@@ -20,6 +20,7 @@ const TABLES = {
   craftedProperty: c.craftedProperty,
   qualityQuantization: c.qualityQuantization,
   blueprint: c.blueprint,
+  location: c.location,
   rawRecord: c.rawRecord,
 };
 

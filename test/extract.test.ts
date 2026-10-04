@@ -89,8 +89,24 @@ describe('normalize', () => {
     assert.deepEqual(s.manufacturers.map((m) => [m.code, m.descriptionKey]), [['TEST', null]]);
   });
 
+  it('normalizes star map objects as locations with parent and type', () => {
+    assert.deepEqual(s.locations.map((l) => l.uuid).sort(), [U.star, U.station, U.orphan].sort());
+    assert.deepEqual(s.locations.find((l) => l.uuid === U.station), {
+      uuid: U.station, key: 'Test_Station', nameKey: 'test_station', descriptionKey: 'test_station_desc', parentUuid: U.star,
+      type: 'Manmade', navIcon: 'Station', hideInStarmap: false, respawnLocationType: 'Hospital',
+    });
+    const star = s.locations.find((l) => l.uuid === U.star)!;
+    assert.deepEqual([star.parentUuid, star.type, star.descriptionKey], [null, 'Star', null]);
+    const orphan = s.locations.find((l) => l.uuid === U.orphan)!;
+    assert.deepEqual([orphan.nameKey, orphan.parentUuid, orphan.type, orphan.hideInStarmap], [null, null, null, true]);
+    assert.deepEqual(anomaly('unresolved_ref').filter((a) => a.record === 'StarMapObject.Test_Orphan').map((a) => a.detail.split(':')[0]), [
+      'parent', 'star map object type 10000000-0000-0000-0000-0000000000ff',
+    ]);
+  });
+
   it('keeps every exported record raw, incl. pools that are not normalized', () => {
     assert.ok(s.rawRecords.some((r) => r.uuid === U.pool));
+    assert.ok(s.rawRecords.some((r) => r.uuid === U.marker));
     assert.equal(s.rawRecords.length, Object.keys(RECORDS).length);
   });
 
@@ -101,6 +117,7 @@ describe('normalize', () => {
       '1 null list entries skipped in modifier.valueRanges',
       '1 null list entries skipped in resource.properties',
       '1 null list entries skipped in slot.context',
+      '1 null list entries skipped in starmap.types',
     ]);
   });
 

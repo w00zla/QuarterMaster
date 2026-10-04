@@ -23,6 +23,13 @@ export const U = {
   blueprint: '10000000-0000-0000-0000-00000000000d',
   blueprint2: '10000000-0000-0000-0000-00000000000e',
   pool: '10000000-0000-0000-0000-00000000000f',
+  starmapTypes: '10000000-0000-0000-0000-000000000010',
+  typeStar: '10000000-0000-0000-0000-000000000011',
+  typeStation: '10000000-0000-0000-0000-000000000012',
+  star: '10000000-0000-0000-0000-000000000013',
+  station: '10000000-0000-0000-0000-000000000014',
+  orphan: '10000000-0000-0000-0000-000000000015',
+  marker: '10000000-0000-0000-0000-000000000016',
 };
 
 const R = 'libs/foundry/records/';
@@ -73,6 +80,12 @@ const blueprintRecord = (id: string, name: string, rootCount: number, slots: unk
     }],
   },
 });
+
+const starMapObject = (name: string, id: string, fields: Record<string, unknown>) => rec(`StarMapObject.${name}`, id, {
+  _Type_: 'StarMapObject', name: `@${name}`, description: '@LOC_UNINITIALIZED', parent: null, type: null,
+  navIcon: 'Default', hideInStarmap: false, respawnLocationType: 'None', ...fields,
+});
+const starMapType = (id: string) => ({ _RecordPath_: ref('starmap/starmapobjecttypes.json'), _RecordName_: `StarMapObjectType.${id}`, _RecordId_: id });
 
 export const RECORDS: Record<string, unknown> = {
   'resourcetypedatabase/resourcetypedatabase.json': rec('ResourceTypeDatabase.Main', U.rtdb, {
@@ -142,6 +155,25 @@ export const RECORDS: Record<string, unknown> = {
     _Type_: 'EntityClassDefinition',
     Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Type: 'Misc', SubType: 'Harvestable', Localization: { Name: '@items_commodities_testgem' } } }],
   }),
+  'starmap/starmapobjecttypes.json': rec('StarMapObjectTypes.StarMapObjectTypes', U.starmapTypes, {
+    _Type_: 'StarMapObjectTypes',
+    types: [
+      { _RecordId_: U.typeStar, _RecordName_: `StarMapObjectType.${U.typeStar}`, _Type_: 'StarMapObjectType', name: 'Star' },
+      null,
+      { _RecordId_: U.typeStation, _RecordName_: `StarMapObjectType.${U.typeStation}`, _Type_: 'StarMapObjectType', name: 'Manmade' },
+    ],
+  }),
+  'starmap/pu/system/test/teststar.json': starMapObject('TestStar', U.star, { type: starMapType(U.typeStar), navIcon: 'Star' }),
+  'starmap/pu/station/test_station.json': starMapObject('Test_Station', U.station, {
+    description: '@Test_Station_Desc', parent: ref('starmap/pu/system/test/teststar.json'), type: starMapType(U.typeStation),
+    navIcon: 'Station', respawnLocationType: 'Hospital',
+  }),
+  // Dangling parent and an unknown object type
+  'starmap/pu/station/test_orphan.json': starMapObject('Test_Orphan', U.orphan, {
+    name: '@LOC_UNINITIALIZED', parent: ref('starmap/pu/system/gone.json'), type: starMapType('10000000-0000-0000-0000-0000000000ff'), hideInStarmap: true,
+  }),
+  // Not a StarMapObject: raw only
+  'starmap/smdefaultmissionmarker.json': rec('MissionMarker.Default', U.marker, { _Type_: 'StarMapMissionMarker' }),
   'scitemmanufacturer/scitemmanufacturer.test.json': rec('SCItemManufacturer.TEST', U.manufacturer, {
     _Type_: 'SCItemManufacturer', Code: 'TEST', Localization: { Name: '@manufacturer_NameTEST', Description: '@LOC_EMPTY' },
   }),
@@ -149,7 +181,8 @@ export const RECORDS: Record<string, unknown> = {
 
 export const INI_EN = '\uFEFFitems_commodities_testmetal=Test Metal\r\nitems_commodities_testmetal_ore=Test Metal (Ore)\r\n'
   + 'item_NameTEST_Output=Test Cooler \\n\r\ncrafting_ui_slotname_frame,P=Frame\r\nunrelated_key=Not referenced\r\n'
-  + 'item_DescTEST_Output=Item Type: Cooler\\nGrade: B\\nClass: Military\\n\\nKeeps things cool.\r\n';
+  + 'item_DescTEST_Output=Item Type: Cooler\\nGrade: B\\nClass: Military\\n\\nKeeps things cool.\r\n'
+  + 'Test_Station=Test Station\r\n';
 export const INI_DE = '\uFEFFitems_commodities_testmetal=Testmetall\r\n'
   + 'item_NameTEST_Output=! GERMAN_(GERMANY) TRANSLATION NOT FOUND FOR LOCID: item_NameTEST_Output !\r\n';
 

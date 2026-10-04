@@ -6,7 +6,7 @@ import { isObj, recordKey, refPath, type DcbRecord, type Obj, type RecordStore }
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type Anomaly, type Blueprint, type BlueprintCategory, type BlueprintInput, type BlueprintSlot,
-  type BlueprintTier, type CraftedProperty, type Item, type Manufacturer, type ModifierRange,
+  type BlueprintTier, type CraftedProperty, type Item, type Location, type Manufacturer, type ModifierRange,
   type QualityQuantization, type RawRecord, type Resource, type Snapshot,
 } from '../snapshot.ts';
 
@@ -18,6 +18,8 @@ export const PATHS = {
   qualityQuantization: 'libs/foundry/records/crafting/qualityquantization/',
   globalParams: 'libs/foundry/records/crafting/globalparams/craftingglobalparams.json',
   resourceTypes: 'libs/foundry/records/resourcetypedatabase/resourcetypedatabase.json',
+  starmap: 'libs/foundry/records/starmap/',
+  starmapTypes: 'libs/foundry/records/starmap/starmapobjecttypes.json',
 };
 
 // SResourceTypeDefaultCargoContainers field -> box size in SCU
@@ -68,7 +70,8 @@ export function normalize(input: NormalizeInput): Snapshot {
   };
 
   const en = input.localizations.get('en');
-  const rawPaths = new Set<string>(store.list(PATHS.crafting));
+  const starmapPaths = store.list(PATHS.starmap);
+  const rawPaths = new Set<string>([...store.list(PATHS.crafting), ...starmapPaths]);
   rawPaths.add(PATHS.resourceTypes);
 
   // --- resources --------------------------------------------------------------------
@@ -355,6 +358,47 @@ export function normalize(input: NormalizeInput): Snapshot {
     };
   });
 
+  // --- locations ---------------------------------------------------------------------
+  // Object types are inline entries of one record, referenced by their id
+  const typeNames = new Map<string, string>();
+  const typesRecord = store.get(PATHS.starmapTypes);
+  if (!typesRecord) anomaly('missing_record', PATHS.starmapTypes, 'star map object types not found');
+  for (const t of entries(typesRecord?._RecordValue_.types, 'starmap.types')) {
+    const id = str(t._RecordId_);
+    const name = str(t.name);
+    if (id && name) typeNames.set(id, name);
+  }
+
+  const locations: Location[] = [];
+  for (const path of starmapPaths) {
+    const r = store.get(path)!;
+    const v = r._RecordValue_;
+    // Other record types (markers, special events, …) stay raw only
+    if (v._Type_ !== 'StarMapObject') continue;
+    const from = r._RecordName_;
+    let parentUuid: string | null = null;
+    if (str(v.parent)) {
+      const parent = store.get(refPath(v.parent));
+      if (!parent) anomaly('unresolved_ref', from, `parent: ${String(v.parent)}`);
+      else if (parent._RecordValue_._Type_ !== 'StarMapObject') anomaly('unexpected_shape', from, `parent is a ${parent._RecordValue_._Type_}`);
+      else parentUuid = parent._RecordId_;
+    }
+    const typeId = isObj(v.type) ? str(v.type._RecordId_) : null;
+    const typeName = typeId ? typeNames.get(typeId) ?? null : null;
+    if (typeId && !typeName) anomaly('unresolved_ref', from, `star map object type ${typeId}`);
+    locations.push({
+      uuid: r._RecordId_,
+      key: recordKey(from),
+      nameKey: locKey(v.name),
+      descriptionKey: locKey(v.description),
+      parentUuid,
+      type: typeName,
+      navIcon: str(v.navIcon),
+      hideInStarmap: v.hideInStarmap === true,
+      respawnLocationType: str(v.respawnLocationType),
+    });
+  }
+
   // --- raw records and localization --------------------------------------------------
   const rawRecords: RawRecord[] = [...rawPaths].sort().flatMap((path) => {
     const r: DcbRecord | null = store.get(path);
@@ -412,5 +456,6 @@ export function normalize(input: NormalizeInput): Snapshot {
     craftedProperties,
     qualityQuantizations,
     blueprints,
+    locations,
   };
 }

@@ -16,7 +16,7 @@ export const LANGUAGE_CODES: Record<string, string> = {
 };
 
 // Placeholder keys that mean "no text"
-const SENTINEL_KEYS = new Set(['loc_empty', 'loc_placeholder']);
+const SENTINEL_KEYS = new Set(['loc_empty', 'loc_placeholder', 'loc_uninitialized']);
 
 /** Normalizes a loc reference ("@Item_Name,P" or "item_name") to its lookup key, or null for none/sentinels. */
 export function locKey(ref: unknown): string | null {

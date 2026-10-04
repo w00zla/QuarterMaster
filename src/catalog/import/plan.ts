@@ -4,7 +4,7 @@ import type { Blueprint, Snapshot } from '../snapshot.ts';
 
 export const ENTITY_NAMES = [
   // Foreign key order: referenced tables first
-  'manufacturer', 'item', 'resource', 'blueprintCategory', 'craftedProperty', 'qualityQuantization', 'blueprint', 'rawRecord',
+  'manufacturer', 'item', 'resource', 'blueprintCategory', 'craftedProperty', 'qualityQuantization', 'blueprint', 'location', 'rawRecord',
 ] as const;
 export type EntityName = (typeof ENTITY_NAMES)[number];
 
@@ -56,6 +56,7 @@ export function toEntitySets(s: Snapshot): EntitySets {
       const { tiers: _tiers, ...row } = b;
       return { ...row, contentHash: hashOf(b) };
     }),
+    location: s.locations.map((l) => ({ ...l, contentHash: hashOf(l) })),
     rawRecord: s.rawRecords.map((r) => ({ ...r, contentHash: hashOf(r) })),
   };
 }
@@ -111,6 +112,7 @@ export function checkIntegrity(s: Snapshot): string[] {
   const properties = ids('crafted property', s.craftedProperties);
   const quantizations = ids('quality quantization', s.qualityQuantizations);
   ids('blueprint', s.blueprints);
+  const locations = ids('location', s.locations);
   ids('raw record', s.rawRecords);
 
   const ref = (ok: boolean, msg: string) => { if (!ok) errors.push(msg); };
@@ -133,7 +135,10 @@ export function checkIntegrity(s: Snapshot): string[] {
       }
     }
   }
-  for (const [name, n] of [['blueprints', s.blueprints.length], ['resources', s.resources.length], ['items', s.items.length]] as const) {
+  for (const l of s.locations) ref(!l.parentUuid || locations.has(l.parentUuid), `location ${l.key}: unknown parent ${l.parentUuid}`);
+  for (const [name, n] of [
+    ['blueprints', s.blueprints.length], ['resources', s.resources.length], ['items', s.items.length], ['locations', s.locations.length],
+  ] as const) {
     if (n === 0) errors.push(`snapshot contains no ${name}`);
   }
   if (!s.localization.en || Object.keys(s.localization.en).length === 0) errors.push('snapshot contains no English texts');

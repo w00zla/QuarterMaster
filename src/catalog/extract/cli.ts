@@ -18,6 +18,8 @@ const DCB_FILTERS = [
   'libs/foundry/records/resourcetypedatabase/**',
   'libs/foundry/records/scitemmanufacturer/**',
   'libs/foundry/records/entities/scitem/**',
+  // Whole-directory globs only: segment wildcards like '**/*refin*' match nothing in StarBreaker
+  'libs/foundry/records/starmap/**',
 ];
 
 const HELP = `Usage: pnpm catalog:extract [options]
@@ -149,6 +151,9 @@ async function main() {
     ['  without output', snapshot.blueprints.filter((b) => !b.outputItemUuid).length],
     ['  "N of M slots"', snapshot.blueprints.filter((b) => b.tiers.some((t) => t.requiredSlots !== t.slots.length)).length],
     ['blueprint inputs', snapshot.blueprints.reduce((n, b) => n + b.tiers.reduce((m, t) => m + t.slots.reduce((k, s) => k + s.inputs.length, 0), 0), 0)],
+    ['locations', snapshot.locations.length],
+    ['  stations', snapshot.locations.filter((l) => l.navIcon === 'Station').length],
+    ['  landing zones', snapshot.locations.filter((l) => l.navIcon === 'LandingZone').length],
   ];
   for (const [label, n] of rows) console.log(`  ${String(n).padStart(7)}  ${label}`);
   console.log('\nLocalization (keys with text):');

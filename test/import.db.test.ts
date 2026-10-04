@@ -50,7 +50,11 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('resource'), 2);
     assert.equal(await count('raw_record'), base.rawRecords.length);
     assert.equal(await count('localization', `source = 'game' AND lang = 'de'`), 1);
-    assert.equal(await count('localization', `source = 'game' AND lang = 'en'`), 6);
+    assert.equal(await count('localization', `source = 'game' AND lang = 'en'`), 7);
+    assert.equal(await count('location'), 3);
+    const [station] = await db.execute<{ parent: string; nav: string }>(
+      sql`SELECT parent_uuid AS parent, nav_icon AS nav FROM catalog.location WHERE uuid = ${U.station}`);
+    assert.deepEqual([station!.parent, station!.nav], [U.star, 'Station']);
     assert.equal(await count('localization_source', `source = 'game'`), 2);
     const [qty] = await db.execute<{ quantity: string }>(sql`SELECT quantity::text FROM catalog.blueprint_input WHERE kind = 'resource'`);
     assert.equal(qty!.quantity, '0.046');
@@ -67,17 +71,21 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     next.game.build = 1001;
     next.blueprints = next.blueprints.filter((b) => b.uuid !== U.blueprint2);
     next.blueprints[0]!.tiers[0]!.slots[0]!.inputs[0]!.quantity = 0.05;
+    next.locations = next.locations.filter((l) => l.uuid !== U.orphan);
     // Small sets: retiring 1 of 2 blueprints must not trip the ratio safeguard (absolute minimum)
     const r = await runImport(db, next, hashOf(next), OPTIONS);
     assert.equal(r.status, 'imported');
     assert.deepEqual([r.diffs.blueprint.changed, r.diffs.blueprint.retired], [[U.blueprint], [U.blueprint2]]);
     assert.equal(await count('blueprint', 'retired_at IS NOT NULL'), 1);
     assert.equal(await count('blueprint_input', `quantity = 0.05`), 1);
+    assert.deepEqual(r.diffs.location.retired, [U.orphan]);
+    assert.equal(await count('location', 'retired_at IS NOT NULL'), 1);
 
     const again = fixtureSnapshot();
     again.game.build = 1002;
     const r2 = await runImport(db, again, hashOf(again), OPTIONS);
     assert.deepEqual(r2.diffs.blueprint.revived, [U.blueprint2]);
+    assert.deepEqual(r2.diffs.location.revived, [U.orphan]);
     assert.equal(await count('blueprint', 'retired_at IS NULL'), 2);
     const [first] = await db.execute<{ first: number }>(sql`SELECT first_seen_import_id AS first FROM catalog.blueprint WHERE uuid = ${U.blueprint2}`);
     assert.equal(first!.first, r.importId! - 1);

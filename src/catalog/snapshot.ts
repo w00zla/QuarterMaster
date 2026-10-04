@@ -2,7 +2,7 @@
 // Bump SNAPSHOT_SCHEMA_VERSION on any incompatible change.
 import { z } from 'zod';
 
-export const SNAPSHOT_SCHEMA_VERSION = 2;
+export const SNAPSHOT_SCHEMA_VERSION = 3;
 
 // Game record ids are UUID-shaped but not necessarily RFC-compliant
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -125,6 +125,21 @@ export const blueprintSchema = z.object({
   tiers: z.array(blueprintTierSchema),
 });
 
+// Star map object (system, planet, station, outpost, …); all of them, selection happens in the app
+export const locationSchema = z.object({
+  uuid,
+  key: z.string(),
+  nameKey: locKey,
+  descriptionKey: locKey,
+  parentUuid: uuid.nullable(),
+  // StarMapObjectType name, e.g. "Planet", "Manmade", "LandingZone"
+  type: z.string().nullable(),
+  // Marker icon, e.g. "Station", "LandingZone", "Outpost", "Default"
+  navIcon: z.string().nullable(),
+  hideInStarmap: z.boolean(),
+  respawnLocationType: z.string().nullable(),
+});
+
 export const snapshotSchema = z.object({
   schemaVersion: z.literal(SNAPSHOT_SCHEMA_VERSION),
   game: z.object({
@@ -148,6 +163,7 @@ export const snapshotSchema = z.object({
   craftedProperties: z.array(craftedPropertySchema),
   qualityQuantizations: z.array(qualityQuantizationSchema),
   blueprints: z.array(blueprintSchema),
+  locations: z.array(locationSchema),
 });
 
 export type Snapshot = z.infer<typeof snapshotSchema>;
@@ -160,6 +176,7 @@ export type BlueprintCategory = z.infer<typeof blueprintCategorySchema>;
 export type CraftedProperty = z.infer<typeof craftedPropertySchema>;
 export type QualityQuantization = z.infer<typeof qualityQuantizationSchema>;
 export type Blueprint = z.infer<typeof blueprintSchema>;
+export type Location = z.infer<typeof locationSchema>;
 export type BlueprintTier = z.infer<typeof blueprintTierSchema>;
 export type BlueprintSlot = z.infer<typeof blueprintSlotSchema>;
 export type BlueprintInput = z.infer<typeof blueprintInputSchema>;

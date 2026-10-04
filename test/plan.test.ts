@@ -86,7 +86,9 @@ describe('checkIntegrity', () => {
     const s = fixtureSnapshot();
     s.blueprints[0]!.tiers[0]!.slots[0]!.inputs[0]!.uuid = '00000000-0000-0000-0000-000000000000';
     s.items.push({ ...s.items[0]! });
+    s.locations.find((l) => l.uuid === U.station)!.parentUuid = '00000000-0000-0000-0000-000000000001';
     const errors = checkIntegrity(s);
+    assert.ok(errors.some((e) => e === 'location Test_Station: unknown parent 00000000-0000-0000-0000-000000000001'));
     assert.ok(errors.some((e) => e.includes('unknown resource 00000000')));
     assert.ok(errors.some((e) => e.startsWith('duplicate item uuid')));
   });

@@ -158,6 +158,23 @@ export const blueprintInput = catalog.table('blueprint_input', {
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
 ]);
 
+/** Star map objects (systems, planets, stations, outposts, …), all of them; the app selects what it offers. */
+export const location = catalog.table('location', {
+  uuid: uuid('uuid').primaryKey(),
+  key: text('key').notNull(),
+  nameKey: text('name_key'),
+  descriptionKey: text('description_key'),
+  // No foreign key: rows of one import reference each other in any order (checked by the import instead)
+  parentUuid: uuid('parent_uuid'),
+  // StarMapObjectType name ("Planet", "Manmade", …)
+  type: text('type'),
+  // Marker icon ("Station", "LandingZone", "Outpost", …)
+  navIcon: text('nav_icon'),
+  hideInStarmap: boolean('hide_in_starmap').notNull(),
+  respawnLocationType: text('respawn_location_type'),
+  ...lifecycle(),
+}, (t) => [index().on(t.parentUuid), index().on(t.navIcon)]);
+
 /**
  * One text set per source and language: 'game' (catalog import) or an externally maintained
  * global.ini (localization import). The source with the highest priority wins per key.
