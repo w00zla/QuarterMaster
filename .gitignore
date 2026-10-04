@@ -1,0 +1,10 @@
+.claude/
+
+# Local third-party binaries and resources (not committed)
+/local/
+
+# Node
+node_modules/
+
+# Local environment
+.env

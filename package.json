@@ -1,0 +1,31 @@
+{
+  "name": "sc-quartermaster",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "node --env-file-if-exists=.env --test \"test/**/*.test.ts\"",
+    "db:up": "scripts/dev-db.sh up",
+    "db:down": "scripts/dev-db.sh down",
+    "db:psql": "scripts/dev-db.sh psql",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file-if-exists=.env src/db/migrate.ts",
+    "catalog:extract": "node src/catalog/extract/cli.ts",
+    "catalog:import": "node --env-file-if-exists=.env src/catalog/import/cli.ts",
+    "loc:import": "node --env-file-if-exists=.env src/catalog/import/loc-cli.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3",
+    "postgres": "^3.4.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2"
+  }
+}

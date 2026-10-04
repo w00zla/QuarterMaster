@@ -1,0 +1,162 @@
+// Catalog snapshot: the contract between extractor and importer.
+// Bump SNAPSHOT_SCHEMA_VERSION on any incompatible change.
+import { z } from 'zod';
+
+export const SNAPSHOT_SCHEMA_VERSION = 1;
+
+// Game record ids are UUID-shaped but not necessarily RFC-compliant
+const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+const locKey = z.string().nullable();
+
+export const anomalySchema = z.object({
+  code: z.string(),
+  record: z.string().nullable(),
+  detail: z.string(),
+});
+
+export const rawRecordSchema = z.object({
+  uuid,
+  name: z.string(),
+  type: z.string(),
+  path: z.string(),
+  data: z.unknown(),
+});
+
+export const resourceSchema = z.object({
+  uuid,
+  key: z.string(),
+  groupPath: z.array(z.string()),
+  nameKey: locKey,
+  descriptionKey: locKey,
+  isOre: z.boolean(),
+  refinedUuid: uuid.nullable(),
+  densityGPerCc: z.number().nullable(),
+  boxSizesScu: z.array(z.number()),
+  craftingData: z.array(z.object({
+    name: z.string().nullable(),
+    qualityDistributionUuid: uuid.nullable(),
+    qualityLocationOverrideUuid: uuid.nullable(),
+    qualityQuantizationUuid: uuid.nullable(),
+  })),
+  data: z.unknown(),
+});
+
+export const manufacturerSchema = z.object({
+  uuid,
+  key: z.string(),
+  code: z.string().nullable(),
+  nameKey: locKey,
+  descriptionKey: locKey,
+});
+
+export const itemSchema = z.object({
+  uuid,
+  className: z.string(),
+  type: z.string().nullable(),
+  subType: z.string().nullable(),
+  size: z.number().int().nullable(),
+  grade: z.number().int().nullable(),
+  manufacturerUuid: uuid.nullable(),
+  nameKey: locKey,
+  descriptionKey: locKey,
+});
+
+export const blueprintCategorySchema = z.object({
+  uuid,
+  key: z.string(),
+});
+
+export const craftedPropertySchema = z.object({
+  uuid,
+  key: z.string(),
+  nameKey: locKey,
+  unitKey: locKey,
+  // e.g. { _Type_: 'CraftingDisplayTransformation_Scale', scale: 0.000001 }; several types exist
+  displayTransformation: z.unknown(),
+});
+
+export const qualityQuantizationSchema = z.object({
+  uuid,
+  key: z.string(),
+  bands: z.array(z.object({ start: z.number(), end: z.number(), mappedValue: z.number() })),
+});
+
+export const modifierRangeSchema = z.object({
+  type: z.string(),
+  startQuality: z.number(),
+  endQuality: z.number(),
+  // Linear: modifierAtStart/End; LinearIntegerAdditive: additiveModifierAtStart/End; unknown types keep their raw numbers
+  values: z.record(z.string(), z.number()),
+});
+
+export const blueprintInputSchema = z.object({
+  kind: z.enum(['resource', 'item']),
+  uuid,
+  // resource: SCU; item: count
+  quantity: z.number(),
+  minQuality: z.number().int(),
+});
+
+export const blueprintSlotSchema = z.object({
+  key: z.string(),
+  nameKey: locKey,
+  requiredCount: z.number().int(),
+  modifiers: z.array(z.object({ propertyUuid: uuid, ranges: z.array(modifierRangeSchema) })),
+  inputs: z.array(blueprintInputSchema),
+});
+
+export const blueprintTierSchema = z.object({
+  craftSeconds: z.number(),
+  // How many of the slots must be filled (usually all of them)
+  requiredSlots: z.number().int(),
+  slots: z.array(blueprintSlotSchema),
+});
+
+export const blueprintSchema = z.object({
+  uuid,
+  key: z.string(),
+  categoryUuid: uuid.nullable(),
+  outputItemUuid: uuid.nullable(),
+  isDefault: z.boolean(),
+  tiers: z.array(blueprintTierSchema),
+});
+
+export const snapshotSchema = z.object({
+  schemaVersion: z.literal(SNAPSHOT_SCHEMA_VERSION),
+  game: z.object({
+    channel: z.string(),
+    build: z.number().int(),
+    branch: z.string(),
+    version: z.string(),
+    label: z.string().nullable(),
+    manifest: z.unknown(),
+  }),
+  extractor: z.object({ version: z.string(), starbreaker: z.string() }),
+  extractedAt: z.iso.datetime(),
+  anomalies: z.array(anomalySchema),
+  // Language code -> loc key (lower case, without '@') -> text; complete global.ini per shipped language
+  localization: z.record(z.string(), z.record(z.string(), z.string())),
+  rawRecords: z.array(rawRecordSchema),
+  resources: z.array(resourceSchema),
+  manufacturers: z.array(manufacturerSchema),
+  items: z.array(itemSchema),
+  blueprintCategories: z.array(blueprintCategorySchema),
+  craftedProperties: z.array(craftedPropertySchema),
+  qualityQuantizations: z.array(qualityQuantizationSchema),
+  blueprints: z.array(blueprintSchema),
+});
+
+export type Snapshot = z.infer<typeof snapshotSchema>;
+export type Anomaly = z.infer<typeof anomalySchema>;
+export type RawRecord = z.infer<typeof rawRecordSchema>;
+export type Resource = z.infer<typeof resourceSchema>;
+export type Manufacturer = z.infer<typeof manufacturerSchema>;
+export type Item = z.infer<typeof itemSchema>;
+export type BlueprintCategory = z.infer<typeof blueprintCategorySchema>;
+export type CraftedProperty = z.infer<typeof craftedPropertySchema>;
+export type QualityQuantization = z.infer<typeof qualityQuantizationSchema>;
+export type Blueprint = z.infer<typeof blueprintSchema>;
+export type BlueprintTier = z.infer<typeof blueprintTierSchema>;
+export type BlueprintSlot = z.infer<typeof blueprintSlotSchema>;
+export type BlueprintInput = z.infer<typeof blueprintInputSchema>;
+export type ModifierRange = z.infer<typeof modifierRangeSchema>;
