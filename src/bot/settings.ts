@@ -30,6 +30,13 @@ export async function ensureGuild(db: Db, guildId: string, name: string): Promis
 }
 
 export async function getGuildSettings(db: Db, guildId: string): Promise<GuildSettings> {
+  const settings = await findGuildSettings(db, guildId);
+  if (!settings) throw new Error(`No settings for guild ${guildId}`);
+  return settings;
+}
+
+/** null when the server has not run /qm-setup yet. */
+export async function findGuildSettings(db: Db, guildId: string): Promise<GuildSettings | null> {
   const [row] = await db
     .select({
       memberRoleIds: org.memberRoleIds,
@@ -41,7 +48,7 @@ export async function getGuildSettings(db: Db, guildId: string): Promise<GuildSe
     .from(org)
     .innerJoin(guild, eq(guild.guildId, org.guildId))
     .where(eq(org.guildId, guildId));
-  if (!row) throw new Error(`No settings for guild ${guildId}`);
+  if (!row) return null;
   return { ...row, baseLang: row.baseLang as Lang, logsLevel: row.logsLevel as LogsLevel };
 }
 

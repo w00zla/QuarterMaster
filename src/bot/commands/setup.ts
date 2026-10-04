@@ -8,6 +8,7 @@ import {
 import { UserError } from '../errors.ts';
 import { localizedDescription, t, type Lang, type MessageKey } from '../i18n.ts';
 import type { BotCommand } from '../registry.ts';
+import { syncDiscordGuild } from '../roster.ts';
 import { ensureGuild, LOGS_LEVELS, updateGuildSettings, type GuildSettings } from '../settings.ts';
 
 const NAME = 'qm-setup';
@@ -122,5 +123,7 @@ export const setupCommand: BotCommand = {
     await ensureGuild(ctx.db, interaction.guildId, interaction.guild?.name ?? interaction.guildId);
     const settings = await updateGuildSettings(ctx.db, interaction.guildId, patch);
     await interaction.update(setupPanel(settings, ctx.lang, checkLogsChannel(interaction.guild, settings.logsChannelId)));
+    // Different roles mean a different roster (after the update: a large server takes a while)
+    if ((patch.memberRoleIds || patch.officerRoleIds) && interaction.guild) await syncDiscordGuild(ctx.db, interaction.guild);
   },
 };

@@ -55,15 +55,18 @@ export const member = app.table('member', {
 }, (t) => [primaryKey({ columns: [t.guildId, t.userId] })]);
 
 /**
- * One row = one batch. Booking the same merge key again adds to the quantity; a batch that
- * reaches 0 is deleted. Rules a CHECK cannot express (refining only for ores, only crafting
+ * One row = one batch. Personal stock belongs to the user, not to an org (one character, one
+ * inventory): guild_id NULL, visible to its owner only, usable without any org. Org stock has a
+ * guild_id and a holder who is a member of that org. Booking the same merge key again adds to
+ * the quantity; a batch that reaches 0 is deleted. Rules a CHECK cannot express (refining only for ores, only crafting
  * inputs, selectable and non-retired locations/subjects) are enforced by the stock service.
  */
 export const stockBatch = app.table('stock_batch', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-  guildId: text('guild_id').notNull(),
+  // NULL for personal stock
+  guildId: text('guild_id'),
   // Who physically holds it, also for org stock
-  ownerUserId: text('owner_user_id').notNull(),
+  ownerUserId: text('owner_user_id').notNull().references(() => appUser.userId),
   designation: text('designation').notNull(),
   kind: text('kind').notNull(),
   resourceUuid: uuid('resource_uuid').references(() => resource.uuid),
@@ -76,8 +79,10 @@ export const stockBatch = app.table('stock_batch', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
+  // Org stock only: the composite FK is not checked while guild_id is NULL
   foreignKey({ columns: [t.guildId, t.ownerUserId], foreignColumns: [member.guildId, member.userId] }),
   check('stock_batch_designation', sql`${t.designation} IN ('personal', 'org')`),
+  check('stock_batch_personal_global', sql`(${t.designation} = 'personal') = (${t.guildId} IS NULL)`),
   check('stock_batch_kind', sql`(${t.kind} = 'resource' AND ${t.resourceUuid} IS NOT NULL AND ${t.itemUuid} IS NULL)
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
   check('stock_batch_state', sql`${t.state} IN ('stored', 'refining')`),
@@ -90,24 +95,25 @@ export const stockBatch = app.table('stock_batch', {
   ).nullsNotDistinct(),
   index().on(t.guildId, t.resourceUuid),
   index().on(t.guildId, t.itemUuid),
-  index().on(t.guildId, t.ownerUserId),
+  index().on(t.ownerUserId, t.guildId),
   index().on(t.guildId, t.locationUuid),
 ]);
 
 /**
  * Append-only journal, the source of truth (also for #logs). Keeps a copy of the batch key
  * instead of a reference (batches get deleted at 0). Moves and refinery completions are two
- * rows sharing a group_id.
+ * rows sharing a group_id. Rows about personal stock have no guild_id, like the batch.
  */
 export const stockJournal = app.table('stock_journal', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-  guildId: text('guild_id').notNull(),
+  // NULL for personal stock
+  guildId: text('guild_id'),
   createdAt: createdAt(),
   action: text('action').notNull(),
   groupId: uuid('group_id'),
   // Who executed the booking vs. whose batch it affected (differ when an officer books for someone)
-  actorUserId: text('actor_user_id').notNull(),
-  ownerUserId: text('owner_user_id').notNull(),
+  actorUserId: text('actor_user_id').notNull().references(() => appUser.userId),
+  ownerUserId: text('owner_user_id').notNull().references(() => appUser.userId),
   designation: text('designation').notNull(),
   kind: text('kind').notNull(),
   resourceUuid: uuid('resource_uuid').references(() => resource.uuid),
@@ -121,6 +127,7 @@ export const stockJournal = app.table('stock_journal', {
 }, (t) => [
   foreignKey({ columns: [t.guildId, t.actorUserId], foreignColumns: [member.guildId, member.userId] }),
   foreignKey({ columns: [t.guildId, t.ownerUserId], foreignColumns: [member.guildId, member.userId] }),
+  check('stock_journal_personal_global', sql`(${t.designation} = 'personal') = (${t.guildId} IS NULL)`),
   check('stock_journal_action', sql`${t.action} IN ('add', 'remove', 'adjust', 'move_out', 'move_in', 'refine_out', 'refine_in')`),
   check('stock_journal_group', sql`(${t.action} IN ('move_out', 'move_in', 'refine_out', 'refine_in')) = (${t.groupId} IS NOT NULL)`),
   check('stock_journal_designation', sql`${t.designation} IN ('personal', 'org')`),
@@ -131,7 +138,7 @@ export const stockJournal = app.table('stock_journal', {
   check('stock_journal_delta', sql`${t.delta} <> 0`),
   index().on(t.guildId, t.createdAt.desc()),
   index().on(t.groupId),
-  index().on(t.guildId, t.ownerUserId, t.createdAt.desc()),
+  index().on(t.ownerUserId, t.guildId, t.createdAt.desc()),
 ]);
 
 /**

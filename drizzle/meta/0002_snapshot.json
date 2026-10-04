@@ -1,5 +1,5 @@
 {
-  "id": "2f1c9db5-684e-4a16-8a79-32768179735a",
+  "id": "c919e228-3b39-4ec7-9d6b-27ee0300e2ea",
   "prevId": "e9e90da0-ed6c-4003-9ea5-7a9be3d3dc4d",
   "version": "7",
   "dialect": "postgresql",
@@ -246,7 +246,7 @@
           "name": "guild_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "owner_user_id": {
           "name": "owner_user_id",
@@ -361,17 +361,17 @@
           "method": "btree",
           "with": {}
         },
-        "stock_batch_guild_id_owner_user_id_index": {
-          "name": "stock_batch_guild_id_owner_user_id_index",
+        "stock_batch_owner_user_id_guild_id_index": {
+          "name": "stock_batch_owner_user_id_guild_id_index",
           "columns": [
             {
-              "expression": "guild_id",
+              "expression": "owner_user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "owner_user_id",
+              "expression": "guild_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -405,6 +405,20 @@
         }
       },
       "foreignKeys": {
+        "stock_batch_owner_user_id_app_user_user_id_fk": {
+          "name": "stock_batch_owner_user_id_app_user_user_id_fk",
+          "tableFrom": "stock_batch",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "stock_batch_resource_uuid_resource_uuid_fk": {
           "name": "stock_batch_resource_uuid_resource_uuid_fk",
           "tableFrom": "stock_batch",
@@ -488,6 +502,10 @@
           "name": "stock_batch_designation",
           "value": "\"app\".\"stock_batch\".\"designation\" IN ('personal', 'org')"
         },
+        "stock_batch_personal_global": {
+          "name": "stock_batch_personal_global",
+          "value": "(\"app\".\"stock_batch\".\"designation\" = 'personal') = (\"app\".\"stock_batch\".\"guild_id\" IS NULL)"
+        },
         "stock_batch_kind": {
           "name": "stock_batch_kind",
           "value": "(\"app\".\"stock_batch\".\"kind\" = 'resource' AND \"app\".\"stock_batch\".\"resource_uuid\" IS NOT NULL AND \"app\".\"stock_batch\".\"item_uuid\" IS NULL)\n    OR (\"app\".\"stock_batch\".\"kind\" = 'item' AND \"app\".\"stock_batch\".\"item_uuid\" IS NOT NULL AND \"app\".\"stock_batch\".\"resource_uuid\" IS NULL)"
@@ -540,7 +558,7 @@
           "name": "guild_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -665,17 +683,17 @@
           "method": "btree",
           "with": {}
         },
-        "stock_journal_guild_id_owner_user_id_created_at_index": {
-          "name": "stock_journal_guild_id_owner_user_id_created_at_index",
+        "stock_journal_owner_user_id_guild_id_created_at_index": {
+          "name": "stock_journal_owner_user_id_guild_id_created_at_index",
           "columns": [
             {
-              "expression": "guild_id",
+              "expression": "owner_user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "owner_user_id",
+              "expression": "guild_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -694,6 +712,34 @@
         }
       },
       "foreignKeys": {
+        "stock_journal_actor_user_id_app_user_user_id_fk": {
+          "name": "stock_journal_actor_user_id_app_user_user_id_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_journal_owner_user_id_app_user_user_id_fk": {
+          "name": "stock_journal_owner_user_id_app_user_user_id_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "stock_journal_resource_uuid_resource_uuid_fk": {
           "name": "stock_journal_resource_uuid_resource_uuid_fk",
           "tableFrom": "stock_journal",
@@ -773,6 +819,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "stock_journal_personal_global": {
+          "name": "stock_journal_personal_global",
+          "value": "(\"app\".\"stock_journal\".\"designation\" = 'personal') = (\"app\".\"stock_journal\".\"guild_id\" IS NULL)"
+        },
         "stock_journal_action": {
           "name": "stock_journal_action",
           "value": "\"app\".\"stock_journal\".\"action\" IN ('add', 'remove', 'adjust', 'move_out', 'move_in', 'refine_out', 'refine_in')"

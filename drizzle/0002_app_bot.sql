@@ -34,7 +34,7 @@ CREATE TABLE "app"."org" (
 --> statement-breakpoint
 CREATE TABLE "app"."stock_batch" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "app"."stock_batch_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
-	"guild_id" text NOT NULL,
+	"guild_id" text,
 	"owner_user_id" text NOT NULL,
 	"designation" text NOT NULL,
 	"kind" text NOT NULL,
@@ -48,6 +48,7 @@ CREATE TABLE "app"."stock_batch" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "stock_batch_merge_key" UNIQUE NULLS NOT DISTINCT("guild_id","owner_user_id","designation","kind","resource_uuid","item_uuid","location_uuid","state","quality"),
 	CONSTRAINT "stock_batch_designation" CHECK ("app"."stock_batch"."designation" IN ('personal', 'org')),
+	CONSTRAINT "stock_batch_personal_global" CHECK (("app"."stock_batch"."designation" = 'personal') = ("app"."stock_batch"."guild_id" IS NULL)),
 	CONSTRAINT "stock_batch_kind" CHECK (("app"."stock_batch"."kind" = 'resource' AND "app"."stock_batch"."resource_uuid" IS NOT NULL AND "app"."stock_batch"."item_uuid" IS NULL)
     OR ("app"."stock_batch"."kind" = 'item' AND "app"."stock_batch"."item_uuid" IS NOT NULL AND "app"."stock_batch"."resource_uuid" IS NULL)),
 	CONSTRAINT "stock_batch_state" CHECK ("app"."stock_batch"."state" IN ('stored', 'refining')),
@@ -59,7 +60,7 @@ CREATE TABLE "app"."stock_batch" (
 --> statement-breakpoint
 CREATE TABLE "app"."stock_journal" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "app"."stock_journal_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
-	"guild_id" text NOT NULL,
+	"guild_id" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"action" text NOT NULL,
 	"group_id" uuid,
@@ -74,6 +75,7 @@ CREATE TABLE "app"."stock_journal" (
 	"quality" integer NOT NULL,
 	"delta" numeric(14, 6) NOT NULL,
 	"note" text,
+	CONSTRAINT "stock_journal_personal_global" CHECK (("app"."stock_journal"."designation" = 'personal') = ("app"."stock_journal"."guild_id" IS NULL)),
 	CONSTRAINT "stock_journal_action" CHECK ("app"."stock_journal"."action" IN ('add', 'remove', 'adjust', 'move_out', 'move_in', 'refine_out', 'refine_in')),
 	CONSTRAINT "stock_journal_group" CHECK (("app"."stock_journal"."action" IN ('move_out', 'move_in', 'refine_out', 'refine_in')) = ("app"."stock_journal"."group_id" IS NOT NULL)),
 	CONSTRAINT "stock_journal_designation" CHECK ("app"."stock_journal"."designation" IN ('personal', 'org')),
@@ -121,10 +123,13 @@ CREATE TABLE "bot"."user_config" (
 ALTER TABLE "app"."member" ADD CONSTRAINT "member_guild_id_org_guild_id_fk" FOREIGN KEY ("guild_id") REFERENCES "app"."org"("guild_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."member" ADD CONSTRAINT "member_user_id_app_user_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "app"."app_user"("user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."member" ADD CONSTRAINT "member_default_location_uuid_location_uuid_fk" FOREIGN KEY ("default_location_uuid") REFERENCES "catalog"."location"("uuid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "app"."stock_batch" ADD CONSTRAINT "stock_batch_owner_user_id_app_user_user_id_fk" FOREIGN KEY ("owner_user_id") REFERENCES "app"."app_user"("user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."stock_batch" ADD CONSTRAINT "stock_batch_resource_uuid_resource_uuid_fk" FOREIGN KEY ("resource_uuid") REFERENCES "catalog"."resource"("uuid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."stock_batch" ADD CONSTRAINT "stock_batch_item_uuid_item_uuid_fk" FOREIGN KEY ("item_uuid") REFERENCES "catalog"."item"("uuid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."stock_batch" ADD CONSTRAINT "stock_batch_location_uuid_location_uuid_fk" FOREIGN KEY ("location_uuid") REFERENCES "catalog"."location"("uuid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."stock_batch" ADD CONSTRAINT "stock_batch_guild_id_owner_user_id_member_guild_id_user_id_fk" FOREIGN KEY ("guild_id","owner_user_id") REFERENCES "app"."member"("guild_id","user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "app"."stock_journal" ADD CONSTRAINT "stock_journal_actor_user_id_app_user_user_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "app"."app_user"("user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "app"."stock_journal" ADD CONSTRAINT "stock_journal_owner_user_id_app_user_user_id_fk" FOREIGN KEY ("owner_user_id") REFERENCES "app"."app_user"("user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."stock_journal" ADD CONSTRAINT "stock_journal_resource_uuid_resource_uuid_fk" FOREIGN KEY ("resource_uuid") REFERENCES "catalog"."resource"("uuid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."stock_journal" ADD CONSTRAINT "stock_journal_item_uuid_item_uuid_fk" FOREIGN KEY ("item_uuid") REFERENCES "catalog"."item"("uuid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "app"."stock_journal" ADD CONSTRAINT "stock_journal_location_uuid_location_uuid_fk" FOREIGN KEY ("location_uuid") REFERENCES "catalog"."location"("uuid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -137,9 +142,9 @@ ALTER TABLE "bot"."logs_outbox" ADD CONSTRAINT "logs_outbox_journal_id_stock_jou
 ALTER TABLE "bot"."user_config" ADD CONSTRAINT "user_config_user_id_app_user_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "app"."app_user"("user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "stock_batch_guild_id_resource_uuid_index" ON "app"."stock_batch" USING btree ("guild_id","resource_uuid");--> statement-breakpoint
 CREATE INDEX "stock_batch_guild_id_item_uuid_index" ON "app"."stock_batch" USING btree ("guild_id","item_uuid");--> statement-breakpoint
-CREATE INDEX "stock_batch_guild_id_owner_user_id_index" ON "app"."stock_batch" USING btree ("guild_id","owner_user_id");--> statement-breakpoint
+CREATE INDEX "stock_batch_owner_user_id_guild_id_index" ON "app"."stock_batch" USING btree ("owner_user_id","guild_id");--> statement-breakpoint
 CREATE INDEX "stock_batch_guild_id_location_uuid_index" ON "app"."stock_batch" USING btree ("guild_id","location_uuid");--> statement-breakpoint
 CREATE INDEX "stock_journal_guild_id_created_at_index" ON "app"."stock_journal" USING btree ("guild_id","created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "stock_journal_group_id_index" ON "app"."stock_journal" USING btree ("group_id");--> statement-breakpoint
-CREATE INDEX "stock_journal_guild_id_owner_user_id_created_at_index" ON "app"."stock_journal" USING btree ("guild_id","owner_user_id","created_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "stock_journal_owner_user_id_guild_id_created_at_index" ON "app"."stock_journal" USING btree ("owner_user_id","guild_id","created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "user_blueprint_blueprint_uuid_index" ON "app"."user_blueprint" USING btree ("blueprint_uuid");

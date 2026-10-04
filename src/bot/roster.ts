@@ -1,0 +1,127 @@
+// Roster: app.member mirrors who holds one of the org's member or officer roles.
+// Rows exist only for current role holders. Someone who loses the role (or leaves the server)
+// keeps an inactive row only while this org's stock or journal rows reference them; otherwise
+// the row is deleted. Their app_user row goes too, but only once it holds no data at all:
+// users can work without any org (personal stock, blueprints, profile).
+import { and, eq, sql } from 'drizzle-orm';
+import { GuildMemberRoleManager, type APIInteractionGuildMember, type Guild, type GuildMember } from 'discord.js';
+import type { Db } from '../db/client.ts';
+import { appUser, member } from '../db/schema/app.ts';
+import { findGuildSettings, type GuildSettings } from './settings.ts';
+
+/** What the roster needs to know about a Discord server member. */
+export interface MemberInfo {
+  userId: string;
+  // Server nickname, else global name, else username
+  displayName: string;
+  roleIds: string[];
+  bot: boolean;
+}
+
+export function memberInfo(m: GuildMember | APIInteractionGuildMember): MemberInfo {
+  if (m.roles instanceof GuildMemberRoleManager) {
+    const gm = m as GuildMember;
+    return { userId: gm.id, displayName: gm.displayName, roleIds: [...gm.roles.cache.keys()], bot: gm.user.bot };
+  }
+  const api = m as APIInteractionGuildMember;
+  return {
+    userId: api.user.id,
+    displayName: api.nick ?? api.user.global_name ?? api.user.username,
+    roleIds: api.roles,
+    bot: api.user.bot ?? false,
+  };
+}
+
+export interface Access {
+  // Holds a member or an officer role (officers count as members)
+  member: boolean;
+  officer: boolean;
+}
+
+export function accessOf(roleIds: string[], settings: Pick<GuildSettings, 'memberRoleIds' | 'officerRoleIds'>): Access {
+  const has = (ids: string[]) => ids.some((id) => roleIds.includes(id));
+  const officer = has(settings.officerRoleIds);
+  return { member: officer || has(settings.memberRoleIds), officer };
+}
+
+export type SyncResult = 'active' | 'inactive' | 'deleted' | 'none';
+
+/** Brings one person's roster row in line with their current roles (null = no longer on the server). */
+export async function syncMember(
+  db: Db, guildId: string, settings: GuildSettings, userId: string, info: MemberInfo | null,
+): Promise<SyncResult> {
+  if (info && !info.bot && accessOf(info.roleIds, settings).member) {
+    await db.transaction(async (tx) => {
+      await tx.insert(appUser).values({ userId }).onConflictDoNothing();
+      await tx.insert(member).values({ guildId, userId, displayName: info.displayName }).onConflictDoUpdate({
+        target: [member.guildId, member.userId],
+        set: { active: true, inactiveSince: null, displayName: info.displayName, updatedAt: sql`now()` },
+        setWhere: sql`NOT ${member.active} OR ${member.displayName} IS DISTINCT FROM excluded.display_name`,
+      });
+    });
+    return 'active';
+  }
+  return db.transaction(async (tx) => {
+    const deleted = await tx.execute(sql`
+      DELETE FROM app.member m WHERE m.guild_id = ${guildId} AND m.user_id = ${userId}
+        AND NOT EXISTS (SELECT 1 FROM app.stock_batch b WHERE b.guild_id = m.guild_id AND b.owner_user_id = m.user_id)
+        AND NOT EXISTS (SELECT 1 FROM app.stock_journal j WHERE j.guild_id = m.guild_id
+                          AND (j.owner_user_id = m.user_id OR j.actor_user_id = m.user_id))
+      RETURNING 1`);
+    if (deleted.length) {
+      await tx.execute(sql`
+        DELETE FROM app.app_user u WHERE u.user_id = ${userId} AND u.rsi_handle IS NULL
+          AND NOT EXISTS (SELECT 1 FROM app.member m WHERE m.user_id = u.user_id)
+          AND NOT EXISTS (SELECT 1 FROM app.user_blueprint b WHERE b.user_id = u.user_id)
+          AND NOT EXISTS (SELECT 1 FROM app.stock_batch b WHERE b.owner_user_id = u.user_id)
+          AND NOT EXISTS (SELECT 1 FROM app.stock_journal j WHERE j.owner_user_id = u.user_id OR j.actor_user_id = u.user_id)
+          AND NOT EXISTS (SELECT 1 FROM bot.user_config c WHERE c.user_id = u.user_id)`);
+      return 'deleted';
+    }
+    const updated = await tx.update(member)
+      .set({
+        active: false,
+        inactiveSince: sql`coalesce(${member.inactiveSince}, now())`,
+        ...(info ? { displayName: info.displayName } : {}),
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(member.guildId, guildId), eq(member.userId, userId)))
+      .returning({ userId: member.userId });
+    return updated.length ? 'inactive' : 'none';
+  });
+}
+
+/**
+ * Full sync of one server: everyone on it plus everyone the roster still lists as active
+ * (they may have left while the bot was offline). Members without a role and without a row
+ * cost no query.
+ */
+export async function syncGuild(db: Db, guildId: string, settings: GuildSettings, members: MemberInfo[]) {
+  const rows = await db.select({ userId: member.userId, active: member.active }).from(member).where(eq(member.guildId, guildId));
+  const known = new Map(rows.map((r) => [r.userId, r.active]));
+  const counts: Record<SyncResult, number> = { active: 0, inactive: 0, deleted: 0, none: 0 };
+  const seen = new Set<string>();
+  for (const info of members) {
+    seen.add(info.userId);
+    const relevant = known.has(info.userId) || (!info.bot && accessOf(info.roleIds, settings).member);
+    if (relevant) counts[await syncMember(db, guildId, settings, info.userId, info)]++;
+  }
+  for (const [userId, active] of known) {
+    if (!seen.has(userId) && active) counts[await syncMember(db, guildId, settings, userId, null)]++;
+  }
+  return counts;
+}
+
+/** Fetches all members of a server from Discord and syncs them; null when the server has no setup yet. */
+export async function syncDiscordGuild(db: Db, guild: Guild) {
+  const settings = await findGuildSettings(db, guild.id);
+  if (!settings) return null;
+  const members = await guild.members.fetch();
+  return syncGuild(db, guild.id, settings, [...members.values()].map(memberInfo));
+}
+
+/** Member event: joined, roles or nickname changed (info), or left (null). */
+export async function syncMemberEvent(db: Db, guildId: string, userId: string, info: MemberInfo | null) {
+  const settings = await findGuildSettings(db, guildId);
+  if (settings) await syncMember(db, guildId, settings, userId, info);
+}

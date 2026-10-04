@@ -8,6 +8,8 @@ const en = {
   'error.unknownCommand': 'This command is not available (anymore).',
   'error.guildOnly': 'This command only works on a server.',
   'error.manageGuild': 'You need the Manage Server permission for this.',
+  'error.notSetUp': 'The bot is not set up on this server yet. An admin has to run /qm-setup first.',
+  'error.notMember': "You need one of the org's member or officer roles for this.",
 
   'cmd.setup': 'Set up the bot for this server: roles, language, logs',
   'setup.title': '**Quartermaster setup**',
@@ -43,6 +45,8 @@ const de: Record<MessageKey, string> = {
   'error.unknownCommand': 'Dieser Befehl ist nicht (mehr) verfügbar.',
   'error.guildOnly': 'Dieser Befehl funktioniert nur auf einem Server.',
   'error.manageGuild': 'Dafür brauchst du die Berechtigung „Server verwalten“.',
+  'error.notSetUp': 'Der Bot ist auf diesem Server noch nicht eingerichtet. Ein Admin muss zuerst /qm-setup ausführen.',
+  'error.notMember': 'Dafür brauchst du eine der Member- oder Officer-Rollen der Org.',
 
   'cmd.setup': 'Bot für diesen Server einrichten: Rollen, Sprache, Logs',
   'setup.title': '**Quartermaster-Einrichtung**',
