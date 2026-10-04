@@ -15,6 +15,13 @@
       "when": 1791146885423,
       "tag": "0001_location",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791147633259,
+      "tag": "0002_bot",
+      "breakpoints": true
     }
   ]
 }
