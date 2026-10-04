@@ -2,7 +2,7 @@
 // Bump SNAPSHOT_SCHEMA_VERSION on any incompatible change.
 import { z } from 'zod';
 
-export const SNAPSHOT_SCHEMA_VERSION = 1;
+export const SNAPSHOT_SCHEMA_VERSION = 2;
 
 // Game record ids are UUID-shaped but not necessarily RFC-compliant
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -56,6 +56,10 @@ export const itemSchema = z.object({
   subType: z.string().nullable(),
   size: z.number().int().nullable(),
   grade: z.number().int().nullable(),
+  // As the game states them in the English description ("Grade: B", "Class: Military"); the
+  // numeric grade is set on every item, but only ship components have a grade in the game
+  gradeLetter: z.string().nullable(),
+  itemClass: z.string().nullable(),
   manufacturerUuid: uuid.nullable(),
   nameKey: locKey,
   descriptionKey: locKey,

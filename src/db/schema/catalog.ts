@@ -76,6 +76,10 @@ export const item = catalog.table('item', {
   subType: text('sub_type'),
   size: integer('size'),
   grade: integer('grade'),
+  // From the English description: only ship components have a grade letter (A–D)
+  gradeLetter: text('grade_letter'),
+  // English class name (Military, …); display names are app texts qm_item_class_<lower>
+  itemClass: text('item_class'),
   manufacturerUuid: uuid('manufacturer_uuid').references(() => manufacturer.uuid),
   nameKey: text('name_key'),
   descriptionKey: text('description_key'),

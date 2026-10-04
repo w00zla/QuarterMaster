@@ -8,8 +8,8 @@ import { textDiffCounts } from './apply.ts';
 import { parseIniFile, runLocImport, runLocRemove } from './loc-import.ts';
 import { sha256 } from './plan.ts';
 
-const HELP = `Usage: npm run loc:import -- <global.ini> --source <name> --lang <code> [options]
-       npm run loc:import -- --remove --source <name> --lang <code> [--dry-run]
+const HELP = `Usage: pnpm loc:import <global.ini> --source <name> --lang <code> [options]
+       pnpm loc:import --remove --source <name> --lang <code> [--dry-run]
 
   --source <name>           Name of the text source, e.g. community-de ("game" is reserved)
   --lang <code>             Language code, e.g. de
@@ -83,7 +83,7 @@ async function main(): Promise<number> {
     if (args.json) {
       console.log(JSON.stringify({
         status: result.status, source: args.source, lang: args.lang, priority: result.priority,
-        file: { path: file, bytes: bytes.length, sha256: sha256(bytes), keys: ini.parsed, placeholders: ini.placeholders },
+        file: { path: file, bytes: bytes.length, sha256: sha256(bytes), keys: ini.parsed, placeholders: ini.placeholders, appKeys: ini.appKeys },
         texts: textDiffCounts(result.diff), knownToGame: result.knownToGame, gameKeys: result.gameKeys, wins: result.wins,
         violations: result.violations, warnings: result.warnings, sources: result.sources,
       }, null, 2));
@@ -91,6 +91,7 @@ async function main(): Promise<number> {
       const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
       log(`File: ${file} (${(statSync(file).size / 1024 / 1024).toFixed(1)} MB, sha256 ${sha256(bytes).slice(0, 12)}…)`);
       log(`      ${ini.parsed} keys, ${ini.placeholders} "translation not found" placeholders skipped, ${result.diff.total} texts`);
+      if (ini.appKeys) log(`Warning: ${ini.appKeys} keys with the app's reserved prefix skipped (app texts never come from a file)`);
       if (result.knownToGame !== null && result.gameKeys) {
         log(`Game: ${result.knownToGame} of ${result.diff.total} keys known to the game (${pct(result.knownToGame, result.diff.total)}), `
           + `covering ${pct(result.knownToGame, result.gameKeys)} of the game's ${result.gameKeys} English keys`);

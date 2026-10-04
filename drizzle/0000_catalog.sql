@@ -93,6 +93,8 @@ CREATE TABLE "catalog"."item" (
 	"sub_type" text,
 	"size" integer,
 	"grade" integer,
+	"grade_letter" text,
+	"item_class" text,
 	"manufacturer_uuid" uuid,
 	"name_key" text,
 	"description_key" text,
@@ -210,4 +212,65 @@ CREATE VIEW "catalog"."localization_effective" AS (
   SELECT DISTINCT ON (l.lang, l.key) l.lang, l.key, l.value, l.source
   FROM "catalog"."localization" l
   JOIN "catalog"."localization_source" s ON s.source = l.source AND s.lang = l.lang
-  ORDER BY l.lang, l.key, s.priority DESC, l.source);
+  ORDER BY l.lang, l.key, s.priority DESC, l.source);--> statement-breakpoint
+-- App-defined texts (source `app`, reserved key prefix qm_, never taken from a global.ini; see
+-- src/catalog/labels.ts): names the game data lacks. Maintained via the admin UI later.
+--   qm_blueprint_category_<group>  blueprint category groups (category without its size)
+--   qm_item_class_<class>          item classes, which the game only states in descriptions
+INSERT INTO "catalog"."localization_source" ("source", "lang", "priority", "origin", "content_sha256", "key_count") VALUES
+  ('app', 'en', 1000, 'app (migration 0000)', '', 0),
+  ('app', 'de', 1000, 'app (migration 0000)', '', 0);
+--> statement-breakpoint
+INSERT INTO "catalog"."localization" ("source", "lang", "key", "value") VALUES
+  ('app', 'en', 'qm_blueprint_category_fpsarmours', 'Personal Armor'),
+  ('app', 'de', 'qm_blueprint_category_fpsarmours', 'Rüstung'),
+  ('app', 'en', 'qm_blueprint_category_fpsweapons', 'Personal Weapons'),
+  ('app', 'de', 'qm_blueprint_category_fpsweapons', 'Handwaffen'),
+  ('app', 'en', 'qm_blueprint_category_vehiclecomponent', 'Vehicle Components'),
+  ('app', 'de', 'qm_blueprint_category_vehiclecomponent', 'Fahrzeugkomponenten'),
+  ('app', 'en', 'qm_blueprint_category_vehicleweapons', 'Vehicle Weapons'),
+  ('app', 'de', 'qm_blueprint_category_vehicleweapons', 'Fahrzeugwaffen'),
+  ('app', 'en', 'qm_blueprint_category_missionitem', 'Mission Items'),
+  ('app', 'de', 'qm_blueprint_category_missionitem', 'Missionsgegenstände'),
+  ('app', 'en', 'qm_blueprint_category_medical', 'Medical'),
+  ('app', 'de', 'qm_blueprint_category_medical', 'Medizin'),
+  ('app', 'en', 'qm_blueprint_category_utility', 'Utility'),
+  ('app', 'de', 'qm_blueprint_category_utility', 'Hilfsmittel'),
+  ('app', 'en', 'qm_blueprint_category_fusebattery', 'Fuses & Batteries'),
+  ('app', 'de', 'qm_blueprint_category_fusebattery', 'Sicherungen & Batterien'),
+  ('app', 'en', 'qm_blueprint_category_example1', 'Example 1 (unused)'),
+  ('app', 'de', 'qm_blueprint_category_example1', 'Beispiel 1 (ungenutzt)'),
+  ('app', 'en', 'qm_blueprint_category_example2', 'Example 2 (unused)'),
+  ('app', 'de', 'qm_blueprint_category_example2', 'Beispiel 2 (ungenutzt)'),
+  ('app', 'en', 'qm_blueprint_category_refiningexample1', 'Refining Example (unused)'),
+  ('app', 'de', 'qm_blueprint_category_refiningexample1', 'Raffinieren, Beispiel (ungenutzt)'),
+  ('app', 'en', 'qm_blueprint_category_dismantleexample1', 'Dismantling Example (unused)'),
+  ('app', 'de', 'qm_blueprint_category_dismantleexample1', 'Zerlegen, Beispiel (ungenutzt)'),
+  ('app', 'en', 'qm_item_class_military', 'Military'),
+  ('app', 'de', 'qm_item_class_military', 'Militär'),
+  ('app', 'en', 'qm_item_class_civilian', 'Civilian'),
+  ('app', 'de', 'qm_item_class_civilian', 'Zivil'),
+  ('app', 'en', 'qm_item_class_industrial', 'Industrial'),
+  ('app', 'de', 'qm_item_class_industrial', 'Industrie'),
+  ('app', 'en', 'qm_item_class_stealth', 'Stealth'),
+  ('app', 'de', 'qm_item_class_stealth', 'Tarnung'),
+  ('app', 'en', 'qm_item_class_competition', 'Competition'),
+  ('app', 'de', 'qm_item_class_competition', 'Wettkampf'),
+  ('app', 'en', 'qm_item_class_ballistic', 'Ballistic'),
+  ('app', 'de', 'qm_item_class_ballistic', 'Ballistisch'),
+  ('app', 'en', 'qm_item_class_energy', 'Energy'),
+  ('app', 'de', 'qm_item_class_energy', 'Energie'),
+  ('app', 'en', 'qm_item_class_laser', 'Laser'),
+  ('app', 'de', 'qm_item_class_laser', 'Laser'),
+  ('app', 'en', 'qm_item_class_electron', 'Electron'),
+  ('app', 'de', 'qm_item_class_electron', 'Elektron'),
+  ('app', 'en', 'qm_item_class_energy_laser', 'Energy (Laser)'),
+  ('app', 'de', 'qm_item_class_energy_laser', 'Energie (Laser)'),
+  ('app', 'en', 'qm_item_class_energy_plasma', 'Energy (Plasma)'),
+  ('app', 'de', 'qm_item_class_energy_plasma', 'Energie (Plasma)'),
+  ('app', 'en', 'qm_item_class_energy_electron', 'Energy (Electron)'),
+  ('app', 'de', 'qm_item_class_energy_electron', 'Energie (Elektron)');
+--> statement-breakpoint
+UPDATE "catalog"."localization_source" s
+SET "key_count" = (SELECT count(*) FROM "catalog"."localization" l WHERE l."source" = s."source" AND l."lang" = s."lang")
+WHERE s."source" = 'app';

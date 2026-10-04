@@ -7,6 +7,9 @@ import { chunks, type TextDiff } from './plan.ts';
 
 export const GAME_SOURCE = 'game';
 export const GAME_PRIORITY = 0;
+// Texts the app defines itself (keys with APP_KEY_PREFIX), maintained via the admin UI
+export const APP_SOURCE = 'app';
+export const APP_PRIORITY = 1000;
 export const DEFAULT_EXTERNAL_PRIORITY = 100;
 
 export type SourceRow = typeof c.localizationSource.$inferSelect;

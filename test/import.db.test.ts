@@ -6,6 +6,8 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
 import { runImport, type ImportOptions } from '../src/catalog/import/apply.ts';
 import { parseIniFile, runLocImport, runLocRemove, type LocImportOptions } from '../src/catalog/import/loc-import.ts';
+import { loadPlannerData } from '../src/planner/load.ts';
+import { getBlueprints } from '../src/web/queries.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import type { Snapshot } from '../src/catalog/snapshot.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
@@ -48,7 +50,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('resource'), 2);
     assert.equal(await count('raw_record'), base.rawRecords.length);
     assert.equal(await count('localization', `source = 'game' AND lang = 'de'`), 1);
-    assert.equal(await count('localization', `source = 'game' AND lang = 'en'`), 5);
+    assert.equal(await count('localization', `source = 'game' AND lang = 'en'`), 6);
     assert.equal(await count('localization_source', `source = 'game'`), 2);
     const [qty] = await db.execute<{ quantity: string }>(sql`SELECT quantity::text FROM catalog.blueprint_input WHERE kind = 'resource'`);
     assert.equal(qty!.quantity, '0.046');
@@ -91,6 +93,36 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.deepEqual(r.safeguards.violations.map((v) => v.code), ['downgrade']);
     assert.equal(await count('import'), before);
     assert.equal(await count('blueprint', 'retired_at IS NULL'), 2);
+  });
+
+  it('seeds app-defined blueprint category names and falls back to the key', async () => {
+    assert.equal(await count('localization', `source = 'app' AND lang = 'de'`), 24);
+    assert.equal(await count('localization', `source = 'app' AND key NOT LIKE 'qm\\_%'`), 0);
+    assert.equal(await count('localization_source', `source = 'app' AND key_count = 24`), 2);
+    const [row] = await db.execute<{ value: string }>(sql`
+      SELECT value FROM catalog.localization_effective WHERE lang = 'de' AND key = 'qm_blueprint_category_fpsarmours'`);
+    assert.equal(row!.value, 'Rüstung');
+    // The fixture's category has no manual text: derived from its key
+    const bp = (await getBlueprints(db, 'de')).find((b) => b.uuid === U.blueprint)!;
+    assert.deepEqual([bp.category, bp.categoryGroup, bp.categoryLabel], ['TestCat', 'TestCat', 'Test Cat']);
+    // No game text for the fixture's item type: derived from the type
+    assert.equal(bp.outputTypeLabel, 'Cooler');
+    // Class from the item, named by the app's texts
+    assert.deepEqual([bp.gradeLetter, bp.itemClass], ['B', 'Militär']);
+  });
+
+  it('loads planner recipes with names, inputs and modifiers', async () => {
+    const data = await loadPlannerData(db, [U.blueprint, '00000000-0000-0000-0000-000000000000'], 'en');
+    assert.equal(data.defaultQuality, 500);
+    assert.equal(data.recipes.length, 1);
+    const r = data.recipes[0]!;
+    assert.deepEqual([r.name, r.craftSeconds, r.requiredSlots], ['Test Cooler', 150, 2]);
+    assert.deepEqual(r.slots.map((s) => [s.key, s.name, s.inputs.map((i) => `${i.name} ${i.quantity}`)]), [
+      ['FRAME', 'Frame', ['Test Metal 0.046']],
+      ['EMITTER', 'Emitter', ['TEST_Gem 7']],
+      ['NESTED', 'Nested', []],
+    ]);
+    assert.deepEqual(r.slots[0]!.modifiers.map((m) => [m.key, m.ranges.length]), [['GPP_Test', 2]]);
   });
 
   describe('external localization', () => {
@@ -140,6 +172,10 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
 
     it('rejects the reserved game source and removes a source with its texts', async () => {
       await assert.rejects(runLocImport(db, file, { ...LOC, source: 'game' }), /reserved/);
+      await assert.rejects(runLocImport(db, file, { ...LOC, source: 'app' }), /reserved/);
+      await assert.rejects(runLocImport(db, { ...file, qm_blueprint_category_x: 'Hijack' }, LOC), /reserved for the app/);
+      const parsed = parseIniFile(new TextEncoder().encode('qm_blueprint_category_x=Hijack\r\nitems_commodities_testmetal=Metall\r\n'));
+      assert.deepEqual([Object.keys(parsed.texts), parsed.appKeys], [['items_commodities_testmetal'], 1]);
       assert.equal((await runLocRemove(db, 'community-de', 'de', true))?.keyCount, 4);
       assert.equal(await count('localization', `source = 'community-de'`), 4);
       await runLocRemove(db, 'community-de', 'de', false);

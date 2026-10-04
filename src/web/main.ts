@@ -1,0 +1,199 @@
+// Admin web UI: read-only JSON API plus the built SPA (web/dist), behind HTTP basic auth.
+// Meant to run locally; binds to 127.0.0.1 unless WEB_HOST says otherwise.
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { Hono, type Context } from 'hono';
+import { basicAuth } from 'hono/basic-auth';
+import { bodyLimit } from 'hono/body-limit';
+import { HTTPException } from 'hono/http-exception';
+import { connect } from '../db/client.ts';
+import { runImport, summarize, textDiffCounts } from '../catalog/import/apply.ts';
+import { loadSnapshot } from '../catalog/import/load.ts';
+import { parseIniFile, runLocImport } from '../catalog/import/loc-import.ts';
+import { loadPlannerData } from '../planner/load.ts';
+import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
+import * as q from './queries.ts';
+
+const { WEB_USER, WEB_PASSWORD, WEB_HOST = '127.0.0.1', WEB_PORT = '3000' } = process.env;
+if (!WEB_USER || !WEB_PASSWORD) {
+  console.error('WEB_USER and WEB_PASSWORD must be set (see .env.example)');
+  process.exit(1);
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
+
+const { db, close } = connect(process.env.DATABASE_URL);
+const app = new Hono();
+
+app.use('*', basicAuth({ username: WEB_USER, password: WEB_PASSWORD, realm: 'SC Quartermaster' }));
+
+// Languages are validated against the ones with texts; anything else falls back to English
+let langs = new Set<string>();
+const refreshLangs = async () => {
+  langs = new Set((await q.getMeta(db)).langs);
+};
+const lang = (c: Context) => {
+  const l = c.req.query('lang') ?? 'en';
+  return langs.has(l) ? l : 'en';
+};
+const uuid = (c: Context) => {
+  const id = c.req.param('uuid') ?? '';
+  return UUID.test(id) ? id : null;
+};
+const found = <T>(c: Context, value: T | null) => (value === null ? c.json({ error: 'not found' }, 404) : c.json(value));
+
+const api = new Hono();
+api.get('/meta', async (c) => {
+  const meta = await q.getMeta(db);
+  langs = new Set(meta.langs);
+  return c.json(meta);
+});
+api.get('/overview', async (c) => c.json(await q.getOverview(db, lang(c))));
+api.get('/imports', async (c) => c.json(await q.getImports(db)));
+api.get('/imports/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  return found(c, Number.isInteger(id) ? await q.getImport(db, id) : null);
+});
+api.get('/blueprints', async (c) => c.json(await q.getBlueprints(db, lang(c))));
+api.get('/blueprints/:uuid', async (c) => {
+  const id = uuid(c);
+  return found(c, id ? await q.getBlueprint(db, id, lang(c)) : null);
+});
+api.get('/resources', async (c) => c.json(await q.getResources(db, lang(c))));
+api.get('/resources/:uuid', async (c) => {
+  const id = uuid(c);
+  return found(c, id ? await q.getResource(db, id, lang(c)) : null);
+});
+api.get('/items', async (c) => c.json(await q.getItems(db, lang(c))));
+api.get('/items/:uuid', async (c) => {
+  const id = uuid(c);
+  return found(c, id ? await q.getItem(db, id, lang(c)) : null);
+});
+api.get('/localization/sources', async (c) => c.json(await q.getLocSources(db)));
+api.get('/localization/search', async (c) => {
+  const query = (c.req.query('q') ?? '').trim();
+  const limit = Math.min(Math.max(Number(c.req.query('limit')) || 200, 1), 1000);
+  return c.json(query ? await q.searchLoc(db, lang(c), query, limit) : { total: 0, rows: [] });
+});
+api.get('/localization/keys/:key', async (c) => c.json(await q.getLocKey(db, c.req.param('key').toLowerCase())));
+api.get('/planner/recipes', async (c) => {
+  const uuids = [...new Set((c.req.query('uuids') ?? '').split(',').filter((u) => UUID.test(u)))].slice(0, 200);
+  return c.json(await loadPlannerData(db, uuids, lang(c)));
+});
+// --- imports (write) ----------------------------------------------------------------
+// The file is the raw request body. Writing endpoints require a custom header: a form on
+// another site cannot set it, so the browser's stored basic auth cannot be abused (CSRF).
+// Without `dryRun=0` everything is a dry run.
+const WRITE_HEADER = 'x-quartermaster';
+const MB = 1024 * 1024;
+const requireWriteHeader = async (c: Context, next: () => Promise<void>) => {
+  if (c.req.header(WRITE_HEADER) !== '1') return c.json({ error: `missing ${WRITE_HEADER} header` }, 403);
+  await next();
+};
+const flag = (c: Context, name: string) => c.req.query(name) === '1';
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+api.post('/import/catalog', requireWriteHeader, bodyLimit({ maxSize: 300 * MB }), async (c) => {
+  let loaded;
+  try {
+    loaded = loadSnapshot(new Uint8Array(await c.req.arrayBuffer()));
+  } catch (err) {
+    return c.json({ error: message(err) }, 400);
+  }
+  const { snapshot, sha256 } = loaded;
+  const result = await runImport(db, snapshot, sha256, {
+    dryRun: c.req.query('dryRun') !== '0',
+    force: flag(c, 'force'),
+    allowDowngrade: flag(c, 'allowDowngrade'),
+    maxRetireRatio: 0.1,
+    maxChangeRatio: 0.5,
+  });
+  if (result.status === 'imported') await refreshLangs();
+  const s = summarize(result);
+  const { manifest: _manifest, ...game } = snapshot.game;
+  return c.json({
+    status: result.status,
+    // A dry run's id belongs to a rolled-back row: only report real imports
+    importId: result.status === 'imported' ? result.importId : null,
+    game,
+    extractedAt: snapshot.extractedAt,
+    snapshotSha256: sha256,
+    anomalyCount: snapshot.anomalies.length,
+    lastImport: result.last && { id: result.last.id, channel: result.last.channel, gameBuild: result.last.gameBuild },
+    entities: s.entities as CatalogImportResponse['entities'],
+    localization: s.localization as CatalogImportResponse['localization'],
+    violations: result.safeguards.violations,
+    warnings: result.safeguards.warnings,
+  } satisfies CatalogImportResponse);
+});
+
+api.post('/import/localization', requireWriteHeader, bodyLimit({ maxSize: 100 * MB }), async (c) => {
+  const source = c.req.query('source') ?? '';
+  const language = c.req.query('lang') ?? '';
+  const priority = c.req.query('priority');
+  if (priority !== undefined && priority !== '' && !Number.isInteger(Number(priority))) return c.json({ error: 'priority must be an integer' }, 400);
+  const ini = parseIniFile(new Uint8Array(await c.req.arrayBuffer()));
+  try {
+    const r = await runLocImport(db, ini.texts, {
+      source,
+      lang: language,
+      priority: priority ? Number(priority) : null,
+      origin: `upload: ${c.req.query('name') ?? 'global.ini'}`,
+      dryRun: c.req.query('dryRun') !== '0',
+      force: flag(c, 'force'),
+      maxRemoveRatio: 0.5,
+      minGameOverlap: 0.5,
+    });
+    if (r.status === 'imported') await refreshLangs();
+    return c.json({
+      status: r.status,
+      source,
+      lang: language,
+      priority: r.priority,
+      previous: r.previous && { priority: r.previous.priority, keyCount: r.previous.keyCount, importedAt: r.previous.importedAt.toISOString() },
+      file: { keys: ini.parsed, placeholders: ini.placeholders, appKeys: ini.appKeys },
+      texts: textDiffCounts(r.diff),
+      knownToGame: r.knownToGame,
+      gameKeys: r.gameKeys,
+      wins: r.wins,
+      violations: r.violations,
+      warnings: r.warnings,
+    } satisfies LocImportResponse);
+  } catch (err) {
+    // Validation errors (source/lang names, empty file, reserved keys)
+    return c.json({ error: message(err) }, 400);
+  }
+});
+
+api.notFound((c) => c.json({ error: 'not found' }, 404));
+app.route('/api', api);
+
+app.onError((err, c) => {
+  // Intended responses such as the basic auth challenge (401)
+  if (err instanceof HTTPException) return err.getResponse();
+  console.error(err);
+  return c.json({ error: 'internal error' }, 500);
+});
+
+// The SPA: static files, every other path gets index.html (client-side routing)
+if (existsSync(DIST)) {
+  app.use('*', serveStatic({ root: DIST }));
+  const index = readFileSync(`${DIST}/index.html`, 'utf8');
+  app.get('*', (c) => c.html(index));
+} else {
+  app.get('*', (c) => c.text('SPA not built: run "pnpm web:build", or use "pnpm web:dev" for development.', 404));
+}
+
+await refreshLangs();
+const server = serve({ fetch: app.fetch, hostname: WEB_HOST, port: Number(WEB_PORT) }, (info) => {
+  const url = `http://${info.address}:${info.port}`;
+  console.log(`Backend (API) on ${url}`);
+  console.log(existsSync(DIST) ? `Built UI on ${url}` : 'No built UI (web/dist); in development the UI runs on Vite (pnpm web:dev)');
+});
+
+const shutdown = () => server.close(() => void close().then(() => process.exit(0)));
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

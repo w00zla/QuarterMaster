@@ -2,9 +2,10 @@
 import { sql, TransactionRollbackError } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { displayText, isMissingTranslation, parseGlobalIni } from '../extract/localization.ts';
+import { APP_KEY_PREFIX, isAppKey } from '../labels.ts';
 import { IMPORT_LOCK } from './apply.ts';
 import {
-  DEFAULT_EXTERNAL_PRIORITY, GAME_SOURCE, countWins, readKeys, readSources, readTexts, removeSource, writeTexts, type SourceRow,
+  APP_SOURCE, DEFAULT_EXTERNAL_PRIORITY, GAME_SOURCE, countWins, readKeys, readSources, readTexts, removeSource, writeTexts, type SourceRow,
 } from './localization.ts';
 import { diffTexts, textsSha256, type TextDiff, type Violation } from './plan.ts';
 
@@ -13,9 +14,11 @@ const LANG_PATTERN = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 export interface ParsedIni {
   texts: Record<string, string>;
-  // Keys found in the file, incl. placeholders
+  // Keys found in the file, incl. placeholders and app keys
   parsed: number;
   placeholders: number;
+  // Keys with the app's reserved prefix: never taken from a file
+  appKeys: number;
 }
 
 /** Decodes a global.ini (UTF-8, or UTF-16 with BOM) into display texts. */
@@ -26,12 +29,14 @@ export function parseIniFile(bytes: Uint8Array): ParsedIni {
       : buf.toString('utf8');
   const texts: Record<string, string> = {};
   let placeholders = 0;
+  let appKeys = 0;
   const entries = parseGlobalIni(text);
   for (const [key, value] of entries) {
-    if (isMissingTranslation(value)) placeholders++;
+    if (isAppKey(key)) appKeys++;
+    else if (isMissingTranslation(value)) placeholders++;
     else texts[key] = displayText(value);
   }
-  return { texts, parsed: entries.size, placeholders };
+  return { texts, parsed: entries.size, placeholders, appKeys };
 }
 
 export interface LocImportOptions {
@@ -66,6 +71,7 @@ export interface LocImportResult {
 export function validateSourceAndLang(source: string, lang: string): string[] {
   const errors: string[] = [];
   if (source === GAME_SOURCE) errors.push(`source "${GAME_SOURCE}" is reserved for the catalog import`);
+  else if (source === APP_SOURCE) errors.push(`source "${APP_SOURCE}" is reserved for the app's own texts`);
   else if (!SOURCE_PATTERN.test(source)) errors.push(`invalid source name "${source}" (lower case letters, digits, . _ -)`);
   if (!LANG_PATTERN.test(lang)) errors.push(`invalid language code "${lang}" (e.g. de, pt-BR)`);
   return errors;
@@ -76,6 +82,7 @@ export async function runLocImport(db: Db, texts: Record<string, string>, opts: 
   const errors = validateSourceAndLang(opts.source, opts.lang);
   if (errors.length > 0) throw new Error(errors.join('; '));
   if (Object.keys(texts).length === 0) throw new Error('file contains no texts');
+  if (Object.keys(texts).some(isAppKey)) throw new Error(`keys starting with "${APP_KEY_PREFIX}" are reserved for the app's own texts`);
 
   const sha = textsSha256(texts);
   let result: LocImportResult | undefined;

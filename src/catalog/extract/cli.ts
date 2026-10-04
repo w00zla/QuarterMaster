@@ -1,5 +1,5 @@
 // Extracts the game catalog from a local Data.p4k into a snapshot file.
-// Usage: npm run catalog:extract -- [--p4k <Data.p4k>] [--label 4.10.1] [--out <file>] [--starbreaker <bin>] [--work <dir>]
+// Usage: pnpm catalog:extract [--p4k <Data.p4k>] [--label 4.10.1] [--out <file>] [--starbreaker <bin>] [--work <dir>]
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -20,7 +20,7 @@ const DCB_FILTERS = [
   'libs/foundry/records/entities/scitem/**',
 ];
 
-const HELP = `Usage: npm run catalog:extract -- [options]
+const HELP = `Usage: pnpm catalog:extract [options]
 
   --p4k <path>          Data.p4k of the game install (default: $SC_DATA_P4K)
   --label <text>        Human readable version, e.g. 4.10.1 (not in the build manifest)

@@ -1,5 +1,5 @@
 {
-  "id": "02b64007-8930-463b-86fa-1e10f7a772d4",
+  "id": "dd014173-dd46-49d8-b281-6d3028d62a7d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -776,6 +776,18 @@
         "grade": {
           "name": "grade",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grade_letter": {
+          "name": "grade_letter",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_class": {
+          "name": "item_class",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

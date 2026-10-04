@@ -148,7 +148,8 @@ export const RECORDS: Record<string, unknown> = {
 };
 
 export const INI_EN = '\uFEFFitems_commodities_testmetal=Test Metal\r\nitems_commodities_testmetal_ore=Test Metal (Ore)\r\n'
-  + 'item_NameTEST_Output=Test Cooler \\n\r\ncrafting_ui_slotname_frame,P=Frame\r\nunrelated_key=Not referenced\r\n';
+  + 'item_NameTEST_Output=Test Cooler \\n\r\ncrafting_ui_slotname_frame,P=Frame\r\nunrelated_key=Not referenced\r\n'
+  + 'item_DescTEST_Output=Item Type: Cooler\\nGrade: B\\nClass: Military\\n\\nKeeps things cool.\r\n';
 export const INI_DE = '\uFEFFitems_commodities_testmetal=Testmetall\r\n'
   + 'item_NameTEST_Output=! GERMAN_(GERMANY) TRANSLATION NOT FOUND FOR LOCID: item_NameTEST_Output !\r\n';
 

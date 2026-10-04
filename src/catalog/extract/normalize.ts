@@ -1,6 +1,7 @@
 // Turns exported DataCore records into a catalog snapshot.
 // Robust by design: unexpected shapes become anomalies, never crashes.
 import { displayText, isMissingTranslation, locKey } from './localization.ts';
+import { isAppKey } from '../labels.ts';
 import { isObj, recordKey, refPath, type DcbRecord, type Obj, type RecordStore } from './records.ts';
 import {
   SNAPSHOT_SCHEMA_VERSION,
@@ -66,6 +67,7 @@ export function normalize(input: NormalizeInput): Snapshot {
     return rec?._RecordId_ ?? null;
   };
 
+  const en = input.localizations.get('en');
   const rawPaths = new Set<string>(store.list(PATHS.crafting));
   rawPaths.add(PATHS.resourceTypes);
 
@@ -321,6 +323,8 @@ export function normalize(input: NormalizeInput): Snapshot {
         anomaly('unresolved_ref', r._RecordName_, `manufacturer ${mPath}`);
       }
     }
+    // Grade letter and class are only stated in the English description text
+    const description = displayText(en?.get(locKey(loc.Description) ?? '') ?? '');
     return {
       uuid: r._RecordId_,
       className: recordKey(r._RecordName_),
@@ -328,6 +332,9 @@ export function normalize(input: NormalizeInput): Snapshot {
       subType: str(def.SubType),
       size: int(def.Size),
       grade: int(def.Grade),
+      gradeLetter: /^Grade: ([A-D])\s*$/m.exec(description)?.[1] ?? null,
+      // Some texts use other spaces (e.g. no-break space): normalized, so equal classes match
+      itemClass: /^Class: (.+?)\s*$/m.exec(description)?.[1]?.replace(/\s+/g, ' ') ?? null,
       manufacturerUuid,
       nameKey: locKey(loc.Name),
       descriptionKey: locKey(loc.Description),
@@ -373,14 +380,16 @@ export function normalize(input: NormalizeInput): Snapshot {
   for (const [lang, table] of input.localizations) {
     const texts: Record<string, string> = {};
     let placeholders = 0;
+    let appKeys = 0;
     for (const [k, text] of [...table].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-      if (isMissingTranslation(text)) placeholders++;
+      if (isAppKey(k)) appKeys++;
+      else if (isMissingTranslation(text)) placeholders++;
       else texts[k] = displayText(text);
     }
+    if (appKeys > 0) anomaly('reserved_key', null, `${lang}: ${appKeys} game keys use the app's reserved prefix; skipped`);
     localization[lang] = texts;
     if (placeholders > 0) anomaly('missing_translation', null, `${lang}: ${placeholders} "translation not found" placeholders skipped`);
   }
-  const en = input.localizations.get('en');
   const missingEn = en ? [...keys].filter((k) => !en.has(k)).length : keys.size;
   if (missingEn > 0) anomaly('missing_localization', null, `${missingEn} of ${keys.size} loc keys have no English text`);
 

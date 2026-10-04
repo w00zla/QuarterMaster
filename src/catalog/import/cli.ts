@@ -2,14 +2,13 @@
 // Exit codes: 0 = imported / dry run / nothing to do, 1 = error, 2 = blocked by a safeguard.
 import { readFileSync, statSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { gunzipSync } from 'node:zlib';
 import { sql } from 'drizzle-orm';
 import { connect } from '../../db/client.ts';
-import { snapshotSchema } from '../snapshot.ts';
 import { runImport, summarize } from './apply.ts';
-import { ENTITY_NAMES, checkIntegrity, sha256 } from './plan.ts';
+import { loadSnapshot } from './load.ts';
+import { ENTITY_NAMES } from './plan.ts';
 
-const HELP = `Usage: npm run catalog:import -- <snapshot.json[.gz]> [options]
+const HELP = `Usage: pnpm catalog:import <snapshot.json[.gz]> [options]
 
   --dry-run                 Run the full import in a transaction and roll it back
   --force                   Override mass-retire/mass-change safeguards, re-import an identical snapshot
@@ -52,27 +51,11 @@ async function main(): Promise<number> {
   };
   const log = args.json ? () => {} : (msg = '') => console.log(msg);
   const timings: Record<string, number> = {};
-  const timed = <T>(label: string, fn: () => T): T => {
-    const t0 = performance.now();
-    const r = fn();
-    timings[label] = performance.now() - t0;
-    return r;
-  };
 
   // --- load and check the snapshot (no DB needed) ---
   const file = positionals[0]!;
-  const text = timed('read', () => {
-    const bytes = readFileSync(file);
-    return (file.endsWith('.gz') ? gunzipSync(bytes) : bytes).toString('utf8');
-  });
-  const hash = sha256(text);
-  const parsed = timed('validate', () => snapshotSchema.safeParse(JSON.parse(text)));
-  if (!parsed.success) throw new Error(`Snapshot failed validation:\n${parsed.error.message}`);
-  const snapshot = parsed.data;
-  const errors = timed('integrity', () => checkIntegrity(snapshot));
-  if (errors.length > 0) {
-    throw new Error(`Snapshot failed integrity checks (${errors.length}):\n  ${errors.slice(0, 20).join('\n  ')}`);
-  }
+  const { snapshot, sha256: hash, timings: loadTimings } = loadSnapshot(readFileSync(file));
+  Object.assign(timings, loadTimings);
 
   const g = snapshot.game;
   log(`Snapshot: ${g.channel} build ${g.build}${g.label ? ` "${g.label}"` : ''} (${g.branch}) extracted ${snapshot.extractedAt}`);

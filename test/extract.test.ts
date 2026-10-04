@@ -83,6 +83,9 @@ describe('normalize', () => {
     const out = s.items.find((i) => i.uuid === U.output)!;
     assert.equal(out.manufacturerUuid, U.manufacturer);
     assert.equal(out.size, 2);
+    // Grade letter and class come from the English description
+    assert.deepEqual([out.gradeLetter, out.itemClass], ['B', 'Military']);
+    assert.deepEqual([s.items.find((i) => i.uuid === U.gem)!.gradeLetter, s.items.find((i) => i.uuid === U.gem)!.itemClass], [null, null]);
     assert.deepEqual(s.manufacturers.map((m) => [m.code, m.descriptionKey]), [['TEST', null]]);
   });
 
