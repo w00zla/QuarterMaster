@@ -9,10 +9,13 @@ import { bySubcommand, createRegistry, type BotCommand } from '../src/bot/regist
 type Call = [method: string, arg?: unknown];
 
 /** Minimal stand-in for a discord.js interaction: records every response call. */
-function fakeInteraction(opts: { kind?: 'command' | 'autocomplete'; name: string; locale?: string; sub?: string; group?: string }) {
+function fakeInteraction(opts: {
+  kind?: 'command' | 'autocomplete' | 'component'; name: string; locale?: string; sub?: string; group?: string; customId?: string;
+}) {
   const calls: Call[] = [];
   const i = {
     commandName: opts.name,
+    customId: opts.customId ?? '',
     locale: opts.locale ?? 'en-US',
     guildId: 'g1',
     user: { id: 'u1' },
@@ -20,6 +23,7 @@ function fakeInteraction(opts: { kind?: 'command' | 'autocomplete'; name: string
     replied: false,
     responded: false,
     isAutocomplete: () => opts.kind === 'autocomplete',
+    isMessageComponent: () => opts.kind === 'component',
     isChatInputCommand: () => (opts.kind ?? 'command') === 'command',
     options: {
       getSubcommand: () => opts.sub ?? null,
@@ -38,6 +42,10 @@ function fakeInteraction(opts: { kind?: 'command' | 'autocomplete'; name: string
     },
     async followUp(arg: unknown) {
       calls.push(['followUp', arg]);
+    },
+    async update(arg: unknown) {
+      calls.push(['update', arg]);
+      i.replied = true;
     },
     async respond(arg: unknown) {
       calls.push(['respond', arg]);
@@ -176,6 +184,33 @@ describe('bot router', () => {
     assert.deepEqual(a.calls, [['respond', [{ name: 'de', value: 'v' }]]]);
     assert.deepEqual(b.calls, [['respond', []]]);
     assert.deepEqual(c.calls, [['respond', []]]);
+  });
+
+  it('routes components by the command name prefix of the custom ID', async () => {
+    const seen: string[] = [];
+    const registry = createRegistry([
+      command('qm-x', async () => {}, { component: async (ctx) => { seen.push(ctx.interaction.customId, ctx.lang); await ctx.interaction.update({ content: 'ok' }); } }),
+    ]);
+    const { interaction, calls } = fakeInteraction({ kind: 'component', name: '', customId: 'qm-x:field', locale: 'de' });
+    await handleInteraction(interaction, registry);
+    assert.deepEqual(seen, ['qm-x:field', 'de']);
+    assert.deepEqual(calls, [['update', { content: 'ok' }]]);
+  });
+
+  it('answers component errors ephemerally: UserError as message, others generic and logged', async () => {
+    const { logged, log } = quietLog();
+    const registry = createRegistry([
+      command('qm-u', async () => {}, { component: async () => { throw new UserError('error.manageGuild'); } }),
+      command('qm-e', async () => {}, { component: async () => { throw new Error('boom'); } }),
+    ]);
+    const u = fakeInteraction({ kind: 'component', name: '', customId: 'qm-u:a' });
+    const e = fakeInteraction({ kind: 'component', name: '', customId: 'qm-e:a' });
+    const gone = fakeInteraction({ kind: 'component', name: '', customId: 'qm-gone:a' });
+    for (const x of [u, e, gone]) await handleInteraction(x.interaction, registry, { log });
+    assert.deepEqual(u.calls, [['reply', { content: t('en', 'error.manageGuild'), flags: MessageFlags.Ephemeral }]]);
+    assert.deepEqual(e.calls, [['reply', { content: t('en', 'error.generic'), flags: MessageFlags.Ephemeral }]]);
+    assert.deepEqual(gone.calls, [['reply', { content: t('en', 'error.unknownCommand'), flags: MessageFlags.Ephemeral }]]);
+    assert.equal(logged.length, 1);
   });
 
   it('rejects duplicate command names', () => {

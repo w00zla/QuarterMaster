@@ -3,8 +3,10 @@ import type {
   AutocompleteInteraction,
   ChatInputCommandInteraction,
   InteractionReplyOptions,
+  MessageComponentInteraction,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from 'discord.js';
+import type { Db } from '../db/client.ts';
 import { UserError } from './errors.ts';
 import type { Lang, MessageKey, MessageVars } from './i18n.ts';
 
@@ -17,9 +19,19 @@ export interface CommandContext {
   t: (key: MessageKey, vars?: MessageVars) => string;
   /** Replies, or edits the deferred reply, or follows up after a first reply. Use this, not interaction.reply. */
   reply: (content: ReplyContent) => Promise<void>;
+  db: Db;
 }
 
 export type CommandHandler = (ctx: CommandContext) => Promise<void>;
+
+/** A click or selection on a component whose custom ID starts with `<command name>:`. */
+export interface ComponentContext {
+  // Answer with interaction.update (edit the panel) or interaction.reply
+  interaction: MessageComponentInteraction;
+  lang: Lang;
+  t: (key: MessageKey, vars?: MessageVars) => string;
+  db: Db;
+}
 
 export interface BotCommand {
   // Name and options are English; descriptions get `description_localizations` (see localizedDescription)
@@ -27,6 +39,8 @@ export interface BotCommand {
   execute: CommandHandler;
   // Must answer within 3 s and cannot be deferred; at most 25 choices
   autocomplete?: (interaction: AutocompleteInteraction, lang: Lang) => Promise<void>;
+  // Components the command's replies carry; custom IDs are `<command name>:<rest>`
+  component?: (ctx: ComponentContext) => Promise<void>;
   // Replies are private unless set to false
   ephemeral?: boolean;
 }

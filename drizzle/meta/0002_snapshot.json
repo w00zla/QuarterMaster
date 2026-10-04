@@ -1,5 +1,5 @@
 {
-  "id": "1f9fa434-a7d4-481e-a0df-e0d3c5fe95cb",
+  "id": "2f1c9db5-684e-4a16-8a79-32768179735a",
   "prevId": "e9e90da0-ed6c-4003-9ea5-7a9be3d3dc4d",
   "version": "7",
   "dialect": "postgresql",
@@ -978,7 +978,7 @@
         },
         "guild_logs_level": {
           "name": "guild_logs_level",
-          "value": "\"bot\".\"guild\".\"logs_level\" IN ('off', 'org', 'all')"
+          "value": "\"bot\".\"guild\".\"logs_level\" IN ('off', 'org')"
         }
       },
       "isRLSEnabled": false

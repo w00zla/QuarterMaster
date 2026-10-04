@@ -1,6 +1,9 @@
-// Interaction router: dispatches slash commands and autocomplete to the registry,
+// Interaction router: dispatches slash commands, autocomplete and components to the registry,
 // defers slow commands before Discord's 3 s limit and turns errors into replies.
-import { MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Interaction } from 'discord.js';
+import {
+  MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Interaction, type MessageComponentInteraction,
+} from 'discord.js';
+import type { Db } from '../db/client.ts';
 import { UserError } from './errors.ts';
 import { t, userLang } from './i18n.ts';
 import type { Registry, ReplyContent } from './registry.ts';
@@ -11,6 +14,8 @@ const DEFER_AFTER_MS = 2000;
 type Log = (msg: string, err: unknown) => void;
 
 export interface RouterOptions {
+  // Optional only for tests whose handlers never touch the database
+  db?: Db;
   deferAfterMs?: number;
   log?: Log;
 }
@@ -56,7 +61,9 @@ class Responder {
 
 export async function handleInteraction(interaction: Interaction, registry: Registry, options: RouterOptions = {}) {
   const log = options.log ?? defaultLog;
+  const db = options.db as Db;
   if (interaction.isAutocomplete()) return handleAutocomplete(interaction, registry, log);
+  if (interaction.isMessageComponent()) return handleComponent(interaction, registry, db, log);
   if (!interaction.isChatInputCommand()) return;
 
   const command = registry.get(interaction.commandName);
@@ -70,6 +77,7 @@ export async function handleInteraction(interaction: Interaction, registry: Regi
       lang,
       t: (key, vars) => t(lang, key, vars),
       reply: (content) => responder.send(content),
+      db,
     });
   } catch (err) {
     const isUser = err instanceof UserError;
@@ -82,6 +90,26 @@ export async function handleInteraction(interaction: Interaction, registry: Regi
     }
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function handleComponent(interaction: MessageComponentInteraction, registry: Registry, db: Db, log: Log) {
+  const commandName = interaction.customId.split(':', 1)[0]!;
+  const command = registry.get(commandName);
+  const lang = userLang(interaction.locale);
+  try {
+    if (!command?.component) throw new UserError('error.unknownCommand');
+    await command.component({ interaction, lang, t: (key, vars) => t(lang, key, vars), db });
+  } catch (err) {
+    const isUser = err instanceof UserError;
+    if (!isUser) log(`Component ${interaction.customId} failed (guild ${interaction.guildId ?? '-'}, user ${interaction.user.id})`, err);
+    const content = isUser ? t(lang, err.key, err.vars) : t(lang, 'error.generic');
+    try {
+      if (interaction.replied || interaction.deferred) await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
+      else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    } catch (sendErr) {
+      log(`Could not send the error reply for ${interaction.customId}`, sendErr);
+    }
   }
 }
 

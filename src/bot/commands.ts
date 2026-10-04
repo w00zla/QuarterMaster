@@ -1,4 +1,5 @@
-// All slash commands of the bot. Empty until the guild schema exists (/qm setup comes first).
+// All slash commands of the bot.
+import { setupCommand } from './commands/setup.ts';
 import type { BotCommand } from './registry.ts';
 
-export const commands: BotCommand[] = [];
+export const commands: BotCommand[] = [setupCommand];

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc",
-    "test": "node --env-file-if-exists=.env --test \"test/**/*.test.ts\"",
+    "test": "node --env-file-if-exists=.env --test --test-concurrency=1 \"test/**/*.test.ts\"",
     "db:up": "scripts/dev-db.sh up",
     "db:down": "scripts/dev-db.sh down",
     "db:psql": "scripts/dev-db.sh psql",

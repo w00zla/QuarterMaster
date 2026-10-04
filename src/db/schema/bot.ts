@@ -22,7 +22,7 @@ export const guild = bot.table('guild', {
 }, (t) => [
   check('guild_logs_channel_id_format', sql`${t.logsChannelId} IS NULL OR ${snowflake(t.logsChannelId)}`),
   check('guild_base_lang', sql`${t.baseLang} IN ('de', 'en')`),
-  check('guild_logs_level', sql`${t.logsLevel} IN ('off', 'org', 'all')`),
+  check('guild_logs_level', sql`${t.logsLevel} IN ('off', 'org')`),
 ]);
 
 /** Bot settings per user, global. */

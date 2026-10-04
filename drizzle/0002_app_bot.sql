@@ -102,7 +102,7 @@ CREATE TABLE "bot"."guild" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "guild_logs_channel_id_format" CHECK ("bot"."guild"."logs_channel_id" IS NULL OR "bot"."guild"."logs_channel_id" ~ '^[0-9]{17,20}$'),
 	CONSTRAINT "guild_base_lang" CHECK ("bot"."guild"."base_lang" IN ('de', 'en')),
-	CONSTRAINT "guild_logs_level" CHECK ("bot"."guild"."logs_level" IN ('off', 'org', 'all'))
+	CONSTRAINT "guild_logs_level" CHECK ("bot"."guild"."logs_level" IN ('off', 'org'))
 );
 --> statement-breakpoint
 CREATE TABLE "bot"."logs_outbox" (

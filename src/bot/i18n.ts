@@ -7,6 +7,32 @@ const en = {
   'error.generic': 'Something went wrong. The error has been logged.',
   'error.unknownCommand': 'This command is not available (anymore).',
   'error.guildOnly': 'This command only works on a server.',
+  'error.manageGuild': 'You need the Manage Server permission for this.',
+
+  'cmd.setup': 'Set up the bot for this server: roles, language, logs',
+  'setup.title': '**Quartermaster setup**',
+  'setup.memberRoles': 'Member roles',
+  'setup.officerRoles': 'Officer roles',
+  'setup.baseLang': 'Base language (public output)',
+  'setup.logs': 'Logs',
+  'setup.none': 'none',
+  'setup.saved': 'Changes are saved immediately.',
+  'setup.pick.memberRoles': 'Member roles: book their own stock',
+  'setup.pick.officerRoles': 'Officer roles: also book org stock',
+  'setup.pick.baseLang': 'Base language',
+  'setup.pick.logsChannel': 'Logs channel (none = no logs)',
+  'setup.pick.logsLevel': 'What gets logged',
+  'setup.lang.en': 'English',
+  'setup.lang.de': 'Deutsch',
+  'setup.level.off': 'Off',
+  'setup.level.org': 'Org stock bookings',
+  'setup.perms.ok': 'the bot can post there',
+  'setup.perms.missing': 'missing bot permissions: {perms}',
+  'setup.perms.unknown': 'channel not found, permissions not checked',
+  'perm.viewChannel': 'View Channel',
+  'perm.sendMessages': 'Send Messages',
+  'perm.embedLinks': 'Embed Links',
+  'perm.attachFiles': 'Attach Files',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -16,6 +42,32 @@ const de: Record<MessageKey, string> = {
   'error.generic': 'Da ist etwas schiefgelaufen. Der Fehler wurde protokolliert.',
   'error.unknownCommand': 'Dieser Befehl ist nicht (mehr) verfügbar.',
   'error.guildOnly': 'Dieser Befehl funktioniert nur auf einem Server.',
+  'error.manageGuild': 'Dafür brauchst du die Berechtigung „Server verwalten“.',
+
+  'cmd.setup': 'Bot für diesen Server einrichten: Rollen, Sprache, Logs',
+  'setup.title': '**Quartermaster-Einrichtung**',
+  'setup.memberRoles': 'Member-Rollen',
+  'setup.officerRoles': 'Officer-Rollen',
+  'setup.baseLang': 'Basissprache (öffentliche Ausgaben)',
+  'setup.logs': 'Logs',
+  'setup.none': 'keine',
+  'setup.saved': 'Änderungen werden sofort gespeichert.',
+  'setup.pick.memberRoles': 'Member-Rollen: buchen ihren eigenen Bestand',
+  'setup.pick.officerRoles': 'Officer-Rollen: buchen auch Org-Bestand',
+  'setup.pick.baseLang': 'Basissprache',
+  'setup.pick.logsChannel': 'Logs-Channel (keiner = keine Logs)',
+  'setup.pick.logsLevel': 'Was geloggt wird',
+  'setup.lang.en': 'English',
+  'setup.lang.de': 'Deutsch',
+  'setup.level.off': 'Aus',
+  'setup.level.org': 'Buchungen von Org-Bestand',
+  'setup.perms.ok': 'der Bot kann dort posten',
+  'setup.perms.missing': 'dem Bot fehlen Rechte: {perms}',
+  'setup.perms.unknown': 'Channel nicht gefunden, Rechte nicht geprüft',
+  'perm.viewChannel': 'Kanal ansehen',
+  'perm.sendMessages': 'Nachrichten senden',
+  'perm.embedLinks': 'Links einbetten',
+  'perm.attachFiles': 'Dateien anhängen',
 };
 
 export const MESSAGES: Record<Lang, Record<MessageKey, string>> = { en, de };
@@ -33,7 +85,7 @@ export function userLang(locale: string | null | undefined): Lang {
 }
 
 /**
- * Language for public output on a server (#logs, anything several people see).
+ * Language for public output on a server (logs channel, anything several people see).
  * PLACEHOLDER: always English until the guild settings table exists; then read the configured
  * base language. Never use Discord's guildLocale for this (see .claude/requirements.md).
  */

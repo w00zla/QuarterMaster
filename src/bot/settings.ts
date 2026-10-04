@@ -1,0 +1,59 @@
+// Server settings as /qm-setup edits them: roles live in app.org, bot-only settings in bot.guild.
+import { eq, sql } from 'drizzle-orm';
+import type { Db } from '../db/client.ts';
+import { org } from '../db/schema/app.ts';
+import { guild } from '../db/schema/bot.ts';
+import type { Lang } from './i18n.ts';
+
+export const LOGS_LEVELS = ['off', 'org'] as const;
+export type LogsLevel = (typeof LOGS_LEVELS)[number];
+
+export interface GuildSettings {
+  memberRoleIds: string[];
+  officerRoleIds: string[];
+  baseLang: Lang;
+  logsChannelId: string | null;
+  logsLevel: LogsLevel;
+}
+
+/** Creates the org and its bot settings on first use (keeps the cached server name current). */
+export async function ensureGuild(db: Db, guildId: string, name: string): Promise<GuildSettings> {
+  await db.transaction(async (tx) => {
+    await tx.insert(org).values({ guildId, name }).onConflictDoUpdate({
+      target: org.guildId,
+      set: { name, updatedAt: sql`now()` },
+      setWhere: sql`${org.name} IS DISTINCT FROM excluded.name`,
+    });
+    await tx.insert(guild).values({ guildId }).onConflictDoNothing();
+  });
+  return getGuildSettings(db, guildId);
+}
+
+export async function getGuildSettings(db: Db, guildId: string): Promise<GuildSettings> {
+  const [row] = await db
+    .select({
+      memberRoleIds: org.memberRoleIds,
+      officerRoleIds: org.officerRoleIds,
+      baseLang: guild.baseLang,
+      logsChannelId: guild.logsChannelId,
+      logsLevel: guild.logsLevel,
+    })
+    .from(org)
+    .innerJoin(guild, eq(guild.guildId, org.guildId))
+    .where(eq(org.guildId, guildId));
+  if (!row) throw new Error(`No settings for guild ${guildId}`);
+  return { ...row, baseLang: row.baseLang as Lang, logsLevel: row.logsLevel as LogsLevel };
+}
+
+export async function updateGuildSettings(db: Db, guildId: string, patch: Partial<GuildSettings>): Promise<GuildSettings> {
+  const { memberRoleIds, officerRoleIds, baseLang, logsChannelId, logsLevel } = patch;
+  await db.transaction(async (tx) => {
+    if (memberRoleIds !== undefined || officerRoleIds !== undefined) {
+      await tx.update(org).set({ memberRoleIds, officerRoleIds, updatedAt: sql`now()` }).where(eq(org.guildId, guildId));
+    }
+    if (baseLang !== undefined || logsChannelId !== undefined || logsLevel !== undefined) {
+      await tx.update(guild).set({ baseLang, logsChannelId, logsLevel, updatedAt: sql`now()` }).where(eq(guild.guildId, guildId));
+    }
+  });
+  return getGuildSettings(db, guildId);
+}
