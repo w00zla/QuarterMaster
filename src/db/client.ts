@@ -1,9 +1,10 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import * as app from './schema/app.ts';
 import * as bot from './schema/bot.ts';
 import * as catalog from './schema/catalog.ts';
 
-export const schema = { ...catalog, ...bot };
+export const schema = { ...catalog, ...app, ...bot };
 export type Db = PostgresJsDatabase<typeof schema>;
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 

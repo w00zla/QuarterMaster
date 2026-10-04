@@ -1,24 +1,18 @@
 {
-  "id": "76e6843e-1bc6-4ad9-9e7e-1906d9f18f6a",
+  "id": "1f9fa434-a7d4-481e-a0df-e0d3c5fe95cb",
   "prevId": "e9e90da0-ed6c-4003-9ea5-7a9be3d3dc4d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "bot.app_user": {
+    "app.app_user": {
       "name": "app_user",
-      "schema": "bot",
+      "schema": "app",
       "columns": {
         "user_id": {
           "name": "user_id",
           "type": "text",
           "primaryKey": true,
           "notNull": true
-        },
-        "lang_override": {
-          "name": "lang_override",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "rsi_handle": {
           "name": "rsi_handle",
@@ -49,115 +43,14 @@
       "checkConstraints": {
         "app_user_id_format": {
           "name": "app_user_id_format",
-          "value": "\"bot\".\"app_user\".\"user_id\" ~ '^[0-9]{17,20}$'"
-        },
-        "app_user_lang_override": {
-          "name": "app_user_lang_override",
-          "value": "\"bot\".\"app_user\".\"lang_override\" IS NULL OR \"bot\".\"app_user\".\"lang_override\" IN ('de', 'en')"
+          "value": "\"app\".\"app_user\".\"user_id\" ~ '^[0-9]{17,20}$'"
         }
       },
       "isRLSEnabled": false
     },
-    "bot.guild": {
-      "name": "guild",
-      "schema": "bot",
-      "columns": {
-        "guild_id": {
-          "name": "guild_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "base_lang": {
-          "name": "base_lang",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'en'"
-        },
-        "member_role_ids": {
-          "name": "member_role_ids",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'"
-        },
-        "officer_role_ids": {
-          "name": "officer_role_ids",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'"
-        },
-        "logs_channel_id": {
-          "name": "logs_channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "logs_level": {
-          "name": "logs_level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'org'"
-        },
-        "joined_at": {
-          "name": "joined_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "left_at": {
-          "name": "left_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "guild_id_format": {
-          "name": "guild_id_format",
-          "value": "\"bot\".\"guild\".\"guild_id\" ~ '^[0-9]{17,20}$'"
-        },
-        "guild_logs_channel_id_format": {
-          "name": "guild_logs_channel_id_format",
-          "value": "\"bot\".\"guild\".\"logs_channel_id\" IS NULL OR \"bot\".\"guild\".\"logs_channel_id\" ~ '^[0-9]{17,20}$'"
-        },
-        "guild_base_lang": {
-          "name": "guild_base_lang",
-          "value": "\"bot\".\"guild\".\"base_lang\" IN ('de', 'en')"
-        },
-        "guild_logs_level": {
-          "name": "guild_logs_level",
-          "value": "\"bot\".\"guild\".\"logs_level\" IN ('off', 'org', 'all')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "bot.guild_member": {
-      "name": "guild_member",
-      "schema": "bot",
+    "app.member": {
+      "name": "member",
+      "schema": "app",
       "columns": {
         "guild_id": {
           "name": "guild_id",
@@ -213,11 +106,11 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "guild_member_guild_id_guild_guild_id_fk": {
-          "name": "guild_member_guild_id_guild_guild_id_fk",
-          "tableFrom": "guild_member",
-          "tableTo": "guild",
-          "schemaTo": "bot",
+        "member_guild_id_org_guild_id_fk": {
+          "name": "member_guild_id_org_guild_id_fk",
+          "tableFrom": "member",
+          "tableTo": "org",
+          "schemaTo": "app",
           "columnsFrom": [
             "guild_id"
           ],
@@ -227,11 +120,11 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "guild_member_user_id_app_user_user_id_fk": {
-          "name": "guild_member_user_id_app_user_user_id_fk",
-          "tableFrom": "guild_member",
+        "member_user_id_app_user_user_id_fk": {
+          "name": "member_user_id_app_user_user_id_fk",
+          "tableFrom": "member",
           "tableTo": "app_user",
-          "schemaTo": "bot",
+          "schemaTo": "app",
           "columnsFrom": [
             "user_id"
           ],
@@ -241,9 +134,9 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "guild_member_default_location_uuid_location_uuid_fk": {
-          "name": "guild_member_default_location_uuid_location_uuid_fk",
-          "tableFrom": "guild_member",
+        "member_default_location_uuid_location_uuid_fk": {
+          "name": "member_default_location_uuid_location_uuid_fk",
+          "tableFrom": "member",
           "tableTo": "location",
           "schemaTo": "catalog",
           "columnsFrom": [
@@ -257,8 +150,8 @@
         }
       },
       "compositePrimaryKeys": {
-        "guild_member_guild_id_user_id_pk": {
-          "name": "guild_member_guild_id_user_id_pk",
+        "member_guild_id_user_id_pk": {
+          "name": "member_guild_id_user_id_pk",
           "columns": [
             "guild_id",
             "user_id"
@@ -270,9 +163,67 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "bot.stock_batch": {
+    "app.org": {
+      "name": "org",
+      "schema": "app",
+      "columns": {
+        "guild_id": {
+          "name": "guild_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "member_role_ids": {
+          "name": "member_role_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "officer_role_ids": {
+          "name": "officer_role_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "org_guild_id_format": {
+          "name": "org_guild_id_format",
+          "value": "\"app\".\"org\".\"guild_id\" ~ '^[0-9]{17,20}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.stock_batch": {
       "name": "stock_batch",
-      "schema": "bot",
+      "schema": "app",
       "columns": {
         "id": {
           "name": "id",
@@ -282,7 +233,7 @@
           "identity": {
             "type": "always",
             "name": "stock_batch_id_seq",
-            "schema": "bot",
+            "schema": "app",
             "increment": "1",
             "startWith": "1",
             "minValue": "1",
@@ -496,11 +447,11 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "stock_batch_guild_id_owner_user_id_guild_member_guild_id_user_id_fk": {
-          "name": "stock_batch_guild_id_owner_user_id_guild_member_guild_id_user_id_fk",
+        "stock_batch_guild_id_owner_user_id_member_guild_id_user_id_fk": {
+          "name": "stock_batch_guild_id_owner_user_id_member_guild_id_user_id_fk",
           "tableFrom": "stock_batch",
-          "tableTo": "guild_member",
-          "schemaTo": "bot",
+          "tableTo": "member",
+          "schemaTo": "app",
           "columnsFrom": [
             "guild_id",
             "owner_user_id"
@@ -535,38 +486,38 @@
       "checkConstraints": {
         "stock_batch_designation": {
           "name": "stock_batch_designation",
-          "value": "\"bot\".\"stock_batch\".\"designation\" IN ('personal', 'org')"
+          "value": "\"app\".\"stock_batch\".\"designation\" IN ('personal', 'org')"
         },
         "stock_batch_kind": {
           "name": "stock_batch_kind",
-          "value": "(\"bot\".\"stock_batch\".\"kind\" = 'resource' AND \"bot\".\"stock_batch\".\"resource_uuid\" IS NOT NULL AND \"bot\".\"stock_batch\".\"item_uuid\" IS NULL)\n    OR (\"bot\".\"stock_batch\".\"kind\" = 'item' AND \"bot\".\"stock_batch\".\"item_uuid\" IS NOT NULL AND \"bot\".\"stock_batch\".\"resource_uuid\" IS NULL)"
+          "value": "(\"app\".\"stock_batch\".\"kind\" = 'resource' AND \"app\".\"stock_batch\".\"resource_uuid\" IS NOT NULL AND \"app\".\"stock_batch\".\"item_uuid\" IS NULL)\n    OR (\"app\".\"stock_batch\".\"kind\" = 'item' AND \"app\".\"stock_batch\".\"item_uuid\" IS NOT NULL AND \"app\".\"stock_batch\".\"resource_uuid\" IS NULL)"
         },
         "stock_batch_state": {
           "name": "stock_batch_state",
-          "value": "\"bot\".\"stock_batch\".\"state\" IN ('stored', 'refining')"
+          "value": "\"app\".\"stock_batch\".\"state\" IN ('stored', 'refining')"
         },
         "stock_batch_refining_resource": {
           "name": "stock_batch_refining_resource",
-          "value": "\"bot\".\"stock_batch\".\"state\" = 'stored' OR \"bot\".\"stock_batch\".\"kind\" = 'resource'"
+          "value": "\"app\".\"stock_batch\".\"state\" = 'stored' OR \"app\".\"stock_batch\".\"kind\" = 'resource'"
         },
         "stock_batch_quality": {
           "name": "stock_batch_quality",
-          "value": "\"bot\".\"stock_batch\".\"quality\" BETWEEN 0 AND 1000"
+          "value": "\"app\".\"stock_batch\".\"quality\" BETWEEN 0 AND 1000"
         },
         "stock_batch_quantity": {
           "name": "stock_batch_quantity",
-          "value": "\"bot\".\"stock_batch\".\"quantity\" > 0"
+          "value": "\"app\".\"stock_batch\".\"quantity\" > 0"
         },
         "stock_batch_item_pieces": {
           "name": "stock_batch_item_pieces",
-          "value": "\"bot\".\"stock_batch\".\"kind\" = 'resource' OR \"bot\".\"stock_batch\".\"quantity\" = trunc(\"bot\".\"stock_batch\".\"quantity\")"
+          "value": "\"app\".\"stock_batch\".\"kind\" = 'resource' OR \"app\".\"stock_batch\".\"quantity\" = trunc(\"app\".\"stock_batch\".\"quantity\")"
         }
       },
       "isRLSEnabled": false
     },
-    "bot.stock_journal": {
+    "app.stock_journal": {
       "name": "stock_journal",
-      "schema": "bot",
+      "schema": "app",
       "columns": {
         "id": {
           "name": "id",
@@ -576,7 +527,7 @@
           "identity": {
             "type": "always",
             "name": "stock_journal_id_seq",
-            "schema": "bot",
+            "schema": "app",
             "increment": "1",
             "startWith": "1",
             "minValue": "1",
@@ -673,12 +624,6 @@
         "note": {
           "name": "note",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "logs_posted_at": {
-          "name": "logs_posted_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         }
@@ -791,11 +736,11 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "stock_journal_guild_id_actor_user_id_guild_member_guild_id_user_id_fk": {
-          "name": "stock_journal_guild_id_actor_user_id_guild_member_guild_id_user_id_fk",
+        "stock_journal_guild_id_actor_user_id_member_guild_id_user_id_fk": {
+          "name": "stock_journal_guild_id_actor_user_id_member_guild_id_user_id_fk",
           "tableFrom": "stock_journal",
-          "tableTo": "guild_member",
-          "schemaTo": "bot",
+          "tableTo": "member",
+          "schemaTo": "app",
           "columnsFrom": [
             "guild_id",
             "actor_user_id"
@@ -807,11 +752,11 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "stock_journal_guild_id_owner_user_id_guild_member_guild_id_user_id_fk": {
-          "name": "stock_journal_guild_id_owner_user_id_guild_member_guild_id_user_id_fk",
+        "stock_journal_guild_id_owner_user_id_member_guild_id_user_id_fk": {
+          "name": "stock_journal_guild_id_owner_user_id_member_guild_id_user_id_fk",
           "tableFrom": "stock_journal",
-          "tableTo": "guild_member",
-          "schemaTo": "bot",
+          "tableTo": "member",
+          "schemaTo": "app",
           "columnsFrom": [
             "guild_id",
             "owner_user_id"
@@ -830,38 +775,38 @@
       "checkConstraints": {
         "stock_journal_action": {
           "name": "stock_journal_action",
-          "value": "\"bot\".\"stock_journal\".\"action\" IN ('add', 'remove', 'adjust', 'move_out', 'move_in', 'refine_out', 'refine_in')"
+          "value": "\"app\".\"stock_journal\".\"action\" IN ('add', 'remove', 'adjust', 'move_out', 'move_in', 'refine_out', 'refine_in')"
         },
         "stock_journal_group": {
           "name": "stock_journal_group",
-          "value": "(\"bot\".\"stock_journal\".\"action\" IN ('move_out', 'move_in', 'refine_out', 'refine_in')) = (\"bot\".\"stock_journal\".\"group_id\" IS NOT NULL)"
+          "value": "(\"app\".\"stock_journal\".\"action\" IN ('move_out', 'move_in', 'refine_out', 'refine_in')) = (\"app\".\"stock_journal\".\"group_id\" IS NOT NULL)"
         },
         "stock_journal_designation": {
           "name": "stock_journal_designation",
-          "value": "\"bot\".\"stock_journal\".\"designation\" IN ('personal', 'org')"
+          "value": "\"app\".\"stock_journal\".\"designation\" IN ('personal', 'org')"
         },
         "stock_journal_kind": {
           "name": "stock_journal_kind",
-          "value": "(\"bot\".\"stock_journal\".\"kind\" = 'resource' AND \"bot\".\"stock_journal\".\"resource_uuid\" IS NOT NULL AND \"bot\".\"stock_journal\".\"item_uuid\" IS NULL)\n    OR (\"bot\".\"stock_journal\".\"kind\" = 'item' AND \"bot\".\"stock_journal\".\"item_uuid\" IS NOT NULL AND \"bot\".\"stock_journal\".\"resource_uuid\" IS NULL)"
+          "value": "(\"app\".\"stock_journal\".\"kind\" = 'resource' AND \"app\".\"stock_journal\".\"resource_uuid\" IS NOT NULL AND \"app\".\"stock_journal\".\"item_uuid\" IS NULL)\n    OR (\"app\".\"stock_journal\".\"kind\" = 'item' AND \"app\".\"stock_journal\".\"item_uuid\" IS NOT NULL AND \"app\".\"stock_journal\".\"resource_uuid\" IS NULL)"
         },
         "stock_journal_state": {
           "name": "stock_journal_state",
-          "value": "\"bot\".\"stock_journal\".\"state\" IN ('stored', 'refining')"
+          "value": "\"app\".\"stock_journal\".\"state\" IN ('stored', 'refining')"
         },
         "stock_journal_quality": {
           "name": "stock_journal_quality",
-          "value": "\"bot\".\"stock_journal\".\"quality\" BETWEEN 0 AND 1000"
+          "value": "\"app\".\"stock_journal\".\"quality\" BETWEEN 0 AND 1000"
         },
         "stock_journal_delta": {
           "name": "stock_journal_delta",
-          "value": "\"bot\".\"stock_journal\".\"delta\" <> 0"
+          "value": "\"app\".\"stock_journal\".\"delta\" <> 0"
         }
       },
       "isRLSEnabled": false
     },
-    "bot.user_blueprint": {
+    "app.user_blueprint": {
       "name": "user_blueprint",
-      "schema": "bot",
+      "schema": "app",
       "columns": {
         "user_id": {
           "name": "user_id",
@@ -905,7 +850,7 @@
           "name": "user_blueprint_user_id_app_user_user_id_fk",
           "tableFrom": "user_blueprint",
           "tableTo": "app_user",
-          "schemaTo": "bot",
+          "schemaTo": "app",
           "columnsFrom": [
             "user_id"
           ],
@@ -942,6 +887,200 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "bot.guild": {
+      "name": "guild",
+      "schema": "bot",
+      "columns": {
+        "guild_id": {
+          "name": "guild_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "base_lang": {
+          "name": "base_lang",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en'"
+        },
+        "logs_channel_id": {
+          "name": "logs_channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "logs_level": {
+          "name": "logs_level",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'org'"
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "left_at": {
+          "name": "left_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "guild_guild_id_org_guild_id_fk": {
+          "name": "guild_guild_id_org_guild_id_fk",
+          "tableFrom": "guild",
+          "tableTo": "org",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "guild_id"
+          ],
+          "columnsTo": [
+            "guild_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "guild_logs_channel_id_format": {
+          "name": "guild_logs_channel_id_format",
+          "value": "\"bot\".\"guild\".\"logs_channel_id\" IS NULL OR \"bot\".\"guild\".\"logs_channel_id\" ~ '^[0-9]{17,20}$'"
+        },
+        "guild_base_lang": {
+          "name": "guild_base_lang",
+          "value": "\"bot\".\"guild\".\"base_lang\" IN ('de', 'en')"
+        },
+        "guild_logs_level": {
+          "name": "guild_logs_level",
+          "value": "\"bot\".\"guild\".\"logs_level\" IN ('off', 'org', 'all')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "bot.logs_outbox": {
+      "name": "logs_outbox",
+      "schema": "bot",
+      "columns": {
+        "journal_id": {
+          "name": "journal_id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "posted_at": {
+          "name": "posted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "logs_outbox_journal_id_stock_journal_id_fk": {
+          "name": "logs_outbox_journal_id_stock_journal_id_fk",
+          "tableFrom": "logs_outbox",
+          "tableTo": "stock_journal",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "journal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "bot.user_config": {
+      "name": "user_config",
+      "schema": "bot",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "lang_override": {
+          "name": "lang_override",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "user_config_user_id_app_user_user_id_fk": {
+          "name": "user_config_user_id_app_user_user_id_fk",
+          "tableFrom": "user_config",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "user_config_lang_override": {
+          "name": "user_config_lang_override",
+          "value": "\"bot\".\"user_config\".\"lang_override\" IS NULL OR \"bot\".\"user_config\".\"lang_override\" IN ('de', 'en')"
+        }
+      },
       "isRLSEnabled": false
     },
     "catalog.blueprint": {
@@ -2584,6 +2723,7 @@
   },
   "enums": {},
   "schemas": {
+    "app": "app",
     "bot": "bot",
     "catalog": "catalog"
   },
