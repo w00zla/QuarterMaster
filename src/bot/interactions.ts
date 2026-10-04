@@ -62,7 +62,7 @@ class Responder {
 export async function handleInteraction(interaction: Interaction, registry: Registry, options: RouterOptions = {}) {
   const log = options.log ?? defaultLog;
   const db = options.db as Db;
-  if (interaction.isAutocomplete()) return handleAutocomplete(interaction, registry, log);
+  if (interaction.isAutocomplete()) return handleAutocomplete(interaction, registry, db, log);
   if (interaction.isMessageComponent()) return handleComponent(interaction, registry, db, log);
   if (!interaction.isChatInputCommand()) return;
 
@@ -113,10 +113,10 @@ async function handleComponent(interaction: MessageComponentInteraction, registr
   }
 }
 
-async function handleAutocomplete(interaction: AutocompleteInteraction, registry: Registry, log: Log) {
+async function handleAutocomplete(interaction: AutocompleteInteraction, registry: Registry, db: Db, log: Log) {
   const command = registry.get(interaction.commandName);
   try {
-    if (command?.autocomplete) await command.autocomplete(interaction, userLang(interaction.locale));
+    if (command?.autocomplete) await command.autocomplete(interaction, userLang(interaction.locale), db);
     else await interaction.respond([]);
   } catch (err) {
     log(`Autocomplete for /${interaction.commandName} failed`, err);

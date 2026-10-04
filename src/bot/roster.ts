@@ -125,3 +125,20 @@ export async function syncMemberEvent(db: Db, guildId: string, userId: string, i
   const settings = await findGuildSettings(db, guildId);
   if (settings) await syncMember(db, guildId, settings, userId, info);
 }
+
+/**
+ * Autocomplete over the org's active members: display name or RSI handle contains every word;
+ * names starting with the first word come first, then alphabetical.
+ */
+export async function searchMembers(db: Db, guildId: string, query: string, limit = 25) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = sql`lower(${member.displayName} || ' ' || coalesce(${appUser.rsiHandle}, ''))`;
+  const conditions = words.map((w) => sql`strpos(${hay}, ${w}) > 0`);
+  const first = words[0] ?? '';
+  return db.select({ userId: member.userId, displayName: member.displayName, rsiHandle: appUser.rsiHandle })
+    .from(member)
+    .innerJoin(appUser, eq(appUser.userId, member.userId))
+    .where(and(eq(member.guildId, guildId), eq(member.active, true), ...conditions))
+    .orderBy(sql`starts_with(lower(${member.displayName}), ${first}) DESC`, sql`lower(${member.displayName})`)
+    .limit(limit);
+}

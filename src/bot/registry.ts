@@ -38,7 +38,7 @@ export interface BotCommand {
   data: RESTPostAPIChatInputApplicationCommandsJSONBody;
   execute: CommandHandler;
   // Must answer within 3 s and cannot be deferred; at most 25 choices
-  autocomplete?: (interaction: AutocompleteInteraction, lang: Lang) => Promise<void>;
+  autocomplete?: (interaction: AutocompleteInteraction, lang: Lang, db: Db) => Promise<void>;
   // Components the command's replies carry; custom IDs are `<command name>:<rest>`
   component?: (ctx: ComponentContext) => Promise<void>;
   // Replies are private unless set to false
