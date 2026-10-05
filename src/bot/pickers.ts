@@ -31,15 +31,19 @@ export async function materialChoices(db: Db, lang: Lang, query: string, ores: b
     : { name: fit(`${m.name} (${t(lang, m.kind === 'item' ? 'unit.pcs' : 'unit.scu')})`), value: `${m.kind}:${m.uuid}` });
 }
 
-/** "⚗️ Quantanium · Q820 · 12.5 SCU · Area18 · Org (Hans)" */
-export function batchLabel(p: PickableBatch, lang: Lang): string {
+/**
+ * "⚗️ Quantanium · Q820 · 12.5 SCU · Area18 · Org (Hans)" or "… · Personal"; `asTotal` labels the amount as the batch's
+ * total ("Total: 12.5 SCU"), for replies after a booking.
+ */
+export function batchLabel(p: PickableBatch, lang: Lang, asTotal = false): string {
   const b = p.batch;
+  const amount = `${formatAmount(b.quantity)} ${t(lang, b.kind === 'item' ? 'unit.pcs' : 'unit.scu')}`;
   return fit([
     `${b.state === 'refining' ? '⚗️ ' : ''}${p.material}`,
     `Q${b.quality}`,
-    `${formatAmount(b.quantity)} ${t(lang, b.kind === 'item' ? 'unit.pcs' : 'unit.scu')}`,
+    asTotal ? t(lang, 'stock.list.total', { amount }) : amount,
     p.location,
-    b.designation === 'org' ? `${t(lang, 'stock.org')} (${p.holderName ?? '?'})` : null,
+    b.designation === 'org' ? `${t(lang, 'stock.org')} (${p.holderName ?? '?'})` : t(lang, 'stock.personal'),
   ].filter(Boolean).join(' · '));
 }
 

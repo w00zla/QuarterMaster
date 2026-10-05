@@ -87,8 +87,8 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     const [org] = (await pickableBatches(db, olga, 'change', 'en')).filter((p) => p.batch.designation === 'org');
     assert.equal(batchLabel(org!, 'en'), 'Test Metal · Q700 · 4 SCU · Test Station · Org (Mia)');
     const [job] = await pickableBatches(db, mia, 'refining', 'de');
-    assert.equal(batchLabel(job!, 'de'), '⚗️ Test Metal (Ore) · Q600 · 8 SCU · Test Station');
+    assert.equal(batchLabel(job!, 'de'), '⚗️ Test Metal (Ore) · Q600 · 8 SCU · Test Station · Pers.');
     const found = await batchChoices(db, mia, 'change', 'en', 'q900');
-    assert.deepEqual(found.map((c) => c.name), ['Test Metal · Q900 · 1.5 SCU · Test Station']);
+    assert.deepEqual(found.map((c) => c.name), ['Test Metal · Q900 · 1.5 SCU · Test Station · Pers.']);
   });
 });

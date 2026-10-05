@@ -1,7 +1,7 @@
 // Read side for stock pickers and displays: selectable locations and bookable materials (cached in
 // memory per language, reloaded after a newer catalog import) and the batches an actor may change.
 // No Discord here: the bot and the web UI build their own labels from these.
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { locText, rows } from '../db/query.ts';
@@ -105,13 +105,47 @@ export async function pickableBatches(db: Db, actor: Actor, pick: BatchPick, lan
     ? sql`b.guild_id IS NULL AND b.owner_user_id = ${actor.userId}`
     : sql`((b.guild_id IS NULL AND b.owner_user_id = ${actor.userId}) OR b.guild_id = ${actor.guildId})`;
   const state = pick === 'refining' ? sql`b.state = 'refining'` : pick === 'move' ? sql`b.state = 'stored'` : sql`true`;
+  return loadBatches(db, sql`${scope} AND ${state}`, lang);
+}
+
+export interface StockFilter {
+  // Personal stock of this user, or the org's stock
+  scope: { personalOf: string } | { guildId: string };
+  subjectUuid?: string;
+  locationUuid?: string;
+  // Org stock only
+  holderUserId?: string;
+}
+
+/** What a list shows: personal stock is only ever its owner's; org stock is visible to all members. */
+export function stockList(db: Db, filter: StockFilter, lang: string): Promise<PickableBatch[]> {
+  const conds = [
+    'personalOf' in filter.scope
+      ? sql`b.guild_id IS NULL AND b.owner_user_id = ${filter.scope.personalOf}`
+      : sql`b.guild_id = ${filter.scope.guildId}`,
+  ];
+  if (filter.subjectUuid) conds.push(sql`coalesce(b.resource_uuid, b.item_uuid) = ${filter.subjectUuid}`);
+  if (filter.locationUuid) conds.push(sql`b.location_uuid = ${filter.locationUuid}`);
+  if (filter.holderUserId) conds.push(sql`b.owner_user_id = ${filter.holderUserId}`);
+  return loadBatches(db, sql.join(conds, sql` AND `), lang);
+}
+
+/** Stored batches of a material in the org plus the user's own personal stock, best quality first. */
+export async function findStock(db: Db, guildId: string, userId: string, subjectUuid: string, minQuality: number, lang: string) {
+  const found = await loadBatches(db, sql`(b.guild_id = ${guildId} OR (b.guild_id IS NULL AND b.owner_user_id = ${userId}))
+    AND coalesce(b.resource_uuid, b.item_uuid) = ${subjectUuid} AND b.quality >= ${minQuality} AND b.state = 'stored'`, lang);
+  return found.sort((a, b) => b.batch.quality - a.batch.quality || a.batch.id - b.batch.id);
+}
+
+/** Batches matching `where` (alias `b`) with display names, ordered by material, then quality (best first). */
+async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBatch[]> {
   const found = await rows<Batch & { holderName: string | null }>(db, sql`
     SELECT b.id::int AS id, b.guild_id AS "guildId", b.owner_user_id AS "ownerUserId", b.designation, b.kind,
       b.resource_uuid AS "resourceUuid", b.item_uuid AS "itemUuid", b.location_uuid AS "locationUuid", b.state, b.quality,
       b.quantity::text AS quantity, m.display_name AS "holderName"
     FROM app.stock_batch b
     LEFT JOIN app.member m ON b.guild_id IS NOT NULL AND m.guild_id = b.guild_id AND m.user_id = b.owner_user_id
-    WHERE ${scope} AND ${state}`);
+    WHERE ${where}`);
   const [materials, locations] = [await materialCatalog(db, lang), await locationCatalog(db, lang)];
   // Batches may reference retired catalog entries, which the caches leave out: fall back to the names stored in the catalog
   const fallbackNames = await missingNames(db, lang, found.filter((b) => !materials.has(b.resourceUuid ?? b.itemUuid!)).map((b) => b.resourceUuid ?? b.itemUuid!),
@@ -137,4 +171,15 @@ async function missingNames(db: Db, lang: string, subjects: string[], locations:
     UNION ALL SELECT i.uuid, coalesce(${locText(lang, sql`i.name_key`)}, i.class_name) FROM catalog.item i WHERE i.uuid IN (${list(subjects)})
     UNION ALL SELECT l.uuid, coalesce(${locText(lang, sql`l.name_key`)}, l.key) FROM catalog.location l WHERE l.uuid IN (${list(locations)})`);
   return new Map(found.map((f) => [f.uuid, f.name]));
+}
+
+/** Sum of a material in one stock (a user's personal stock or an org's stock), as NUMERIC text ("0" if none). */
+export async function materialTotal(db: Db, scope: StockFilter['scope'], subjectUuid: string): Promise<string> {
+  const where = 'personalOf' in scope
+    ? sql`guild_id IS NULL AND owner_user_id = ${scope.personalOf}`
+    : sql`guild_id = ${scope.guildId}`;
+  const found = await rows<{ total: string }>(db, sql`
+    SELECT coalesce(sum(quantity), 0)::text AS total FROM app.stock_batch
+    WHERE ${where} AND coalesce(resource_uuid, item_uuid) = ${subjectUuid}`);
+  return found[0]!.total;
 }
