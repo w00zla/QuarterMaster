@@ -60,6 +60,10 @@ const en = {
   'bp.who.none': 'Nobody in the org has registered **{name}** yet.',
   'bp.who.some': '**{name}**: {count} member(s)',
   'bp.who.more': '… and {count} more',
+
+  'unit.scu': 'SCU',
+  'unit.pcs': 'pcs',
+  'stock.org': 'Org',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -122,6 +126,10 @@ const de: Record<MessageKey, string> = {
   'bp.who.none': 'In der Org hat noch niemand **{name}** registriert.',
   'bp.who.some': '**{name}**: {count} Mitglied(er)',
   'bp.who.more': '… und {count} weitere',
+
+  'unit.scu': 'SCU',
+  'unit.pcs': 'Stk.',
+  'stock.org': 'Org',
 };
 
 export const MESSAGES: Record<Lang, Record<MessageKey, string>> = { en, de };

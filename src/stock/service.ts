@@ -76,9 +76,14 @@ export class StockError extends Error {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Locations stock can be booked at (`l` = catalog.location): stations and landing zones with a name. */
+/**
+ * Locations stock can be booked at (`l` = catalog.location): stations and landing zones with an English
+ * name; not jump points (types Anomaly, PointOfInterest) and not unfinished objects ("WIP …", the game uses
+ * a no-break space there, so the word boundary `\M` instead of a plain space).
+ */
 export const selectableLocationSql = (l = 'l') => sql.raw(`(${l}.nav_icon IN ('Station', 'LandingZone') AND NOT ${l}.hide_in_starmap
-  AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key))`);
+  AND coalesce(${l}.type, '') NOT IN ('Anomaly', 'PointOfInterest')
+  AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);
 
 const BATCH_COLUMNS = sql.raw(`id::int AS id, guild_id AS "guildId", owner_user_id AS "ownerUserId", designation, kind,
   resource_uuid AS "resourceUuid", item_uuid AS "itemUuid", location_uuid AS "locationUuid", state, quality, quantity::text AS quantity`);

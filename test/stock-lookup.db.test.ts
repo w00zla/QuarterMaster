@@ -1,0 +1,94 @@
+// Runs against TEST_DATABASE_URL only; the bot, app and catalog schemas there are dropped and recreated.
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import { sql } from 'drizzle-orm';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import { connect, type Db } from '../src/db/client.ts';
+import { runImport } from '../src/catalog/import/apply.ts';
+import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
+import { batchChoices, batchLabel, locationChoices, materialChoices } from '../src/bot/pickers.ts';
+import { syncMember } from '../src/bot/roster.ts';
+import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
+import { locationCatalog, materialCatalog, pickableBatches } from '../src/stock/lookup.ts';
+import { add, refineStart, type Actor } from '../src/stock/service.ts';
+import { U, fixtureSnapshot } from './fixtures.ts';
+
+const url = process.env.TEST_DATABASE_URL;
+const G = '930000000000000001';
+const [MEMBER_ROLE, OFFICER_ROLE] = ['931000000000000001', '931000000000000002'];
+const [MIA, OLGA] = ['932000000000000001', '932000000000000002'];
+const JUMP = '10000000-0000-0000-0000-0000000000bb';
+const mia: Actor = { userId: MIA, guildId: G, officer: false };
+const olga: Actor = { userId: OLGA, guildId: G, officer: true };
+
+describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
+  let db: Db;
+  let close: () => Promise<void>;
+
+  before(async () => {
+    ({ db, close } = connect(url));
+    for (const schema of ['bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
+    const snap = fixtureSnapshot();
+    await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
+    // A named jump point: a station by nav icon, but never a place to store things
+    await db.execute(sql`INSERT INTO catalog.location (uuid, key, name_key, type, nav_icon, hide_in_starmap, content_hash, first_seen_import_id, last_seen_import_id)
+      VALUES (${JUMP}, 'JumpPoint_Test', 'test_station', 'Anomaly', 'Station', false, 'x', 1, 1)`);
+    await ensureGuild(db, G, 'Lookup Org');
+    const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
+    await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
+    await syncMember(db, G, settings, OLGA, { userId: OLGA, displayName: 'Olga', roleIds: [OFFICER_ROLE], bot: false });
+    const metal = { kind: 'resource' as const, uuid: U.metal, locationUuid: U.station };
+    await add(db, mia, { ...metal, quality: 500, amount: '2' });
+    await add(db, mia, { ...metal, quality: 900, amount: '1,5' });
+    await add(db, mia, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 100, amount: '7' });
+    await add(db, mia, { ...metal, quality: 700, amount: '4', org: true });
+    await add(db, olga, { ...metal, quality: 800, amount: '3' });
+    await refineStart(db, mia, { oreUuid: U.ore, locationUuid: U.station, quality: 600, amount: '8' });
+  });
+  after(async () => close?.());
+
+  it('offers selectable locations only, labelled with their place in the star map', async () => {
+    const locations = await locationCatalog(db, 'en');
+    assert.deepEqual([...locations.keys()], [U.station]);
+    assert.equal(locations.get(U.station)!.label, 'Test Station');
+    assert.deepEqual(await locationChoices(db, 'en', 'test'), [{ name: 'Test Station', value: U.station }]);
+  });
+
+  it('offers recipe materials with their unit, ores only for the refinery', async () => {
+    const materials = await materialCatalog(db, 'en');
+    assert.deepEqual([...materials.values()].map((m) => [m.uuid, m.kind, m.isOre]).sort(), [
+      [U.metal, 'resource', false], [U.ore, 'resource', true], [U.gem, 'item', false],
+    ].sort());
+    const regular = await materialChoices(db, 'de', '', false);
+    assert.deepEqual(regular.map((c) => c.value).sort(), [`item:${U.gem}`, `resource:${U.metal}`].sort());
+    assert.ok(regular.some((c) => c.name === 'Testmetall (SCU)'));
+    assert.ok(regular.some((c) => c.name.endsWith('(Stk.)')));
+    assert.deepEqual((await materialChoices(db, 'en', '', true)).map((c) => c.value), [U.ore]);
+  });
+
+  it('members pick their personal batches, officers also the org stock; material, then best quality first', async () => {
+    const own = await pickableBatches(db, mia, 'change', 'en');
+    // Personal only (her org batch is for officers), ordered by material name, then quality
+    const expected = own.map((p) => [p.material, p.batch.quality] as const)
+      .toSorted((a, b) => a[0].localeCompare(b[0]) || b[1] - a[1]);
+    assert.deepEqual(own.map((p) => [p.material, p.batch.quality]), expected);
+    assert.equal(own.length, 4);
+    assert.ok(own.every((p) => p.batch.designation === 'personal'));
+    assert.deepEqual(own.filter((p) => p.batch.resourceUuid === U.metal).map((p) => p.batch.quality), [900, 500]);
+    const officer = await pickableBatches(db, olga, 'change', 'en');
+    assert.deepEqual(officer.map((p) => [p.batch.designation, p.batch.quality, p.holderName]).filter(([d]) => d === 'org'), [['org', 700, 'Mia']]);
+    assert.equal(officer.filter((p) => p.batch.designation === 'personal').length, 1);
+    assert.deepEqual((await pickableBatches(db, mia, 'refining', 'en')).map((p) => p.batch.state), ['refining']);
+    assert.ok((await pickableBatches(db, mia, 'move', 'en')).every((p) => p.batch.state === 'stored'));
+  });
+
+  it('labels batches for the picker', async () => {
+    const [org] = (await pickableBatches(db, olga, 'change', 'en')).filter((p) => p.batch.designation === 'org');
+    assert.equal(batchLabel(org!, 'en'), 'Test Metal · Q700 · 4 SCU · Test Station · Org (Mia)');
+    const [job] = await pickableBatches(db, mia, 'refining', 'de');
+    assert.equal(batchLabel(job!, 'de'), '⚗️ Test Metal (Ore) · Q600 · 8 SCU · Test Station');
+    const found = await batchChoices(db, mia, 'change', 'en', 'q900');
+    assert.deepEqual(found.map((c) => c.name), ['Test Metal · Q900 · 1.5 SCU · Test Station']);
+  });
+});

@@ -1,9 +1,9 @@
 // Blueprint catalog for the bot (labels, search) and the per-user blueprint registry.
-// The catalog is held in memory per language (1.6k rows) so autocomplete stays fast; it is
-// reloaded when a newer catalog import exists.
+// The catalog is held in memory per language (1.6k rows, see importCache) so autocomplete stays fast.
 import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
-import { categoryText, itemClassText, locText, one, rows, withCategoryLabel } from '../db/query.ts';
+import { importCache } from '../db/import-cache.ts';
+import { categoryText, itemClassText, locText, rows, withCategoryLabel } from '../db/query.ts';
 import { member, userBlueprint } from '../db/schema/app.ts';
 import type { Lang } from './i18n.ts';
 
@@ -26,7 +26,6 @@ export interface BlueprintEntry {
 
 // Discord limit for choice names
 const MAX_LABEL = 100;
-const CHECK_IMPORT_MS = 60_000;
 
 /** "Name · S3 · B Industrial · CHCO"; labels that still collide get the tokens of the blueprint key that tell them apart. */
 export function buildLabels(entries: Omit<BlueprintEntry, 'label'>[]): BlueprintEntry[] {
@@ -53,23 +52,12 @@ export function buildLabels(entries: Omit<BlueprintEntry, 'label'>[]): Blueprint
 
 const truncate = (s: string) => (s.length > MAX_LABEL ? `${s.slice(0, MAX_LABEL - 1)}…` : s);
 
-interface CatalogCache {
-  importId: number | null;
-  checkedAt: number;
+export interface BlueprintCatalog {
   entries: BlueprintEntry[];
   byUuid: Map<string, BlueprintEntry>;
 }
 
-const caches = new Map<Lang, CatalogCache>();
-
-export async function blueprintCatalog(db: Db, lang: Lang): Promise<CatalogCache> {
-  const cached = caches.get(lang);
-  if (cached && Date.now() - cached.checkedAt < CHECK_IMPORT_MS) return cached;
-  const latest = (await one<{ id: number | null }>(db, sql`SELECT max(id) AS id FROM catalog.import`))?.id ?? null;
-  if (cached && cached.importId === latest) {
-    cached.checkedAt = Date.now();
-    return cached;
-  }
+export const blueprintCatalog = importCache(async (db: Db, lang: Lang): Promise<BlueprintCatalog> => {
   const loaded = await rows<Omit<BlueprintEntry, 'label'> & { category: string | null }>(db, sql`
     SELECT b.uuid, b.key,
       coalesce(${locText(lang, sql`i.name_key`)}, i.class_name, b.key) AS name,
@@ -84,10 +72,8 @@ export async function blueprintCatalog(db: Db, lang: Lang): Promise<CatalogCache
     const { category: _c, categoryGroup: _g, ...rest } = withCategoryLabel(r);
     return rest;
   }));
-  const cache = { importId: latest, checkedAt: Date.now(), entries, byUuid: new Map(entries.map((e) => [e.uuid, e])) };
-  caches.set(lang, cache);
-  return cache;
-}
+  return { entries, byUuid: new Map(entries.map((e) => [e.uuid, e])) };
+});
 
 /**
  * Up to `limit` entries matching every word of the query in the label or the English name;
