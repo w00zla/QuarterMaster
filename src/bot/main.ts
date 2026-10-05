@@ -18,17 +18,25 @@ const registry = createRegistry(commands);
 // member events and member lists for the roster sync
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 
-client.once(Events.ClientReady, async (c) => {
+client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag} on ${c.guilds.cache.size} server(s), ${registry.size} command(s)`);
-  // Catch up on everything that changed while the bot was offline
-  for (const guild of c.guilds.cache.values()) {
-    try {
-      const counts = await syncDiscordGuild(db, guild);
-      if (counts) console.log(`Roster ${guild.name}: ${JSON.stringify(counts)}`);
-    } catch (err) {
-      console.error(`Roster sync failed for ${guild.id}`, err);
+});
+
+// Catch up on everything that changed while the bot was offline. ShardReady fires on every new
+// gateway session, not only at startup: member events missed in between are not replayed (a resume
+// would replay them). Syncs run one after another.
+let rosterSync = Promise.resolve();
+client.on(Events.ShardReady, (shardId) => {
+  rosterSync = rosterSync.then(async () => {
+    for (const guild of client.guilds.cache.filter((g) => g.shardId === shardId).values()) {
+      try {
+        const counts = await syncDiscordGuild(db, guild);
+        if (counts) console.log(`Roster ${guild.name}: ${JSON.stringify(counts)}`);
+      } catch (err) {
+        console.error(`Roster sync failed for ${guild.id}`, err);
+      }
     }
-  }
+  });
 });
 
 const onMember = (guildId: string, userId: string, info: Parameters<typeof syncMemberEvent>[3]) =>
