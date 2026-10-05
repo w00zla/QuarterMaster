@@ -53,6 +53,7 @@ CREATE TABLE "app"."stock_batch" (
     OR ("app"."stock_batch"."kind" = 'item' AND "app"."stock_batch"."item_uuid" IS NOT NULL AND "app"."stock_batch"."resource_uuid" IS NULL)),
 	CONSTRAINT "stock_batch_state" CHECK ("app"."stock_batch"."state" IN ('stored', 'refining')),
 	CONSTRAINT "stock_batch_refining_resource" CHECK ("app"."stock_batch"."state" = 'stored' OR "app"."stock_batch"."kind" = 'resource'),
+	CONSTRAINT "stock_batch_refining_personal" CHECK ("app"."stock_batch"."state" = 'stored' OR "app"."stock_batch"."designation" = 'personal'),
 	CONSTRAINT "stock_batch_quality" CHECK ("app"."stock_batch"."quality" BETWEEN 0 AND 1000),
 	CONSTRAINT "stock_batch_quantity" CHECK ("app"."stock_batch"."quantity" > 0),
 	CONSTRAINT "stock_batch_item_pieces" CHECK ("app"."stock_batch"."kind" = 'resource' OR "app"."stock_batch"."quantity" = trunc("app"."stock_batch"."quantity"))
@@ -82,6 +83,7 @@ CREATE TABLE "app"."stock_journal" (
 	CONSTRAINT "stock_journal_kind" CHECK (("app"."stock_journal"."kind" = 'resource' AND "app"."stock_journal"."resource_uuid" IS NOT NULL AND "app"."stock_journal"."item_uuid" IS NULL)
     OR ("app"."stock_journal"."kind" = 'item' AND "app"."stock_journal"."item_uuid" IS NOT NULL AND "app"."stock_journal"."resource_uuid" IS NULL)),
 	CONSTRAINT "stock_journal_state" CHECK ("app"."stock_journal"."state" IN ('stored', 'refining')),
+	CONSTRAINT "stock_journal_refining_personal" CHECK ("app"."stock_journal"."state" = 'stored' OR "app"."stock_journal"."designation" = 'personal'),
 	CONSTRAINT "stock_journal_quality" CHECK ("app"."stock_journal"."quality" BETWEEN 0 AND 1000),
 	CONSTRAINT "stock_journal_delta" CHECK ("app"."stock_journal"."delta" <> 0)
 );

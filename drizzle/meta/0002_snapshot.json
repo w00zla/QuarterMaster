@@ -1,5 +1,5 @@
 {
-  "id": "c919e228-3b39-4ec7-9d6b-27ee0300e2ea",
+  "id": "582958aa-f0c1-4d78-a1cd-267401ddaa0d",
   "prevId": "e9e90da0-ed6c-4003-9ea5-7a9be3d3dc4d",
   "version": "7",
   "dialect": "postgresql",
@@ -518,6 +518,10 @@
           "name": "stock_batch_refining_resource",
           "value": "\"app\".\"stock_batch\".\"state\" = 'stored' OR \"app\".\"stock_batch\".\"kind\" = 'resource'"
         },
+        "stock_batch_refining_personal": {
+          "name": "stock_batch_refining_personal",
+          "value": "\"app\".\"stock_batch\".\"state\" = 'stored' OR \"app\".\"stock_batch\".\"designation\" = 'personal'"
+        },
         "stock_batch_quality": {
           "name": "stock_batch_quality",
           "value": "\"app\".\"stock_batch\".\"quality\" BETWEEN 0 AND 1000"
@@ -842,6 +846,10 @@
         "stock_journal_state": {
           "name": "stock_journal_state",
           "value": "\"app\".\"stock_journal\".\"state\" IN ('stored', 'refining')"
+        },
+        "stock_journal_refining_personal": {
+          "name": "stock_journal_refining_personal",
+          "value": "\"app\".\"stock_journal\".\"state\" = 'stored' OR \"app\".\"stock_journal\".\"designation\" = 'personal'"
         },
         "stock_journal_quality": {
           "name": "stock_journal_quality",

@@ -87,6 +87,8 @@ export const stockBatch = app.table('stock_batch', {
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
   check('stock_batch_state', sql`${t.state} IN ('stored', 'refining')`),
   check('stock_batch_refining_resource', sql`${t.state} = 'stored' OR ${t.kind} = 'resource'`),
+  // Refinery jobs belong to the player who runs them; the result can be donated afterwards
+  check('stock_batch_refining_personal', sql`${t.state} = 'stored' OR ${t.designation} = 'personal'`),
   check('stock_batch_quality', sql`${t.quality} BETWEEN 0 AND 1000`),
   check('stock_batch_quantity', sql`${t.quantity} > 0`),
   check('stock_batch_item_pieces', sql`${t.kind} = 'resource' OR ${t.quantity} = trunc(${t.quantity})`),
@@ -134,6 +136,7 @@ export const stockJournal = app.table('stock_journal', {
   check('stock_journal_kind', sql`(${t.kind} = 'resource' AND ${t.resourceUuid} IS NOT NULL AND ${t.itemUuid} IS NULL)
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
   check('stock_journal_state', sql`${t.state} IN ('stored', 'refining')`),
+  check('stock_journal_refining_personal', sql`${t.state} = 'stored' OR ${t.designation} = 'personal'`),
   check('stock_journal_quality', sql`${t.quality} BETWEEN 0 AND 1000`),
   check('stock_journal_delta', sql`${t.delta} <> 0`),
   index().on(t.guildId, t.createdAt.desc()),
