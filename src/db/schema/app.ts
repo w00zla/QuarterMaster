@@ -39,13 +39,16 @@ export const appUser = app.table('app_user', {
 }, (t) => [check('app_user_id_format', snowflake(t.userId))]);
 
 /**
- * User × org (roster). Active = holds a configured member or officer role. The permission
- * level is not stored: it is computed live from the user's roles and Manage Server.
+ * User × org (roster). Active = holds a configured member or officer role. The officer flag is
+ * stored for the user web app, which has no interaction with roles; the bot still resolves rights
+ * live from the interaction (and refreshes the row on every requireMember).
  */
 export const member = app.table('member', {
   guildId: text('guild_id').notNull().references(() => org.guildId),
   userId: text('user_id').notNull().references(() => appUser.userId),
   active: boolean('active').notNull().default(true),
+  // Holds an officer role; false while inactive
+  officer: boolean('officer').notNull().default(false),
   // Cached for lists and #logs after a member left
   displayName: text('display_name').notNull(),
   defaultLocationUuid: uuid('default_location_uuid').references(() => location.uuid),

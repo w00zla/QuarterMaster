@@ -1,4 +1,4 @@
-// Runs against TEST_DATABASE_URL only; the bot, app and catalog schemas there are dropped and recreated.
+// Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
@@ -38,7 +38,7 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
 
   before(async () => {
     ({ db, close } = connect(url));
-    for (const schema of ['bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    for (const schema of ['web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
     await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });

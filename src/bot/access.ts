@@ -1,4 +1,5 @@
-// Who may do what, resolved live from the interaction's roles (permission levels are never stored).
+// Who may do what, resolved live from the interaction's roles (the roster also stores the officer
+// flag, for the user web app; the bot never reads it).
 // Also keeps the caller's roster row current as a safety net for missed member events.
 import type { ChatInputCommandInteraction, MessageComponentInteraction } from 'discord.js';
 import type { Db } from '../db/client.ts';

@@ -1,4 +1,4 @@
-// Runs against TEST_DATABASE_URL only; the bot, app and catalog schemas there are dropped and recreated.
+// Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
@@ -6,6 +6,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
+import { writeHeartbeat } from '../src/bot/heartbeat.ts';
 import { syncGuild, syncMember, type MemberInfo } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings, type GuildSettings } from '../src/bot/settings.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
@@ -30,7 +31,7 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
 
   before(async () => {
     ({ db, close } = connect(url));
-    for (const schema of ['bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    for (const schema of ['web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
     await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
@@ -107,5 +108,31 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
     assert.deepEqual(counts, { active: 1, inactive: 1, deleted: 0, none: 0 });
     assert.equal((await row(ALICE))!.active, false);
     assert.equal((await row(BOB))!.active, true);
+  });
+
+  it('stores the officer flag and keeps it current, false while inactive', async () => {
+    const officer = async (userId: string) => (await db.execute<{ officer: boolean }>(
+      sql`SELECT officer FROM app.member WHERE guild_id = ${G} AND user_id = ${userId}`))[0]?.officer;
+    // Bob is an active member from the full sync above
+    assert.equal(await officer(BOB), false);
+    await syncMember(db, G, settings, BOB, info(BOB, [OFFICER_ROLE]));
+    assert.equal(await officer(BOB), true);
+    await syncMember(db, G, settings, BOB, info(BOB, [MEMBER_ROLE]));
+    assert.equal(await officer(BOB), false);
+    // New rows get it on insert; a referenced officer who loses every role keeps an inactive row without it
+    await syncMember(db, G, settings, ALICE, info(ALICE, [MEMBER_ROLE, OFFICER_ROLE], 'Alice Renamed'));
+    assert.equal(await officer(ALICE), true);
+    assert.equal(await syncMember(db, G, settings, ALICE, info(ALICE, [], 'Alice Renamed')), 'inactive');
+    assert.equal(await officer(ALICE), false);
+  });
+
+  it('heartbeat: one row, updated in place', async () => {
+    const beats = async () => db.execute<{ at: Date }>(sql`SELECT at FROM bot.heartbeat`);
+    await writeHeartbeat(db);
+    const [first] = await beats();
+    await writeHeartbeat(db);
+    const rows = await beats();
+    assert.equal(rows.length, 1);
+    assert.ok(new Date(rows[0]!.at) >= new Date(first!.at));
   });
 });

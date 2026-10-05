@@ -3,8 +3,9 @@ import postgres from 'postgres';
 import * as app from './schema/app.ts';
 import * as bot from './schema/bot.ts';
 import * as catalog from './schema/catalog.ts';
+import * as web from './schema/web.ts';
 
-export const schema = { ...catalog, ...app, ...bot };
+export const schema = { ...catalog, ...app, ...bot, ...web };
 export type Db = PostgresJsDatabase<typeof schema>;
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 

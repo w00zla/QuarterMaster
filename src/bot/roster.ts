@@ -50,13 +50,15 @@ export type SyncResult = 'active' | 'inactive' | 'deleted' | 'none';
 export async function syncMember(
   db: Db, guildId: string, settings: GuildSettings, userId: string, info: MemberInfo | null,
 ): Promise<SyncResult> {
-  if (info && !info.bot && accessOf(info.roleIds, settings).member) {
+  const access = info && !info.bot ? accessOf(info.roleIds, settings) : null;
+  if (info && access?.member) {
     await db.transaction(async (tx) => {
       await tx.insert(appUser).values({ userId }).onConflictDoNothing();
-      await tx.insert(member).values({ guildId, userId, displayName: info.displayName }).onConflictDoUpdate({
+      await tx.insert(member).values({ guildId, userId, displayName: info.displayName, officer: access.officer }).onConflictDoUpdate({
         target: [member.guildId, member.userId],
-        set: { active: true, inactiveSince: null, displayName: info.displayName, updatedAt: sql`now()` },
-        setWhere: sql`NOT ${member.active} OR ${member.displayName} IS DISTINCT FROM excluded.display_name`,
+        set: { active: true, inactiveSince: null, displayName: info.displayName, officer: access.officer, updatedAt: sql`now()` },
+        setWhere: sql`NOT ${member.active} OR ${member.displayName} IS DISTINCT FROM excluded.display_name
+          OR ${member.officer} IS DISTINCT FROM excluded.officer`,
       });
     });
     return 'active';
@@ -81,6 +83,7 @@ export async function syncMember(
     const updated = await tx.update(member)
       .set({
         active: false,
+        officer: false,
         inactiveSince: sql`coalesce(${member.inactiveSince}, now())`,
         ...(info ? { displayName: info.displayName } : {}),
         updatedAt: sql`now()`,
