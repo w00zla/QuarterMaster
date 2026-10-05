@@ -1,5 +1,5 @@
 // Admin web UI: JSON API (catalog reads, catalog/localization imports) plus the built SPA (web/dist),
-// behind HTTP basic auth. Binds to 127.0.0.1 unless WEB_HOST says otherwise; in production it sits
+// behind HTTP basic auth. Binds to 127.0.0.1 unless ADMINAPP_HOST says otherwise; in production it sits
 // behind Caddy (TLS) and is published on the host's loopback only (compose.yaml).
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,9 +17,9 @@ import { loadPlannerData } from '../planner/load.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
 import * as q from './queries.ts';
 
-const { WEB_USER, WEB_PASSWORD, WEB_HOST = '127.0.0.1', WEB_PORT = '3000' } = process.env;
-if (!WEB_USER || !WEB_PASSWORD) {
-  console.error('WEB_USER and WEB_PASSWORD must be set (see .env.example)');
+const { ADMINAPP_USER, ADMINAPP_PASSWORD, ADMINAPP_HOST = '127.0.0.1', ADMINAPP_PORT = '3000' } = process.env;
+if (!ADMINAPP_USER || !ADMINAPP_PASSWORD) {
+  console.error('ADMINAPP_USER and ADMINAPP_PASSWORD must be set (see .env.example)');
   process.exit(1);
 }
 
@@ -29,7 +29,7 @@ const DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
 const { db, close } = connect(process.env.DATABASE_URL);
 const app = new Hono();
 
-app.use('*', basicAuth({ username: WEB_USER, password: WEB_PASSWORD, realm: 'SC Quartermaster' }));
+app.use('*', basicAuth({ username: ADMINAPP_USER, password: ADMINAPP_PASSWORD, realm: 'SC Quartermaster' }));
 
 // Languages are validated against the ones with texts; anything else falls back to English
 let langs = new Set<string>();
@@ -189,7 +189,7 @@ if (existsSync(DIST)) {
 }
 
 await refreshLangs();
-const server = serve({ fetch: app.fetch, hostname: WEB_HOST, port: Number(WEB_PORT) }, (info) => {
+const server = serve({ fetch: app.fetch, hostname: ADMINAPP_HOST, port: Number(ADMINAPP_PORT) }, (info) => {
   const url = `http://${info.address}:${info.port}`;
   console.log(`Backend (API) on ${url}`);
   console.log(existsSync(DIST) ? `Built UI on ${url}` : 'No built UI (web/dist); in development the UI runs on Vite (pnpm web:dev)');

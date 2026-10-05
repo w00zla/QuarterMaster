@@ -6,6 +6,10 @@ export interface MeOrg {
   // The user's name on that server (roster)
   displayName: string;
   officer: boolean;
+  // False while the bot cannot vouch for this org's roster: its org stock is read-only then
+  rosterFresh: boolean;
+  // False once the bot was removed from the server (the roster is frozen, so never fresh)
+  botPresent: boolean;
 }
 
 export interface MeResponse {
@@ -16,6 +20,4 @@ export interface MeResponse {
   avatarUrl: string;
   // Active memberships only
   orgs: MeOrg[];
-  // False when the bot's roster sync is not alive: org stock is read-only then
-  rosterFresh: boolean;
 }

@@ -4,15 +4,9 @@ import type { Db } from '../db/client.ts';
 import type { MeResponse } from './api-types.ts';
 import type { Session } from './session.ts';
 
-// The bot writes the heartbeat every minute; older than this = the roster may miss role changes
-export const HEARTBEAT_STALE_MS = 5 * 60_000;
-
-/** True when the bot's roster sync is alive (bot.heartbeat recent enough). */
-export async function rosterFresh(db: Db): Promise<boolean> {
-  const rows = await db.execute<{ fresh: boolean }>(sql`
-    SELECT at > now() - ${`${HEARTBEAT_STALE_MS} milliseconds`}::interval AS fresh FROM bot.heartbeat WHERE id = 1`);
-  return rows[0]?.fresh ?? false;
-}
+// The bot refreshes app.org.roster_checked_at every minute while it vouches for the org's roster
+// (src/bot/roster-keeper.ts); older than this = role changes may be missing: org stock read-only
+export const ROSTER_STALE_MS = 5 * 60_000;
 
 const CDN = 'https://cdn.discordapp.com';
 
@@ -23,8 +17,13 @@ export const avatarUrl = (userId: string, avatar: string | null) => avatar
 
 export async function getMe(db: Db, session: Session): Promise<MeResponse> {
   const { userId } = session;
-  const orgs = await db.execute<{ guild_id: string; name: string; display_name: string; officer: boolean }>(sql`
-    SELECT o.guild_id, o.name, m.display_name, m.officer FROM app.member m JOIN app.org o ON o.guild_id = m.guild_id
+  const orgs = await db.execute<{
+    guild_id: string; name: string; display_name: string; officer: boolean; roster_fresh: boolean; bot_present: boolean;
+  }>(sql`
+    SELECT o.guild_id, o.name, m.display_name, m.officer,
+      coalesce(o.roster_checked_at > now() - ${`${ROSTER_STALE_MS} milliseconds`}::interval, false) AS roster_fresh,
+      g.left_at IS NULL AS bot_present
+    FROM app.member m JOIN app.org o ON o.guild_id = m.guild_id LEFT JOIN bot.guild g ON g.guild_id = o.guild_id
     WHERE m.user_id = ${userId} AND m.active ORDER BY lower(o.name)`);
   return {
     userId,
@@ -32,7 +31,9 @@ export async function getMe(db: Db, session: Session): Promise<MeResponse> {
     name: session.globalName ?? session.username,
     username: session.username,
     avatarUrl: avatarUrl(userId, session.avatar),
-    orgs: orgs.map((o) => ({ guildId: o.guild_id, name: o.name, displayName: o.display_name, officer: o.officer })),
-    rosterFresh: await rosterFresh(db),
+    orgs: orgs.map((o) => ({
+      guildId: o.guild_id, name: o.name, displayName: o.display_name, officer: o.officer,
+      rosterFresh: o.roster_fresh, botPresent: o.bot_present,
+    })),
   };
 }

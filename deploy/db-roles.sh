@@ -5,7 +5,8 @@
 #   qm_app:   DML for bot and admin; app.stock_journal is append-only (SELECT, INSERT); no access
 #             to schema web (bot and admin must not forge web sessions)
 #   qm_web:   user web app; reads catalog and app, writes users, stock, journal (INSERT only) and
-#             blueprints, but not org/member (role IDs, officer flag); bot: heartbeat (SELECT) only;
+#             blueprints, but not org/member (role IDs, officer flag, roster freshness); from bot only
+#             guild_id and left_at of bot.guild;
 #             full DML in web
 # Grants for new tables come from default privileges, which only cover objects created BY qm_owner:
 # never run migrations as the superuser. They cover qm_app only; qm_web's grants are explicit and
@@ -56,7 +57,8 @@ SELECT 'GRANT INSERT, UPDATE, DELETE ON app.stock_batch TO qm_web'
 SELECT 'GRANT INSERT ON app.stock_journal TO qm_web' WHERE to_regclass('app.stock_journal') IS NOT NULL \gexec
 SELECT 'GRANT INSERT, DELETE ON app.user_blueprint TO qm_web'
   WHERE to_regclass('app.user_blueprint') IS NOT NULL \gexec
-SELECT 'GRANT SELECT ON bot.heartbeat TO qm_web' WHERE to_regclass('bot.heartbeat') IS NOT NULL \gexec
+-- From bot only whether the bot is still on the server
+SELECT 'GRANT SELECT (guild_id, left_at) ON bot.guild TO qm_web' WHERE to_regclass('bot.guild') IS NOT NULL \gexec
 SELECT 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA web TO qm_web'
   WHERE to_regnamespace('web') IS NOT NULL \gexec
 SQL

@@ -12,9 +12,10 @@ export const loginNotice = ref<"failed" | "denied" | null>(
   params.get("login") === "failed" ? "failed" : params.get("login") === "denied" ? "denied" : null,
 );
 if (params.has("login")) {
-  params.delete("login");
-  const query = params.toString();
-  window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+  // Built from the full URL: a path like //evil.com taken as a relative URL would point off-site
+  const url = new URL(window.location.href);
+  url.searchParams.delete("login");
+  window.history.replaceState(null, "", url);
 }
 
 export async function loadMe() {

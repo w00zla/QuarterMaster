@@ -6,7 +6,6 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
-import { writeHeartbeat } from '../src/bot/heartbeat.ts';
 import { syncGuild, syncMember, type MemberInfo } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings, type GuildSettings } from '../src/bot/settings.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
@@ -126,13 +125,25 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
     assert.equal(await officer(ALICE), false);
   });
 
-  it('heartbeat: one row, updated in place', async () => {
-    const beats = async () => db.execute<{ at: Date }>(sql`SELECT at FROM bot.heartbeat`);
-    await writeHeartbeat(db);
-    const [first] = await beats();
-    await writeHeartbeat(db);
-    const rows = await beats();
-    assert.equal(rows.length, 1);
-    assert.ok(new Date(rows[0]!.at) >= new Date(first!.at));
+  it('a concurrent first write keeps the user row, the member change still commits', async () => {
+    const GINA = '720000000000000007';
+    await syncMember(db, G, settings, GINA, info(GINA, [MEMBER_ROLE]));
+    const other = connect(url);
+    try {
+      let sync: Promise<string> | undefined;
+      // The write holds a key lock on the user row until it commits; the roster's user delete waits
+      // for it and then fails on the foreign key
+      await other.db.transaction(async (tx) => {
+        await tx.execute(sql`INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, location_uuid, quality, quantity)
+          VALUES (NULL, ${GINA}, 'personal', 'resource', ${U.metal}, ${U.station}, 500, 1)`);
+        sync = syncMember(db, G, settings, GINA, null);
+        await new Promise((r) => setTimeout(r, 300));
+      });
+      assert.equal(await sync, 'deleted');
+      assert.equal(await row(GINA), undefined);
+      assert.equal(await userExists(GINA), true);
+    } finally {
+      await other.close();
+    }
   });
 });

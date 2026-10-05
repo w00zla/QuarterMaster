@@ -20,7 +20,10 @@ const en = {
   "home.noOrgs": "You are not in any org. Personal stock and blueprints work without one.",
   "home.officer": "Officer",
   "home.member": "Member",
-  "home.rosterStale": "The Discord bot is offline: org stock is read-only until it is back.",
+  "home.readOnly": "Read-only",
+  "home.botMissing": "Bot not on the server",
+  "home.botMissingHint": "The Discord bot was removed from this server: the member list is no longer kept current, its org stock is read-only.",
+  "home.rosterStale": "The Discord bot cannot confirm the member list of this org right now (offline or syncing): its org stock is read-only until it can.",
 };
 type Key = keyof typeof en;
 
@@ -40,7 +43,10 @@ const de: Record<Key, string> = {
   "home.noOrgs": "Du bist in keiner Org. Persönlicher Bestand und Blueprints funktionieren auch ohne.",
   "home.officer": "Officer",
   "home.member": "Member",
-  "home.rosterStale": "Der Discord-Bot ist offline: Org-Bestand ist nur lesbar, bis er wieder da ist.",
+  "home.readOnly": "Nur lesbar",
+  "home.botMissing": "Bot nicht auf dem Server",
+  "home.botMissingHint": "Der Discord-Bot wurde von diesem Server entfernt: Die Mitgliederliste wird nicht mehr abgeglichen, der Org-Bestand ist nur lesbar.",
+  "home.rosterStale": "Der Discord-Bot kann die Mitgliederliste dieser Org gerade nicht bestätigen (offline oder Abgleich läuft): Ihr Org-Bestand ist bis dahin nur lesbar.",
 };
 
 const TEXTS: Record<Lang, Record<Key, string>> = { de, en };

@@ -62,7 +62,10 @@ export function discordLogin(opts: {
       const current = new URL(opts.redirectUri);
       current.search = callbackQuery;
       const tokens = await client.authorizationCodeGrant(config, current, { expectedState: state, pkceCodeVerifier: verifier });
-      const res = await doFetch(`${API}/users/@me`, { headers: { authorization: `Bearer ${tokens.access_token}` } });
+      const res = await doFetch(`${API}/users/@me`, {
+        headers: { authorization: `Bearer ${tokens.access_token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!res.ok) throw new Error(`Discord /users/@me answered ${res.status}`);
       const user = userSchema.parse(await res.json());
       return { id: user.id, username: user.username, globalName: user.global_name ?? null, avatar: user.avatar ?? null };

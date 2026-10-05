@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { categoryText, itemClassText, locText, rows, withCategoryLabel } from '../db/query.ts';
-import { member, userBlueprint } from '../db/schema/app.ts';
+import { appUser, member, userBlueprint } from '../db/schema/app.ts';
 import type { Lang } from './i18n.ts';
 
 export interface BlueprintEntry {
@@ -99,8 +99,12 @@ export async function ownedBlueprints(db: Db, userId: string): Promise<Set<strin
 
 /** true if added, false if it was registered already. */
 export async function addBlueprint(db: Db, userId: string, blueprintUuid: string): Promise<boolean> {
-  const added = await db.insert(userBlueprint).values({ userId, blueprintUuid }).onConflictDoNothing().returning();
-  return added.length > 0;
+  return db.transaction(async (tx) => {
+    // The roster cleanup may have removed the user row (no data left), e.g. under a web session
+    await tx.insert(appUser).values({ userId }).onConflictDoNothing();
+    const added = await tx.insert(userBlueprint).values({ userId, blueprintUuid }).onConflictDoNothing().returning();
+    return added.length > 0;
+  });
 }
 
 /** true if removed, false if it was not registered. */

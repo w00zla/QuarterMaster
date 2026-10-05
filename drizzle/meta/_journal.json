@@ -36,6 +36,13 @@
       "when": 1791236722870,
       "tag": "0004_session_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791239214334,
+      "tag": "0005_roster_checked",
+      "breakpoints": true
     }
   ]
 }

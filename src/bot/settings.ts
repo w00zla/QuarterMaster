@@ -1,5 +1,5 @@
 // Server settings as /qm-setup edits them: roles live in app.org, bot-only settings in bot.guild.
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { org } from '../db/schema/app.ts';
 import { guild } from '../db/schema/bot.ts';
@@ -27,6 +27,28 @@ export async function ensureGuild(db: Db, guildId: string, name: string): Promis
     await tx.insert(guild).values({ guildId }).onConflictDoNothing();
   });
   return getGuildSettings(db, guildId);
+}
+
+/** The bot was removed from the server (its data is kept). */
+export async function markGuildLeft(db: Db, guildId: string) {
+  await db.update(guild).set({ leftAt: sql`now()`, updatedAt: sql`now()` }).where(and(eq(guild.guildId, guildId), isNull(guild.leftAt)));
+}
+
+/** The bot joined the server (again). */
+export async function markGuildPresent(db: Db, guildId: string) {
+  await db.update(guild).set({ leftAt: null, updatedAt: sql`now()` }).where(and(eq(guild.guildId, guildId), isNotNull(guild.leftAt)));
+}
+
+/** At startup: the servers the bot is on are present, every other one was left while it was offline. */
+export async function reconcilePresence(db: Db, presentGuildIds: string[]) {
+  await db.transaction(async (tx) => {
+    if (presentGuildIds.length) {
+      await tx.update(guild).set({ leftAt: null, updatedAt: sql`now()` })
+        .where(and(inArray(guild.guildId, presentGuildIds), isNotNull(guild.leftAt)));
+    }
+    await tx.update(guild).set({ leftAt: sql`now()`, updatedAt: sql`now()` })
+      .where(and(presentGuildIds.length ? notInArray(guild.guildId, presentGuildIds) : sql`true`, isNull(guild.leftAt)));
+  });
 }
 
 export async function getGuildSettings(db: Db, guildId: string): Promise<GuildSettings> {

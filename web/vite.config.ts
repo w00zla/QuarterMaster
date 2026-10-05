@@ -6,14 +6,14 @@ import vue from "@vitejs/plugin-vue";
 // Dev: the API runs as its own process (pnpm web); Vite proxies /api to it.
 // Settings come from the repo root's .env, like the backend's.
 export default defineConfig(({ command, mode }) => {
-  const env = loadEnv(mode, fileURLToPath(new URL("..", import.meta.url)), "WEB_");
+  const env = loadEnv(mode, fileURLToPath(new URL("..", import.meta.url)), "ADMINAPP_");
   return {
-    plugins: [vue(), ...(command === "serve" ? [basicAuth(env.WEB_USER, env.WEB_PASSWORD)] : [])],
+    plugins: [vue(), ...(command === "serve" ? [basicAuth(env.ADMINAPP_USER, env.ADMINAPP_PASSWORD)] : [])],
     server: {
       host: "127.0.0.1",
       port: 5173,
       strictPort: true,
-      proxy: { "/api": `http://127.0.0.1:${env.WEB_PORT || "3000"}` },
+      proxy: { "/api": `http://127.0.0.1:${env.ADMINAPP_PORT || "3000"}` },
     },
   };
 });
@@ -22,7 +22,7 @@ export default defineConfig(({ command, mode }) => {
 // prompts once on page load and sends the credentials with every /api request,
 // which the proxy passes on. Without it, the API's 401 on fetch() never prompts.
 function basicAuth(user: string | undefined, password: string | undefined): Plugin {
-  if (!user || !password) throw new Error("WEB_USER and WEB_PASSWORD must be set in the repo's .env");
+  if (!user || !password) throw new Error("ADMINAPP_USER and ADMINAPP_PASSWORD must be set in the repo's .env");
   const expected = Buffer.from(`Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`);
   return {
     name: "basic-auth",

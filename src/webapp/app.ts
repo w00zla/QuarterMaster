@@ -11,9 +11,10 @@ import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from 'hono-rate-limiter';
 import type { Db } from '../db/client.ts';
 import type { DiscordLogin } from './discord.ts';
+import { rateKey } from './ip.ts';
 import { getMe } from './me.ts';
 import {
-  ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, hashToken, validateSession, type Session,
+  ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, validateSession, type Session,
 } from './session.ts';
 
 export interface WebappConfig {
@@ -23,7 +24,8 @@ export interface WebappConfig {
   trustProxy: boolean;
   // Built SPA; null = none
   distDir: string | null;
-  rateLimit?: { windowMs: number; auth: number; api: number };
+  // Per window: auth and apiIp per client address (IPv6 per /64), apiUser per logged-in user
+  rateLimit?: { windowMs: number; auth: number; apiIp: number; apiUser: number };
 }
 
 type Env = { Variables: { session: Session; token: string } };
@@ -31,7 +33,8 @@ type Env = { Variables: { session: Session; token: string } };
 const OAUTH_COOKIE = 'qm_oauth';
 const OAUTH_MAX_AGE = 600;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-const DEFAULT_LIMITS = { windowMs: 15 * 60_000, auth: 30, api: 1500 };
+const DEFAULT_LIMITS = { windowMs: 15 * 60_000, auth: 30, apiIp: 3000, apiUser: 1500 };
+const IMMUTABLE = 'public, max-age=31536000, immutable';
 
 const cookieOptions = (maxAge: number) =>
   ({ prefix: 'host', path: '/', secure: true, httpOnly: true, sameSite: 'Lax', maxAge }) as const;
@@ -92,15 +95,10 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
   app.use('/auth/*', noStore);
   app.use('/api/*', noStore);
 
-  app.use('/auth/*', rateLimiter({ windowMs: limits.windowMs, limit: limits.auth, keyGenerator: clientIp }));
-  app.use('/api/*', rateLimiter({
-    windowMs: limits.windowMs,
-    limit: limits.api,
-    keyGenerator: (c) => {
-      const token = sessionToken(c);
-      return token ? `s:${hashToken(token)}` : `ip:${clientIp(c)}`;
-    },
-  }));
+  // Per address before anything touches the DB (random session cookies must not buy fresh
+  // buckets); per user after the session check (see the API below)
+  app.use('/auth/*', rateLimiter({ windowMs: limits.windowMs, limit: limits.auth, keyGenerator: (c) => rateKey(clientIp(c)) }));
+  app.use('/api/*', rateLimiter({ windowMs: limits.windowMs, limit: limits.apiIp, keyGenerator: (c) => rateKey(clientIp(c)) }));
 
   // --- login ------------------------------------------------------------------------------
   app.get('/auth/login', async (c) => {
@@ -134,7 +132,8 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
 
   app.post('/auth/logout', async (c) => {
     const token = sessionToken(c);
-    if (token) await deleteSession(db, token);
+    const userId = token ? await deleteSession(db, token) : null;
+    if (userId) console.log(`Logout ${userId} (ip ${clientIp(c)})`);
     deleteCookie(c, SESSION_COOKIE, { prefix: 'host', path: '/', secure: true });
     return c.body(null, 204);
   });
@@ -152,6 +151,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     c.set('token', token!);
     return next();
   });
+  api.use('*', rateLimiter<Env>({ windowMs: limits.windowMs, limit: limits.apiUser, keyGenerator: (c) => `u:${c.get('session').userId}` }));
   // Writes take JSON only: a cross-site JSON request needs a CORS preflight, which is never answered
   api.use('*', async (c, next) => {
     if (SAFE_METHODS.has(c.req.method)) return next();
@@ -164,7 +164,8 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
 
   api.get('/me', async (c) => c.json(await getMe(db, c.get('session'))));
 
-  api.notFound((c) => c.json({ error: 'not found' }, 404));
+  // Last: a sub-app's notFound does not apply once mounted, and the SPA fallback must never answer /api
+  api.all('*', (c) => c.json({ error: 'not found' }, 404));
   app.route('/api', api);
 
   app.onError((err, c) => {
@@ -174,7 +175,17 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
 
   // --- SPA --------------------------------------------------------------------------------
   if (config.distDir && existsSync(config.distDir)) {
-    app.use('*', serveStatic({ root: config.distDir }));
+    const files = serveStatic({ root: config.distDir });
+    // Hashed file names: cache for good
+    app.use('/assets/*', async (c, next) => {
+      await next();
+      if (c.res.ok) c.header('Cache-Control', IMMUTABLE);
+    });
+    // No dotfiles; index.html always through the fallback below (no-cache)
+    app.use('*', (c, next) => {
+      const path = c.req.path;
+      return path === '/' || path === '/index.html' || path.split('/').some((s) => s.startsWith('.')) ? next() : files(c, next);
+    });
     const index = readFileSync(`${config.distDir}/index.html`, 'utf8');
     app.get('*', (c) => {
       c.header('Cache-Control', 'no-cache');

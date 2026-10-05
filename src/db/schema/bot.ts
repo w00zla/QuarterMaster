@@ -1,7 +1,7 @@
 // Discord bot configuration and state. The data the bot works on (orgs, roster, stock,
 // blueprints) lives in schema `app`; nothing in `app` references this schema.
 import { sql } from 'drizzle-orm';
-import { bigint, check, pgSchema, smallint, text, timestamp } from 'drizzle-orm/pg-core';
+import { bigint, check, pgSchema, text, timestamp } from 'drizzle-orm/pg-core';
 import { appUser, createdAt, org, snowflake, stockJournal, updatedAt } from './app.ts';
 
 export const bot = pgSchema('bot');
@@ -43,13 +43,3 @@ export const logsOutbox = bot.table('logs_outbox', {
   journalId: bigint('journal_id', { mode: 'number' }).primaryKey().references(() => stockJournal.id),
   postedAt: timestamp('posted_at', { withTimezone: true }).notNull().defaultNow(),
 });
-
-/**
- * Liveness of the roster sync: one row, written by the bot every minute while its gateway
- * connection is ready. The user web app treats the roster as stale when it is older than a few
- * minutes and shows org stock read-only.
- */
-export const heartbeat = bot.table('heartbeat', {
-  id: smallint('id').primaryKey().default(1),
-  at: timestamp('at', { withTimezone: true }).notNull(),
-}, (t) => [check('heartbeat_single_row', sql`${t.id} = 1`)]);

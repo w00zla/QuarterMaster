@@ -4,7 +4,9 @@ import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
-import { ensureGuild, getGuildSettings, updateGuildSettings } from '../src/bot/settings.ts';
+import {
+  ensureGuild, getGuildSettings, markGuildLeft, markGuildPresent, reconcilePresence, updateGuildSettings,
+} from '../src/bot/settings.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const G = '300000000000000001';
@@ -40,6 +42,23 @@ describe('bot guild settings (database)', { skip: url ? false : 'TEST_DATABASE_U
       logsLevel: 'off',
     });
     assert.deepEqual((await updateGuildSettings(db, G, { logsChannelId: null })).logsChannelId, null);
+  });
+
+  it('records whether the bot is on the server: events and the startup check', async () => {
+    const [A, B, C] = ['700000000000000031', '700000000000000032', '700000000000000033'];
+    for (const id of [A, B, C]) await ensureGuild(db, id, `g${id.slice(-1)}`);
+    const left = async () => (await db.execute<{ guild_id: string }>(
+      sql`SELECT guild_id FROM bot.guild WHERE left_at IS NOT NULL AND guild_id IN (${A}, ${B}, ${C}) ORDER BY guild_id`)).map((r) => r.guild_id);
+    await markGuildLeft(db, A);
+    assert.deepEqual(await left(), [A]);
+    await markGuildPresent(db, A);
+    assert.deepEqual(await left(), []);
+    // Startup: on A and C; B removed the bot while it was offline
+    await markGuildLeft(db, C);
+    await reconcilePresence(db, [A, C]);
+    assert.deepEqual(await left(), [B]);
+    await reconcilePresence(db, []);
+    assert.deepEqual(await left(), [A, B, C]);
   });
 
   it('rejects values the schema does not allow', async () => {

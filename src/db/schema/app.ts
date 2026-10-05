@@ -26,6 +26,9 @@ export const org = app.table('org', {
   name: text('name').notNull(),
   memberRoleIds: text('member_role_ids').array().notNull().default(sql`'{}'`),
   officerRoleIds: text('officer_role_ids').array().notNull().default(sql`'{}'`),
+  // Last time the bot vouched for the roster (src/bot/roster-keeper.ts), NULL while it cannot. The
+  // user web app treats an older value as a stale roster: org stock read-only
+  rosterCheckedAt: timestamp('roster_checked_at', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [check('org_guild_id_format', snowflake(t.guildId))]);

@@ -15,6 +15,8 @@ export default defineConfig(({ mode }) => {
       port: 5174,
       strictPort: true,
       proxy: { "/api": backend, "/auth": backend },
+      // Only what the SPA imports (default: the whole workspace, readable by anything on localhost)
+      fs: { allow: [".", "../web/src", "../src/webapp/api-types.ts"] },
     },
   };
 });

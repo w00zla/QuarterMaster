@@ -46,6 +46,8 @@ export function accessOf(roleIds: string[], settings: Pick<GuildSettings, 'membe
 
 export type SyncResult = 'active' | 'inactive' | 'deleted' | 'none';
 
+const FOREIGN_KEY_VIOLATION = '23503';
+
 /** Brings one person's roster row in line with their current roles (null = no longer on the server). */
 export async function syncMember(
   db: Db, guildId: string, settings: GuildSettings, userId: string, info: MemberInfo | null,
@@ -71,13 +73,19 @@ export async function syncMember(
                           AND (j.owner_user_id = m.user_id OR j.actor_user_id = m.user_id))
       RETURNING 1`);
     if (deleted.length) {
-      await tx.execute(sql`
-        DELETE FROM app.app_user u WHERE u.user_id = ${userId} AND u.rsi_handle IS NULL
-          AND NOT EXISTS (SELECT 1 FROM app.member m WHERE m.user_id = u.user_id)
-          AND NOT EXISTS (SELECT 1 FROM app.user_blueprint b WHERE b.user_id = u.user_id)
-          AND NOT EXISTS (SELECT 1 FROM app.stock_batch b WHERE b.owner_user_id = u.user_id)
-          AND NOT EXISTS (SELECT 1 FROM app.stock_journal j WHERE j.owner_user_id = u.user_id OR j.actor_user_id = u.user_id)
-          AND NOT EXISTS (SELECT 1 FROM bot.user_config c WHERE c.user_id = u.user_id)`);
+      // In a savepoint: a concurrent first write by this user (e.g. from the web app) makes the
+      // delete fail on a foreign key; the user row then simply stays, the member change commits
+      await tx.transaction(async (sp) => {
+        await sp.execute(sql`
+          DELETE FROM app.app_user u WHERE u.user_id = ${userId} AND u.rsi_handle IS NULL
+            AND NOT EXISTS (SELECT 1 FROM app.member m WHERE m.user_id = u.user_id)
+            AND NOT EXISTS (SELECT 1 FROM app.user_blueprint b WHERE b.user_id = u.user_id)
+            AND NOT EXISTS (SELECT 1 FROM app.stock_batch b WHERE b.owner_user_id = u.user_id)
+            AND NOT EXISTS (SELECT 1 FROM app.stock_journal j WHERE j.owner_user_id = u.user_id OR j.actor_user_id = u.user_id)
+            AND NOT EXISTS (SELECT 1 FROM bot.user_config c WHERE c.user_id = u.user_id)`);
+      }).catch((err: unknown) => {
+        if ((err as { cause?: { code?: string } }).cause?.code !== FOREIGN_KEY_VIOLATION) throw err;
+      });
       return 'deleted';
     }
     const updated = await tx.update(member)
@@ -113,14 +121,6 @@ export async function syncGuild(db: Db, guildId: string, settings: GuildSettings
     if (!seen.has(userId) && active) counts[await syncMember(db, guildId, settings, userId, null)]++;
   }
   return counts;
-}
-
-/** Fetches all members of a server from Discord and syncs them; null when the server has no setup yet. */
-export async function syncDiscordGuild(db: Db, guild: Guild) {
-  const settings = await findGuildSettings(db, guild.id);
-  if (!settings) return null;
-  const members = await guild.members.fetch();
-  return syncGuild(db, guild.id, settings, [...members.values()].map(memberInfo));
 }
 
 /** Member event: joined, roles or nickname changed (info), or left (null). */

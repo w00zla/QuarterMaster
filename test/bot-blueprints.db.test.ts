@@ -42,6 +42,11 @@ describe('blueprint registry (database)', { skip: url ? false : 'TEST_DATABASE_U
   it('adds and removes blueprints idempotently', async () => {
     assert.equal(await addBlueprint(db, ANNA, U.blueprint), true);
     assert.equal(await addBlueprint(db, ANNA, U.blueprint), false);
+    // A user row the roster cleanup removed (no data left) comes back with the first blueprint
+    const NEW = '720000000000000099';
+    assert.equal(await addBlueprint(db, NEW, U.blueprint), true);
+    assert.equal((await db.execute(sql`SELECT 1 FROM app.app_user WHERE user_id = ${NEW}`)).length, 1);
+    await removeBlueprint(db, NEW, U.blueprint);
     assert.deepEqual([...await ownedBlueprints(db, ANNA)], [U.blueprint]);
     assert.equal(await removeBlueprint(db, ANNA, U.blueprint), true);
     assert.equal(await removeBlueprint(db, ANNA, U.blueprint), false);

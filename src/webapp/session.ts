@@ -53,8 +53,10 @@ export async function validateSession(db: Db, token: string): Promise<Session | 
   return { userId: row.user_id, username: row.discord_username, globalName: row.discord_global_name, avatar: row.discord_avatar };
 }
 
-export async function deleteSession(db: Db, token: string) {
-  await db.execute(sql`DELETE FROM web.session WHERE token_hash = ${hashToken(token)}`);
+/** Deletes the session; returns its user, null when there was none. */
+export async function deleteSession(db: Db, token: string): Promise<string | null> {
+  const rows = await db.execute<{ user_id: string }>(sql`DELETE FROM web.session WHERE token_hash = ${hashToken(token)} RETURNING user_id`);
+  return rows[0]?.user_id ?? null;
 }
 
 /** Removes expired and idle sessions; returns how many. */

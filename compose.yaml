@@ -77,12 +77,12 @@ services:
     command: [node, src/web/main.ts]
     environment:
       DATABASE_URL: *db-url
-      WEB_USER: ${WEB_USER:?set WEB_USER in .env}
-      WEB_PASSWORD: ${WEB_PASSWORD:?set WEB_PASSWORD in .env}
+      ADMINAPP_USER: ${ADMINAPP_USER:?set ADMINAPP_USER in .env}
+      ADMINAPP_PASSWORD: ${ADMINAPP_PASSWORD:?set ADMINAPP_PASSWORD in .env}
       # All interfaces inside the container; on the host only loopback, for Caddy.
       # Never publish without 127.0.0.1: Docker's port rules bypass ufw/firewalld.
-      WEB_HOST: 0.0.0.0
-      WEB_PORT: "3000"
+      ADMINAPP_HOST: 0.0.0.0
+      ADMINAPP_PORT: "3000"
     ports: ["127.0.0.1:3001:3000"]
 
 volumes:

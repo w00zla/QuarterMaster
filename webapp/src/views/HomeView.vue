@@ -7,7 +7,6 @@ import { me } from "../session";
 <template>
   <div v-if="me" class="home">
     <div class="dim">{{ t("home.welcome", { name: me.name }) }}</div>
-    <div v-if="!me.rosterFresh && me.orgs.length" class="warning">{{ t("home.rosterStale") }}</div>
     <section class="panel">
       <div class="head">
         <span class="head-title">{{ t("home.orgs") }}</span>
@@ -18,6 +17,8 @@ import { me } from "../session";
         <span class="org-name">{{ o.name }}</span>
         <span class="faint">{{ o.displayName }}</span>
         <span class="spacer" />
+        <span v-if="!o.botPresent" class="warning" :title="t('home.botMissingHint')">{{ t("home.botMissing") }}</span>
+        <span v-else-if="!o.rosterFresh" class="warning" :title="t('home.rosterStale')">{{ t("home.readOnly") }}</span>
         <span class="role" :class="{ officer: o.officer }">{{ t(o.officer ? "home.officer" : "home.member") }}</span>
       </div>
     </section>

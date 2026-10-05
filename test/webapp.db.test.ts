@@ -3,12 +3,13 @@
 // openid-client's real state/PKCE handling runs, the fake token endpoint checks the PKCE verifier.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
-import { writeHeartbeat } from '../src/bot/heartbeat.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { createApp, type WebappConfig } from '../src/webapp/app.ts';
@@ -21,6 +22,17 @@ const USER = '730000000000000001';
 const G = '700000000000000009';
 const MEMBER_ROLE = '710000000000000011';
 const OFFICER_ROLE = '710000000000000012';
+
+/** A built SPA in a temp dir: index, one hashed asset, two dotfiles that must never be served. */
+function spaDist() {
+  const dir = mkdtempSync(join(tmpdir(), 'qm-spa-'));
+  mkdirSync(join(dir, 'assets'));
+  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>spa-index</title>');
+  writeFileSync(join(dir, 'assets', 'app-1234.js'), 'console.log(1)');
+  writeFileSync(join(dir, '.env'), 'SECRET=1');
+  writeFileSync(join(dir, 'assets', '.secret'), 'SECRET=2');
+  return dir;
+}
 
 /** Fake Discord: remembers the PKCE challenge of the last authorize URL and checks the verifier. */
 function fakeDiscord() {
@@ -152,7 +164,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.deepEqual(await res.json(), {
       userId: USER, name: 'Tester', username: 'tester',
       avatarUrl: `https://cdn.discordapp.com/embed/avatars/${(BigInt(USER) >> 22n) % 6n}.png`,
-      orgs: [], rosterFresh: false,
+      orgs: [],
     });
   });
 
@@ -193,16 +205,21 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.equal((await me(first)).status, 401);
   });
 
-  it('me: active memberships with the officer flag from the roster, heartbeat freshness', async () => {
+  it('me: active memberships with the officer flag from the roster, roster freshness per org', async () => {
     await ensureGuild(db, G, 'Web Org');
     const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
     await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [OFFICER_ROLE], bot: false });
     const token = await loginAs();
-    await writeHeartbeat(db);
-    const { orgs, rosterFresh } = (await (await me(token)).json()) as { orgs: unknown[]; rosterFresh: boolean };
-    assert.deepEqual({ orgs, rosterFresh }, { orgs: [{ guildId: G, name: 'Web Org', displayName: 'Tess', officer: true }], rosterFresh: true });
-    await db.execute(sql`UPDATE bot.heartbeat SET at = now() - interval '10 minutes'`);
-    assert.equal(((await (await me(token)).json()) as { rosterFresh: boolean }).rosterFresh, false);
+    const orgs = async () => ((await (await me(token)).json()) as { orgs: unknown[] }).orgs;
+    await db.execute(sql`UPDATE app.org SET roster_checked_at = now() WHERE guild_id = ${G}`);
+    assert.deepEqual(await orgs(), [{ guildId: G, name: 'Web Org', displayName: 'Tess', officer: true, rosterFresh: true, botPresent: true }]);
+    await db.execute(sql`UPDATE bot.guild SET left_at = now() WHERE guild_id = ${G}`);
+    assert.equal(((await orgs()) as Array<{ botPresent: boolean }>)[0]!.botPresent, false);
+    await db.execute(sql`UPDATE bot.guild SET left_at = NULL WHERE guild_id = ${G}`);
+    for (const value of [sql`now() - interval '10 minutes'`, sql`NULL`]) {
+      await db.execute(sql`UPDATE app.org SET roster_checked_at = ${value} WHERE guild_id = ${G}`);
+      assert.equal(((await orgs()) as Array<{ rosterFresh: boolean }>)[0]!.rosterFresh, false);
+    }
     // Losing the role takes effect without a new login
     await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [], bot: false });
     assert.deepEqual(((await (await me(token)).json()) as { orgs: unknown[] }).orgs, []);
@@ -267,10 +284,51 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
   });
 
   it('rate limits the login', async () => {
-    app = build({ rateLimit: { windowMs: 60_000, auth: 3, api: 100 } });
+    app = build({ rateLimit: { windowMs: 60_000, auth: 3, apiIp: 100, apiUser: 100 } });
     const codes = [];
     for (let i = 0; i < 4; i++) codes.push((await app.request('/auth/login')).status);
     assert.deepEqual(codes, [302, 302, 302, 429]);
+  });
+
+  it('rate limits the API per address, whatever session cookie is sent, and per user', async () => {
+    app = build({ rateLimit: { windowMs: 60_000, auth: 100, apiIp: 3, apiUser: 100 } });
+    const codes = [];
+    for (let i = 0; i < 4; i++) codes.push((await me(`random-${i}`)).status);
+    assert.deepEqual(codes, [401, 401, 401, 429]);
+
+    app = build({ rateLimit: { windowMs: 60_000, auth: 100, apiIp: 100, apiUser: 2 } });
+    // Two sessions of the same user share the user's bucket
+    const [a, b] = [await loginAs(), await loginAs()];
+    assert.deepEqual([(await me(a)).status, (await me(b)).status, (await me(a)).status], [200, 200, 429]);
+  });
+
+  it('answers unknown API routes with JSON 404, also when logged in', async () => {
+    app = build({ distDir: spaDist() });
+    const token = await loginAs();
+    const cookie = `__Host-qm_session=${token}`;
+    for (const method of ['GET', 'POST']) {
+      const res = await app.request('/api/does-not-exist', {
+        method, headers: { cookie, 'content-type': 'application/json', ...sameOrigin }, body: method === 'POST' ? '{}' : undefined,
+      });
+      assert.equal(res.status, 404, method);
+      assert.deepEqual(await res.json(), { error: 'not found' });
+    }
+  });
+
+  it('serves the SPA: index never cached, hashed assets for good, no dotfiles', async () => {
+    app = build({ distDir: spaDist() });
+    for (const path of ['/', '/index.html', '/some/deep/link']) {
+      const res = await app.request(path);
+      assert.equal(res.status, 200, path);
+      assert.equal(res.headers.get('cache-control'), 'no-cache', path);
+      assert.ok((await res.text()).includes('spa-index'), path);
+    }
+    const asset = await app.request('/assets/app-1234.js');
+    assert.equal(await asset.text(), 'console.log(1)');
+    assert.equal(asset.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    for (const path of ['/.env', '/assets/.secret']) {
+      assert.ok(!(await (await app.request(path)).text()).includes('SECRET'), path);
+    }
   });
 
   it('builds SQL from templates only (no sql.raw in the web app)', () => {
