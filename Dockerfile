@@ -10,6 +10,7 @@ RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY web/package.json web/
+COPY webapp/package.json webapp/
 
 # All dependencies incl. dev, to build the SPA (it imports shared code from src/)
 FROM base AS build

@@ -23,6 +23,8 @@
     "web:watch": "node --watch --env-file-if-exists=.env src/web/main.ts",
     "webapp": "node --env-file-if-exists=.env src/webapp/main.ts",
     "webapp:watch": "node --watch --env-file-if-exists=.env src/webapp/main.ts",
+    "webapp:dev": "pnpm --filter sc-quartermaster-webapp dev",
+    "webapp:build": "pnpm --filter sc-quartermaster-webapp build",
     "bot": "node --env-file-if-exists=.env src/bot/main.ts",
     "bot:register": "node --env-file-if-exists=.env src/bot/register.ts"
   },
