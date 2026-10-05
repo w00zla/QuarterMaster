@@ -1,0 +1,258 @@
+// Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
+// The user web app end to end through Hono (app.request), with Discord replaced on the HTTP level:
+// openid-client's real state/PKCE handling runs, the fake token endpoint checks the PKCE verifier.
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { after, before, beforeEach, describe, it } from 'node:test';
+import { sql } from 'drizzle-orm';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import { connect, type Db } from '../src/db/client.ts';
+import { writeHeartbeat } from '../src/bot/heartbeat.ts';
+import { syncMember } from '../src/bot/roster.ts';
+import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
+import { createApp, type WebappConfig } from '../src/webapp/app.ts';
+import { discordLogin } from '../src/webapp/discord.ts';
+import { deleteExpiredSessions } from '../src/webapp/session.ts';
+
+const url = process.env.TEST_DATABASE_URL;
+const ORIGIN = 'https://qm.test';
+const USER = '730000000000000001';
+const G = '700000000000000009';
+const MEMBER_ROLE = '710000000000000011';
+const OFFICER_ROLE = '710000000000000012';
+
+/** Fake Discord: remembers the PKCE challenge of the last authorize URL and checks the verifier. */
+function fakeDiscord() {
+  const fake = { challenge: '', codes: new Set(['good']), userId: USER };
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const target = String(input instanceof Request ? input.url : input);
+    if (target.endsWith('/oauth2/token')) {
+      const body = new URLSearchParams(String(init?.body));
+      const s256 = createHash('sha256').update(body.get('code_verifier') ?? '').digest('base64url');
+      const ok = body.get('grant_type') === 'authorization_code' && fake.codes.has(body.get('code') ?? '')
+        && s256 === fake.challenge && body.get('redirect_uri') === `${ORIGIN}/auth/callback`
+        && body.get('client_id') === 'cid' && body.get('client_secret') === 'secret';
+      return ok
+        ? Response.json({ access_token: 'at', token_type: 'Bearer', expires_in: 604800, scope: 'identify' })
+        : Response.json({ error: 'invalid_grant' }, { status: 400 });
+    }
+    if (target.endsWith('/users/@me')) {
+      const auth = new Headers(init?.headers).get('authorization');
+      return auth === 'Bearer at'
+        ? Response.json({ id: fake.userId, username: 'tester', global_name: 'Tester' })
+        : new Response('unauthorized', { status: 401 });
+    }
+    throw new Error(`unexpected fetch ${target}`);
+  }) as typeof fetch;
+  return { fake, fetchFn };
+}
+
+describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
+  let db: Db;
+  let close: () => Promise<void>;
+  let discord: ReturnType<typeof fakeDiscord>;
+
+  const build = (extra: Partial<WebappConfig> = {}) => createApp(db, discordLogin({
+    clientId: 'cid', clientSecret: 'secret', redirectUri: `${ORIGIN}/auth/callback`, fetch: discord.fetchFn,
+  }), { origin: ORIGIN, trustProxy: false, distDir: null, ...extra });
+  let app: ReturnType<typeof build>;
+
+  const cookiesOf = (res: Response) => res.headers.getSetCookie();
+  const cookieValue = (res: Response, name: string) =>
+    cookiesOf(res).map((c) => c.split(';')[0]!).find((c) => c.startsWith(`${name}=`))?.slice(name.length + 1);
+  const sessions = async () => (await db.execute<{ token_hash: string; user_id: string }>(sql`SELECT token_hash, user_id FROM web.session`));
+
+  /** Runs /auth/login; returns the authorize URL and the OAuth cookie. */
+  const startLogin = async () => {
+    const res = await app.request('/auth/login');
+    assert.equal(res.status, 302);
+    const authorize = new URL(res.headers.get('location')!);
+    discord.fake.challenge = authorize.searchParams.get('code_challenge')!;
+    return { res, authorize, oauth: cookieValue(res, '__Host-qm_oauth')! };
+  };
+  const callback = (query: string, cookie: string) => app.request(`/auth/callback?${query}`, { headers: { cookie } });
+  /** Full login; returns the session token. */
+  const loginAs = async (userId = USER) => {
+    discord.fake.userId = userId;
+    const { authorize, oauth } = await startLogin();
+    const res = await callback(`code=good&state=${authorize.searchParams.get('state')}`, `__Host-qm_oauth=${oauth}`);
+    assert.equal(res.headers.get('location'), '/');
+    return cookieValue(res, '__Host-qm_session')!;
+  };
+  const me = (token: string) => app.request('/api/me', { headers: { cookie: `__Host-qm_session=${token}` } });
+  const sameOrigin = { origin: ORIGIN, 'sec-fetch-site': 'same-origin' };
+
+  before(async () => {
+    ({ db, close } = connect(url));
+    for (const schema of ['web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
+  });
+  beforeEach(async () => {
+    await db.execute(sql`DELETE FROM web.session`);
+    discord = fakeDiscord();
+    app = build();
+  });
+  after(async () => close?.());
+
+  it('sets the security headers, no HSTS (Caddy), no caching of API responses', async () => {
+    const res = await app.request('/api/me');
+    const csp = res.headers.get('content-security-policy') ?? '';
+    for (const part of ["default-src 'self'", "script-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'"]) {
+      assert.ok(csp.includes(part), part);
+    }
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(res.headers.get('x-frame-options'), 'DENY');
+    assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(res.headers.get('strict-transport-security'), null);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+  });
+
+  it('every API route needs a session, unknown ones too', async () => {
+    const routes = app.routes.filter((r) => r.path.startsWith('/api') && r.method !== 'ALL');
+    assert.ok(routes.length > 0);
+    for (const r of [...routes, { method: 'GET', path: '/api/does-not-exist' }]) {
+      const res = await app.request(r.path, { method: r.method, headers: sameOrigin });
+      assert.equal(res.status, 401, `${r.method} ${r.path}`);
+    }
+    const bogus = await me('not-a-session');
+    assert.equal(bogus.status, 401);
+    assert.ok(cookiesOf(bogus).some((c) => c.startsWith('__Host-qm_session=;')), 'unknown cookie is cleared');
+  });
+
+  it('login: PKCE + state to Discord, scope identify, OAuth cookie locked down', async () => {
+    const { res, authorize } = await startLogin();
+    assert.equal(authorize.origin + authorize.pathname, 'https://discord.com/oauth2/authorize');
+    const p = authorize.searchParams;
+    assert.equal(p.get('response_type'), 'code');
+    assert.equal(p.get('client_id'), 'cid');
+    assert.equal(p.get('scope'), 'identify');
+    assert.equal(p.get('redirect_uri'), `${ORIGIN}/auth/callback`);
+    assert.equal(p.get('code_challenge_method'), 'S256');
+    assert.ok((p.get('state') ?? '').length >= 32);
+    const cookie = cookiesOf(res).find((c) => c.startsWith('__Host-qm_oauth='))!;
+    for (const attr of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/', 'Max-Age=600']) assert.ok(cookie.includes(attr), attr);
+    assert.ok(!/domain=/i.test(cookie));
+  });
+
+  it('callback: creates a hashed session and the user row, me answers', async () => {
+    await db.execute(sql`DELETE FROM app.app_user WHERE user_id = ${USER}`);
+    const token = await loginAs();
+    const rows = await sessions();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.token_hash, createHash('sha256').update(token).digest('hex'));
+    assert.notEqual(rows[0]!.token_hash, token);
+    assert.equal((await db.execute(sql`SELECT 1 FROM app.app_user WHERE user_id = ${USER}`)).length, 1);
+    const res = await me(token);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { userId: USER, orgs: [], rosterFresh: false });
+  });
+
+  it('session cookie: __Host-, HttpOnly, Secure, SameSite=Lax', async () => {
+    const { authorize, oauth } = await startLogin();
+    const res = await callback(`code=good&state=${authorize.searchParams.get('state')}`, `__Host-qm_oauth=${oauth}`);
+    const cookie = cookiesOf(res).find((c) => c.startsWith('__Host-qm_session='))!;
+    for (const attr of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/']) assert.ok(cookie.includes(attr), attr);
+    assert.ok(cookiesOf(res).some((c) => c.startsWith('__Host-qm_oauth=;')), 'OAuth cookie is cleared');
+  });
+
+  it('callback refuses a wrong state, a missing OAuth cookie, a wrong verifier, a bad code and a denial', async () => {
+    const { authorize, oauth } = await startLogin();
+    const state = authorize.searchParams.get('state')!;
+    const [, verifier] = oauth.split('.');
+    const cases: Array<[string, string, string]> = [
+      [`code=good&state=wrong`, `__Host-qm_oauth=${oauth}`, '/?login=failed'],
+      [`code=good&state=${state}`, '', '/?login=failed'],
+      [`code=good&state=${state}`, `__Host-qm_oauth=${state}.${verifier!.slice(1)}x`, '/?login=failed'],
+      [`code=bad&state=${state}`, `__Host-qm_oauth=${oauth}`, '/?login=failed'],
+      [`error=access_denied&state=${state}`, `__Host-qm_oauth=${oauth}`, '/?login=denied'],
+    ];
+    for (const [query, cookie, location] of cases) {
+      const res = await callback(query, cookie);
+      assert.equal(res.headers.get('location'), location, query);
+      assert.equal(cookieValue(res, '__Host-qm_session'), undefined, query);
+    }
+    assert.equal((await sessions()).length, 0);
+  });
+
+  it('a new login replaces the session of this browser', async () => {
+    const first = await loginAs();
+    const { authorize, oauth } = await startLogin();
+    const res = await callback(`code=good&state=${authorize.searchParams.get('state')}`,
+      `__Host-qm_oauth=${oauth}; __Host-qm_session=${first}`);
+    assert.notEqual(cookieValue(res, '__Host-qm_session'), first);
+    assert.equal((await sessions()).length, 1);
+    assert.equal((await me(first)).status, 401);
+  });
+
+  it('me: active memberships with the officer flag from the roster, heartbeat freshness', async () => {
+    await ensureGuild(db, G, 'Web Org');
+    const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
+    await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [OFFICER_ROLE], bot: false });
+    const token = await loginAs();
+    await writeHeartbeat(db);
+    assert.deepEqual(await (await me(token)).json(), {
+      userId: USER, orgs: [{ guildId: G, name: 'Web Org', displayName: 'Tess', officer: true }], rosterFresh: true,
+    });
+    await db.execute(sql`UPDATE bot.heartbeat SET at = now() - interval '10 minutes'`);
+    assert.equal(((await (await me(token)).json()) as { rosterFresh: boolean }).rosterFresh, false);
+    // Losing the role takes effect without a new login
+    await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [], bot: false });
+    assert.deepEqual(((await (await me(token)).json()) as { orgs: unknown[] }).orgs, []);
+  });
+
+  it('recreates a user row the roster cleanup removed while logged in', async () => {
+    const token = await loginAs();
+    await db.execute(sql`DELETE FROM app.app_user WHERE user_id = ${USER}`);
+    assert.equal((await me(token)).status, 200);
+    assert.equal((await db.execute(sql`SELECT 1 FROM app.app_user WHERE user_id = ${USER}`)).length, 1);
+  });
+
+  it('expires idle sessions after 14 days and every session after 30', async () => {
+    const idle = await loginAs();
+    const old = await loginAs('730000000000000002');
+    const hash = (t: string) => createHash('sha256').update(t).digest('hex');
+    await db.execute(sql`UPDATE web.session SET last_seen_at = now() - interval '15 days' WHERE token_hash = ${hash(idle)}`);
+    await db.execute(sql`UPDATE web.session SET expires_at = now() - interval '1 second' WHERE token_hash = ${hash(old)}`);
+    assert.equal((await me(idle)).status, 401);
+    assert.equal((await me(old)).status, 401);
+    assert.equal(await deleteExpiredSessions(db), 2);
+  });
+
+  it('logout: refuses cross-origin requests, deletes the session', async () => {
+    const token = await loginAs();
+    const cookie = `__Host-qm_session=${token}`;
+    const foreign: Record<string, string>[] = [{ origin: 'https://evil.test' }, { 'sec-fetch-site': 'same-site', origin: ORIGIN }, {}];
+    for (const headers of foreign) {
+      const res = await app.request('/auth/logout', { method: 'POST', headers: { cookie, ...headers } });
+      assert.equal(res.status, 403, JSON.stringify(headers));
+    }
+    assert.equal((await me(token)).status, 200);
+    const res = await app.request('/auth/logout', { method: 'POST', headers: { cookie, ...sameOrigin } });
+    assert.equal(res.status, 204);
+    assert.equal((await sessions()).length, 0);
+    assert.equal((await me(token)).status, 401);
+  });
+
+  it('API writes take JSON only', async () => {
+    const token = await loginAs();
+    const res = await app.request('/api/me', {
+      method: 'POST', body: 'x', headers: { cookie: `__Host-qm_session=${token}`, 'content-type': 'text/plain', ...sameOrigin },
+    });
+    assert.equal(res.status, 415);
+  });
+
+  it('rate limits the login', async () => {
+    app = build({ rateLimit: { windowMs: 60_000, auth: 3, api: 100 } });
+    const codes = [];
+    for (let i = 0; i < 4; i++) codes.push((await app.request('/auth/login')).status);
+    assert.deepEqual(codes, [302, 302, 302, 429]);
+  });
+
+  it('builds SQL from templates only (no sql.raw in the web app)', () => {
+    const dir = new URL('../src/webapp/', import.meta.url);
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts'))) {
+      assert.ok(!readFileSync(new URL(file, dir), 'utf8').includes('sql.raw'), file);
+    }
+  });
+});
