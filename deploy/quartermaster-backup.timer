@@ -1,0 +1,12 @@
+# Example: runs quartermaster-backup.service daily (see there).
+[Unit]
+Description=Daily Quartermaster database backup
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=15m
+# Catches up on a run missed while the VM was off
+Persistent=true
+
+[Install]
+WantedBy=timers.target

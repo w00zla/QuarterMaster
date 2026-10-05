@@ -1,0 +1,87 @@
+# Production stack: Postgres, the Discord bot and the admin web UI. Caddy runs on the host and
+# terminates TLS (example: .claude/Caddyfile.example). Values come from .env next to this file
+# (see .env.example, section "Deployment").
+#
+#   scripts/deploy.sh                                        # first start and every update
+#   docker compose run --rm bot node src/bot/register.ts     # after command changes
+name: sc-quartermaster
+
+# DB roles (deploy/db-roles.sh): qm_owner runs the migrations, qm_app is everything else.
+# The passwords go into URLs unescaped: URL-safe characters only (e.g. openssl rand -hex 32)
+x-db-url-owner: &db-url-owner postgres://qm_owner:${QM_OWNER_PASSWORD:?set QM_OWNER_PASSWORD in .env}@db:5432/quartermaster
+x-db-url: &db-url postgres://qm_app:${QM_APP_PASSWORD:?set QM_APP_PASSWORD in .env}@db:5432/quartermaster
+
+# The default json-file driver never rotates
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: "5" }
+
+x-app: &app
+  image: sc-quartermaster:latest
+  build: .
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging: *logging
+  depends_on:
+    db: { condition: service_healthy }
+
+services:
+  # No published port: reachable on the compose network only
+  db:
+    image: docker.io/library/postgres:18
+    restart: unless-stopped
+    environment:
+      # Superuser "postgres": init, roles, dumps; no application uses it
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: quartermaster
+      # For deploy/db-roles.sh
+      QM_OWNER_PASSWORD: ${QM_OWNER_PASSWORD:?set QM_OWNER_PASSWORD in .env}
+      QM_APP_PASSWORD: ${QM_APP_PASSWORD:?set QM_APP_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      # Runs on a fresh volume only; deploy.sh runs it after every migration
+      - ./deploy/db-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    healthcheck:
+      test: [CMD, pg_isready, -U, postgres, -d, quartermaster]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  # One-off, never started by "up": docker compose run --rm migrate
+  migrate:
+    <<: *app
+    profiles: [tools]
+    restart: "no"
+    command: [node, src/db/migrate.ts]
+    environment:
+      DATABASE_URL: *db-url-owner
+
+  # No port: the Discord gateway is an outgoing connection
+  bot:
+    <<: *app
+    command: [node, src/bot/main.ts]
+    environment:
+      DATABASE_URL: *db-url
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
+      DISCORD_APP_ID: ${DISCORD_APP_ID:?set DISCORD_APP_ID in .env}
+
+  admin:
+    <<: *app
+    command: [node, src/web/main.ts]
+    environment:
+      DATABASE_URL: *db-url
+      WEB_USER: ${WEB_USER:?set WEB_USER in .env}
+      WEB_PASSWORD: ${WEB_PASSWORD:?set WEB_PASSWORD in .env}
+      # All interfaces inside the container; on the host only loopback, for Caddy.
+      # Never publish without 127.0.0.1: Docker's port rules bypass ufw/firewalld.
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "3000"
+    ports: ["127.0.0.1:3001:3000"]
+
+volumes:
+  pgdata:

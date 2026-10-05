@@ -1,5 +1,6 @@
-// Admin web UI: read-only JSON API plus the built SPA (web/dist), behind HTTP basic auth.
-// Meant to run locally; binds to 127.0.0.1 unless WEB_HOST says otherwise.
+// Admin web UI: JSON API (catalog reads, catalog/localization imports) plus the built SPA (web/dist),
+// behind HTTP basic auth. Binds to 127.0.0.1 unless WEB_HOST says otherwise; in production it sits
+// behind Caddy (TLS) and is published on the host's loopback only (compose.yaml).
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';

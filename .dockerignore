@@ -1,0 +1,9 @@
+**/node_modules
+.git
+.env
+local
+web/dist
+test
+.claude
+.vscode
+backups

@@ -1,0 +1,15 @@
+# Example: daily backup with scripts/backup.sh, triggered by quartermaster-backup.timer.
+# Copy both files to /etc/systemd/system/, adjust User, WorkingDirectory and the target, then:
+#   systemctl daemon-reload && systemctl enable --now quartermaster-backup.timer
+# The user needs access to Docker and, for a remote target, an SSH key without a passphrase
+# whose host key is already known (a first connection would wait for a prompt).
+[Unit]
+Description=Quartermaster database backup
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=quartermaster
+WorkingDirectory=/opt/sc-quartermaster
+ExecStart=/opt/sc-quartermaster/scripts/backup.sh backup@backup.example.com:quartermaster/
