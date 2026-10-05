@@ -24,7 +24,10 @@ const OFFICER_ROLE = '710000000000000012';
 
 /** Fake Discord: remembers the PKCE challenge of the last authorize URL and checks the verifier. */
 function fakeDiscord() {
-  const fake = { challenge: '', codes: new Set(['good']), userId: USER };
+  const fake = {
+    challenge: '', codes: new Set(['good']), userId: USER,
+    globalName: 'Tester' as string | null, avatar: null as string | null,
+  };
   const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
     const target = String(input instanceof Request ? input.url : input);
     if (target.endsWith('/oauth2/token')) {
@@ -40,7 +43,7 @@ function fakeDiscord() {
     if (target.endsWith('/users/@me')) {
       const auth = new Headers(init?.headers).get('authorization');
       return auth === 'Bearer at'
-        ? Response.json({ id: fake.userId, username: 'tester', global_name: 'Tester' })
+        ? Response.json({ id: fake.userId, username: 'tester', global_name: fake.globalName, avatar: fake.avatar })
         : new Response('unauthorized', { status: 401 });
     }
     throw new Error(`unexpected fetch ${target}`);
@@ -145,7 +148,12 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.equal((await db.execute(sql`SELECT 1 FROM app.app_user WHERE user_id = ${USER}`)).length, 1);
     const res = await me(token);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { userId: USER, orgs: [], rosterFresh: false });
+    // Works without any org: profile from the login, default avatar
+    assert.deepEqual(await res.json(), {
+      userId: USER, name: 'Tester', username: 'tester',
+      avatarUrl: `https://cdn.discordapp.com/embed/avatars/${(BigInt(USER) >> 22n) % 6n}.png`,
+      orgs: [], rosterFresh: false,
+    });
   });
 
   it('session cookie: __Host-, HttpOnly, Secure, SameSite=Lax', async () => {
@@ -191,14 +199,30 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [OFFICER_ROLE], bot: false });
     const token = await loginAs();
     await writeHeartbeat(db);
-    assert.deepEqual(await (await me(token)).json(), {
-      userId: USER, orgs: [{ guildId: G, name: 'Web Org', displayName: 'Tess', officer: true }], rosterFresh: true,
-    });
+    const { orgs, rosterFresh } = (await (await me(token)).json()) as { orgs: unknown[]; rosterFresh: boolean };
+    assert.deepEqual({ orgs, rosterFresh }, { orgs: [{ guildId: G, name: 'Web Org', displayName: 'Tess', officer: true }], rosterFresh: true });
     await db.execute(sql`UPDATE bot.heartbeat SET at = now() - interval '10 minutes'`);
     assert.equal(((await (await me(token)).json()) as { rosterFresh: boolean }).rosterFresh, false);
     // Losing the role takes effect without a new login
     await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [], bot: false });
     assert.deepEqual(((await (await me(token)).json()) as { orgs: unknown[] }).orgs, []);
+  });
+
+  it('profile: avatar URL from the hash, username when there is no global name, refreshed by a new login', async () => {
+    discord.fake.globalName = null;
+    discord.fake.avatar = 'a_0123456789abcdef0123456789abcdef';
+    const body = (await (await me(await loginAs())).json()) as { name: string; avatarUrl: string };
+    assert.equal(body.name, 'tester');
+    assert.equal(body.avatarUrl, `https://cdn.discordapp.com/avatars/${USER}/a_0123456789abcdef0123456789abcdef.png?size=64`);
+    discord.fake.globalName = 'Renamed';
+    assert.equal(((await (await me(await loginAs())).json()) as { name: string }).name, 'Renamed');
+  });
+
+  it('refuses a malformed avatar hash from Discord (it goes into a URL)', async () => {
+    discord.fake.avatar = '../../evil';
+    const { authorize, oauth } = await startLogin();
+    const res = await callback(`code=good&state=${authorize.searchParams.get('state')}`, `__Host-qm_oauth=${oauth}`);
+    assert.equal(res.headers.get('location'), '/?login=failed');
   });
 
   it('recreates a user row the roster cleanup removed while logged in', async () => {

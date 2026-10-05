@@ -15,6 +15,11 @@ export const session = web.table('session', {
   // Hex SHA-256 of the token
   tokenHash: text('token_hash').primaryKey(),
   userId: text('user_id').notNull(),
+  // Discord profile at login, for the user's own header (also without any org); refreshed by every login
+  discordUsername: text('discord_username').notNull(),
+  discordGlobalName: text('discord_global_name'),
+  // Avatar hash; NULL = Discord's default avatar
+  discordAvatar: text('discord_avatar'),
   createdAt: createdAt(),
   // Idle timeout counts from here
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),

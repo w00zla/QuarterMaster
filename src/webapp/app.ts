@@ -12,7 +12,9 @@ import { rateLimiter } from 'hono-rate-limiter';
 import type { Db } from '../db/client.ts';
 import type { DiscordLogin } from './discord.ts';
 import { getMe } from './me.ts';
-import { ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, hashToken, validateSession } from './session.ts';
+import {
+  ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, hashToken, validateSession, type Session,
+} from './session.ts';
 
 export interface WebappConfig {
   // Where the browser sees the app, e.g. https://qm.example.com (no trailing slash)
@@ -24,7 +26,7 @@ export interface WebappConfig {
   rateLimit?: { windowMs: number; auth: number; api: number };
 }
 
-type Env = { Variables: { userId: string; token: string } };
+type Env = { Variables: { session: Session; token: string } };
 
 const OAUTH_COOKIE = 'qm_oauth';
 const OAUTH_MAX_AGE = 600;
@@ -124,7 +126,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     // A new session on every login (no session fixation); an old one on this browser goes
     const old = sessionToken(c);
     if (old) await deleteSession(db, old);
-    const token = await createSession(db, user.id);
+    const token = await createSession(db, user);
     setCookie(c, SESSION_COOKIE, token, cookieOptions(ABSOLUTE_MS / 1000));
     console.log(`Login ${user.id} (ip ${clientIp(c)})`);
     return c.redirect('/', 302);
@@ -146,7 +148,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
       if (token) deleteCookie(c, SESSION_COOKIE, { prefix: 'host', path: '/', secure: true });
       return c.json({ error: 'not logged in' }, 401);
     }
-    c.set('userId', session.userId);
+    c.set('session', session);
     c.set('token', token!);
     return next();
   });
@@ -160,7 +162,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
   });
   api.use('*', bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: 'request too large' }, 413) }));
 
-  api.get('/me', async (c) => c.json(await getMe(db, c.get('userId'))));
+  api.get('/me', async (c) => c.json(await getMe(db, c.get('session'))));
 
   api.notFound((c) => c.json({ error: 'not found' }, 404));
   app.route('/api', api);

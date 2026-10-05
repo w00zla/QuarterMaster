@@ -10,6 +10,8 @@ export interface DiscordUser {
   id: string;
   username: string;
   globalName: string | null;
+  // Avatar hash, null = default avatar
+  avatar: string | null;
 }
 
 export interface DiscordLogin {
@@ -23,6 +25,8 @@ const userSchema = z.object({
   id: z.string().regex(/^[0-9]{17,20}$/),
   username: z.string(),
   global_name: z.string().nullish(),
+  // Goes into a CDN URL: hash format only
+  avatar: z.string().regex(/^(a_)?[0-9a-f]{32}$/).nullish(),
 });
 
 export function discordLogin(opts: {
@@ -61,7 +65,7 @@ export function discordLogin(opts: {
       const res = await doFetch(`${API}/users/@me`, { headers: { authorization: `Bearer ${tokens.access_token}` } });
       if (!res.ok) throw new Error(`Discord /users/@me answered ${res.status}`);
       const user = userSchema.parse(await res.json());
-      return { id: user.id, username: user.username, globalName: user.global_name ?? null };
+      return { id: user.id, username: user.username, globalName: user.global_name ?? null, avatar: user.avatar ?? null };
     },
   };
 }
