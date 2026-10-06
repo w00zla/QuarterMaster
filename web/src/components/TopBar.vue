@@ -77,8 +77,9 @@ const langOptions = computed(() => props.langs.map((l) => ({ value: l, label: l 
 }
 
 .logo {
-  width: 32px;
-  height: 32px;
+  /* Same as the user web app: nearly the bar's height (56 px); the file has 128 px, enough for HiDPI */
+  width: 44px;
+  height: 44px;
   display: block;
 }
 
