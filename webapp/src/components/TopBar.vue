@@ -1,11 +1,13 @@
 <script setup lang="ts">
-// The app bar in the admin UI's look: wordmark, tabs, the user with avatar (opens the profile), logout.
+// The app bar in the admin UI's look: wordmark, tabs, the user with avatar (opens the profile), the
+// companion app (Access Key, download), logout.
 import { ref } from "vue";
 import { RouterLink } from "vue-router";
 import Icon, { type IconName } from "../../../adminapp/src/components/Icon.vue";
 import logo from "../../../adminapp/src/assets/logo-128.png";
 import { t, type Key } from "../i18n";
 import { logout, me } from "../session";
+import CompanionDialog from "./CompanionDialog.vue";
 import ProfileDialog from "./ProfileDialog.vue";
 
 const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
@@ -18,6 +20,7 @@ const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
 const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [{ to: "/crafting", label: "nav.crafting", icon: "crafter" }];
 
 const profileOpen = ref(false);
+const companionOpen = ref(false);
 </script>
 
 <template>
@@ -41,6 +44,8 @@ const profileOpen = ref(false);
       <span class="name">{{ me.name }}</span>
     </button>
     <ProfileDialog v-if="profileOpen" @close="profileOpen = false" />
+    <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="link" :size="14" /> {{ t("companion.open") }}</button>
+    <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
     <button class="btn small outline" type="button" @click="logout"><Icon name="log-out" :size="14" /> {{ t("user.logout") }}</button>
   </header>
 </template>
