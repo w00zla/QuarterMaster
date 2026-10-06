@@ -22,7 +22,7 @@ import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import StockFind from "../components/StockFind.vue";
-import { compareBatches, qty } from "../format";
+import { compareBatches, qMark, qty } from "../format";
 import { lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf, writable } from "../orgs";
 import { onServerMessage } from "../realtime";
@@ -38,7 +38,11 @@ const qualityLow = ref(0);
 const qualityHigh = ref(1000);
 // Adding as a dialog: the form, then its own confirmation
 const showAdd = ref(false);
-const addButtons = computed<ConfirmButton[]>(() => [{ label: t("common.cancel"), kind: "outline", value: "cancel" }]);
+const addForm = ref<InstanceType<typeof StockAddForm> | null>(null);
+const addButtons = computed<ConfirmButton[]>(() => [
+  { label: t("common.cancel"), kind: "outline", value: "cancel" },
+  { label: t("stock.add"), kind: "primary", value: "add", icon: "plus", form: "stock-add", disabled: !addForm.value?.ready },
+]);
 
 function added() {
   showAdd.value = false;
@@ -103,7 +107,7 @@ const filtered = computed(() => {
 // --- the table: one group per material (header with the total), its batches below ------------
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: t("stock.col.material"), width: 200 },
-  { key: "quality", label: t("stock.col.quality"), width: 80 },
+  { key: "quality", label: t("stock.col.quality"), width: 130 },
   { key: "amount", label: t("stock.col.amount"), width: 120 },
   { key: "location", label: t("stock.col.location"), width: null },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
@@ -196,7 +200,7 @@ function open(batch: StockBatch, action: BatchAction) {
     </section>
 
     <ConfirmDialog v-if="showAdd" :title="t('stock.addTitle')" icon="plus" :buttons="addButtons" @choose="showAdd = false">
-      <StockAddForm class="flush" :target="scope === 'personal' ? null : scope" @done="added" />
+      <StockAddForm ref="addForm" form-id="stock-add" class="flush" :target="scope === 'personal' ? null : scope" @done="added" />
     </ConfirmDialog>
 
     <section v-if="showFind" class="panel unclipped">
@@ -208,7 +212,7 @@ function open(batch: StockBatch, action: BatchAction) {
       <div class="filters">
         <label class="search">
           <Icon name="search" :size="14" />
-          <input v-model="materialText" type="text" :placeholder="t('stock.filterMaterial')" />
+          <input v-model="materialText" type="text" :placeholder="t('filter.text')" />
           <button v-if="materialText" type="button" class="clear" @click="materialText = ''"><Icon name="close" :size="12" /></button>
         </label>
         <Dropdown v-model="locationFilter" variant="chip" :options="locationOptions" />
@@ -236,7 +240,7 @@ function open(batch: StockBatch, action: BatchAction) {
           </div>
           <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
             <span />
-            <span class="num">Q{{ b.quality }}</span>
+            <span class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
             <span class="cell">{{ b.location }}</span>
             <span v-if="org" class="cell">{{ b.holderName }}</span>

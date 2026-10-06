@@ -58,8 +58,15 @@ export const locationOptions = computed(() => (catalog.value?.locations ?? [])
 export const refineryLocationOptions = computed(() => (catalog.value?.locations ?? []).filter((l) => l.refinery)
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
 
+/** UEX yield bonus of a refinery for an ore in %; undefined when UEX reports none. */
+export const yieldValue = (locationUuid: string, oreUuid: string | null): number | undefined =>
+  oreUuid ? locations.value.get(locationUuid)?.yields[oreUuid] : undefined;
+
+/** "+5" */
+export const signedBonus = (v: number) => (v > 0 ? `+${v}` : String(v));
+
 /** UEX yield bonus of a refinery for an ore, e.g. "Bonus +5 %"; null when UEX reports none. */
 export function yieldBonus(locationUuid: string, oreUuid: string | null): string | null {
-  const v = oreUuid ? locations.value.get(locationUuid)?.yields[oreUuid] : undefined;
-  return v === undefined ? null : t("refinery.bonus", { v: v > 0 ? `+${v}` : String(v) });
+  const v = yieldValue(locationUuid, oreUuid);
+  return v === undefined ? null : t("refinery.bonus", { v: signedBonus(v) });
 }

@@ -2,7 +2,6 @@
 // Your profile, opened from the avatar in the top bar: RSI handle (shown to your orgs) and the web
 // app's language (saved at once).
 import { computed, ref, watch } from "vue";
-import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
 import { me, saveProfile } from "../session";
 import { toast, toastError } from "../toasts";
@@ -23,7 +22,10 @@ watch(() => me.value?.rsiHandle, (h, old) => {
 const trimmed = computed(() => handle.value.trim());
 const valid = computed(() => trimmed.value === "" || HANDLE.test(trimmed.value));
 const changed = computed(() => trimmed.value !== (me.value?.rsiHandle ?? ""));
-const buttons = computed<ConfirmButton[]>(() => [{ label: t("common.close"), kind: "outline", value: "close" }]);
+const buttons = computed<ConfirmButton[]>(() => [
+  { label: t("common.close"), kind: "outline", value: "close" },
+  { label: t("common.save"), kind: "primary", value: "save", icon: "check", form: "profile", disabled: !valid.value || !changed.value || busy.value },
+]);
 
 async function save() {
   if (!valid.value || !changed.value || busy.value) return;
@@ -41,13 +43,10 @@ async function save() {
 
 <template>
   <ConfirmDialog v-if="me" :title="me.name" :subtitle="me.username" icon="user" :buttons="buttons" @choose="emit('close')">
-    <form class="form single flush" @submit.prevent="save">
+    <form id="profile" class="form single flush" @submit.prevent="save">
       <label class="field">
         {{ t("profile.rsi") }}
-        <span class="with-unit">
-          <input v-model="handle" class="input" :class="{ invalid: !valid }" type="text" maxlength="60" autocomplete="off" spellcheck="false" />
-          <button class="btn primary" type="submit" :disabled="!valid || !changed || busy"><Icon name="check" :size="14" /> {{ t("common.save") }}</button>
-        </span>
+        <input v-model="handle" class="input" :class="{ invalid: !valid }" type="text" maxlength="60" autocomplete="off" spellcheck="false" />
       </label>
       <div class="field">
         {{ t("lang.title") }}

@@ -10,7 +10,7 @@ import type { IconName } from "../../../adminapp/src/components/Icon.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
 import { locationOptions, locations } from "../catalog";
-import { amountOf, ownerText, qty, qualityOf, unitText } from "../format";
+import { amountOf, ownerText, qText, qty, qualityOf, unitText } from "../format";
 import { t } from "../i18n";
 import { ensureMembers, memberOptions, members, orgOf, writable } from "../orgs";
 import { me } from "../session";
@@ -130,11 +130,11 @@ async function book() {
     if (props.action === "remove") {
       const body: StockRemoveRequest = { batchId: b.id, amount: all.value ? null : typed, expected: b.quantity, guildId: guildOf() };
       await api<OkResponse>("/stock/remove", { method: "POST", body });
-      toast(t("stock.removed", { what: `−${amountText.value} ${b.material} · Q${b.quality} · ${b.location} · ${ownerText(b)}` }));
+      toast(t("stock.removed", { what: `−${amountText.value} ${b.material} · ${qText(b.quality)} · ${b.location} · ${ownerText(b)}` }));
     } else if (props.action === "adjust") {
       const body: StockAdjustRequest = { batchId: b.id, amount: typed, expected: b.quantity, guildId: guildOf() };
       await api<OkResponse>("/stock/adjust", { method: "POST", body });
-      toast(t("stock.adjusted", { what: `${b.quantity} → ${qty(counted.value, b.unit)} ${b.material} · Q${b.quality} · ${b.location}` }));
+      toast(t("stock.adjusted", { what: `${b.quantity} → ${qty(counted.value, b.unit)} ${b.material} · ${qText(b.quality)} · ${b.location}` }));
     } else if (props.action === "move") {
       const body: StockMoveRequest = { batchId: b.id, amount: all.value ? null : typed, expected: b.quantity };
       if (location.value !== b.locationUuid) body.toLocationUuid = location.value!;
@@ -148,11 +148,11 @@ async function book() {
         if (holder.value && holder.value !== me.value?.userId) body.toHolderUserId = holder.value;
       }
       await api<OkResponse>("/stock/move", { method: "POST", body });
-      toast(t("stock.moved", { what: `${amountText.value} ${b.material} · Q${b.quality} → ${targetText.value}` }));
+      toast(t("stock.moved", { what: `${amountText.value} ${b.material} · ${qText(b.quality)} → ${targetText.value}` }));
     } else {
       const body: RefineryDoneRequest = { batchId: b.id, amount: typed, quality: q.value!, expected: b.quantity };
       await api<OkResponse>("/refinery/done", { method: "POST", body });
-      toast(t("refinery.finished", { what: `${qty(amt.value!, "SCU")} · Q${q.value} · ${b.location}` }));
+      toast(t("refinery.finished", { what: `${qty(amt.value!, "SCU")} · ${qText(q.value)} · ${b.location}` }));
     }
     emit("done");
     emit("close");
@@ -169,7 +169,7 @@ async function book() {
 <template>
   <ConfirmDialog
     :title="step === 'input' ? t(titles[action]) : t('common.checkTitle')"
-    :subtitle="`${b.material} · Q${b.quality} · ${qty(b.quantity, b.unit)} · ${b.location} · ${ownerText(b)}`"
+    :subtitle="`${b.material} · ${qText(b.quality)} · ${qty(b.quantity, b.unit)} · ${b.location} · ${ownerText(b)}`"
     :icon="icons[action]"
     :buttons="buttons"
     @choose="choose"
@@ -223,20 +223,20 @@ async function book() {
     <div v-else class="summary">
       <template v-if="action === 'remove'">
         <span class="big">−{{ amountText }} {{ b.material }}</span>
-        <span class="dim">Q{{ b.quality }} · {{ b.location }} · {{ ownerText(b) }}</span>
+        <span class="dim">{{ qText(b.quality) }} · {{ b.location }} · {{ ownerText(b) }}</span>
       </template>
       <template v-else-if="action === 'adjust'">
         <span class="big">{{ qty(b.quantity, b.unit) }} → {{ qty(counted, b.unit) }} {{ b.material }}</span>
-        <span class="dim">Q{{ b.quality }} · {{ b.location }} · {{ ownerText(b) }}</span>
+        <span class="dim">{{ qText(b.quality) }} · {{ b.location }} · {{ ownerText(b) }}</span>
       </template>
       <template v-else-if="action === 'move'">
-        <span class="big">{{ amountText }} {{ b.material }} · Q{{ b.quality }}</span>
+        <span class="big">{{ amountText }} {{ b.material }} · {{ qText(b.quality) }}</span>
         <span><span class="dim">{{ t("stock.from") }}:</span> {{ b.location }} · {{ ownerText(b) }}</span>
         <span><span class="dim">{{ t("stock.to") }}:</span> {{ targetText }}</span>
       </template>
       <template v-else>
-        <span class="big">{{ b.material }} · {{ qty(b.quantity, b.unit) }} · Q{{ b.quality }}</span>
-        <span><span class="dim">{{ t("refinery.result") }}:</span> {{ qty(amt ?? "", "SCU") }} · Q{{ q }} · {{ b.location }} · {{ t("stock.pers") }}</span>
+        <span class="big">{{ b.material }} · {{ qty(b.quantity, b.unit) }} · {{ qText(b.quality) }}</span>
+        <span><span class="dim">{{ t("refinery.result") }}:</span> {{ qty(amt ?? "", "SCU") }} · {{ qText(q) }} · {{ b.location }} · {{ t("stock.pers") }}</span>
       </template>
     </div>
   </ConfirmDialog>

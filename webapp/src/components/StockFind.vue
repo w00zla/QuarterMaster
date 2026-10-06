@@ -7,7 +7,7 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
 import { materialOptions } from "../catalog";
-import { ownerText, qty, qualityOf } from "../format";
+import { ownerText, qText, qty, qualityOf } from "../format";
 import { lang, t } from "../i18n";
 import { onServerMessage } from "../realtime";
 import { me } from "../session";
@@ -89,7 +89,7 @@ onUnmounted(() => unsubscribe());
     <template v-if="result">
       <div v-if="!result.length" class="empty-line">{{ t("stock.findNone") }}</div>
       <div v-for="b in result" :key="b.id" class="list-row">
-        <span class="q">Q{{ b.quality }}</span>
+        <span class="q">{{ qText(b.quality) }}</span>
         <span class="amount">{{ qty(b.quantity, b.unit) }}</span>
         <span>{{ b.material }}</span>
         <span class="dim">{{ b.location }}</span>

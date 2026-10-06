@@ -224,7 +224,7 @@ onUnmounted(() => unsubscribe());
       <div class="filters">
         <label class="search">
           <Icon name="search" :size="14" />
-          <input v-model="search" type="text" :placeholder="t('bp.search')" />
+          <input v-model="search" type="text" :placeholder="t('filter.text')" />
           <button v-if="search" type="button" class="clear" :title="t('pick.clear')" @click="search = ''">
             <Icon name="close" :size="12" />
           </button>

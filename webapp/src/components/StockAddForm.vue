@@ -7,15 +7,15 @@ import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
 import { locationOptions, locations, materialOptions, materials, oreOptions, refineryLocationOptions, yieldBonus } from "../catalog";
-import { amountOf, qty, qualityOf, unitText } from "../format";
-import Icon from "../../../adminapp/src/components/Icon.vue";
+import { amountOf, qText, qty, qualityOf, unitText } from "../format";
 import { t } from "../i18n";
 import { ensureMembers, memberOptions, members, orgOf, writable } from "../orgs";
 import { me } from "../session";
 import { toast, toastError } from "../toasts";
 import Picker from "./Picker.vue";
 
-const props = defineProps<{ refinery?: boolean; target?: string | null }>();
+// formId: the dialog's footer button submits the form by this ID
+const props = defineProps<{ refinery?: boolean; target?: string | null; formId: string }>();
 const emit = defineEmits<{ done: [] }>();
 
 const subject = ref<string | null>(null);
@@ -69,7 +69,7 @@ function ownerText(): string {
 
 function submit() {
   if (!valid.value || busy.value) return;
-  pending.value = `${qty(amt.value!, unit.value)} ${materials.value.get(subject.value!)?.name ?? ""} · Q${q.value} · ${
+  pending.value = `${qty(amt.value!, unit.value)} ${materials.value.get(subject.value!)?.name ?? ""} · ${qText(q.value)} · ${
     locations.value.get(location.value!)?.short ?? ""} · ${ownerText()}`;
 }
 
@@ -111,10 +111,13 @@ async function book() {
     pending.value = null;
   }
 }
+
+// For the dialog's submit button
+defineExpose({ ready: computed(() => valid.value && !busy.value) });
 </script>
 
 <template>
-  <form class="form" @submit.prevent="submit">
+  <form :id="formId" class="form" @submit.prevent="submit">
     <label class="field">
       {{ t(refinery ? "field.ore" : "field.material") }}
       <Picker v-model="subject" :options="refinery ? oreOptions : materialOptions" :placeholder="t(refinery ? 'pick.ore' : 'pick.material')" />
@@ -142,9 +145,6 @@ async function book() {
       {{ t("field.holder") }}
       <Picker v-model="holder" :options="memberOptions(org.guildId)" :placeholder="t('pick.member')" />
     </label>
-    <div class="form-actions">
-      <button class="btn primary" type="submit" :disabled="!valid || busy"><Icon :name="refinery ? 'drop' : 'plus'" :size="14" /> {{ t(refinery ? "refinery.start" : "stock.add") }}</button>
-    </div>
     <ConfirmDialog
       v-if="pending"
       :title="t(refinery ? 'confirm.refineryStart' : 'confirm.add')"

@@ -22,12 +22,21 @@ export function qualityOf(text: string): number | null {
   return n <= 1000 ? n : null;
 }
 
+/** Star level of a quality: one per 100 from 500 (500-599 = 1 ... 900-999 = 5). */
+const qualityStars = (q: number) => Math.min(5, Math.floor(q / 100) - 4);
+
+/** The level of a quality: "⊘" (below 500, not usable), "★" to "★★★★★", "♛" (1000) */
+export const qMark = (q: number) => (q < 500 ? "⊘" : q === 1000 ? "♛" : "★".repeat(qualityStars(q)));
+
+/** The quality with its level: "⊘ 480", "★★★ 720", "♛ 1000" */
+export const qText = (q: number | null) => (q === null ? "" : `${qMark(q)} ${q}`);
+
 /** "Org (holder)" or "Pers.", as in the bot. */
 export const ownerText = (b: StockBatch) =>
   b.designation === "org" ? `${orgOf(b.guildId)?.name ?? "Org"} (${b.holderName ?? "?"})` : t("stock.pers");
 
-/** "Quantanium · Q820 · Area18 · Pers." */
-export const batchText = (b: StockBatch) => `${b.material} · Q${b.quality} · ${b.location} · ${ownerText(b)}`;
+/** "Quantanium · ★★★★ 820 · Area18 · Pers." */
+export const batchText = (b: StockBatch) => `${b.material} · ${qText(b.quality)} · ${b.location} · ${ownerText(b)}`;
 
 /** Within a material: best quality first, then the larger batch, then by location. */
 export function compareBatches(a: StockBatch, b: StockBatch) {

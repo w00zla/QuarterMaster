@@ -10,6 +10,9 @@ export interface ConfirmButton {
   disabled?: boolean;
   // "left" parks the button at the far left of the footer
   side?: "left";
+  icon?: IconName;
+  // ID of a form in the body: the button submits it (also on Enter there) instead of answering
+  form?: string;
 }
 
 // Open dialogs, innermost last: only that one answers Escape (a form dialog with its confirmation on top)
@@ -68,13 +71,14 @@ onUnmounted(() => {
           <button
             v-for="b in buttons"
             :key="b.value"
-            type="button"
+            :type="b.form ? 'submit' : 'button'"
+            :form="b.form"
             class="btn"
             :class="[b.kind, { left: b.side === 'left' }]"
             :disabled="b.disabled"
-            @click="emit('choose', b.value)"
+            @click="b.form || emit('choose', b.value)"
           >
-            {{ b.label }}
+            <Icon v-if="b.icon" :name="b.icon" :size="14" /> {{ b.label }}
           </button>
         </div>
       </div>

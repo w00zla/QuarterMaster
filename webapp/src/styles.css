@@ -255,3 +255,22 @@
   opacity: 0.3;
   cursor: default;
 }
+
+/* Quality in table columns: the level right before a fixed four-digit field for the value, so the
+   values line up; a narrow column clips the level at its left, never the value */
+.qcell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4ch;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qcell > :first-child {
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+
+.qcell > :last-child {
+  text-align: right;
+}
