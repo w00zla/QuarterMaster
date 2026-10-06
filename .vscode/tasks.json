@@ -1,6 +1,8 @@
 {
   // Admin web UI in development: API restarting on changes (pnpm web:watch, :3000) + Vite with hot reload (pnpm web:dev, :5173).
   // Run "web: dev", then open http://127.0.0.1:5173 (basic auth from .env).
+  // User web app in development: dev DB (pnpm db:up), then backend (pnpm webapp:watch, :3002), Vite (pnpm webapp:dev, :5174)
+  // and the Discord bot (pnpm bot, keeps the roster current). Run "webapp: dev", then open http://localhost:5174 (not 127.0.0.1).
   "version": "2.0.0",
   "tasks": [
     {
@@ -31,6 +33,61 @@
       "label": "web: dev",
       "dependsOn": ["web: backend", "web: frontend"],
       "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "db: up",
+      "type": "shell",
+      "command": "pnpm db:up",
+      "presentation": { "group": "webapp-dev", "panel": "shared", "reveal": "silent" },
+      "problemMatcher": []
+    },
+    {
+      "label": "webapp: backend",
+      "type": "shell",
+      "command": "pnpm webapp:watch",
+      "isBackground": true,
+      "presentation": { "group": "webapp-dev", "panel": "dedicated", "reveal": "always" },
+      "problemMatcher": {
+        "owner": "webapp-api",
+        "pattern": { "regexp": "^\\0never$", "file": 1, "line": 2, "message": 3 },
+        "background": { "activeBegin": true, "beginsPattern": "^(> .* webapp:watch|Restarting)", "endsPattern": "User web app on http" }
+      }
+    },
+    {
+      "label": "webapp: frontend",
+      "type": "shell",
+      "command": "pnpm webapp:dev",
+      "isBackground": true,
+      "presentation": { "group": "webapp-dev", "panel": "dedicated", "reveal": "always" },
+      "problemMatcher": {
+        "owner": "webapp-vite",
+        "pattern": { "regexp": "^\\0never$", "file": 1, "line": 2, "message": 3 },
+        "background": { "activeBegin": true, "beginsPattern": "^> vite$", "endsPattern": "ready in \\d+ ms" }
+      }
+    },
+    {
+      "label": "bot",
+      "type": "shell",
+      "command": "pnpm bot",
+      "isBackground": true,
+      "presentation": { "group": "webapp-dev", "panel": "dedicated", "reveal": "always" },
+      "problemMatcher": {
+        "owner": "bot",
+        "pattern": { "regexp": "^\\0never$", "file": 1, "line": 2, "message": 3 },
+        "background": { "activeBegin": true, "beginsPattern": "^> .* bot( |$)", "endsPattern": "Logged in as" }
+      }
+    },
+    {
+      "label": "webapp: servers",
+      "dependsOn": ["webapp: backend", "webapp: frontend", "bot"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "webapp: dev",
+      "dependsOn": ["db: up", "webapp: servers"],
+      "dependsOrder": "sequence",
       "problemMatcher": []
     }
   ]
