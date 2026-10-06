@@ -49,7 +49,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
 
   before(async () => {
     ({ db, close } = connect(url));
-    for (const schema of ['web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    for (const schema of ['uex', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
     await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });

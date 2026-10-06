@@ -6,7 +6,7 @@
 #   docker compose run --rm bot node src/bot/register.ts     # after command changes
 name: sc-quartermaster
 
-# DB roles (deploy/db-roles.sh): qm_owner runs the migrations, qm_app is bot and admin, qm_web is
+# DB roles (deploy/db-roles.sh): qm_owner runs the migrations, qm_app is bot, admin and uex, qm_web is
 # the user web app (no service yet).
 # The passwords go into URLs unescaped: URL-safe characters only (e.g. openssl rand -hex 32)
 x-db-url-owner: &db-url-owner postgres://qm_owner:${QM_OWNER_PASSWORD:?set QM_OWNER_PASSWORD in .env}@db:5432/quartermaster
@@ -71,6 +71,14 @@ services:
       DATABASE_URL: *db-url
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
       DISCORD_APP_ID: ${DISCORD_APP_ID:?set DISCORD_APP_ID in .env}
+
+  # Pulls the UEX refinery data into schema uex every hour; no port
+  uex:
+    <<: *app
+    command: [node, src/uex/main.ts]
+    environment:
+      DATABASE_URL: *db-url
+      UEX_TOKEN: ${UEX_TOKEN:?set UEX_TOKEN in .env}
 
   admin:
     <<: *app

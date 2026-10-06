@@ -100,7 +100,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
 
   before(async () => {
     ({ db, close } = connect(url));
-    for (const schema of ['web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    for (const schema of ['uex', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
     await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
   });
   beforeEach(async () => {

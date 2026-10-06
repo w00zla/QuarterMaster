@@ -25,6 +25,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
 
   before(async () => {
     ({ db, close } = connect(url));
+    await db.execute(sql`DROP SCHEMA IF EXISTS uex CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS web CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS bot CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS app CASCADE`);

@@ -26,7 +26,8 @@
     "webapp:dev": "pnpm --filter sc-quartermaster-webapp dev",
     "webapp:build": "pnpm --filter sc-quartermaster-webapp build",
     "bot": "node --env-file-if-exists=.env src/bot/main.ts",
-    "bot:register": "node --env-file-if-exists=.env src/bot/register.ts"
+    "bot:register": "node --env-file-if-exists=.env src/bot/register.ts",
+    "uex": "node --env-file-if-exists=.env src/uex/main.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",

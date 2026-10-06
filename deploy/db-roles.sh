@@ -7,7 +7,7 @@
 #   qm_web:   user web app; reads catalog and app, writes users, stock, journal (INSERT only) and
 #             blueprints, but not org/member (role IDs, officer flag, roster freshness); from bot only
 #             guild_id and left_at of bot.guild;
-#             full DML in web
+#             full DML in web; reads uex
 # Grants for new tables come from default privileges, which only cover objects created BY qm_owner:
 # never run migrations as the superuser. They cover qm_app only; qm_web's grants are explicit and
 # applied on every run. Dev and test databases have no roles (superuser only).
@@ -46,9 +46,9 @@ SELECT 'REVOKE ALL ON ALL TABLES IN SCHEMA web FROM qm_app' WHERE to_regnamespac
 
 -- qm_web, explicit (also exist only after the migrations). Schema-wide grants pick up new tables
 -- because this script runs after every migration. No grants on drizzle.
-SELECT format('GRANT USAGE ON SCHEMA %I TO qm_web', s) FROM unnest(ARRAY['catalog', 'app', 'bot', 'web']) s
+SELECT format('GRANT USAGE ON SCHEMA %I TO qm_web', s) FROM unnest(ARRAY['catalog', 'app', 'bot', 'web', 'uex']) s
   WHERE to_regnamespace(s) IS NOT NULL \gexec
-SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO qm_web', s) FROM unnest(ARRAY['catalog', 'app']) s
+SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO qm_web', s) FROM unnest(ARRAY['catalog', 'app', 'uex']) s
   WHERE to_regnamespace(s) IS NOT NULL \gexec
 -- app.org and app.member stay read-only: role IDs and the officer flag come from the bot
 SELECT 'GRANT INSERT, UPDATE ON app.app_user TO qm_web' WHERE to_regclass('app.app_user') IS NOT NULL \gexec

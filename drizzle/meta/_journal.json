@@ -57,6 +57,13 @@
       "when": 1791313833916,
       "tag": "0007_user_setting",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791320471246,
+      "tag": "0008_uex",
+      "breakpoints": true
     }
   ]
 }

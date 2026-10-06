@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Production update with Docker Compose (run on the VM, from the checkout, after a push; scripts/push-deploy.sh does both):
 # backup -> keep the running image as :previous -> build (with the latest Node base image) and
-# pull Postgres -> stop bot/admin -> migrate -> DB roles (deploy/db-roles.sh) -> start.
+# pull Postgres -> stop bot/admin/uex -> migrate -> DB roles (deploy/db-roles.sh) -> start.
 # A failed migration leaves the DB unchanged (all pending migrations run in one transaction):
 # the script then starts the previous image again.
 # Backups go to $BACKUP_DIR (default: backups/ in the checkout, gitignored).
@@ -33,8 +33,8 @@ docker compose build --pull
 # Same major version (pinned tag), minor updates only; the container is recreated by "up" below
 docker compose pull db
 
-echo "==> Stop bot and admin"
-docker compose stop bot admin
+echo "==> Stop bot, admin and uex"
+docker compose stop bot admin uex
 
 echo "==> Migrate"
 if ! docker compose run --rm migrate; then
@@ -44,7 +44,7 @@ if ! docker compose run --rm migrate; then
     docker tag "$IMAGE:previous" "$IMAGE:latest"
     docker compose up -d
   else
-    echo "No previous image: bot and admin stay stopped." >&2
+    echo "No previous image: bot, admin and uex stay stopped." >&2
   fi
   exit 1
 fi
