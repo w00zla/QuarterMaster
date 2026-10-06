@@ -1,0 +1,72 @@
+// Refinery locations from the latest UEX yields snapshot. UEX has its own IDs and names: a terminal is
+// matched to a selectable catalog location by English name within the same system.
+import { sql } from 'drizzle-orm';
+import type { Db } from '../db/client.ts';
+import { one } from '../db/query.ts';
+import { locationCatalog, type LocationEntry } from '../stock/lookup.ts';
+
+export interface UexTerminal {
+  id: number;
+  name: string;
+  system: string;
+  // The station, city or outpost as UEX names it ("Nyx Gateway (Pyro)", "Checkmate Station")
+  place: string;
+}
+
+export interface RefineryMatch {
+  // Catalog location UUID -> its UEX terminal
+  matched: Map<string, UexTerminal>;
+  unmatched: UexTerminal[];
+}
+
+type YieldRow = Record<string, unknown>;
+const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+/** The distinct terminals of a refineries_yields `data` array. */
+export function uexTerminals(data: YieldRow[]): UexTerminal[] {
+  const byId = new Map<number, UexTerminal>();
+  for (const r of data) {
+    const place = str(r.space_station_name) ?? str(r.city_name) ?? str(r.outpost_name);
+    const system = str(r.star_system_name);
+    if (typeof r.id_terminal !== 'number' || !place || !system || byId.has(r.id_terminal)) continue;
+    byId.set(r.id_terminal, { id: r.id_terminal, name: str(r.terminal_name) ?? place, system, place });
+  }
+  return [...byId.values()];
+}
+
+/** Pure: matches terminals to English location entries (name + system; "(System)" and a trailing "Station" dropped). */
+export function matchRefineries(terminals: UexTerminal[], locations: Iterable<LocationEntry>): RefineryMatch {
+  const key = (name: string, system: string) => `${name.toLowerCase()}|${system.toLowerCase()}`;
+  const byKey = new Map<string, string>();
+  for (const l of locations) if (l.system) byKey.set(key(l.nameEn, l.system), l.uuid);
+  const result: RefineryMatch = { matched: new Map(), unmatched: [] };
+  for (const t of terminals) {
+    const name = t.place.replace(/\s*\([^)]*\)$/, '');
+    const uuid = byKey.get(key(name, t.system)) ?? byKey.get(key(name.replace(/\s+Station$/i, ''), t.system));
+    if (uuid) result.matched.set(uuid, t);
+    else result.unmatched.push(t);
+  }
+  return result;
+}
+
+let cached: { snapshotId: number; locations: Map<string, LocationEntry>; value: RefineryMatch } | null = null;
+
+/** Matched refinery terminals of the latest yields snapshot; null while there is none. */
+export async function refineryMatch(db: Db): Promise<RefineryMatch | null> {
+  const latest = await one<{ id: number }>(db, sql`
+    SELECT id::int AS id FROM uex.snapshot WHERE endpoint = 'refineries_yields' ORDER BY id DESC LIMIT 1`);
+  if (!latest) return null;
+  // English names and systems: what UEX uses
+  const locations = await locationCatalog(db, 'en');
+  if (cached?.snapshotId === latest.id && cached.locations === locations) return cached.value;
+  const snap = await one<{ data: YieldRow[] }>(db, sql`SELECT data FROM uex.snapshot WHERE id = ${latest.id}`);
+  const value = matchRefineries(uexTerminals(snap?.data ?? []), locations.values());
+  cached = { snapshotId: latest.id, locations, value };
+  return value;
+}
+
+/** Location UUIDs with a refinery; null = no UEX data yet (every selectable location counts). */
+export async function refineryLocations(db: Db): Promise<Set<string> | null> {
+  const match = await refineryMatch(db);
+  return match ? new Set(match.matched.keys()) : null;
+}

@@ -160,6 +160,15 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await refused(refineDone(db, mia, { batchId: done.batch!.id, amount: '1', quality: 1 }), 'notRefining');
   });
 
+  it('refinery: only at UEX refineries once there is UEX data', async () => {
+    const yields = [{ id_terminal: 1, terminal_name: 'Refinement Center - Elsewhere', star_system_name: 'Nyx', space_station_name: 'Elsewhere' }];
+    await db.execute(sql`INSERT INTO uex.snapshot (endpoint, content_hash, data)
+      VALUES ('refineries_yields', ${'a'.repeat(64)}, ${JSON.stringify(yields)}::jsonb)`);
+    await refused(refineStart(db, mia, { oreUuid: U.ore, locationUuid: U.station, quality: 600, amount: '1' }), 'notRefinery');
+    await db.execute(sql`TRUNCATE uex.snapshot`);
+    assert.ok((await refineStart(db, mia, { oreUuid: U.ore, locationUuid: U.station, quality: 600, amount: '1' })).batch);
+  });
+
   it('never hands out the same units twice under concurrent removal', async () => {
     const b = (await add(db, max, { ...metal, quality: 430, amount: '1' })).batch!;
     const results = await Promise.allSettled([1, 2, 3].map(() => remove(db, max, { batchId: b.id, amount: '1' })));

@@ -63,6 +63,8 @@ export interface CatalogLocation {
   label: string;
   // "Area18", plus the system where the name alone is ambiguous
   short: string;
+  // Has a refinery (per UEX; every location while there is no UEX data yet)
+  refinery: boolean;
 }
 
 export interface CatalogBlueprint {

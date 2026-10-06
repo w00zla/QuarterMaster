@@ -55,3 +55,5 @@ export const oreOptions = computed(() => (catalog.value?.materials ?? []).filter
   .map((m) => ({ value: m.uuid, label: m.name })).sort((a, b) => byName(a.label, b.label)));
 export const locationOptions = computed(() => (catalog.value?.locations ?? [])
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
+export const refineryLocationOptions = computed(() => (catalog.value?.locations ?? []).filter((l) => l.refinery)
+  .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));

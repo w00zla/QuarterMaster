@@ -6,7 +6,7 @@ import type { OkResponse, RefineryStartRequest, StockAddRequest } from "../../..
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
-import { locationOptions, locations, materialOptions, materials, oreOptions } from "../catalog";
+import { locationOptions, locations, materialOptions, materials, oreOptions, refineryLocationOptions } from "../catalog";
 import { amountOf, qty, qualityOf, unitText } from "../format";
 import Icon from "../../../web/src/components/Icon.vue";
 import { t } from "../i18n";
@@ -116,7 +116,7 @@ async function book() {
     </label>
     <label class="field">
       {{ t("field.location") }}
-      <Picker v-model="location" :options="locationOptions" :placeholder="t('pick.location')" />
+      <Picker v-model="location" :options="refinery ? refineryLocationOptions : locationOptions" :placeholder="t('pick.location')" />
     </label>
     <label class="field">
       {{ t("field.quality") }}

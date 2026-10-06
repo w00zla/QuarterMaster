@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db, Tx } from '../db/client.ts';
 import { one } from '../db/query.ts';
+import { refineryLocations } from '../uex/refineries.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
 
 export type Designation = 'personal' | 'org';
@@ -59,7 +60,7 @@ export interface StockResult {
 }
 
 export type StockErrorCode =
-  | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'oreViaRefinery' | 'notOre' | 'unknownLocation' | 'retired'
+  | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'oreViaRefinery' | 'notOre' | 'unknownLocation' | 'notRefinery' | 'retired'
   | 'invalidAmount' | 'invalidQuality' | 'batchNotFound' | 'batchChanged' | 'insufficient' | 'holderNotMember'
   | 'notRefining' | 'refiningFixed' | 'nothingToMove' | 'noChange';
 
@@ -254,6 +255,9 @@ export async function refineStart(db: Db, actor: Actor, input: { oreUuid: string
     const subject = await subjectInfo(tx, 'resource', input.oreUuid);
     if (!subject.isOre) throw new StockError('notOre');
     await checkLocation(tx, input.locationUuid);
+    // Refineries per UEX; without UEX data yet every selectable location
+    const refineries = await refineryLocations(db);
+    if (refineries && !refineries.has(input.locationUuid)) throw new StockError('notRefinery');
     const key: BatchKey = {
       guildId: null, ownerUserId: actor.userId, designation: 'personal', kind: 'resource', resourceUuid: input.oreUuid, itemUuid: null,
       locationUuid: input.locationUuid, state: 'refining', quality: input.quality,
