@@ -8,6 +8,7 @@ import { connect, type Db } from '../src/db/client.ts';
 import { snapshot } from '../src/db/schema/ext.ts';
 import { storeSnapshot } from '../src/ext/store.ts';
 import { fetchEndpoint, pullUex } from '../src/ext/uex.ts';
+import { getUex } from '../src/adminapp/queries.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -88,5 +89,22 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
       console.error = error;
     }
     assert.deepEqual((await rows()).map((r) => r.endpoint), ['refineries_methods']);
+  });
+
+  it('answers the admin overview: status, terminals with their yields, methods', async () => {
+    const empty = await getUex(db, 'en');
+    assert.deepEqual([[...empty.endpoints], empty.refineries, empty.ores, empty.methods], [[], [], [], []]);
+    const y = (terminal: number, place: string, ore: string, value: number) =>
+      ({ id_terminal: terminal, terminal_name: `Refinery ${place}`, star_system_name: 'Nyx', space_station_name: place, commodity_name: ore, value });
+    await storeSnapshot(db, 'uex', 'refineries_yields', [y(1, 'Old', 'Iron (Ore)', 1)]);
+    await storeSnapshot(db, 'uex', 'refineries_yields', [y(2, 'Zeta', 'Iron (Ore)', -5), y(1, 'Alpha', 'Gold (Ore)', 8), y(1, 'Alpha', 'Iron (Ore)', 2)]);
+    await storeSnapshot(db, 'uex', 'refineries_methods', [{ id: 1, name: 'Cormack', code: 'COR', rating_yield: 1, rating_cost: 2, rating_speed: 3 }]);
+    const uex = await getUex(db, 'en');
+    assert.deepEqual(uex.endpoints.map((e) => [e.endpoint, e.rows, e.snapshots]), [['refineries_methods', 1, 1], ['refineries_yields', 3, 2]]);
+    assert.deepEqual(uex.ores, ['Gold (Ore)', 'Iron (Ore)']);
+    assert.deepEqual(uex.refineries.map((r) => [r.place, r.location, r.yields]), [
+      ['Alpha', null, { 'Gold (Ore)': 8, 'Iron (Ore)': 2 }], ['Zeta', null, { 'Iron (Ore)': -5 }],
+    ]);
+    assert.deepEqual(uex.methods, [{ name: 'Cormack', code: 'COR', ratingYield: 1, ratingCost: 2, ratingSpeed: 3 }]);
   });
 });

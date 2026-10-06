@@ -74,6 +74,7 @@ api.get('/items/:uuid', async (c) => {
   return found(c, id ? await q.getItem(db, id, lang(c)) : null);
 });
 api.get('/localization/sources', async (c) => c.json(await q.getLocSources(db)));
+api.get('/ext/uex', async (c) => c.json(await q.getUex(db, lang(c))));
 api.get('/localization/search', async (c) => {
   const query = (c.req.query('q') ?? '').trim();
   const limit = Math.min(Math.max(Number(c.req.query('limit')) || 200, 1), 1000);

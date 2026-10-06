@@ -8,8 +8,10 @@ import {
 } from '../catalog/labels.ts';
 import type {
   BlueprintDetail, BlueprintRow, BlueprintSlot, EntityCount, GameInfo, ImportDetail, ImportRow, ItemDetail, ItemRow,
-  LocKeyDetail, LocSearch, LocSource, Meta, Overview, Ref, ResourceDetail, ResourceRow,
+  LocKeyDetail, LocSearch, LocSource, Meta, Overview, Ref, ResourceDetail, ResourceRow, UexEndpointStatus, UexRefinery, UexResponse,
 } from './api-types.ts';
+import { locationCatalog } from '../stock/lookup.ts';
+import { refineryMatch, uexTerminals } from '../ext/refineries.ts';
 
 /** Timestamp as ISO 8601 string (the driver would return Postgres' text format here). */
 const iso = (column: string) => sql.raw(`to_json(${column}) #>> '{}'`);
@@ -368,4 +370,41 @@ export async function getLocKey(db: Db, key: string): Promise<LocKeyDetail> {
     WHERE l.key = ${key}
     ORDER BY l.lang = 'en' DESC, l.lang, s.priority DESC, l.source`);
   return { key, values };
+}
+
+// --- 3rd party: UEX --------------------------------------------------------------------------------
+
+/** Pull status, refinery terminals with their catalog match and yield bonuses, methods. */
+export async function getUex(db: Db, lang: string): Promise<UexResponse> {
+  const endpoints = await rows<UexEndpointStatus>(db, sql`
+    SELECT DISTINCT ON (endpoint) endpoint, jsonb_array_length(data) AS rows,
+      (count(*) OVER (PARTITION BY endpoint))::int AS snapshots, ${iso('fetched_at')} AS "changedAt", ${iso('checked_at')} AS "checkedAt"
+    FROM ext.snapshot WHERE source = 'uex' ORDER BY endpoint, id DESC`);
+  const latest = async (endpoint: string) => (await one<{ data: Record<string, unknown>[] }>(db, sql`
+    SELECT data FROM ext.snapshot WHERE source = 'uex' AND endpoint = ${endpoint} ORDER BY id DESC LIMIT 1`))?.data ?? [];
+  const [yields, methods] = [await latest('refineries_yields'), await latest('refineries_methods')];
+
+  const match = await refineryMatch(db);
+  const byTerminal = new Map([...match?.matched ?? []].map(([uuid, t]) => [t.id, uuid]));
+  const locations = await locationCatalog(db, lang);
+  const ores = new Set<string>();
+  const refineries = uexTerminals(yields).map((t): UexRefinery => {
+    const uuid = byTerminal.get(t.id) ?? null;
+    return { terminalId: t.id, terminal: t.name, system: t.system, place: t.place, locationUuid: uuid, location: uuid ? locations.get(uuid)?.label ?? null : null, yields: {} };
+  });
+  const byId = new Map(refineries.map((r) => [r.terminalId, r]));
+  for (const y of yields) {
+    const r = byId.get(y.id_terminal as number);
+    if (!r || typeof y.commodity_name !== 'string' || typeof y.value !== 'number') continue;
+    r.yields[y.commodity_name] = y.value;
+    ores.add(y.commodity_name);
+  }
+  return {
+    endpoints,
+    refineries: refineries.sort((a, b) => a.system.localeCompare(b.system) || a.place.localeCompare(b.place)),
+    ores: [...ores].sort((a, b) => a.localeCompare(b)),
+    methods: methods.map((m) => ({
+      name: String(m.name), code: String(m.code), ratingYield: Number(m.rating_yield), ratingCost: Number(m.rating_cost), ratingSpeed: Number(m.rating_speed),
+    })).sort((a, b) => a.name.localeCompare(b.name)),
+  };
 }

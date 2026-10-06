@@ -314,3 +314,46 @@ export interface LocKeyDetail {
   key: string;
   values: LocKeyValue[];
 }
+
+// --- 3rd party: UEX ----------------------------------------------------------------------------
+
+/** The latest snapshot of one pulled UEX endpoint. */
+export interface UexEndpointStatus {
+  endpoint: string;
+  rows: number;
+  // Distinct responses kept (the history)
+  snapshots: number;
+  // First fetch with the latest content / latest fetch that returned it
+  changedAt: string;
+  checkedAt: string;
+}
+
+export interface UexRefinery {
+  terminalId: number;
+  terminal: string;
+  system: string;
+  // UEX's station/city name
+  place: string;
+  // Matched catalog location (label in the text language); null = not matched
+  locationUuid: string | null;
+  location: string | null;
+  // Yield bonus in % per ore (UEX's ore name)
+  yields: Record<string, number>;
+}
+
+export interface UexMethod {
+  name: string;
+  code: string;
+  // UEX ratings 1 (low) to 3 (high)
+  ratingYield: number;
+  ratingCost: number;
+  ratingSpeed: number;
+}
+
+export interface UexResponse {
+  endpoints: UexEndpointStatus[];
+  refineries: UexRefinery[];
+  // Every ore that appears in the yields, alphabetical
+  ores: string[];
+  methods: UexMethod[];
+}

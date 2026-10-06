@@ -6,6 +6,7 @@ import ItemsView from "./views/ItemsView.vue";
 import TextsView from "./views/TextsView.vue";
 import ImportsView from "./views/ImportsView.vue";
 import PlannerView from "./views/PlannerView.vue";
+import ThirdPartyView from "./views/ThirdPartyView.vue";
 
 // List views keep their table while the optional param selects the detail.
 export const router = createRouter({
@@ -21,6 +22,7 @@ export const router = createRouter({
     { path: "/localisation/:key?", name: "localisation", component: TextsView },
     { path: "/texts/:key?", redirect: (to) => `/localisation/${to.params.key ?? ""}` },
     { path: "/imports/:id?", name: "imports", component: ImportsView },
+    { path: "/3rd-party", name: "third-party", component: ThirdPartyView },
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
 });

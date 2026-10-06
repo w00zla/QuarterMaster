@@ -17,6 +17,7 @@ const TABS: { to: string; label: string; icon: IconName }[] = [
   { to: "/resources", label: "Resources", icon: "resource" },
   { to: "/items", label: "Items", icon: "item" },
   { to: "/localisation", label: "Localisation", icon: "texts" },
+  { to: "/3rd-party", label: "3rd Party", icon: "link" },
 ];
 // The tool, apart from the data views
 const TOOL_TABS: typeof TABS = [{ to: "/crafting", label: "Crafting", icon: "crafter" }];
