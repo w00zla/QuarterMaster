@@ -9,15 +9,15 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY web/package.json web/
+COPY adminapp/package.json adminapp/
 COPY webapp/package.json webapp/
 
 # All dependencies incl. dev, to build the SPA (it imports shared code from src/)
 FROM base AS build
 RUN pnpm install --frozen-lockfile
 COPY src src
-COPY web web
-RUN pnpm web:build
+COPY adminapp adminapp
+RUN pnpm adminapp:build
 
 # Runtime dependencies of the backend only
 FROM base AS deps
@@ -31,5 +31,5 @@ COPY package.json ./
 COPY --from=deps /app/node_modules node_modules
 COPY src src
 COPY drizzle drizzle
-COPY --from=build /app/web/dist web/dist
+COPY --from=build /app/adminapp/dist adminapp/dist
 USER node

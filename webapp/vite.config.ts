@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
       // ws: the realtime socket (/api/ws) goes through the proxy too
       proxy: { "/api": { target: backend, ws: true }, "/auth": backend },
       // Only what the SPA imports (default: the whole workspace, readable by anything on localhost)
-      fs: { allow: [".", "../web/src", "../src/webapp/api-types.ts", "../src/stock/amount.ts", "../src/planner/plan.ts"] },
+      fs: { allow: [".", "../adminapp/src", "../src/webapp/api-types.ts", "../src/stock/amount.ts", "../src/planner/plan.ts"] },
     },
   };
 });

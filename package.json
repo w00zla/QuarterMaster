@@ -17,17 +17,17 @@
     "catalog:extract": "node src/catalog/extract/cli.ts",
     "catalog:import": "node --env-file-if-exists=.env src/catalog/import/cli.ts",
     "loc:import": "node --env-file-if-exists=.env src/catalog/import/loc-cli.ts",
-    "web": "node --env-file-if-exists=.env src/web/main.ts",
-    "web:dev": "pnpm --filter sc-quartermaster-web dev",
-    "web:build": "pnpm --filter sc-quartermaster-web build",
-    "web:watch": "node --watch --env-file-if-exists=.env src/web/main.ts",
+    "adminapp": "node --env-file-if-exists=.env src/adminapp/main.ts",
+    "adminapp:dev": "pnpm --filter sc-quartermaster-adminapp dev",
+    "adminapp:build": "pnpm --filter sc-quartermaster-adminapp build",
+    "adminapp:watch": "node --watch --env-file-if-exists=.env src/adminapp/main.ts",
     "webapp": "node --env-file-if-exists=.env src/webapp/main.ts",
     "webapp:watch": "node --watch --env-file-if-exists=.env src/webapp/main.ts",
     "webapp:dev": "pnpm --filter sc-quartermaster-webapp dev",
     "webapp:build": "pnpm --filter sc-quartermaster-webapp build",
     "bot": "node --env-file-if-exists=.env src/bot/main.ts",
     "bot:register": "node --env-file-if-exists=.env src/bot/register.ts",
-    "uex": "node --env-file-if-exists=.env src/uex/main.ts"
+    "ext": "node --env-file-if-exists=.env src/ext/main.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",

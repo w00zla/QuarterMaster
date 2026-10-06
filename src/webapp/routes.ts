@@ -10,12 +10,12 @@ import { importCache } from '../db/import-cache.ts';
 import { toMicros, formatMicros } from '../planner/plan.ts';
 import { blueprintCatalog, ownedBlueprints, addBlueprint, removeBlueprint } from '../bot/blueprints.ts';
 import { loadPlannerData } from '../planner/load.ts';
-import { getBlueprint, getBlueprints, getItem, getItems, getResource, getResources } from '../web/queries.ts';
+import { getBlueprint, getBlueprints, getItem, getItems, getResource, getResources } from '../adminapp/queries.ts';
 import { formatAmount } from '../stock/amount.ts';
 import { findStock, locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
 import * as stock from '../stock/service.ts';
 import { StockError, type Actor } from '../stock/service.ts';
-import { refineryLocations } from '../uex/refineries.ts';
+import { refineryLocations } from '../ext/refineries.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, Lang, MaterialInfo, OkResponse, OrgBlueprintsResponse,
   OrgMember, StockBatch,

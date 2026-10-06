@@ -4,7 +4,7 @@
 import { computed } from "vue";
 import { computePlan, MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlanEntry, PlannerData } from "../../../src/planner/types";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import CraftingPicker from "../components/CraftingPicker.vue";
 import PlanEntryCard from "../components/PlanEntryCard.vue";
 import { addToCrafting, checks, useCrafting } from "../crafting";

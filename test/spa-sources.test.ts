@@ -12,9 +12,9 @@ const SINKS = /v-html|innerHTML|outerHTML|insertAdjacentHTML|document\.write|cre
 describe('SPA sources', () => {
   it('use no HTML sinks (XSS); Icon.vue renders constant SVGs only', () => {
     let checked = 0;
-    for (const root of ['../web/src/', '../webapp/src/']) {
+    for (const root of ['../adminapp/src/', '../webapp/src/']) {
       for (const file of files(new URL(root, import.meta.url))) {
-        if (file.pathname.endsWith('/web/src/components/Icon.vue')) continue;
+        if (file.pathname.endsWith('/adminapp/src/components/Icon.vue')) continue;
         checked++;
         const hit = SINKS.exec(readFileSync(file, 'utf8'));
         assert.equal(hit, null, `${file.pathname}: ${hit?.[0]}`);

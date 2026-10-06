@@ -1,37 +1,37 @@
 {
-  // Admin web UI in development: API restarting on changes (pnpm web:watch, :3000) + Vite with hot reload (pnpm web:dev, :5173).
-  // Run "web: dev", then open http://127.0.0.1:5173 (basic auth from .env).
+  // Admin web UI in development: API restarting on changes (pnpm adminapp:watch, :3000) + Vite with hot reload (pnpm adminapp:dev, :5173).
+  // Run "adminapp: dev", then open http://127.0.0.1:5173 (basic auth from .env).
   // User web app in development: dev DB (pnpm db:up), then backend (pnpm webapp:watch, :3002), Vite (pnpm webapp:dev, :5174)
   // and the Discord bot (pnpm bot, keeps the roster current). Run "webapp: dev", then open http://localhost:5174 (not 127.0.0.1).
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "web: backend",
+      "label": "adminapp: backend",
       "type": "shell",
-      "command": "pnpm web:watch",
+      "command": "pnpm adminapp:watch",
       "isBackground": true,
-      "presentation": { "group": "web-dev", "panel": "dedicated", "reveal": "always" },
+      "presentation": { "group": "adminapp-dev", "panel": "dedicated", "reveal": "always" },
       "problemMatcher": {
-        "owner": "web-api",
+        "owner": "adminapp-api",
         "pattern": { "regexp": "^\\0never$", "file": 1, "line": 2, "message": 3 },
-        "background": { "activeBegin": true, "beginsPattern": "^> .* web$", "endsPattern": "Backend \\(API\\) on http" }
+        "background": { "activeBegin": true, "beginsPattern": "^(> .* adminapp:watch|Restarting)", "endsPattern": "Backend \\(API\\) on http" }
       }
     },
     {
-      "label": "web: frontend",
+      "label": "adminapp: frontend",
       "type": "shell",
-      "command": "pnpm web:dev",
+      "command": "pnpm adminapp:dev",
       "isBackground": true,
-      "presentation": { "group": "web-dev", "panel": "dedicated", "reveal": "always" },
+      "presentation": { "group": "adminapp-dev", "panel": "dedicated", "reveal": "always" },
       "problemMatcher": {
-        "owner": "web-vite",
+        "owner": "adminapp-vite",
         "pattern": { "regexp": "^\\0never$", "file": 1, "line": 2, "message": 3 },
         "background": { "activeBegin": true, "beginsPattern": "^> vite$", "endsPattern": "ready in \\d+ ms" }
       }
     },
     {
-      "label": "web: dev",
-      "dependsOn": ["web: backend", "web: frontend"],
+      "label": "adminapp: dev",
+      "dependsOn": ["adminapp: backend", "adminapp: frontend"],
       "dependsOrder": "parallel",
       "problemMatcher": []
     },

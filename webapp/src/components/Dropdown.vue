@@ -3,7 +3,7 @@
 // and Escape. BindSight's Dropdown; the variant classes are prefixed (dd-chip, …): the shared ui.css
 // has global .chip/.outline/.small classes that would style the root as well.
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 
 export type DropdownOption = { value: string; label: string };
 

@@ -3,7 +3,7 @@
 // ones, best quality first. Runs again when that stock changes.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
 import { materialOptions } from "../catalog";

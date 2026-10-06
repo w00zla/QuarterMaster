@@ -49,7 +49,7 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
-  web:
+  adminapp:
     dependencies:
       vue:
         specifier: ^3.5.43

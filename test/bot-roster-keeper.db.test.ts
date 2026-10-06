@@ -39,7 +39,7 @@ describe('roster keeper (database)', { skip: url ? false : 'TEST_DATABASE_URL no
 
   before(async () => {
     ({ db, close } = connect(url));
-    for (const schema of ['uex', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
     await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
     await ensureGuild(db, G, 'Keeper Org');
     await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });

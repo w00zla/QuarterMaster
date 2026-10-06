@@ -1,6 +1,6 @@
-// Pulls the UEX refinery data into uex.snapshot at start and then every hour.
+// Pulls the third-party data into ext.snapshot at start and then every hour (today: UEX).
 import { connect } from '../db/client.ts';
-import { pullAll } from './fetch.ts';
+import { pullUex } from './uex.ts';
 
 const INTERVAL_MS = 60 * 60 * 1000;
 
@@ -9,9 +9,9 @@ if (!token) throw new Error('UEX_TOKEN is not set');
 
 const { db, close } = connect(process.env.DATABASE_URL);
 
-let running: Promise<void> = pullAll(db, token);
+let running: Promise<void> = pullUex(db, token);
 const timer = setInterval(() => {
-  running = running.then(() => pullAll(db, token));
+  running = running.then(() => pullUex(db, token));
 }, INTERVAL_MS);
 
 const shutdown = async () => {

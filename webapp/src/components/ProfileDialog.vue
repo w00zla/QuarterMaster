@@ -2,7 +2,7 @@
 // Your profile, opened from the avatar in the top bar: RSI handle (shown to your orgs) and the web
 // app's language (saved at once).
 import { computed, ref, watch } from "vue";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
 import { me, saveProfile } from "../session";
 import { toast, toastError } from "../toasts";

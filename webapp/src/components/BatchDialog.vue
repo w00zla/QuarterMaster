@@ -6,7 +6,7 @@ import { computed, ref, watch } from "vue";
 import type {
   OkResponse, RefineryDoneRequest, StockAdjustRequest, StockBatch, StockMoveRequest, StockRemoveRequest,
 } from "../../../src/webapp/api-types";
-import type { IconName } from "../../../web/src/components/Icon.vue";
+import type { IconName } from "../../../adminapp/src/components/Icon.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
 import { locationOptions, locations } from "../catalog";

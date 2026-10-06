@@ -1,12 +1,13 @@
-// Runs against TEST_DATABASE_URL only; the uex, web, bot, app and catalog schemas there are dropped and recreated.
+// Runs against TEST_DATABASE_URL only; the ext, web, bot, app and catalog schemas there are dropped and recreated.
 // The UEX pull with the API replaced by a fake fetch.
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { asc, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
-import { snapshot } from '../src/db/schema/uex.ts';
-import { fetchEndpoint, pullAll, storeSnapshot } from '../src/uex/fetch.ts';
+import { snapshot } from '../src/db/schema/ext.ts';
+import { storeSnapshot } from '../src/ext/store.ts';
+import { fetchEndpoint, pullUex } from '../src/ext/uex.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -31,28 +32,28 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
 
   before(async () => {
     ({ db, close } = connect(url));
-    for (const schema of ['uex', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
     await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
   });
   after(() => close());
-  beforeEach(() => db.execute(sql`TRUNCATE uex.snapshot`));
+  beforeEach(() => db.execute(sql`TRUNCATE ext.snapshot`));
 
   const rows = () => db.select().from(snapshot).orderBy(asc(snapshot.id));
 
   it('stores a snapshot only when the content changed', async () => {
-    assert.equal(await storeSnapshot(db, 'refineries_yields', [{ id: 1, value: 5 }]), 'inserted');
+    assert.equal(await storeSnapshot(db, 'uex', 'refineries_yields', [{ id: 1, value: 5 }]), 'inserted');
     const [first] = await rows();
-    assert.equal(await storeSnapshot(db, 'refineries_yields', [{ id: 1, value: 5 }]), 'unchanged');
+    assert.equal(await storeSnapshot(db, 'uex', 'refineries_yields', [{ id: 1, value: 5 }]), 'unchanged');
     let all = await rows();
     assert.equal(all.length, 1);
     assert.ok(all[0]!.checkedAt > first!.checkedAt);
     assert.equal(all[0]!.fetchedAt.getTime(), first!.fetchedAt.getTime());
 
-    assert.equal(await storeSnapshot(db, 'refineries_yields', [{ id: 1, value: 6 }]), 'inserted');
+    assert.equal(await storeSnapshot(db, 'uex', 'refineries_yields', [{ id: 1, value: 6 }]), 'inserted');
     // Back to the first content: a new row, the history shows the flip
-    assert.equal(await storeSnapshot(db, 'refineries_yields', [{ id: 1, value: 5 }]), 'inserted');
+    assert.equal(await storeSnapshot(db, 'uex', 'refineries_yields', [{ id: 1, value: 5 }]), 'inserted');
     // Another endpoint is compared with its own latest row only
-    assert.equal(await storeSnapshot(db, 'refineries_methods', [{ id: 1, value: 5 }]), 'inserted');
+    assert.equal(await storeSnapshot(db, 'uex', 'refineries_methods', [{ id: 1, value: 5 }]), 'inserted');
     all = await rows();
     assert.deepEqual(all.map((r) => [r.endpoint, r.data]), [
       ['refineries_yields', [{ id: 1, value: 5 }]],
@@ -82,7 +83,7 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
     const error = console.error;
     console.error = () => {};
     try {
-      await pullAll(db, 'tok', fetchFn);
+      await pullUex(db, 'tok', fetchFn);
     } finally {
       console.error = error;
     }

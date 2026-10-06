@@ -1,4 +1,4 @@
-// Admin web UI: JSON API (catalog reads, catalog/localization imports) plus the built SPA (web/dist),
+// Admin web UI: JSON API (catalog reads, catalog/localization imports) plus the built SPA (adminapp/dist),
 // behind HTTP basic auth. Binds to 127.0.0.1 unless ADMINAPP_HOST says otherwise; in production it sits
 // behind Caddy (TLS) and is published on the host's loopback only (compose.yaml).
 import { existsSync, readFileSync } from 'node:fs';
@@ -24,7 +24,7 @@ if (!ADMINAPP_USER || !ADMINAPP_PASSWORD) {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
+const DIST = fileURLToPath(new URL('../../adminapp/dist', import.meta.url));
 
 const { db, close } = connect(process.env.DATABASE_URL);
 const app = new Hono();
@@ -185,14 +185,14 @@ if (existsSync(DIST)) {
   const index = readFileSync(`${DIST}/index.html`, 'utf8');
   app.get('*', (c) => c.html(index));
 } else {
-  app.get('*', (c) => c.text('SPA not built: run "pnpm web:build", or use "pnpm web:dev" for development.', 404));
+  app.get('*', (c) => c.text('SPA not built: run "pnpm adminapp:build", or use "pnpm adminapp:dev" for development.', 404));
 }
 
 await refreshLangs();
 const server = serve({ fetch: app.fetch, hostname: ADMINAPP_HOST, port: Number(ADMINAPP_PORT) }, (info) => {
   const url = `http://${info.address}:${info.port}`;
   console.log(`Backend (API) on ${url}`);
-  console.log(existsSync(DIST) ? `Built UI on ${url}` : 'No built UI (web/dist); in development the UI runs on Vite (pnpm web:dev)');
+  console.log(existsSync(DIST) ? `Built UI on ${url}` : 'No built UI (adminapp/dist); in development the UI runs on Vite (pnpm adminapp:dev)');
 });
 
 const shutdown = () => server.close(() => void close().then(() => process.exit(0)));

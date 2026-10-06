@@ -9,7 +9,7 @@ import RawJson from "../components/RawJson.vue";
 import { useFetch } from "../api";
 import { matches } from "../format";
 import { HELP } from "../help";
-import type { ResourceDetail, ResourceRow } from "../../../src/web/api-types";
+import type { ResourceDetail, ResourceRow } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
 const route = useRoute();

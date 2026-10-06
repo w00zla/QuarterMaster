@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { LocationEntry } from '../src/stock/lookup.ts';
-import { matchRefineries, uexTerminals } from '../src/uex/refineries.ts';
+import { matchRefineries, uexTerminals } from '../src/ext/refineries.ts';
 
 const loc = (uuid: string, name: string, system: string | null): LocationEntry =>
   ({ uuid, name, nameEn: name, body: null, system, label: name, short: name });

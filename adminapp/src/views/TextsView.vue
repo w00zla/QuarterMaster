@@ -9,7 +9,7 @@ import { useFetch } from "../api";
 import { dateTime, sourceTag } from "../format";
 import { HELP } from "../help";
 import { lang } from "../lang";
-import type { LocKeyDetail, LocSearch, LocSearchRow, LocSource } from "../../../src/web/api-types";
+import type { LocKeyDetail, LocSearch, LocSearchRow, LocSource } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
 const route = useRoute();

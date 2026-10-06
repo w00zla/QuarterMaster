@@ -8,7 +8,7 @@ import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
 import { locationOptions, locations, materialOptions, materials, oreOptions, refineryLocationOptions } from "../catalog";
 import { amountOf, qty, qualityOf, unitText } from "../format";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
 import { ensureMembers, memberOptions, members, orgOf, writable } from "../orgs";
 import { me } from "../session";

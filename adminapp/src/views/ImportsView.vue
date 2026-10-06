@@ -9,7 +9,7 @@ import Icon from "../components/Icon.vue";
 import { useFetch } from "../api";
 import { dateTime } from "../format";
 import { HELP } from "../help";
-import type { Anomaly, ImportDetail, ImportRow } from "../../../src/web/api-types";
+import type { Anomaly, ImportDetail, ImportRow } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
 interface Counts { total: number; added: number; changed: number; unchanged: number; revived?: number; retired?: number; removed?: number }

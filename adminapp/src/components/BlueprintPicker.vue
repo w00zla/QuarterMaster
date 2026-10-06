@@ -8,7 +8,7 @@ import Icon from "./Icon.vue";
 import TypeLabel from "./TypeLabel.vue";
 import { get, useFetch } from "../api";
 import { lang } from "../lang";
-import type { BlueprintRow, ItemDetail, ItemRow, ResourceDetail, ResourceRow } from "../../../src/web/api-types";
+import type { BlueprintRow, ItemDetail, ItemRow, ResourceDetail, ResourceRow } from "../../../src/adminapp/api-types";
 
 const emit = defineEmits<{ add: [uuid: string] }>();
 

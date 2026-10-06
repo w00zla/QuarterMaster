@@ -2,7 +2,7 @@
 .git
 .env
 local
-web/dist
+adminapp/dist
 test
 .claude
 .vscode

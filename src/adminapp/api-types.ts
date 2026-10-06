@@ -1,4 +1,4 @@
-// Response types of the admin API, shared by the server (src/web) and the SPA (web/).
+// Response types of the admin API, shared by the server (src/adminapp) and the SPA (adminapp/).
 // Types only: the SPA imports this file and must not pull in server dependencies.
 
 export interface GameInfo {

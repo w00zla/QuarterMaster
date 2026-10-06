@@ -4,8 +4,8 @@
 // choice change: a quality below the minimum shows on the slot's min Q tag, a wrong slot choice
 // next to the slot count, and the stats list every stat the recipe's slots can give.
 import { computed } from "vue";
-import Icon from "../../../web/src/components/Icon.vue";
-import { typeIcon } from "../../../web/src/typeIcons";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
 import { warningOf } from "../crafting";

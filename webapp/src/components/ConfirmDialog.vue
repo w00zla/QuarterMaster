@@ -1,7 +1,7 @@
 <script lang="ts">
 // One question, a row of buttons, one answer. The caller decides the wording and the icon; optional
 // body content (default slot) sits between title and buttons. Taken from BindSight.
-import type { IconName } from "../../../web/src/components/Icon.vue";
+import type { IconName } from "../../../adminapp/src/components/Icon.vue";
 
 export interface ConfirmButton {
   label: string;
@@ -18,7 +18,7 @@ const open: symbol[] = [];
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 
 const props = defineProps<{
   title: string;

@@ -6,9 +6,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type {
   BlueprintListResponse, BlueprintOwner, BlueprintRequest, CatalogBlueprint, OkResponse, OrgBlueprintsResponse,
 } from "../../../src/webapp/api-types";
-import DataTable from "../../../web/src/components/DataTable.vue";
-import Icon from "../../../web/src/components/Icon.vue";
-import type { ColumnSpec } from "../../../web/src/tableColumns";
+import DataTable from "../../../adminapp/src/components/DataTable.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import type { ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { useRouter } from "vue-router";
 import { api } from "../api";
 import { addToCrafting } from "../crafting";

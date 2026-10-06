@@ -4,7 +4,7 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import type { StockMetrics, SummaryResponse } from "../../../src/webapp/api-types";
 import { api } from "../api";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import StatTile from "../components/StatTile.vue";
 import { lang, t } from "../i18n";
 import { onServerMessage } from "../realtime";

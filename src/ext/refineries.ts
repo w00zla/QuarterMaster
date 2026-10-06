@@ -54,12 +54,12 @@ let cached: { snapshotId: number; locations: Map<string, LocationEntry>; value: 
 /** Matched refinery terminals of the latest yields snapshot; null while there is none. */
 export async function refineryMatch(db: Db): Promise<RefineryMatch | null> {
   const latest = await one<{ id: number }>(db, sql`
-    SELECT id::int AS id FROM uex.snapshot WHERE endpoint = 'refineries_yields' ORDER BY id DESC LIMIT 1`);
+    SELECT id::int AS id FROM ext.snapshot WHERE source = 'uex' AND endpoint = 'refineries_yields' ORDER BY id DESC LIMIT 1`);
   if (!latest) return null;
   // English names and systems: what UEX uses
   const locations = await locationCatalog(db, 'en');
   if (cached?.snapshotId === latest.id && cached.locations === locations) return cached.value;
-  const snap = await one<{ data: YieldRow[] }>(db, sql`SELECT data FROM uex.snapshot WHERE id = ${latest.id}`);
+  const snap = await one<{ data: YieldRow[] }>(db, sql`SELECT data FROM ext.snapshot WHERE id = ${latest.id}`);
   const value = matchRefineries(uexTerminals(snap?.data ?? []), locations.values());
   cached = { snapshotId: latest.id, locations, value };
   return value;

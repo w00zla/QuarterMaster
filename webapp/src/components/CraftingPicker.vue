@@ -4,9 +4,9 @@
 // - by ingredient: pick a resource or item, then one of the recipes using it.
 // The manufacturer is shown, not searched.
 import { computed, ref, watch } from "vue";
-import type { BlueprintRow, ItemRow, ResourceRow } from "../../../src/web/api-types";
+import type { BlueprintRow, ItemRow, ResourceRow } from "../../../src/adminapp/api-types";
 import type { CraftingUse } from "../../../src/webapp/api-types";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { useCrafting } from "../crafting";
 import { unitText } from "../format";

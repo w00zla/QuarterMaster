@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // An item type as icon plus display name; the technical type as the native tooltip.
-import Icon from "../../../web/src/components/Icon.vue";
-import { typeIcon } from "../../../web/src/typeIcons";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import { typeIcon } from "../../../adminapp/src/typeIcons";
 
 withDefaults(defineProps<{ type: string | null | undefined; label: string | null | undefined; size?: number }>(), { size: 14 });
 </script>

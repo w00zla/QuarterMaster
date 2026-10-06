@@ -12,7 +12,7 @@ import TypeLabel from "../components/TypeLabel.vue";
 import { useFetch } from "../api";
 import { matches } from "../format";
 import { HELP } from "../help";
-import type { ItemDetail, ItemRow } from "../../../src/web/api-types";
+import type { ItemDetail, ItemRow } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
 const route = useRoute();

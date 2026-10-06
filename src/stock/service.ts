@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db, Tx } from '../db/client.ts';
 import { one } from '../db/query.ts';
-import { refineryLocations } from '../uex/refineries.ts';
+import { refineryLocations } from '../ext/refineries.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
 
 export type Designation = 'personal' | 'org';

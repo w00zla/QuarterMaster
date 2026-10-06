@@ -7,7 +7,7 @@ import Icon from "../components/Icon.vue";
 import { useFetch } from "../api";
 import { dateTime, duration, sourceTag } from "../format";
 import { HELP } from "../help";
-import type { Overview } from "../../../src/web/api-types";
+import type { Overview } from "../../../src/adminapp/api-types";
 
 const router = useRouter();
 const overview = useFetch<Overview>(() => "/overview");

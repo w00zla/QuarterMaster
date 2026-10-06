@@ -38,7 +38,7 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
 
   before(async () => {
     ({ db, close } = connect(url));
-    for (const schema of ['uex', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
     await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
@@ -162,10 +162,10 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
 
   it('refinery: only at UEX refineries once there is UEX data', async () => {
     const yields = [{ id_terminal: 1, terminal_name: 'Refinement Center - Elsewhere', star_system_name: 'Nyx', space_station_name: 'Elsewhere' }];
-    await db.execute(sql`INSERT INTO uex.snapshot (endpoint, content_hash, data)
-      VALUES ('refineries_yields', ${'a'.repeat(64)}, ${JSON.stringify(yields)}::jsonb)`);
+    await db.execute(sql`INSERT INTO ext.snapshot (source, endpoint, content_hash, data)
+      VALUES ('uex', 'refineries_yields', ${'a'.repeat(64)}, ${JSON.stringify(yields)}::jsonb)`);
     await refused(refineStart(db, mia, { oreUuid: U.ore, locationUuid: U.station, quality: 600, amount: '1' }), 'notRefinery');
-    await db.execute(sql`TRUNCATE uex.snapshot`);
+    await db.execute(sql`TRUNCATE ext.snapshot`);
     assert.ok((await refineStart(db, mia, { oreUuid: U.ore, locationUuid: U.station, quality: 600, amount: '1' })).batch);
   });
 

@@ -7,7 +7,7 @@ import { connect, type Db } from '../src/db/client.ts';
 import { runImport, type ImportOptions } from '../src/catalog/import/apply.ts';
 import { parseIniFile, runLocImport, runLocRemove, type LocImportOptions } from '../src/catalog/import/loc-import.ts';
 import { loadPlannerData } from '../src/planner/load.ts';
-import { getBlueprints } from '../src/web/queries.ts';
+import { getBlueprints } from '../src/adminapp/queries.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import type { Snapshot } from '../src/catalog/snapshot.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
@@ -25,7 +25,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
 
   before(async () => {
     ({ db, close } = connect(url));
-    await db.execute(sql`DROP SCHEMA IF EXISTS uex CASCADE`);
+    await db.execute(sql`DROP SCHEMA IF EXISTS ext CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS web CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS bot CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS app CASCADE`);

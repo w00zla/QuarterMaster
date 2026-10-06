@@ -1,5 +1,5 @@
 // Response types of the user web app API, shared with its SPA. Pure types: no server imports.
-import type { ResourceDetail } from '../web/api-types.ts';
+import type { ResourceDetail } from '../adminapp/api-types.ts';
 
 export interface MeOrg {
   guildId: string;
@@ -247,7 +247,7 @@ export interface SummaryResponse {
 }
 
 // --- crafting check (the admin UI's planner; all take &lang=de|en) ---------------------------------
-// GET /api/crafting/blueprints                       BlueprintRow[]  (types from src/web/api-types.ts)
+// GET /api/crafting/blueprints                       BlueprintRow[]  (types from src/adminapp/api-types.ts)
 // GET /api/crafting/resources                        ResourceRow[]
 // GET /api/crafting/items                            ItemRow[]
 // GET /api/crafting/used-by?kind=resource|item&uuid=  CraftingUse[]: recipes that take it

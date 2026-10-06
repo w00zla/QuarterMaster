@@ -3,7 +3,7 @@ import { onMounted, provide, ref } from "vue";
 import { RouterView } from "vue-router";
 import TopBar from "./components/TopBar.vue";
 import { get } from "./api";
-import type { Meta } from "../../src/web/api-types";
+import type { Meta } from "../../src/adminapp/api-types";
 import { lang } from "./lang";
 
 const meta = ref<Meta>({ game: null, langs: ["en"] });

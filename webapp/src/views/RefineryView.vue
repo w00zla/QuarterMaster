@@ -3,7 +3,7 @@
 // always personal, so this works the same without any org.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import BatchDialog from "../components/BatchDialog.vue";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";

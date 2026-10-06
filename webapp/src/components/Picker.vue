@@ -12,7 +12,7 @@ export interface PickerOption {
 // All typed words must match; entries whose label starts with the first word come first, otherwise the
 // caller's order stays. Text that was not picked is dropped on blur: only listed values get through.
 import { computed, nextTick, ref, watch } from "vue";
-import Icon from "../../../web/src/components/Icon.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
 
 const MAX = 20;

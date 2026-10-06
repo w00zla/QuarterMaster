@@ -1,5 +1,5 @@
 {
-  "id": "c6b20102-14d2-41a3-83a6-e2794c460c4b",
+  "id": "083019f4-38f7-469b-9773-dd9bd0dd1de5",
   "prevId": "30ecf7d8-36f1-455b-be01-7940cda1d95e",
   "version": "7",
   "dialect": "postgresql",
@@ -2791,9 +2791,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "uex.snapshot": {
+    "ext.snapshot": {
       "name": "snapshot",
-      "schema": "uex",
+      "schema": "ext",
       "columns": {
         "id": {
           "name": "id",
@@ -2803,7 +2803,7 @@
           "identity": {
             "type": "always",
             "name": "snapshot_id_seq",
-            "schema": "uex",
+            "schema": "ext",
             "increment": "1",
             "startWith": "1",
             "minValue": "1",
@@ -2811,6 +2811,12 @@
             "cache": "1",
             "cycle": false
           }
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "endpoint": {
           "name": "endpoint",
@@ -2846,9 +2852,15 @@
         }
       },
       "indexes": {
-        "snapshot_endpoint_id_index": {
-          "name": "snapshot_endpoint_id_index",
+        "snapshot_source_endpoint_id_index": {
+          "name": "snapshot_source_endpoint_id_index",
           "columns": [
+            {
+              "expression": "source",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "endpoint",
               "isExpression": false,
@@ -2875,7 +2887,7 @@
       "checkConstraints": {
         "snapshot_content_hash_format": {
           "name": "snapshot_content_hash_format",
-          "value": "\"uex\".\"snapshot\".\"content_hash\" ~ '^[0-9a-f]{64}$'"
+          "value": "\"ext\".\"snapshot\".\"content_hash\" ~ '^[0-9a-f]{64}$'"
         }
       },
       "isRLSEnabled": false
@@ -3030,7 +3042,7 @@
     "app": "app",
     "bot": "bot",
     "catalog": "catalog",
-    "uex": "uex",
+    "ext": "ext",
     "web": "web"
   },
   "sequences": {},

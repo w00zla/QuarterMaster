@@ -1,4 +1,4 @@
-import type { BlueprintInput } from "../../src/web/api-types";
+import type { BlueprintInput } from "../../src/adminapp/api-types";
 
 export function duration(seconds: number | null): string {
   if (seconds === null) return "—";

@@ -5,7 +5,7 @@ import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import Icon, { type IconName } from "./Icon.vue";
 import Dropdown from "./Dropdown.vue";
-import type { GameInfo } from "../../../src/web/api-types";
+import type { GameInfo } from "../../../src/adminapp/api-types";
 import { lang } from "../lang";
 import logo from "../assets/logo-128.png";
 

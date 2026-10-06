@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // One headline number with its icon and label; "—" while there is none yet, so nothing shifts when it arrives.
-import Icon, { type IconName } from "../../../web/src/components/Icon.vue";
+import Icon, { type IconName } from "../../../adminapp/src/components/Icon.vue";
 
 defineProps<{ label: string; value: string | null; icon: IconName }>();
 </script>

@@ -7,7 +7,7 @@ import HelpTip from "./HelpTip.vue";
 import Icon from "./Icon.vue";
 import { postFile } from "../api";
 import { HELP } from "../help";
-import type { CatalogImportResponse, LocImportResponse, Meta } from "../../../src/web/api-types";
+import type { CatalogImportResponse, LocImportResponse, Meta } from "../../../src/adminapp/api-types";
 
 const emit = defineEmits<{ imported: [] }>();
 const meta = inject<{ value: Meta }>("meta");

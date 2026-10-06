@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import vue from "@vitejs/plugin-vue";
 
-// Dev: the API runs as its own process (pnpm web); Vite proxies /api to it.
+// Dev: the API runs as its own process (pnpm adminapp); Vite proxies /api to it.
 // Settings come from the repo root's .env, like the backend's.
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL("..", import.meta.url)), "ADMINAPP_");

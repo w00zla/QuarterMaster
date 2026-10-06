@@ -9,8 +9,8 @@ const cache = new Map<string, Promise<BlueprintInfo | MaterialInfo>>();
 // first use and shows it only once it is there (teleported, placed like the admin's Tooltip: above
 // the name, below it when there is no room). It overlays the page, nothing moves.
 import { computed, nextTick, onUnmounted, ref } from "vue";
-import Icon from "../../../web/src/components/Icon.vue";
-import { typeIcon } from "../../../web/src/typeIcons";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { api } from "../api";
 import { duration, qty } from "../format";
 import { lang, t } from "../i18n";

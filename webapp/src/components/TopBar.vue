@@ -2,8 +2,8 @@
 // The app bar in the admin UI's look: wordmark, tabs, the user with avatar (opens the profile), logout.
 import { ref } from "vue";
 import { RouterLink } from "vue-router";
-import Icon, { type IconName } from "../../../web/src/components/Icon.vue";
-import logo from "../../../web/src/assets/logo-128.png";
+import Icon, { type IconName } from "../../../adminapp/src/components/Icon.vue";
+import logo from "../../../adminapp/src/assets/logo-128.png";
 import { t, type Key } from "../i18n";
 import { logout, me } from "../session";
 import ProfileDialog from "./ProfileDialog.vue";
