@@ -3,7 +3,7 @@
 // system, an ore to a bookable catalog ore by its normalized English name.
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
-import { one } from '../db/query.ts';
+import { locText, one, rows } from '../db/query.ts';
 import { locationCatalog, materialCatalog, type LocationEntry, type MaterialEntry } from '../stock/lookup.ts';
 
 export interface UexTerminal {
@@ -90,4 +90,22 @@ export async function refineryMatch(db: Db): Promise<RefineryMatch | null> {
 export async function refineryLocations(db: Db): Promise<Set<string> | null> {
   const match = await refineryMatch(db);
   return match ? new Set(match.matched.keys()) : null;
+}
+
+export interface RefiningMethod {
+  code: string;
+  // The game's name in `lang`
+  name: string;
+  yieldPct: number;
+  secondsPerScu: number;
+  source: string;
+  gameVersion: string;
+}
+
+/** The refining methods with their community values, best yield first. */
+export function refiningMethods(db: Db, lang: string): Promise<RefiningMethod[]> {
+  return rows<RefiningMethod>(db, sql`
+    SELECT m.code, coalesce(${locText(lang, sql`m.name_key`)}, m.code) AS name, m.yield_pct::float8 AS "yieldPct",
+      m.seconds_per_scu AS "secondsPerScu", m.source, m.game_version AS "gameVersion"
+    FROM ext.refining_method m ORDER BY m.yield_pct DESC, m.code`);
 }

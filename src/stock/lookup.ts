@@ -88,12 +88,23 @@ export function searchWords<T>(entries: Iterable<T>, query: string, text: (e: T)
 /** remove/adjust: any batch the actor may change; move: not refinery jobs; refining: the actor's own refinery jobs. */
 export type BatchPick = 'change' | 'move' | 'refining';
 
+/** A refinery job's method and estimates (NULLs on jobs from before they were recorded). */
+export interface RefineInfo {
+  method: string | null;
+  startedAt: string | null;
+  endsAt: string | null;
+  // NUMERIC text
+  expected: string | null;
+}
+
 export interface PickableBatch {
   batch: Batch;
   material: string;
   location: string;
   // Org stock: who holds it
   holderName: string | null;
+  // Refinery jobs only
+  refine: RefineInfo | null;
 }
 
 /**
@@ -139,10 +150,12 @@ export async function findStock(db: Db, guildId: string, userId: string, subject
 
 /** Batches matching `where` (alias `b`) with display names, ordered by material, then quality (best first). */
 async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBatch[]> {
-  const found = await rows<Batch & { holderName: string | null }>(db, sql`
+  const found = await rows<Batch & { holderName: string | null; refine: RefineInfo }>(db, sql`
     SELECT b.id::int AS id, b.guild_id AS "guildId", b.owner_user_id AS "ownerUserId", b.designation, b.kind,
       b.resource_uuid AS "resourceUuid", b.item_uuid AS "itemUuid", b.location_uuid AS "locationUuid", b.state, b.quality,
-      b.quantity::text AS quantity, m.display_name AS "holderName"
+      b.quantity::text AS quantity, m.display_name AS "holderName",
+      json_build_object('method', b.refine_method, 'startedAt', b.refine_started_at, 'endsAt', b.refine_ends_at,
+        'expected', b.refine_expected::text) AS refine
     FROM app.stock_batch b
     LEFT JOIN app.member m ON b.guild_id IS NOT NULL AND m.guild_id = b.guild_id AND m.user_id = b.owner_user_id
     WHERE ${where}`);
@@ -151,13 +164,14 @@ async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBa
   const fallbackNames = await missingNames(db, lang, found.filter((b) => !materials.has(b.resourceUuid ?? b.itemUuid!)).map((b) => b.resourceUuid ?? b.itemUuid!),
     found.filter((b) => !locations.has(b.locationUuid)).map((b) => b.locationUuid));
   return found
-    .map(({ holderName, ...batch }) => {
+    .map(({ holderName, refine, ...batch }) => {
       const subject = batch.resourceUuid ?? batch.itemUuid!;
       return {
         batch,
         material: materials.get(subject)?.name ?? fallbackNames.get(subject) ?? subject,
         location: locations.get(batch.locationUuid)?.short ?? fallbackNames.get(batch.locationUuid) ?? batch.locationUuid,
         holderName: batch.designation === 'org' ? holderName : null,
+        refine: batch.state === 'refining' ? refine : null,
       };
     })
     .sort((a, b) => a.material.localeCompare(b.material) || b.batch.quality - a.batch.quality || a.batch.id - b.batch.id);

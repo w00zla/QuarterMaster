@@ -45,6 +45,8 @@ const byUuid = <T extends { uuid: string }>(list: T[] | undefined) => new Map((l
 export const materials = computed(() => byUuid<CatalogMaterial>(catalog.value?.materials));
 export const locations = computed(() => byUuid<CatalogLocation>(catalog.value?.locations));
 export const blueprints = computed(() => byUuid<CatalogBlueprint>(catalog.value?.blueprints));
+// Refining methods by code, best yield first
+export const methods = computed(() => new Map((catalog.value?.methods ?? []).map((m) => [m.code, m])));
 
 const byName = (a: string, b: string) => a.localeCompare(b, lang.value);
 

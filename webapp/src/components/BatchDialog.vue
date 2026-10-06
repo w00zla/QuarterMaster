@@ -29,7 +29,8 @@ const step = ref<"input" | "confirm">("input");
 const busy = ref(false);
 
 const all = ref(false);
-const amount = ref("");
+// A finished refinery job starts from its expected yield (an estimate: the user enters what the game shows)
+const amount = ref(props.action === "done" ? b.refine?.expectedYield ?? "" : "");
 const quality = ref("");
 const location = ref<string | null>(b.locationUuid);
 // Move target: personal batch "stay" | guildId (donation); org batch "org" | "personal"

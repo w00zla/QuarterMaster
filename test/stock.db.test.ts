@@ -8,6 +8,7 @@ import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
+import { stockList } from '../src/stock/lookup.ts';
 import { add, adjust, move, refineDone, refineStart, remove, StockError, type Actor, type StockErrorCode } from '../src/stock/service.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
@@ -158,6 +159,31 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     assert.equal(done.journal[0]!.groupId, done.journal[1]!.groupId);
     assert.equal(await batchCount(), before);
     await refused(refineDone(db, mia, { batchId: done.batch!.id, amount: '1', quality: 1 }), 'notRefining');
+  });
+
+  it('refinery: each job is its own batch with method, end and expected yield', async () => {
+    const job = { oreUuid: U.ore, locationUuid: U.station, quality: 610, amount: '4' };
+    await refused(refineStart(db, mia, { ...job, method: 'ABC' }), 'unknownMethod');
+    await refused(refineStart(db, mia, { ...job, durationSeconds: 0 }), 'invalidDuration');
+    await refused(refineStart(db, mia, { ...job, durationSeconds: 1.5 }), 'invalidDuration');
+    await refused(refineStart(db, mia, { ...job, expectedYield: 'x' }), 'invalidAmount');
+    const a = (await refineStart(db, mia, { ...job, method: 'DIN', durationSeconds: 3600, expectedYield: '3,7' })).batch!;
+    // Same ore, place and quality: a second job, not merged into the first
+    const b = (await refineStart(db, mia, job)).batch!;
+    assert.notEqual(a.id, b.id);
+    const jobs = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).filter((p) => p.batch.id === a.id || p.batch.id === b.id);
+    const first = jobs.find((p) => p.batch.id === a.id)!.refine!;
+    assert.equal(first.method, 'DIN');
+    assert.equal(first.expected, '3.700000');
+    assert.equal(new Date(first.endsAt!).getTime() - new Date(first.startedAt!).getTime(), 3600_000);
+    const second = jobs.find((p) => p.batch.id === b.id)!.refine!;
+    assert.deepEqual([second.method, second.endsAt, second.expected], [null, null, null]);
+    assert.ok(second.startedAt);
+    // Stored stock has no job fields, and the refined result is stored stock
+    const done = await refineDone(db, mia, { batchId: a.id, amount: '3.7', quality: 640 });
+    const stored = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).find((p) => p.batch.id === done.batch!.id)!;
+    assert.equal(stored.refine, null);
+    await refineDone(db, mia, { batchId: b.id, amount: '3', quality: 640 });
   });
 
   it('refinery: only at UEX refineries once there is UEX data', async () => {

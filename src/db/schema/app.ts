@@ -82,6 +82,13 @@ export const stockBatch = app.table('stock_batch', {
   quality: integer('quality').notNull(),
   // SCU for resources, pieces for items
   quantity: quantity('quantity').notNull(),
+  // Refinery jobs only (all NULL for stored stock; NULL on jobs from before migration 0009). The method is an
+  // ext.refining_method code, checked by the stock service (no FK: nothing references schema ext). Ends at and
+  // expected yield are estimates the user may overwrite with the terminal's values.
+  refineMethod: text('refine_method'),
+  refineStartedAt: timestamp('refine_started_at', { withTimezone: true }),
+  refineEndsAt: timestamp('refine_ends_at', { withTimezone: true }),
+  refineExpected: quantity('refine_expected'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -98,8 +105,13 @@ export const stockBatch = app.table('stock_batch', {
   check('stock_batch_quality', sql`${t.quality} BETWEEN 0 AND 1000`),
   check('stock_batch_quantity', sql`${t.quantity} > 0`),
   check('stock_batch_item_pieces', sql`${t.kind} = 'resource' OR ${t.quantity} = trunc(${t.quantity})`),
+  check('stock_batch_refine_job', sql`${t.state} = 'refining' OR (${t.refineMethod} IS NULL AND ${t.refineStartedAt} IS NULL
+    AND ${t.refineEndsAt} IS NULL AND ${t.refineExpected} IS NULL)`),
+  check('stock_batch_refine_ends', sql`${t.refineEndsAt} IS NULL OR ${t.refineEndsAt} >= ${t.refineStartedAt}`),
+  check('stock_batch_refine_expected', sql`${t.refineExpected} IS NULL OR ${t.refineExpected} >= 0`),
+  // The start time keeps two refinery jobs with the same ore, place and quality apart (stored stock: NULL, merges)
   unique('stock_batch_merge_key').on(
-    t.guildId, t.ownerUserId, t.designation, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality,
+    t.guildId, t.ownerUserId, t.designation, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineStartedAt,
   ).nullsNotDistinct(),
   index().on(t.guildId, t.resourceUuid),
   index().on(t.guildId, t.itemUuid),

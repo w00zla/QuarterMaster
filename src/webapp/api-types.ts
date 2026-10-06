@@ -88,10 +88,20 @@ export interface CatalogBlueprint {
   retired: boolean;
 }
 
+/** A refining method with its community values (estimates, see ext.refining_method). */
+export interface CatalogRefiningMethod {
+  code: string;
+  name: string;
+  yieldPct: number;
+  secondsPerScu: number;
+}
+
 export interface CatalogResponse {
   materials: CatalogMaterial[];
   locations: CatalogLocation[];
   blueprints: CatalogBlueprint[];
+  // Best yield first
+  methods: CatalogRefiningMethod[];
 }
 
 // --- stock -------------------------------------------------------------------------------------
@@ -123,6 +133,18 @@ export interface StockBatch {
   holderName: string | null;
   // Whether you may remove/adjust/move it (personal: yours; org: officers of that org)
   canChange: boolean;
+  // Refinery jobs only; the fields are NULL on jobs started without them
+  refine: StockRefine | null;
+}
+
+export interface StockRefine {
+  // CatalogRefiningMethod.code
+  method: string | null;
+  // ISO timestamps
+  startedAt: string | null;
+  endsAt: string | null;
+  // Expected refined SCU (an estimate), exact decimal text
+  expectedYield: string | null;
 }
 
 export interface StockListResponse {
@@ -180,6 +202,11 @@ export interface RefineryStartRequest {
   locationUuid: string;
   quality: number;
   amount: string;
+  // CatalogRefiningMethod.code
+  method?: string;
+  // Estimates, prefilled from the method and editable: processing time and refined SCU
+  durationSeconds?: number;
+  expectedYield?: string;
 }
 
 export interface RefineryDoneRequest {

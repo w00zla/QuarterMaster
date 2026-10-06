@@ -2,12 +2,13 @@
 // Books new stock (POST /api/stock/add) or starts a refinery job (POST /api/refinery/start, always
 // personal, ores only), after a confirmation step like every action.
 import { computed, ref, watch } from "vue";
+import { estimateJob } from "../../../src/ext/refining-estimate";
 import type { OkResponse, RefineryStartRequest, StockAddRequest } from "../../../src/webapp/api-types";
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
-import { locationOptions, locations, materialOptions, materials, oreOptions, refineryLocationOptions, yieldBonus } from "../catalog";
-import { amountOf, qText, qty, qualityOf, unitText } from "../format";
+import { locationOptions, locations, materialOptions, materials, methods, oreOptions, refineryLocationOptions, yieldBonus, yieldValue } from "../catalog";
+import { amountOf, hm, qText, qty, qualityOf, unitText } from "../format";
 import { t } from "../i18n";
 import { ensureMembers, memberOptions, members, orgOf, writable } from "../orgs";
 import { me } from "../session";
@@ -59,7 +60,48 @@ watch(org, (o) => {
 const unit = computed(() => (subject.value ? materials.value.get(subject.value)?.unit : undefined) ?? "SCU");
 const q = computed(() => qualityOf(quality.value));
 const amt = computed(() => amountOf(amount.value, unit.value));
-const valid = computed(() => !!subject.value && !!location.value && q.value !== null && !!amt.value && (!pickHolder.value || !!holder.value));
+
+// --- refinery: method, then duration and expected yield, prefilled from the method's community values
+// (and the station's UEX bonus) until the user types into them, e.g. the terminal's numbers -------
+const method = ref("");
+const hours = ref("");
+const minutes = ref("");
+const expectedYield = ref("");
+const durationEdited = ref(false);
+const yieldEdited = ref(false);
+
+const methodOptions = computed(() => [...methods.value.values()].map((m) => ({ value: m.code, label: `${m.name} · ${m.yieldPct} %` })));
+watch(methodOptions, (o) => {
+  if (!method.value && o.length) method.value = o[0]!.value;
+}, { immediate: true });
+
+const estimate = computed(() => {
+  const m = methods.value.get(method.value);
+  if (!props.refinery || !m || !amt.value) return null;
+  return estimateJob(Number(amt.value), m, (location.value && yieldValue(location.value, subject.value)) || 0);
+});
+watch(estimate, (e) => {
+  if (!e) return;
+  if (!durationEdited.value) {
+    const total = Math.ceil(e.seconds / 60);
+    hours.value = String(Math.floor(total / 60));
+    minutes.value = String(total % 60);
+  }
+  if (!yieldEdited.value) expectedYield.value = String(e.yieldScu);
+});
+
+const wholeOf = (text: string) => (/^\s*\d{0,6}\s*$/.test(text) ? Number(text.trim() || "0") : null);
+// null: invalid (not whole numbers, minutes over 59, or no time at all)
+const durationSeconds = computed(() => {
+  const h = wholeOf(hours.value);
+  const m = wholeOf(minutes.value);
+  return h === null || m === null || m > 59 || h * 60 + m === 0 ? null : (h * 60 + m) * 60;
+});
+const expectedAmt = computed(() => (expectedYield.value.trim() ? amountOf(expectedYield.value, "SCU") : ""));
+const refineValid = computed(() => !props.refinery || (durationSeconds.value !== null && expectedAmt.value !== null));
+
+const valid = computed(() => !!subject.value && !!location.value && q.value !== null && !!amt.value && (!pickHolder.value || !!holder.value)
+  && refineValid.value);
 
 function ownerText(): string {
   if (props.refinery || !org.value) return t("stock.pers");
@@ -69,8 +111,11 @@ function ownerText(): string {
 
 function submit() {
   if (!valid.value || busy.value) return;
+  const job = props.refinery
+    ? ` · ${methods.value.get(method.value)?.name ?? ""}${expectedAmt.value ? ` · ≈ ${qty(expectedAmt.value, "SCU")}` : ""} · ${hm(durationSeconds.value!)}`
+    : "";
   pending.value = `${qty(amt.value!, unit.value)} ${materials.value.get(subject.value!)?.name ?? ""} · ${qText(q.value)} · ${
-    locations.value.get(location.value!)?.short ?? ""} · ${ownerText()}`;
+    locations.value.get(location.value!)?.short ?? ""} · ${ownerText()}${job}`;
 }
 
 const confirmButtons = computed<ConfirmButton[]>(() => [
@@ -89,7 +134,12 @@ async function book() {
   busy.value = true;
   try {
     if (props.refinery) {
-      const body: RefineryStartRequest = { oreUuid: subject.value!, locationUuid: location.value!, quality: q.value!, amount: amount.value.trim() };
+      const body: RefineryStartRequest = {
+        oreUuid: subject.value!, locationUuid: location.value!, quality: q.value!, amount: amount.value.trim(),
+        durationSeconds: durationSeconds.value!,
+      };
+      if (method.value) body.method = method.value;
+      if (expectedAmt.value) body.expectedYield = expectedAmt.value;
       await api<OkResponse>("/refinery/start", { method: "POST", body });
       toast(t("refinery.started", { what }));
     } else {
@@ -137,6 +187,28 @@ defineExpose({ ready: computed(() => valid.value && !busy.value) });
         <span class="unit">{{ unitText(unit) }}</span>
       </span>
     </label>
+    <template v-if="refinery">
+      <div class="field">
+        {{ t("field.method") }}
+        <Dropdown v-model="method" variant="chip" :options="methodOptions" />
+      </div>
+      <div class="field">
+        {{ t("field.duration") }}
+        <span class="with-unit">
+          <input v-model="hours" class="input short" :class="{ invalid: durationSeconds === null }" type="text" inputmode="numeric" @input="durationEdited = true" />
+          <span class="unit">{{ t("unit.h") }}</span>
+          <input v-model="minutes" class="input short" :class="{ invalid: durationSeconds === null }" type="text" inputmode="numeric" @input="durationEdited = true" />
+          <span class="unit">{{ t("unit.min") }}</span>
+        </span>
+      </div>
+      <label class="field">
+        {{ t("field.expectedYield") }}
+        <span class="with-unit">
+          <input v-model="expectedYield" class="input" :class="{ invalid: expectedAmt === null }" type="text" inputmode="decimal" @input="yieldEdited = true" />
+          <span class="unit">{{ unitText("SCU") }}</span>
+        </span>
+      </label>
+    </template>
     <div v-if="!refinery && targets.length > 1" class="field">
       {{ t("field.target") }}
       <Dropdown v-model="target" variant="chip" :options="targets" />

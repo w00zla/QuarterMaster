@@ -8,10 +8,10 @@ import {
 } from '../catalog/labels.ts';
 import type {
   BlueprintDetail, BlueprintRow, BlueprintSlot, EntityCount, GameInfo, ImportDetail, ImportRow, ItemDetail, ItemRow,
-  LocKeyDetail, LocSearch, LocSource, Meta, Overview, Ref, ResourceDetail, ResourceRow, UexEndpointStatus, UexRefinery, UexResponse,
+  LocKeyDetail, LocSearch, LocSource, Meta, Overview, Ref, ResourceDetail, ResourceRow, UexEndpointStatus, UexMethod, UexRefinery, UexResponse,
 } from './api-types.ts';
 import { locationCatalog } from '../stock/lookup.ts';
-import { refineryMatch, uexTerminals } from '../ext/refineries.ts';
+import { refineryMatch, refiningMethods, uexTerminals } from '../ext/refineries.ts';
 
 /** Timestamp as ISO 8601 string (the driver would return Postgres' text format here). */
 const iso = (column: string) => sql.raw(`to_json(${column}) #>> '{}'`);
@@ -403,8 +403,23 @@ export async function getUex(db: Db, lang: string): Promise<UexResponse> {
     endpoints,
     refineries: refineries.sort((a, b) => a.system.localeCompare(b.system) || a.place.localeCompare(b.place)),
     ores: [...ores].sort((a, b) => a.localeCompare(b)),
-    methods: methods.map((m) => ({
-      name: String(m.name), code: String(m.code), ratingYield: Number(m.rating_yield), ratingCost: Number(m.rating_cost), ratingSpeed: Number(m.rating_speed),
-    })).sort((a, b) => a.name.localeCompare(b.name)),
+    methods: await joinMethods(db, lang, methods),
   };
+}
+
+/** UEX's method ratings and the community values (ext.refining_method), one row per code. */
+async function joinMethods(db: Db, lang: string, uex: Record<string, unknown>[]): Promise<UexMethod[]> {
+  const byCode = new Map<string, UexMethod>();
+  for (const m of await refiningMethods(db, lang)) {
+    byCode.set(m.code, {
+      name: m.name, code: m.code, ratingYield: null, ratingCost: null, ratingSpeed: null,
+      yieldPct: m.yieldPct, secondsPerScu: m.secondsPerScu, source: `${m.source} · ${m.gameVersion}`,
+    });
+  }
+  for (const m of uex) {
+    const code = String(m.code);
+    const row = byCode.get(code) ?? { name: String(m.name), code, ratingYield: null, ratingCost: null, ratingSpeed: null, yieldPct: null, secondsPerScu: null, source: null };
+    byCode.set(code, { ...row, ratingYield: Number(m.rating_yield), ratingCost: Number(m.rating_cost), ratingSpeed: Number(m.rating_speed) });
+  }
+  return [...byCode.values()].sort((a, b) => (b.yieldPct ?? -1) - (a.yieldPct ?? -1) || a.name.localeCompare(b.name));
 }

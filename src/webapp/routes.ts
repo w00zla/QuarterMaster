@@ -15,7 +15,7 @@ import { formatAmount } from '../stock/amount.ts';
 import { findStock, locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
 import * as stock from '../stock/service.ts';
 import { StockError, type Actor } from '../stock/service.ts';
-import { refineryMatch } from '../ext/refineries.ts';
+import { refineryMatch, refiningMethods } from '../ext/refineries.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, Lang, MaterialInfo, OkResponse, OrgBlueprintsResponse,
   OrgMember, StockBatch,
@@ -51,7 +51,10 @@ const schemas = {
     batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount, guildId: snowflake.optional(),
     toLocationUuid: uuid.optional(), toOrg: z.boolean().optional(), toHolderUserId: snowflake.optional(),
   }).strict(),
-  refineStart: z.object({ oreUuid: uuid, locationUuid: uuid, quality, amount }).strict(),
+  refineStart: z.object({
+    oreUuid: uuid, locationUuid: uuid, quality, amount,
+    method: z.string().regex(/^[A-Z]{3}$/).optional(), durationSeconds: z.number().int().optional(), expectedYield: amount.optional(),
+  }).strict(),
   refineDone: z.object({ batchId: z.number().int().positive(), amount, quality, expected: amount }).strict(),
   blueprint: z.object({ uuid }).strict(),
   profile: z.object({
@@ -142,6 +145,12 @@ function toBatch(p: PickableBatch, viewer: string, officerIn: Set<string>): Stoc
     holderUserId: b.ownerUserId,
     holderName: p.holderName,
     canChange: b.designation === 'personal' ? b.ownerUserId === viewer : officerIn.has(b.guildId!),
+    refine: p.refine && {
+      method: p.refine.method,
+      startedAt: p.refine.startedAt && new Date(p.refine.startedAt).toISOString(),
+      endsAt: p.refine.endsAt && new Date(p.refine.endsAt).toISOString(),
+      expectedYield: p.refine.expected && formatAmount(p.refine.expected),
+    },
   };
 }
 
@@ -159,6 +168,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
     const [bpTypes, types] = [await blueprintTypes(db, lang), await itemTypes(db, lang)];
     const refineries = await refineryMatch(db);
+    const methods = await refiningMethods(db, lang);
     return c.json({
       materials: [...materials.values()].map((m) => ({
         uuid: m.uuid, kind: m.kind, name: m.name, isOre: m.isOre, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
@@ -174,6 +184,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         manufacturerCode: e.manufacturerCode, category: e.categoryLabel, isDefault: e.isDefault, retired: e.retired,
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
+      methods: methods.map(({ code, name, yieldPct, secondsPerScu }) => ({ code, name, yieldPct, secondsPerScu })),
     } satisfies CatalogResponse);
   });
 

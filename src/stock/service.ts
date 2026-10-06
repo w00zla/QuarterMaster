@@ -60,7 +60,7 @@ export interface StockResult {
 }
 
 export type StockErrorCode =
-  | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'oreViaRefinery' | 'notOre' | 'unknownLocation' | 'notRefinery' | 'retired'
+  | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'oreViaRefinery' | 'notOre' | 'unknownLocation' | 'notRefinery' | 'unknownMethod' | 'invalidDuration' | 'retired'
   | 'invalidAmount' | 'invalidQuality' | 'batchNotFound' | 'batchChanged' | 'insufficient' | 'holderNotMember'
   | 'notRefining' | 'refiningFixed' | 'nothingToMove' | 'noChange';
 
@@ -246,10 +246,31 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
   });
 }
 
-/** Ore delivered to a refinery: a personal batch in state `refining`. */
-export async function refineStart(db: Db, actor: Actor, input: { oreUuid: string; locationUuid: string; quality: number; amount: string }) {
+// Longest refinery job accepted (the community values give about 19 h per SCU for the slowest method)
+const MAX_REFINE_SECONDS = 365 * 24 * 3600;
+
+export interface RefineStartInput {
+  oreUuid: string;
+  locationUuid: string;
+  quality: number;
+  amount: string;
+  // ext.refining_method code
+  method?: string;
+  // Estimates (the user may have taken them from the terminal): processing time and refined SCU
+  durationSeconds?: number;
+  expectedYield?: string;
+}
+
+/**
+ * Ore delivered to a refinery: a personal batch in state `refining`. Every job is a batch of its own
+ * (the start time is part of the merge key), with its method, end and expected yield if given.
+ */
+export async function refineStart(db: Db, actor: Actor, input: RefineStartInput) {
   const amount = parse(input.amount, 'resource');
   checkQuality(input.quality);
+  const expected = input.expectedYield === undefined ? null : parse(input.expectedYield, 'resource');
+  const seconds = input.durationSeconds ?? null;
+  if (seconds !== null && (!Number.isInteger(seconds) || seconds <= 0 || seconds > MAX_REFINE_SECONDS)) throw new StockError('invalidDuration');
   return db.transaction(async (tx): Promise<StockResult> => {
     await ensureUser(tx, actor.userId);
     const subject = await subjectInfo(tx, 'resource', input.oreUuid);
@@ -258,11 +279,18 @@ export async function refineStart(db: Db, actor: Actor, input: { oreUuid: string
     // Refineries per UEX; without UEX data yet every selectable location
     const refineries = await refineryLocations(db);
     if (refineries && !refineries.has(input.locationUuid)) throw new StockError('notRefinery');
+    const method = input.method ?? null;
+    if (method !== null && !(await one(tx, sql`SELECT 1 FROM ext.refining_method WHERE code = ${method}`))) throw new StockError('unknownMethod');
     const key: BatchKey = {
       guildId: null, ownerUserId: actor.userId, designation: 'personal', kind: 'resource', resourceUuid: input.oreUuid, itemUuid: null,
       locationUuid: input.locationUuid, state: 'refining', quality: input.quality,
     };
-    const batch = await upsert(tx, key, amount);
+    const batch = (await one<Batch>(tx, sql`
+      INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity,
+        refine_method, refine_started_at, refine_ends_at, refine_expected)
+      VALUES (${keyValues(key)}, ${amount}::numeric, ${method}, now(),
+        now() + ${seconds}::int * interval '1 second', ${expected}::numeric)
+      RETURNING ${BATCH_COLUMNS}`))!;
     return { journal: [await journal(tx, actor, 'add', key, amount)], batch };
   });
 }

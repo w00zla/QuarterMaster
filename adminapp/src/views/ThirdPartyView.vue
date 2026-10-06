@@ -3,7 +3,7 @@
 // yield bonuses, refining methods).
 import Icon from "../components/Icon.vue";
 import { useFetch } from "../api";
-import { dateTime } from "../format";
+import { dateTime, duration } from "../format";
 import type { UexResponse } from "../../../src/adminapp/api-types";
 
 const uex = useFetch<UexResponse>(() => "/ext/uex");
@@ -82,14 +82,22 @@ const signed = (v: number) => (v > 0 ? `+${v}` : String(v));
         <section v-if="uex.data.value.methods.length" class="panel">
           <div class="head"><Icon name="crafter" :size="16" /><span class="head-title">Refining methods</span></div>
           <table class="mini">
-            <thead><tr><th>Method</th><th>Code</th><th class="num">Yield</th><th class="num">Cost</th><th class="num">Speed</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Method</th><th>Code</th><th class="num">UEX yield</th><th class="num">UEX cost</th><th class="num">UEX speed</th>
+                <th class="num">Yield %</th><th class="num">Time / SCU</th><th>Source</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="m in uex.data.value.methods" :key="m.code">
                 <td>{{ m.name }}</td>
                 <td class="mono dim">{{ m.code }}</td>
-                <td class="num mono">{{ m.ratingYield }}</td>
-                <td class="num mono">{{ m.ratingCost }}</td>
-                <td class="num mono">{{ m.ratingSpeed }}</td>
+                <td class="num mono">{{ m.ratingYield ?? "–" }}</td>
+                <td class="num mono">{{ m.ratingCost ?? "–" }}</td>
+                <td class="num mono">{{ m.ratingSpeed ?? "–" }}</td>
+                <td class="num mono">{{ m.yieldPct ?? "–" }}</td>
+                <td class="num mono">{{ m.secondsPerScu === null ? "–" : duration(m.secondsPerScu) }}</td>
+                <td class="dim">{{ m.source ?? "" }}</td>
               </tr>
             </tbody>
           </table>

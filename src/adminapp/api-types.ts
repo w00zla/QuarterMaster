@@ -341,13 +341,19 @@ export interface UexRefinery {
   yields: Record<string, number>;
 }
 
+/** A refining method: UEX's ratings and the community values in ext.refining_method, joined by code. */
 export interface UexMethod {
   name: string;
   code: string;
-  // UEX ratings 1 (low) to 3 (high)
-  ratingYield: number;
-  ratingCost: number;
-  ratingSpeed: number;
+  // UEX ratings 1 (low) to 3 (high); null when UEX does not list the method
+  ratingYield: number | null;
+  ratingCost: number | null;
+  ratingSpeed: number | null;
+  // ext.refining_method; null when it has no row for the code
+  yieldPct: number | null;
+  secondsPerScu: number | null;
+  // "scminer.rocks · 4.10.1"
+  source: string | null;
 }
 
 export interface UexResponse {

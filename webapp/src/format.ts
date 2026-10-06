@@ -31,6 +31,14 @@ export const qMark = (q: number) => (q < 500 ? "⊘" : q === 1000 ? "♛" : "★
 /** The quality with its level: "⊘ 480", "★★★ 720", "♛ 1000" */
 export const qText = (q: number | null) => (q === null ? "" : `${qMark(q)} ${q}`);
 
+/** A duration: "3 h 12 min", "45 min" (minutes rounded up, so a running job never shows 0 min). */
+export function hm(seconds: number): string {
+  const total = Math.max(0, Math.ceil(seconds / 60));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h ? `${h} ${t("unit.h")} ${m} ${t("unit.min")}` : `${m} ${t("unit.min")}`;
+}
+
 /** "Org (holder)" or "Pers.", as in the bot. */
 export const ownerText = (b: StockBatch) =>
   b.designation === "org" ? `${orgOf(b.guildId)?.name ?? "Org"} (${b.holderName ?? "?"})` : t("stock.pers");

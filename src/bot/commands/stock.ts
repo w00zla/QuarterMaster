@@ -64,6 +64,8 @@ async function describe(db: Db, batch: stock.Batch, lang: Lang): Promise<Pickabl
     material: materials.get(batch.resourceUuid ?? batch.itemUuid!)?.name ?? '?',
     location: locations.get(batch.locationUuid)?.short ?? '?',
     holderName: holder,
+    // The bot shows no refinery job details
+    refine: null,
   };
 }
 

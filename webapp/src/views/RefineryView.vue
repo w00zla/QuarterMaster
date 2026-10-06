@@ -14,8 +14,8 @@ import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import RangeSlider from "../components/RangeSlider.vue";
 import StockAddForm from "../components/StockAddForm.vue";
-import { signedBonus, yieldValue } from "../catalog";
-import { compareBatches, qMark, qty } from "../format";
+import { methods, signedBonus, yieldValue } from "../catalog";
+import { compareBatches, hm, qMark, qty } from "../format";
 import { lang, t } from "../i18n";
 import { onServerMessage } from "../realtime";
 import { toastError } from "../toasts";
@@ -52,14 +52,22 @@ async function load() {
 
 watch(lang, load);
 
+// The remaining times count down on their own
+const now = ref(Date.now());
+let tick: ReturnType<typeof setInterval> | undefined;
+
 let unsubscribe = () => {};
 onMounted(() => {
+  tick = setInterval(() => (now.value = Date.now()), 30_000);
   void load();
   unsubscribe = onServerMessage((m) => {
     if (m.type === "resync" || (m.type === "stock" && m.scope === "personal")) void load();
   });
 });
-onUnmounted(() => unsubscribe());
+onUnmounted(() => {
+  unsubscribe();
+  clearInterval(tick);
+});
 
 const jobs = computed(() => (data.value?.batches ?? []).filter((b) => b.state === "refining"));
 
@@ -78,6 +86,9 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "amount", label: t("stock.col.amount"), width: 120 },
   { key: "location", label: t("stock.col.location"), width: null },
   { key: "bonus", label: t("refinery.col.bonus"), width: 90 },
+  { key: "method", label: t("refinery.col.method"), width: 170 },
+  { key: "expected", label: t("refinery.col.expected"), width: 110 },
+  { key: "ready", label: t("refinery.col.ready"), width: 130 },
   { key: "actions", label: "", width: 56, sortable: false, fixed: true, sep: true },
 ]);
 const cols = useTableColumns("qm.webapp.columns.refinery", columns, { key: "quality", dir: "desc" });
@@ -90,6 +101,10 @@ function valueOf(b: StockBatch, key: string): string | number {
     case "location": return b.location;
     // No UEX value sorts below every reported one
     case "bonus": return yieldValue(b.locationUuid, b.subjectUuid) ?? -Infinity;
+    case "method": return methodName(b);
+    case "expected": return Number(b.refine?.expectedYield ?? -1);
+    // Jobs without an end sort after every timed one
+    case "ready": return b.refine?.endsAt ? Date.parse(b.refine.endsAt) : Infinity;
     default: return "";
   }
 }
@@ -121,6 +136,17 @@ const locationOptions = computed(() => {
     ...[...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, lang.value)),
   ];
 });
+
+const methodName = (b: StockBatch) => (b.refine?.method ? methods.value.get(b.refine.method)?.name ?? b.refine.method : "");
+
+/** null: no end recorded; "" ready; else the time left */
+function left(b: StockBatch): string | null {
+  if (!b.refine?.endsAt) return null;
+  const ms = Date.parse(b.refine.endsAt) - now.value;
+  return ms <= 0 ? "" : t("refinery.in", { t: hm(ms / 1000) });
+}
+
+const endsTitle = (b: StockBatch) => (b.refine?.endsAt ? new Date(b.refine.endsAt).toLocaleString(lang.value) : "");
 
 const bonusText = (b: StockBatch) => {
   const v = yieldValue(b.locationUuid, b.subjectUuid);
@@ -175,6 +201,12 @@ const bonusText = (b: StockBatch) => {
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
             <span class="cell">{{ b.location }}</span>
             <span class="num">{{ bonusText(b) }}</span>
+            <span class="cell">{{ methodName(b) }}</span>
+            <span class="num">{{ b.refine?.expectedYield ? qty(b.refine.expectedYield, "SCU") : "" }}</span>
+            <span :title="endsTitle(b)">
+              <span v-if="left(b) === ''" class="tag ok">{{ t("refinery.readyNow") }}</span>
+              <template v-else>{{ left(b) }}</template>
+            </span>
             <span class="sep actions">
               <button type="button" class="icon-btn" :title="t('refinery.done')" @click="finishing = b"><Icon name="check" :size="15" /></button>
             </span>

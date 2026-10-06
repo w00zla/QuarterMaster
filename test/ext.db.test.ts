@@ -93,7 +93,7 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
 
   it('answers the admin overview: status, terminals with their yields, methods', async () => {
     const empty = await getUex(db, 'en');
-    assert.deepEqual([[...empty.endpoints], empty.refineries, empty.ores, empty.methods], [[], [], [], []]);
+    assert.deepEqual([[...empty.endpoints], empty.refineries, empty.ores, empty.methods.length], [[], [], [], 9]);
     const y = (terminal: number, place: string, ore: string, value: number) =>
       ({ id_terminal: terminal, terminal_name: `Refinery ${place}`, star_system_name: 'Nyx', space_station_name: place, commodity_name: ore, value });
     await storeSnapshot(db, 'uex', 'refineries_yields', [y(1, 'Old', 'Iron (Ore)', 1)]);
@@ -105,6 +105,11 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
     assert.deepEqual(uex.refineries.map((r) => [r.place, r.location, r.yields]), [
       ['Alpha', null, { 'Gold (Ore)': 8, 'Iron (Ore)': 2 }], ['Zeta', null, { 'Iron (Ore)': -5 }],
     ]);
-    assert.deepEqual(uex.methods, [{ name: 'Cormack', code: 'COR', ratingYield: 1, ratingCost: 2, ratingSpeed: 3 }]);
+    // The seeded community values, with UEX's ratings joined by code
+    assert.equal(uex.methods.length, 9);
+    assert.deepEqual(uex.methods[0]!.code, 'DIN');
+    assert.deepEqual(uex.methods.find((m) => m.code === 'COR'), {
+      name: 'COR', code: 'COR', ratingYield: 1, ratingCost: 2, ratingSpeed: 3, yieldPct: 75, secondsPerScu: 9600, source: 'scminer.rocks · 4.10.1',
+    });
   });
 });
