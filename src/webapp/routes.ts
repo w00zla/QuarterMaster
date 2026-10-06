@@ -15,7 +15,7 @@ import { formatAmount } from '../stock/amount.ts';
 import { findStock, locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
 import * as stock from '../stock/service.ts';
 import { StockError, type Actor } from '../stock/service.ts';
-import { refineryLocations } from '../ext/refineries.ts';
+import { refineryMatch } from '../ext/refineries.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, Lang, MaterialInfo, OkResponse, OrgBlueprintsResponse,
   OrgMember, StockBatch,
@@ -158,13 +158,16 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const lang = langOf(c);
     const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
     const [bpTypes, types] = [await blueprintTypes(db, lang), await itemTypes(db, lang)];
-    const refineries = await refineryLocations(db);
+    const refineries = await refineryMatch(db);
     return c.json({
       materials: [...materials.values()].map((m) => ({
         uuid: m.uuid, kind: m.kind, name: m.name, isOre: m.isOre, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-      locations: [...locations.values()].map((l) => ({ uuid: l.uuid, label: l.label, short: l.short, refinery: refineries?.has(l.uuid) ?? true }))
+      locations: [...locations.values()].map((l) => ({
+        uuid: l.uuid, label: l.label, short: l.short, refinery: refineries?.matched.has(l.uuid) ?? true,
+        yields: Object.fromEntries(refineries?.yields.get(l.uuid) ?? []),
+      }))
         .sort((a, b) => a.label.localeCompare(b.label)),
       blueprints: blueprints.entries.map((e) => ({
         uuid: e.uuid, label: e.label, name: e.name, ...(bpTypes.get(e.uuid) ?? noType), size: e.size, gradeLetter: e.gradeLetter, itemClass: e.itemClass,

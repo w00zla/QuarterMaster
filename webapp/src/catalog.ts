@@ -3,7 +3,7 @@
 import { computed, ref, watch } from "vue";
 import type { CatalogBlueprint, CatalogLocation, CatalogMaterial, CatalogResponse, Lang } from "../../src/webapp/api-types";
 import { api } from "./api";
-import { lang } from "./i18n";
+import { lang, t } from "./i18n";
 import { onServerMessage } from "./realtime";
 import { status } from "./session";
 
@@ -57,3 +57,9 @@ export const locationOptions = computed(() => (catalog.value?.locations ?? [])
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
 export const refineryLocationOptions = computed(() => (catalog.value?.locations ?? []).filter((l) => l.refinery)
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
+
+/** UEX yield bonus of a refinery for an ore, e.g. "Bonus +5 %"; null when UEX reports none. */
+export function yieldBonus(locationUuid: string, oreUuid: string | null): string | null {
+  const v = oreUuid ? locations.value.get(locationUuid)?.yields[oreUuid] : undefined;
+  return v === undefined ? null : t("refinery.bonus", { v: v > 0 ? `+${v}` : String(v) });
+}

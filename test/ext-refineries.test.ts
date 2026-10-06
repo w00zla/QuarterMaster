@@ -1,8 +1,8 @@
 // Matching UEX refinery terminals to catalog locations (pure).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { LocationEntry } from '../src/stock/lookup.ts';
-import { matchRefineries, uexTerminals } from '../src/ext/refineries.ts';
+import type { LocationEntry, MaterialEntry } from '../src/stock/lookup.ts';
+import { matchRefineries, matchYields, oreKey, uexTerminals } from '../src/ext/refineries.ts';
 
 const loc = (uuid: string, name: string, system: string | null): LocationEntry =>
   ({ uuid, name, nameEn: name, body: null, system, label: name, short: name });
@@ -28,5 +28,23 @@ describe('UEX refineries', () => {
     ]), locations);
     assert.deepEqual([...matched].map(([uuid, t]) => [uuid, t.id]).sort(), [['checkmate', 3], ['hur-l1', 5], ['levski', 1], ['nyx-gw-stanton', 4], ['ruin', 2]]);
     assert.deepEqual(unmatched.map((t) => t.id), [6, 7]);
+  });
+
+  it('normalizes ore names the way the game and UEX differ', () => {
+    assert.deepEqual(['Hephaestanite (R)', 'Hephaestanite (Raw)', 'Raw Ice', 'Ice (Raw)', 'Construction Rubble', 'Construction Material Rubble', 'Iron (Ore)'].map(oreKey),
+      ['hephaestanite', 'hephaestanite', 'ice', 'ice', 'constructionrubble', 'constructionrubble', 'iron']);
+  });
+
+  it('maps the yields to matched locations and bookable ores', () => {
+    const ore = (uuid: string, nameEn: string, isOre = true): MaterialEntry => ({ kind: 'resource', uuid, name: nameEn, nameEn, isOre });
+    const data = [
+      { ...row(1, 'Nyx', 'Levski'), commodity_name: 'Ice (Raw)', value: 10 },
+      { ...row(1, 'Nyx', 'Levski'), commodity_name: 'Iron (Ore)', value: -5 },
+      { ...row(1, 'Nyx', 'Levski'), commodity_name: 'Construction Material Rubble', value: 3 },
+      { ...row(2, 'Pyro', 'Nowhere'), commodity_name: 'Iron (Ore)', value: 4 },
+    ];
+    const match = matchRefineries(uexTerminals(data), [loc('levski', 'Levski', 'Nyx')]);
+    matchYields(data, match, [ore('ice', 'Raw Ice'), ore('iron', 'Iron (Ore)'), ore('iron-refined', 'Iron', false)]);
+    assert.deepEqual([...match.yields].map(([l, y]) => [l, Object.fromEntries(y)]), [['levski', { ice: 10, iron: -5 }]]);
   });
 });

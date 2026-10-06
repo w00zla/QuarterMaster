@@ -6,7 +6,7 @@ import type { OkResponse, RefineryStartRequest, StockAddRequest } from "../../..
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
-import { locationOptions, locations, materialOptions, materials, oreOptions, refineryLocationOptions } from "../catalog";
+import { locationOptions, locations, materialOptions, materials, oreOptions, refineryLocationOptions, yieldBonus } from "../catalog";
 import { amountOf, qty, qualityOf, unitText } from "../format";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
@@ -20,6 +20,11 @@ const emit = defineEmits<{ done: [] }>();
 
 const subject = ref<string | null>(null);
 const location = ref<string | null>(null);
+// Refineries carry the UEX yield bonus for the picked ore
+const refineryOptions = computed(() => refineryLocationOptions.value.map((o) => {
+  const bonus = yieldBonus(o.value, subject.value);
+  return bonus ? { ...o, label: `${o.label} · ${bonus}` } : o;
+}));
 const quality = ref("");
 const amount = ref("");
 // "personal" or a guildId
@@ -116,7 +121,7 @@ async function book() {
     </label>
     <label class="field">
       {{ t("field.location") }}
-      <Picker v-model="location" :options="refinery ? refineryLocationOptions : locationOptions" :placeholder="t('pick.location')" />
+      <Picker v-model="location" :options="refinery ? refineryOptions : locationOptions" :placeholder="t('pick.location')" />
     </label>
     <label class="field">
       {{ t("field.quality") }}

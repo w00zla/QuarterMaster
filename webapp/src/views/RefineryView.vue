@@ -8,6 +8,7 @@ import { api } from "../api";
 import BatchDialog from "../components/BatchDialog.vue";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import StockAddForm from "../components/StockAddForm.vue";
+import { yieldBonus } from "../catalog";
 import { compareBatches, qty } from "../format";
 import { lang, t } from "../i18n";
 import { onServerMessage } from "../realtime";
@@ -67,6 +68,7 @@ onUnmounted(() => unsubscribe());
         <span class="q">Q{{ b.quality }}</span>
         <span class="amount">{{ qty(b.quantity, b.unit) }}</span>
         <span class="dim">{{ b.location }}</span>
+        <span v-if="yieldBonus(b.locationUuid, b.subjectUuid)" class="dim">{{ yieldBonus(b.locationUuid, b.subjectUuid) }}</span>
         <span class="row-actions">
           <button type="button" class="btn small primary" @click="finishing = b"><Icon name="check" :size="14" /> {{ t("refinery.done") }}</button>
         </span>

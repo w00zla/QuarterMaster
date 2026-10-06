@@ -134,6 +134,7 @@ const en = {
   "refinery.doneTitle": "Refinery job done",
   "refinery.finished": "Job done: {what}",
   "refinery.result": "Result",
+  "refinery.bonus": "Bonus {v} %",
 
   "bp.mine": "Your blueprints",
   "bp.none": "No blueprints registered yet.",
@@ -353,6 +354,7 @@ const de: Record<Key, string> = {
   "refinery.doneTitle": "Raffinerie-Job fertig",
   "refinery.finished": "Job abgeschlossen: {what}",
   "refinery.result": "Ergebnis",
+  "refinery.bonus": "Bonus {v} %",
 
   "bp.mine": "Deine Blueprints",
   "bp.none": "Noch keine Blueprints eingetragen.",

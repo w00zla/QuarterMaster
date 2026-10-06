@@ -1,9 +1,10 @@
-// Refinery locations from the latest UEX yields snapshot. UEX has its own IDs and names: a terminal is
-// matched to a selectable catalog location by English name within the same system.
+// Refinery locations and yield bonuses from the latest UEX yields snapshot. UEX has its own IDs and
+// names: a terminal is matched to a selectable catalog location by English name within the same
+// system, an ore to a bookable catalog ore by its normalized English name.
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { one } from '../db/query.ts';
-import { locationCatalog, type LocationEntry } from '../stock/lookup.ts';
+import { locationCatalog, materialCatalog, type LocationEntry, type MaterialEntry } from '../stock/lookup.ts';
 
 export interface UexTerminal {
   id: number;
@@ -17,6 +18,8 @@ export interface RefineryMatch {
   // Catalog location UUID -> its UEX terminal
   matched: Map<string, UexTerminal>;
   unmatched: UexTerminal[];
+  // Catalog location UUID -> ore UUID -> yield bonus in %
+  yields: Map<string, Map<string, number>>;
 }
 
 type YieldRow = Record<string, unknown>;
@@ -39,7 +42,7 @@ export function matchRefineries(terminals: UexTerminal[], locations: Iterable<Lo
   const key = (name: string, system: string) => `${name.toLowerCase()}|${system.toLowerCase()}`;
   const byKey = new Map<string, string>();
   for (const l of locations) if (l.system) byKey.set(key(l.nameEn, l.system), l.uuid);
-  const result: RefineryMatch = { matched: new Map(), unmatched: [] };
+  const result: RefineryMatch = { matched: new Map(), unmatched: [], yields: new Map() };
   for (const t of terminals) {
     const name = t.place.replace(/\s*\([^)]*\)$/, '');
     const uuid = byKey.get(key(name, t.system)) ?? byKey.get(key(name.replace(/\s+Station$/i, ''), t.system));
@@ -49,7 +52,24 @@ export function matchRefineries(terminals: UexTerminal[], locations: Iterable<Lo
   return result;
 }
 
-let cached: { snapshotId: number; locations: Map<string, LocationEntry>; value: RefineryMatch } | null = null;
+/** "Hephaestanite (R)", "Raw Ice", "Construction Material Rubble" -> "hephaestanite", "ice", "constructionrubble" */
+export const oreKey = (name: string) => name.toLowerCase().replace(/\((ore|raw|r)\)/g, '').replace(/\b(raw|material)\b/g, '').replace(/[^a-z0-9]/g, '');
+
+/** Pure: fills `match.yields` from the yields rows; ores by `oreKey` of their English name. */
+export function matchYields(data: YieldRow[], match: RefineryMatch, materials: Iterable<MaterialEntry>): void {
+  const ores = new Map<string, string>();
+  for (const m of materials) if (m.isOre) ores.set(oreKey(m.nameEn), m.uuid);
+  const location = new Map([...match.matched].map(([uuid, t]) => [t.id, uuid]));
+  for (const r of data) {
+    const uuid = location.get(r.id_terminal as number);
+    const ore = typeof r.commodity_name === 'string' ? ores.get(oreKey(r.commodity_name)) : undefined;
+    if (!uuid || !ore || typeof r.value !== 'number') continue;
+    if (!match.yields.has(uuid)) match.yields.set(uuid, new Map());
+    match.yields.get(uuid)!.set(ore, r.value);
+  }
+}
+
+let cached: { snapshotId: number; locations: Map<string, LocationEntry>; materials: Map<string, MaterialEntry>; value: RefineryMatch } | null = null;
 
 /** Matched refinery terminals of the latest yields snapshot; null while there is none. */
 export async function refineryMatch(db: Db): Promise<RefineryMatch | null> {
@@ -57,11 +77,12 @@ export async function refineryMatch(db: Db): Promise<RefineryMatch | null> {
     SELECT id::int AS id FROM ext.snapshot WHERE source = 'uex' AND endpoint = 'refineries_yields' ORDER BY id DESC LIMIT 1`);
   if (!latest) return null;
   // English names and systems: what UEX uses
-  const locations = await locationCatalog(db, 'en');
-  if (cached?.snapshotId === latest.id && cached.locations === locations) return cached.value;
+  const [locations, materials] = [await locationCatalog(db, 'en'), await materialCatalog(db, 'en')];
+  if (cached?.snapshotId === latest.id && cached.locations === locations && cached.materials === materials) return cached.value;
   const snap = await one<{ data: YieldRow[] }>(db, sql`SELECT data FROM ext.snapshot WHERE id = ${latest.id}`);
   const value = matchRefineries(uexTerminals(snap?.data ?? []), locations.values());
-  cached = { snapshotId: latest.id, locations, value };
+  matchYields(snap?.data ?? [], value, materials.values());
+  cached = { snapshotId: latest.id, locations, materials, value };
   return value;
 }
 

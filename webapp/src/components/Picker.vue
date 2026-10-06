@@ -8,14 +8,12 @@ export interface PickerOption {
 </script>
 
 <script setup lang="ts">
-// A searchable picker (combobox): type to filter, up/down/enter/escape, at most MAX suggestions.
+// A searchable picker (combobox): type to filter, up/down/enter/escape, every match listed (the list scrolls).
 // All typed words must match; entries whose label starts with the first word come first, otherwise the
 // caller's order stays. Text that was not picked is dropped on blur: only listed values get through.
 import { computed, nextTick, ref, watch } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
-
-const MAX = 20;
 
 const props = withDefaults(
   defineProps<{ modelValue: string | null; options: PickerOption[]; placeholder?: string; disabled?: boolean }>(),
@@ -38,7 +36,7 @@ const matches = computed(() => {
   // The picked label in the box shows the full list, not just itself
   const query = selected.value && text.value === selected.value.label ? "" : text.value;
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return props.options.slice(0, MAX);
+  if (!words.length) return props.options;
   const first = words[0]!;
   const hits = props.options.filter((o) => {
     const hay = `${o.label} ${o.hint ?? ""}`.toLowerCase();
@@ -46,7 +44,7 @@ const matches = computed(() => {
   });
   const head = hits.filter((o) => o.label.toLowerCase().startsWith(first));
   const rest = hits.filter((o) => !o.label.toLowerCase().startsWith(first));
-  return [...head, ...rest].slice(0, MAX);
+  return [...head, ...rest];
 });
 
 function onFocus(e: FocusEvent) {

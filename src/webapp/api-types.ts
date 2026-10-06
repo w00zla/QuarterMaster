@@ -65,6 +65,8 @@ export interface CatalogLocation {
   short: string;
   // Has a refinery (per UEX; every location while there is no UEX data yet)
   refinery: boolean;
+  // Refinery yield bonus in % per ore UUID (per UEX; only ores UEX reports for this refinery)
+  yields: Record<string, number>;
 }
 
 export interface CatalogBlueprint {
