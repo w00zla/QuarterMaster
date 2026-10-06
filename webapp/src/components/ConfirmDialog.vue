@@ -11,6 +11,9 @@ export interface ConfirmButton {
   // "left" parks the button at the far left of the footer
   side?: "left";
 }
+
+// Open dialogs, innermost last: only that one answers Escape (a form dialog with its confirmation on top)
+const open: symbol[] = [];
 </script>
 
 <script setup lang="ts">
@@ -29,14 +32,22 @@ const emit = defineEmits<{ choose: [value: string] }>();
 // A click on the backdrop does NOT close the dialog: only Escape or a button does.
 const dismiss = computed(() => props.buttons.find((b) => b.kind === "outline")?.value ?? null);
 
+const id = Symbol("dialog");
+
 function onKey(e: KeyboardEvent) {
   // A picker's suggestion list closes on Escape first (it stops the event)
-  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if (e.key !== "Escape" || e.defaultPrevented || open.at(-1) !== id) return;
   if (dismiss.value !== null) emit("choose", dismiss.value);
 }
 
-onMounted(() => window.addEventListener("keydown", onKey));
-onUnmounted(() => window.removeEventListener("keydown", onKey));
+onMounted(() => {
+  open.push(id);
+  window.addEventListener("keydown", onKey);
+});
+onUnmounted(() => {
+  open.splice(open.indexOf(id), 1);
+  window.removeEventListener("keydown", onKey);
+});
 </script>
 
 <template>

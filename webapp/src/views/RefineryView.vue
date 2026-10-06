@@ -6,6 +6,7 @@ import type { StockBatch, StockListResponse } from "../../../src/webapp/api-type
 import Icon from "../../../web/src/components/Icon.vue";
 import { api } from "../api";
 import BatchDialog from "../components/BatchDialog.vue";
+import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import { compareBatches, qty } from "../format";
 import { lang, t } from "../i18n";
@@ -13,7 +14,14 @@ import { onServerMessage } from "../realtime";
 import { toastError } from "../toasts";
 
 const data = ref<StockListResponse | null>(null);
+// "Start job" as a dialog: the form, then its own confirmation
 const showStart = ref(false);
+const startButtons = computed<ConfirmButton[]>(() => [{ label: t("common.cancel"), kind: "outline", value: "cancel" }]);
+
+function started() {
+  showStart.value = false;
+  void load();
+}
 const finishing = ref<StockBatch | null>(null);
 
 let seq = 0;
@@ -48,8 +56,8 @@ onUnmounted(() => unsubscribe());
       <div class="head">
         <Icon name="drop" :size="16" />
         <span class="head-title">{{ t("refinery.jobs") }}</span>
-        <button type="button" class="btn small primary" @click="showStart = !showStart">
-          <Icon :name="showStart ? 'close' : 'plus'" :size="14" /> {{ t("refinery.start") }}
+        <button type="button" class="btn small primary" @click="showStart = true">
+          <Icon name="plus" :size="14" /> {{ t("refinery.start") }}
         </button>
       </div>
       <div v-if="!data" class="empty-line">{{ t("common.loading") }}</div>
@@ -65,10 +73,9 @@ onUnmounted(() => unsubscribe());
       </div>
     </section>
 
-    <section v-if="showStart" class="panel unclipped">
-      <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("refinery.start") }}</span></div>
-      <StockAddForm refinery @done="load" />
-    </section>
+    <ConfirmDialog v-if="showStart" :title="t('refinery.start')" icon="drop" :buttons="startButtons" @choose="showStart = false">
+      <StockAddForm refinery class="flush" @done="started" />
+    </ConfirmDialog>
 
     <BatchDialog v-if="finishing" :key="finishing.id" :batch="finishing" action="done" @close="finishing = null" @done="load" />
   </div>

@@ -19,6 +19,7 @@ import Icon from "../../../web/src/components/Icon.vue";
 import { sortRows, useTableColumns, type ColumnSpec } from "../../../web/src/tableColumns";
 import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
+import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import StockFind from "../components/StockFind.vue";
 import { compareBatches, qty } from "../format";
@@ -35,7 +36,14 @@ const materialText = ref("");
 const locationFilter = ref("");
 const qualityLow = ref(0);
 const qualityHigh = ref(1000);
+// Adding as a dialog: the form, then its own confirmation
 const showAdd = ref(false);
+const addButtons = computed<ConfirmButton[]>(() => [{ label: t("common.cancel"), kind: "outline", value: "cancel" }]);
+
+function added() {
+  showAdd.value = false;
+  void load();
+}
 const showFind = ref(false);
 const dialog = ref<{ batch: StockBatch; action: BatchAction } | null>(null);
 
@@ -177,8 +185,8 @@ function open(batch: StockBatch, action: BatchAction) {
         <button type="button" class="btn small outline" :class="{ on: showFind }" @click="showFind = !showFind">
           <Icon name="search" :size="14" /> {{ t("stock.find") }}
         </button>
-        <button type="button" class="btn small primary" @click="showAdd = !showAdd">
-          <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ t("stock.add") }}
+        <button type="button" class="btn small primary" @click="showAdd = true">
+          <Icon name="plus" :size="14" /> {{ t("stock.add") }}
         </button>
       </div>
       <div v-if="org && !orgWritable" class="readonly warning">
@@ -187,10 +195,9 @@ function open(batch: StockBatch, action: BatchAction) {
       </div>
     </section>
 
-    <section v-if="showAdd" class="panel unclipped">
-      <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("stock.addTitle") }}</span></div>
-      <StockAddForm :target="scope === 'personal' ? null : scope" @done="load" />
-    </section>
+    <ConfirmDialog v-if="showAdd" :title="t('stock.addTitle')" icon="plus" :buttons="addButtons" @choose="showAdd = false">
+      <StockAddForm class="flush" :target="scope === 'personal' ? null : scope" @done="added" />
+    </ConfirmDialog>
 
     <section v-if="showFind" class="panel unclipped">
       <div class="head"><Icon name="search" :size="16" /><span class="head-title">{{ t("stock.findTitle") }}</span></div>
