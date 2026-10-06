@@ -3,6 +3,7 @@
   // Run "adminapp: dev", then open http://127.0.0.1:5173 (basic auth from .env).
   // User web app in development: dev DB (pnpm db:up), then backend (pnpm webapp:watch, :3002), Vite (pnpm webapp:dev, :5174)
   // and the Discord bot (pnpm bot, keeps the roster current). Run "webapp: dev", then open http://localhost:5174 (not 127.0.0.1).
+  // Everything at once: "all: dev" (dev DB, both web apps, the bot and the third-party pull, pnpm ext, which needs UEX_TOKEN in .env).
   "version": "2.0.0",
   "tasks": [
     {
@@ -87,6 +88,30 @@
     {
       "label": "webapp: dev",
       "dependsOn": ["db: up", "webapp: servers"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "ext",
+      "type": "shell",
+      "command": "pnpm ext",
+      "isBackground": true,
+      "presentation": { "group": "all-dev", "panel": "dedicated", "reveal": "always" },
+      "problemMatcher": {
+        "owner": "ext",
+        "pattern": { "regexp": "^\\0never$", "file": 1, "line": 2, "message": 3 },
+        "background": { "activeBegin": true, "beginsPattern": "^> .* ext( |$)", "endsPattern": "^UEX refineries_methods" }
+      }
+    },
+    {
+      "label": "all: servers",
+      "dependsOn": ["adminapp: backend", "adminapp: frontend", "webapp: backend", "webapp: frontend", "bot", "ext"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "all: dev",
+      "dependsOn": ["db: up", "all: servers"],
       "dependsOrder": "sequence",
       "problemMatcher": []
     }
