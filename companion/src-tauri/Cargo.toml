@@ -1,0 +1,38 @@
+[package]
+name = "quartermaster-companion"
+version = "0.1.0"
+description = "Quartermaster Companion: reads Star Citizen's Game.log for the Quartermaster web app"
+authors = ["w00zla"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name apart from the bin name (a Windows issue,
+# https://github.com/rust-lang/cargo/issues/8519)
+name = "companion_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# File dialogs via xdg-desktop-portal on Linux (the host's native dialog; the
+# plugin's default is rfd's own GTK3 dialog). Windows is unaffected.
+tauri-plugin-dialog = { version = "2.7.3", default-features = false, features = ["xdg-portal"] }
+tauri-plugin-log = "2"
+# The download link of a newer release, opened in the browser
+tauri-plugin-opener = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The web app API; rustls like BindSight, no native-tls
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+# Finding the blueprint lines in GBs of old logs
+memchr = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

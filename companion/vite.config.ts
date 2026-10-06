@@ -1,0 +1,20 @@
+import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
+
+const host = process.env.TAURI_DEV_HOST;
+
+// Tauri runs Vite on a fixed port (tauri.conf.json devUrl); 1430 keeps clear of BindSight's 1420.
+export default defineConfig(() => ({
+  plugins: [vue()],
+  // Rust errors stay visible in `tauri dev`
+  clearScreen: false,
+  server: {
+    port: 1430,
+    strictPort: true,
+    host: host || false,
+    hmr: host ? { protocol: "ws", host, port: 1431 } : undefined,
+    watch: { ignored: ["**/src-tauri/**"] },
+    // Only what the app imports (styles and components shared with the web apps)
+    fs: { allow: [".", "../adminapp/src", "../webapp/src/styles.css", "../webapp/src/components/ConfirmDialog.vue", "../src/webapp/api-types.ts"] },
+  },
+}));
