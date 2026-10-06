@@ -336,6 +336,48 @@ export interface ProfileRequest {
   langOverride?: Lang | null;
 }
 
+// --- API token (companion app) -------------------------------------------------------------------
+// GET  /api/token -> ApiTokenInfo       (session only, 403 'sessionOnly' with a token)
+// POST /api/token -> ApiTokenCreated    creates the token, replacing an existing one; shown only here
+// With "Authorization: Bearer <token>" every other /api route works as the user. The companion app
+// also sends its version in X-QM-Companion; older than the server's release (or missing, while the
+// server has one) = 426 CompanionOutdated for every token request.
+
+export interface ApiTokenInfo {
+  // null = no token
+  createdAt: string | null;
+  lastUsedAt: string | null;
+}
+
+export interface ApiTokenCreated {
+  token: string;
+}
+
+// --- companion app release (GET /api/companion; files at GET /downloads/companion/<file>, session only)
+export type CompanionPlatform = 'windows' | 'linux';
+
+export interface CompanionDownload {
+  platform: CompanionPlatform;
+  file: string;
+  // Bytes
+  size: number;
+  // Path on this server
+  url: string;
+}
+
+export interface CompanionInfo {
+  // null = the server has no release
+  version: string | null;
+  downloads: CompanionDownload[];
+}
+
+export interface CompanionOutdated {
+  error: 'companionOutdated';
+  version: string;
+  // Absolute URLs per platform
+  downloads: Partial<Record<CompanionPlatform, string>>;
+}
+
 // --- realtime (WebSocket /api/ws) ------------------------------------------------------------
 // The server only says what changed; the SPA fetches it through the normal endpoints.
 

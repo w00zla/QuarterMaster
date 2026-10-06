@@ -25,6 +25,7 @@ const app = createApp(db, login, {
   origin,
   trustProxy: config.trustProxy,
   distDir: fileURLToPath(new URL('../../webapp/dist', import.meta.url)),
+  companionDir: config.companionDir,
 });
 
 const cleanup = () => deleteExpiredSessions(db).catch((err: unknown) => console.error('Session cleanup failed', err));

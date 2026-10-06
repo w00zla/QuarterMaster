@@ -336,6 +336,135 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     }
   });
 
+  describe('API token (companion app)', () => {
+    const json = { 'content-type': 'application/json' };
+    const asUser = (token: string, path: string, method = 'GET') => app.request(`/api${path}`, method === 'GET'
+      ? { headers: { cookie: `__Host-qm_session=${token}` } }
+      : { method, headers: { cookie: `__Host-qm_session=${token}`, ...json, ...sameOrigin }, body: '{}' });
+    const asToken = (token: string, path: string, body?: unknown) => app.request(`/api${path}`, body === undefined
+      ? { headers: { authorization: `Bearer ${token}` } }
+      : { method: 'POST', headers: { authorization: `Bearer ${token}`, ...json }, body: JSON.stringify(body) });
+    const create = async (session: string) => {
+      const res = await asUser(session, '/token', 'POST');
+      assert.equal(res.status, 200);
+      return ((await res.json()) as { token: string }).token;
+    };
+
+    beforeEach(async () => {
+      await db.execute(sql`DELETE FROM web.api_token`);
+    });
+
+    it('is created in the session, stored as a hash only, and then acts as the user', async () => {
+      const session = await loginAs();
+      assert.deepEqual(await (await asUser(session, '/token')).json(), { createdAt: null, lastUsedAt: null });
+      const token = await create(session);
+      assert.match(token, /^qmt_[A-Za-z0-9_-]{43}$/);
+      const [row] = await db.execute<{ token_hash: string }>(sql`SELECT token_hash FROM web.api_token`);
+      assert.equal(row!.token_hash, createHash('sha256').update(token).digest('hex'));
+
+      const meRes = await asToken(token, '/me');
+      assert.equal(meRes.status, 200);
+      const body = (await meRes.json()) as { userId: string; name: string };
+      assert.equal(body.userId, USER);
+      assert.equal(body.name, 'Tester');
+      const info = (await (await asUser(session, '/token')).json()) as { createdAt: string | null; lastUsedAt: string | null };
+      assert.ok(info.createdAt && info.lastUsedAt, 'use is recorded');
+    });
+
+    it('a new token replaces the old one', async () => {
+      const session = await loginAs();
+      const first = await create(session);
+      const second = await create(session);
+      assert.notEqual(first, second);
+      assert.equal((await asToken(first, '/me')).status, 401);
+      assert.equal((await asToken(second, '/me')).status, 200);
+    });
+
+    it('token writes need no Origin; a bad token is 401, never a cookie fallback; the cookie path keeps its CSRF check', async () => {
+      const session = await loginAs();
+      const token = await create(session);
+      // Passes the CSRF check and reaches the route (validation)
+      assert.equal((await asToken(token, '/blueprints/add', { uuid: 'not-a-uuid' })).status, 400);
+      const bad = await app.request('/api/me', { headers: { authorization: 'Bearer qmt_wrong', cookie: `__Host-qm_session=${session}` } });
+      assert.equal(bad.status, 401);
+      const csrf = await app.request('/api/profile', {
+        method: 'POST', headers: { cookie: `__Host-qm_session=${session}`, ...json }, body: JSON.stringify({}),
+      });
+      assert.equal(csrf.status, 403);
+    });
+
+    it('cannot see or mint tokens itself', async () => {
+      const token = await create(await loginAs());
+      assert.equal((await asToken(token, '/token')).status, 403);
+      assert.equal((await asToken(token, '/token', {})).status, 403);
+    });
+  });
+
+  describe('companion app release', () => {
+    /** A release dir: the manifest names the Windows standalone zip and the AppImage. */
+    const releaseDir = (version = '1.2.0') => {
+      const dir = mkdtempSync(join(tmpdir(), 'qm-companion-'));
+      writeFileSync(join(dir, 'QM_x64-standalone.zip'), 'zip-bytes');
+      writeFileSync(join(dir, 'QM_amd64.AppImage'), 'appimage-bytes!');
+      writeFileSync(join(dir, 'secret.txt'), 'nope');
+      writeFileSync(join(dir, 'companion.json'), JSON.stringify({ version, windows: 'QM_x64-standalone.zip', linux: 'QM_amd64.AppImage' }));
+      return dir;
+    };
+    const tokenFor = async (session: string) => ((await (await app.request('/api/token', {
+      method: 'POST', headers: { cookie: `__Host-qm_session=${session}`, 'content-type': 'application/json', ...sameOrigin }, body: '{}',
+    })).json()) as { token: string }).token;
+    const meWith = (token: string, version?: string) => app.request('/api/me', {
+      headers: { authorization: `Bearer ${token}`, ...(version ? { 'x-qm-companion': version } : {}) },
+    });
+
+    it('lists the release with versions and sizes; no manifest = none', async () => {
+      const session = await loginAs();
+      const cookie = { cookie: `__Host-qm_session=${session}` };
+      assert.deepEqual(await (await app.request('/api/companion', { headers: cookie })).json(), { version: null, downloads: [] });
+      app = build({ companionDir: releaseDir() });
+      assert.deepEqual(await (await app.request('/api/companion', { headers: cookie })).json(), {
+        version: '1.2.0',
+        downloads: [
+          { platform: 'windows', file: 'QM_x64-standalone.zip', size: 9, url: '/downloads/companion/QM_x64-standalone.zip' },
+          { platform: 'linux', file: 'QM_amd64.AppImage', size: 15, url: '/downloads/companion/QM_amd64.AppImage' },
+        ],
+      });
+    });
+
+    it('serves only the manifest files, only when logged in', async () => {
+      app = build({ companionDir: releaseDir() });
+      const anon = await app.request('/downloads/companion/QM_x64-standalone.zip');
+      assert.equal(anon.status, 302);
+      const cookie = { cookie: `__Host-qm_session=${await loginAs()}` };
+      const res = await app.request('/downloads/companion/QM_x64-standalone.zip', { headers: cookie });
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'zip-bytes');
+      assert.match(res.headers.get('content-disposition') ?? '', /attachment; filename="QM_x64-standalone.zip"/);
+      for (const file of ['secret.txt', 'companion.json', '..%2Fcompanion.json']) {
+        assert.equal((await app.request(`/downloads/companion/${file}`, { headers: cookie })).status, 404, file);
+      }
+    });
+
+    it('refuses an outdated or silent app with 426 and the links; same or newer works; no release = no check', async () => {
+      const session = await loginAs();
+      const token = await tokenFor(session);
+      assert.equal((await meWith(token)).status, 200, 'no release: no check');
+      app = build({ companionDir: releaseDir('1.2.0') });
+      for (const version of [undefined, '1.1.9', '0.9.99', 'garbage']) {
+        const res = await meWith(token, version);
+        assert.equal(res.status, 426, String(version));
+        assert.deepEqual(await res.json(), {
+          error: 'companionOutdated', version: '1.2.0',
+          downloads: { windows: `${ORIGIN}/downloads/companion/QM_x64-standalone.zip`, linux: `${ORIGIN}/downloads/companion/QM_amd64.AppImage` },
+        });
+      }
+      assert.equal((await meWith(token, '1.2.0')).status, 200);
+      assert.equal((await meWith(token, '1.10.0')).status, 200, 'numeric, not text order');
+      // The browser session is not affected
+      assert.equal((await me(session)).status, 200);
+    });
+  });
+
   it('builds SQL from templates only (no sql.raw in the web app)', () => {
     const dir = new URL('../src/webapp/', import.meta.url);
     for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts'))) {

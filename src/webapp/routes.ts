@@ -33,7 +33,7 @@ export class HttpError extends Error {
   }
 }
 
-type Env = { Variables: { session: Session; token: string } };
+type Env = { Variables: { session: Session; token: string; apiToken?: boolean } };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SNOWFLAKE = /^[0-9]{17,20}$/;

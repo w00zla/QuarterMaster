@@ -45,3 +45,24 @@ export const userSetting = web.table('user_setting', {
   check('user_setting_user_id_format', snowflake(t.userId)),
   check('user_setting_lang', sql`${t.lang} IS NULL OR ${t.lang} IN ('de', 'en')`),
 ]);
+
+/**
+ * A user's API token for the companion app: one per user, only its SHA-256 here (shown once when
+ * created; creating a new one replaces it). Acts as the user like a session, without the token
+ * route itself. No FK to app.app_user, like the sessions.
+ */
+export const apiToken = web.table('api_token', {
+  userId: text('user_id').primaryKey(),
+  // Hex SHA-256 of the token
+  tokenHash: text('token_hash').notNull().unique(),
+  // Discord profile of the session that created the token (for /api/me through the token)
+  discordUsername: text('discord_username').notNull(),
+  discordGlobalName: text('discord_global_name'),
+  discordAvatar: text('discord_avatar'),
+  createdAt: createdAt(),
+  // NULL = never used; written at most hourly
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+}, (t) => [
+  check('api_token_user_id_format', snowflake(t.userId)),
+  check('api_token_token_hash_format', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+]);

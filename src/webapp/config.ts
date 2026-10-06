@@ -1,4 +1,5 @@
 // Process settings from the environment, checked before anything starts.
+import { fileURLToPath } from 'node:url';
 export interface ProcessConfig {
   clientId: string;
   clientSecret: string;
@@ -7,11 +8,14 @@ export interface ProcessConfig {
   host: string;
   port: number;
   trustProxy: boolean;
+  // The companion app release (companion.json + files)
+  companionDir: string;
 }
 
 /** Throws with a message for the operator when a setting is missing or unsafe. */
 export function loadConfig(env: Record<string, string | undefined>): ProcessConfig {
   const { DISCORD_APP_ID, DISCORD_CLIENT_SECRET, WEBAPP_ORIGIN, WEBAPP_HOST = '127.0.0.1', WEBAPP_PORT = '3002', WEBAPP_TRUST_PROXY } = env;
+  const { COMPANION_DIR = fileURLToPath(new URL('../../local/companion', import.meta.url)) } = env;
   if (!DISCORD_APP_ID || !DISCORD_CLIENT_SECRET || !WEBAPP_ORIGIN) {
     throw new Error('DISCORD_APP_ID, DISCORD_CLIENT_SECRET and WEBAPP_ORIGIN must be set (see .env.example)');
   }
@@ -31,5 +35,6 @@ export function loadConfig(env: Record<string, string | undefined>): ProcessConf
     host: WEBAPP_HOST,
     port: Number(WEBAPP_PORT),
     trustProxy: WEBAPP_TRUST_PROXY === '1',
+    companionDir: COMPANION_DIR,
   };
 }
