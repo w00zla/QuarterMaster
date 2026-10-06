@@ -1,0 +1,2989 @@
+{
+  "id": "30ecf7d8-36f1-455b-be01-7940cda1d95e",
+  "prevId": "ae484713-1369-48d1-a602-f812fdb15601",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "app.app_user": {
+      "name": "app_user",
+      "schema": "app",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "rsi_handle": {
+          "name": "rsi_handle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "app_user_id_format": {
+          "name": "app_user_id_format",
+          "value": "\"app\".\"app_user\".\"user_id\" ~ '^[0-9]{17,20}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.member": {
+      "name": "member",
+      "schema": "app",
+      "columns": {
+        "guild_id": {
+          "name": "guild_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "officer": {
+          "name": "officer",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "default_location_uuid": {
+          "name": "default_location_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "inactive_since": {
+          "name": "inactive_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "member_guild_id_org_guild_id_fk": {
+          "name": "member_guild_id_org_guild_id_fk",
+          "tableFrom": "member",
+          "tableTo": "org",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "guild_id"
+          ],
+          "columnsTo": [
+            "guild_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "member_user_id_app_user_user_id_fk": {
+          "name": "member_user_id_app_user_user_id_fk",
+          "tableFrom": "member",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "member_default_location_uuid_location_uuid_fk": {
+          "name": "member_default_location_uuid_location_uuid_fk",
+          "tableFrom": "member",
+          "tableTo": "location",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "default_location_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "member_guild_id_user_id_pk": {
+          "name": "member_guild_id_user_id_pk",
+          "columns": [
+            "guild_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "app.org": {
+      "name": "org",
+      "schema": "app",
+      "columns": {
+        "guild_id": {
+          "name": "guild_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "member_role_ids": {
+          "name": "member_role_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "officer_role_ids": {
+          "name": "officer_role_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "roster_checked_at": {
+          "name": "roster_checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "org_guild_id_format": {
+          "name": "org_guild_id_format",
+          "value": "\"app\".\"org\".\"guild_id\" ~ '^[0-9]{17,20}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.stock_batch": {
+      "name": "stock_batch",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "stock_batch_id_seq",
+            "schema": "app",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "guild_id": {
+          "name": "guild_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "designation": {
+          "name": "designation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_uuid": {
+          "name": "resource_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_uuid": {
+          "name": "item_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location_uuid": {
+          "name": "location_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'stored'"
+        },
+        "quality": {
+          "name": "quality",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "numeric(14, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "stock_batch_guild_id_resource_uuid_index": {
+          "name": "stock_batch_guild_id_resource_uuid_index",
+          "columns": [
+            {
+              "expression": "guild_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "resource_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_batch_guild_id_item_uuid_index": {
+          "name": "stock_batch_guild_id_item_uuid_index",
+          "columns": [
+            {
+              "expression": "guild_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "item_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_batch_owner_user_id_guild_id_index": {
+          "name": "stock_batch_owner_user_id_guild_id_index",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "guild_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_batch_guild_id_location_uuid_index": {
+          "name": "stock_batch_guild_id_location_uuid_index",
+          "columns": [
+            {
+              "expression": "guild_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "location_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stock_batch_owner_user_id_app_user_user_id_fk": {
+          "name": "stock_batch_owner_user_id_app_user_user_id_fk",
+          "tableFrom": "stock_batch",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_batch_resource_uuid_resource_uuid_fk": {
+          "name": "stock_batch_resource_uuid_resource_uuid_fk",
+          "tableFrom": "stock_batch",
+          "tableTo": "resource",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "resource_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_batch_item_uuid_item_uuid_fk": {
+          "name": "stock_batch_item_uuid_item_uuid_fk",
+          "tableFrom": "stock_batch",
+          "tableTo": "item",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "item_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_batch_location_uuid_location_uuid_fk": {
+          "name": "stock_batch_location_uuid_location_uuid_fk",
+          "tableFrom": "stock_batch",
+          "tableTo": "location",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "location_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_batch_guild_id_owner_user_id_member_guild_id_user_id_fk": {
+          "name": "stock_batch_guild_id_owner_user_id_member_guild_id_user_id_fk",
+          "tableFrom": "stock_batch",
+          "tableTo": "member",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "guild_id",
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "guild_id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "stock_batch_merge_key": {
+          "name": "stock_batch_merge_key",
+          "nullsNotDistinct": true,
+          "columns": [
+            "guild_id",
+            "owner_user_id",
+            "designation",
+            "kind",
+            "resource_uuid",
+            "item_uuid",
+            "location_uuid",
+            "state",
+            "quality"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "stock_batch_designation": {
+          "name": "stock_batch_designation",
+          "value": "\"app\".\"stock_batch\".\"designation\" IN ('personal', 'org')"
+        },
+        "stock_batch_personal_global": {
+          "name": "stock_batch_personal_global",
+          "value": "(\"app\".\"stock_batch\".\"designation\" = 'personal') = (\"app\".\"stock_batch\".\"guild_id\" IS NULL)"
+        },
+        "stock_batch_kind": {
+          "name": "stock_batch_kind",
+          "value": "(\"app\".\"stock_batch\".\"kind\" = 'resource' AND \"app\".\"stock_batch\".\"resource_uuid\" IS NOT NULL AND \"app\".\"stock_batch\".\"item_uuid\" IS NULL)\n    OR (\"app\".\"stock_batch\".\"kind\" = 'item' AND \"app\".\"stock_batch\".\"item_uuid\" IS NOT NULL AND \"app\".\"stock_batch\".\"resource_uuid\" IS NULL)"
+        },
+        "stock_batch_state": {
+          "name": "stock_batch_state",
+          "value": "\"app\".\"stock_batch\".\"state\" IN ('stored', 'refining')"
+        },
+        "stock_batch_refining_resource": {
+          "name": "stock_batch_refining_resource",
+          "value": "\"app\".\"stock_batch\".\"state\" = 'stored' OR \"app\".\"stock_batch\".\"kind\" = 'resource'"
+        },
+        "stock_batch_refining_personal": {
+          "name": "stock_batch_refining_personal",
+          "value": "\"app\".\"stock_batch\".\"state\" = 'stored' OR \"app\".\"stock_batch\".\"designation\" = 'personal'"
+        },
+        "stock_batch_quality": {
+          "name": "stock_batch_quality",
+          "value": "\"app\".\"stock_batch\".\"quality\" BETWEEN 0 AND 1000"
+        },
+        "stock_batch_quantity": {
+          "name": "stock_batch_quantity",
+          "value": "\"app\".\"stock_batch\".\"quantity\" > 0"
+        },
+        "stock_batch_item_pieces": {
+          "name": "stock_batch_item_pieces",
+          "value": "\"app\".\"stock_batch\".\"kind\" = 'resource' OR \"app\".\"stock_batch\".\"quantity\" = trunc(\"app\".\"stock_batch\".\"quantity\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.stock_journal": {
+      "name": "stock_journal",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "stock_journal_id_seq",
+            "schema": "app",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "guild_id": {
+          "name": "guild_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "designation": {
+          "name": "designation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_uuid": {
+          "name": "resource_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_uuid": {
+          "name": "item_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location_uuid": {
+          "name": "location_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quality": {
+          "name": "quality",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "delta": {
+          "name": "delta",
+          "type": "numeric(14, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "stock_journal_guild_id_created_at_index": {
+          "name": "stock_journal_guild_id_created_at_index",
+          "columns": [
+            {
+              "expression": "guild_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_journal_group_id_index": {
+          "name": "stock_journal_group_id_index",
+          "columns": [
+            {
+              "expression": "group_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_journal_owner_user_id_guild_id_created_at_index": {
+          "name": "stock_journal_owner_user_id_guild_id_created_at_index",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "guild_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stock_journal_actor_user_id_app_user_user_id_fk": {
+          "name": "stock_journal_actor_user_id_app_user_user_id_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_journal_owner_user_id_app_user_user_id_fk": {
+          "name": "stock_journal_owner_user_id_app_user_user_id_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_journal_resource_uuid_resource_uuid_fk": {
+          "name": "stock_journal_resource_uuid_resource_uuid_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "resource",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "resource_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_journal_item_uuid_item_uuid_fk": {
+          "name": "stock_journal_item_uuid_item_uuid_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "item",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "item_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_journal_location_uuid_location_uuid_fk": {
+          "name": "stock_journal_location_uuid_location_uuid_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "location",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "location_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_journal_guild_id_actor_user_id_member_guild_id_user_id_fk": {
+          "name": "stock_journal_guild_id_actor_user_id_member_guild_id_user_id_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "member",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "guild_id",
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "guild_id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "stock_journal_guild_id_owner_user_id_member_guild_id_user_id_fk": {
+          "name": "stock_journal_guild_id_owner_user_id_member_guild_id_user_id_fk",
+          "tableFrom": "stock_journal",
+          "tableTo": "member",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "guild_id",
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "guild_id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "stock_journal_personal_global": {
+          "name": "stock_journal_personal_global",
+          "value": "(\"app\".\"stock_journal\".\"designation\" = 'personal') = (\"app\".\"stock_journal\".\"guild_id\" IS NULL)"
+        },
+        "stock_journal_action": {
+          "name": "stock_journal_action",
+          "value": "\"app\".\"stock_journal\".\"action\" IN ('add', 'remove', 'adjust', 'move_out', 'move_in', 'refine_out', 'refine_in')"
+        },
+        "stock_journal_group": {
+          "name": "stock_journal_group",
+          "value": "(\"app\".\"stock_journal\".\"action\" IN ('move_out', 'move_in', 'refine_out', 'refine_in')) = (\"app\".\"stock_journal\".\"group_id\" IS NOT NULL)"
+        },
+        "stock_journal_designation": {
+          "name": "stock_journal_designation",
+          "value": "\"app\".\"stock_journal\".\"designation\" IN ('personal', 'org')"
+        },
+        "stock_journal_kind": {
+          "name": "stock_journal_kind",
+          "value": "(\"app\".\"stock_journal\".\"kind\" = 'resource' AND \"app\".\"stock_journal\".\"resource_uuid\" IS NOT NULL AND \"app\".\"stock_journal\".\"item_uuid\" IS NULL)\n    OR (\"app\".\"stock_journal\".\"kind\" = 'item' AND \"app\".\"stock_journal\".\"item_uuid\" IS NOT NULL AND \"app\".\"stock_journal\".\"resource_uuid\" IS NULL)"
+        },
+        "stock_journal_state": {
+          "name": "stock_journal_state",
+          "value": "\"app\".\"stock_journal\".\"state\" IN ('stored', 'refining')"
+        },
+        "stock_journal_refining_personal": {
+          "name": "stock_journal_refining_personal",
+          "value": "\"app\".\"stock_journal\".\"state\" = 'stored' OR \"app\".\"stock_journal\".\"designation\" = 'personal'"
+        },
+        "stock_journal_quality": {
+          "name": "stock_journal_quality",
+          "value": "\"app\".\"stock_journal\".\"quality\" BETWEEN 0 AND 1000"
+        },
+        "stock_journal_delta": {
+          "name": "stock_journal_delta",
+          "value": "\"app\".\"stock_journal\".\"delta\" <> 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.user_blueprint": {
+      "name": "user_blueprint",
+      "schema": "app",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "blueprint_uuid": {
+          "name": "blueprint_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "added_at": {
+          "name": "added_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "user_blueprint_blueprint_uuid_index": {
+          "name": "user_blueprint_blueprint_uuid_index",
+          "columns": [
+            {
+              "expression": "blueprint_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "user_blueprint_user_id_app_user_user_id_fk": {
+          "name": "user_blueprint_user_id_app_user_user_id_fk",
+          "tableFrom": "user_blueprint",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "user_blueprint_blueprint_uuid_blueprint_uuid_fk": {
+          "name": "user_blueprint_blueprint_uuid_blueprint_uuid_fk",
+          "tableFrom": "user_blueprint",
+          "tableTo": "blueprint",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "blueprint_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "user_blueprint_user_id_blueprint_uuid_pk": {
+          "name": "user_blueprint_user_id_blueprint_uuid_pk",
+          "columns": [
+            "user_id",
+            "blueprint_uuid"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "bot.guild": {
+      "name": "guild",
+      "schema": "bot",
+      "columns": {
+        "guild_id": {
+          "name": "guild_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "base_lang": {
+          "name": "base_lang",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en'"
+        },
+        "logs_channel_id": {
+          "name": "logs_channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "logs_level": {
+          "name": "logs_level",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'org'"
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "left_at": {
+          "name": "left_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "guild_guild_id_org_guild_id_fk": {
+          "name": "guild_guild_id_org_guild_id_fk",
+          "tableFrom": "guild",
+          "tableTo": "org",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "guild_id"
+          ],
+          "columnsTo": [
+            "guild_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "guild_logs_channel_id_format": {
+          "name": "guild_logs_channel_id_format",
+          "value": "\"bot\".\"guild\".\"logs_channel_id\" IS NULL OR \"bot\".\"guild\".\"logs_channel_id\" ~ '^[0-9]{17,20}$'"
+        },
+        "guild_base_lang": {
+          "name": "guild_base_lang",
+          "value": "\"bot\".\"guild\".\"base_lang\" IN ('de', 'en')"
+        },
+        "guild_logs_level": {
+          "name": "guild_logs_level",
+          "value": "\"bot\".\"guild\".\"logs_level\" IN ('off', 'org')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "bot.logs_outbox": {
+      "name": "logs_outbox",
+      "schema": "bot",
+      "columns": {
+        "journal_id": {
+          "name": "journal_id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "posted_at": {
+          "name": "posted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "logs_outbox_journal_id_stock_journal_id_fk": {
+          "name": "logs_outbox_journal_id_stock_journal_id_fk",
+          "tableFrom": "logs_outbox",
+          "tableTo": "stock_journal",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "journal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "bot.user_config": {
+      "name": "user_config",
+      "schema": "bot",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "lang_override": {
+          "name": "lang_override",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "user_config_user_id_app_user_user_id_fk": {
+          "name": "user_config_user_id_app_user_user_id_fk",
+          "tableFrom": "user_config",
+          "tableTo": "app_user",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "user_config_lang_override": {
+          "name": "user_config_lang_override",
+          "value": "\"bot\".\"user_config\".\"lang_override\" IS NULL OR \"bot\".\"user_config\".\"lang_override\" IN ('de', 'en')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "catalog.blueprint": {
+      "name": "blueprint",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_uuid": {
+          "name": "category_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_item_uuid": {
+          "name": "output_item_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_default": {
+          "name": "is_default",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "blueprint_key_index": {
+          "name": "blueprint_key_index",
+          "columns": [
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "blueprint_output_item_uuid_index": {
+          "name": "blueprint_output_item_uuid_index",
+          "columns": [
+            {
+              "expression": "output_item_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "blueprint_category_uuid_blueprint_category_uuid_fk": {
+          "name": "blueprint_category_uuid_blueprint_category_uuid_fk",
+          "tableFrom": "blueprint",
+          "tableTo": "blueprint_category",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "category_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "blueprint_output_item_uuid_item_uuid_fk": {
+          "name": "blueprint_output_item_uuid_item_uuid_fk",
+          "tableFrom": "blueprint",
+          "tableTo": "item",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "output_item_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "blueprint_first_seen_import_id_import_id_fk": {
+          "name": "blueprint_first_seen_import_id_import_id_fk",
+          "tableFrom": "blueprint",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "blueprint_last_seen_import_id_import_id_fk": {
+          "name": "blueprint_last_seen_import_id_import_id_fk",
+          "tableFrom": "blueprint",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.blueprint_category": {
+      "name": "blueprint_category",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "blueprint_category_first_seen_import_id_import_id_fk": {
+          "name": "blueprint_category_first_seen_import_id_import_id_fk",
+          "tableFrom": "blueprint_category",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "blueprint_category_last_seen_import_id_import_id_fk": {
+          "name": "blueprint_category_last_seen_import_id_import_id_fk",
+          "tableFrom": "blueprint_category",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.blueprint_input": {
+      "name": "blueprint_input",
+      "schema": "catalog",
+      "columns": {
+        "blueprint_uuid": {
+          "name": "blueprint_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tier_index": {
+          "name": "tier_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slot_index": {
+          "name": "slot_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input_index": {
+          "name": "input_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_uuid": {
+          "name": "resource_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_uuid": {
+          "name": "item_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "min_quality": {
+          "name": "min_quality",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "blueprint_input_resource_uuid_index": {
+          "name": "blueprint_input_resource_uuid_index",
+          "columns": [
+            {
+              "expression": "resource_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "blueprint_input_item_uuid_index": {
+          "name": "blueprint_input_item_uuid_index",
+          "columns": [
+            {
+              "expression": "item_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "blueprint_input_blueprint_uuid_blueprint_uuid_fk": {
+          "name": "blueprint_input_blueprint_uuid_blueprint_uuid_fk",
+          "tableFrom": "blueprint_input",
+          "tableTo": "blueprint",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "blueprint_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "blueprint_input_resource_uuid_resource_uuid_fk": {
+          "name": "blueprint_input_resource_uuid_resource_uuid_fk",
+          "tableFrom": "blueprint_input",
+          "tableTo": "resource",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "resource_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "blueprint_input_item_uuid_item_uuid_fk": {
+          "name": "blueprint_input_item_uuid_item_uuid_fk",
+          "tableFrom": "blueprint_input",
+          "tableTo": "item",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "item_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "blueprint_input_blueprint_uuid_tier_index_slot_index_input_index_pk": {
+          "name": "blueprint_input_blueprint_uuid_tier_index_slot_index_input_index_pk",
+          "columns": [
+            "blueprint_uuid",
+            "tier_index",
+            "slot_index",
+            "input_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "blueprint_input_kind": {
+          "name": "blueprint_input_kind",
+          "value": "(\"catalog\".\"blueprint_input\".\"kind\" = 'resource' AND \"catalog\".\"blueprint_input\".\"resource_uuid\" IS NOT NULL AND \"catalog\".\"blueprint_input\".\"item_uuid\" IS NULL)\n    OR (\"catalog\".\"blueprint_input\".\"kind\" = 'item' AND \"catalog\".\"blueprint_input\".\"item_uuid\" IS NOT NULL AND \"catalog\".\"blueprint_input\".\"resource_uuid\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "catalog.blueprint_slot": {
+      "name": "blueprint_slot",
+      "schema": "catalog",
+      "columns": {
+        "blueprint_uuid": {
+          "name": "blueprint_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tier_index": {
+          "name": "tier_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slot_index": {
+          "name": "slot_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "required_count": {
+          "name": "required_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modifiers": {
+          "name": "modifiers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "blueprint_slot_blueprint_uuid_blueprint_uuid_fk": {
+          "name": "blueprint_slot_blueprint_uuid_blueprint_uuid_fk",
+          "tableFrom": "blueprint_slot",
+          "tableTo": "blueprint",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "blueprint_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "blueprint_slot_blueprint_uuid_tier_index_slot_index_pk": {
+          "name": "blueprint_slot_blueprint_uuid_tier_index_slot_index_pk",
+          "columns": [
+            "blueprint_uuid",
+            "tier_index",
+            "slot_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.blueprint_tier": {
+      "name": "blueprint_tier",
+      "schema": "catalog",
+      "columns": {
+        "blueprint_uuid": {
+          "name": "blueprint_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tier_index": {
+          "name": "tier_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "craft_seconds": {
+          "name": "craft_seconds",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "required_slots": {
+          "name": "required_slots",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "blueprint_tier_blueprint_uuid_blueprint_uuid_fk": {
+          "name": "blueprint_tier_blueprint_uuid_blueprint_uuid_fk",
+          "tableFrom": "blueprint_tier",
+          "tableTo": "blueprint",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "blueprint_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "blueprint_tier_blueprint_uuid_tier_index_pk": {
+          "name": "blueprint_tier_blueprint_uuid_tier_index_pk",
+          "columns": [
+            "blueprint_uuid",
+            "tier_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.crafted_property": {
+      "name": "crafted_property",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "unit_key": {
+          "name": "unit_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "display_transformation": {
+          "name": "display_transformation",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "crafted_property_first_seen_import_id_import_id_fk": {
+          "name": "crafted_property_first_seen_import_id_import_id_fk",
+          "tableFrom": "crafted_property",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "crafted_property_last_seen_import_id_import_id_fk": {
+          "name": "crafted_property_last_seen_import_id_import_id_fk",
+          "tableFrom": "crafted_property",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.import": {
+      "name": "import",
+      "schema": "catalog",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "game_build": {
+          "name": "game_build",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "game_branch": {
+          "name": "game_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "game_version": {
+          "name": "game_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "game_label": {
+          "name": "game_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manifest": {
+          "name": "manifest",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_sha256": {
+          "name": "snapshot_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "extractor_version": {
+          "name": "extractor_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starbreaker_version": {
+          "name": "starbreaker_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "extracted_at": {
+          "name": "extracted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "imported_at": {
+          "name": "imported_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "forced": {
+          "name": "forced",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "summary": {
+          "name": "summary",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "anomalies": {
+          "name": "anomalies",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.item": {
+      "name": "item",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "class_name": {
+          "name": "class_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sub_type": {
+          "name": "sub_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grade": {
+          "name": "grade",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grade_letter": {
+          "name": "grade_letter",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_class": {
+          "name": "item_class",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manufacturer_uuid": {
+          "name": "manufacturer_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description_key": {
+          "name": "description_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "item_class_name_index": {
+          "name": "item_class_name_index",
+          "columns": [
+            {
+              "expression": "class_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "item_manufacturer_uuid_manufacturer_uuid_fk": {
+          "name": "item_manufacturer_uuid_manufacturer_uuid_fk",
+          "tableFrom": "item",
+          "tableTo": "manufacturer",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "manufacturer_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "item_first_seen_import_id_import_id_fk": {
+          "name": "item_first_seen_import_id_import_id_fk",
+          "tableFrom": "item",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "item_last_seen_import_id_import_id_fk": {
+          "name": "item_last_seen_import_id_import_id_fk",
+          "tableFrom": "item",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.localization": {
+      "name": "localization",
+      "schema": "catalog",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lang": {
+          "name": "lang",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "localization_lang_key_index": {
+          "name": "localization_lang_key_index",
+          "columns": [
+            {
+              "expression": "lang",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "localization_source_lang_localization_source_source_lang_fk": {
+          "name": "localization_source_lang_localization_source_source_lang_fk",
+          "tableFrom": "localization",
+          "tableTo": "localization_source",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "source",
+            "lang"
+          ],
+          "columnsTo": [
+            "source",
+            "lang"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "localization_source_lang_key_pk": {
+          "name": "localization_source_lang_key_pk",
+          "columns": [
+            "source",
+            "lang",
+            "key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.localization_source": {
+      "name": "localization_source",
+      "schema": "catalog",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lang": {
+          "name": "lang",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "priority": {
+          "name": "priority",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_sha256": {
+          "name": "content_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key_count": {
+          "name": "key_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "imported_at": {
+          "name": "imported_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "localization_source_source_lang_pk": {
+          "name": "localization_source_source_lang_pk",
+          "columns": [
+            "source",
+            "lang"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.location": {
+      "name": "location",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description_key": {
+          "name": "description_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_uuid": {
+          "name": "parent_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nav_icon": {
+          "name": "nav_icon",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hide_in_starmap": {
+          "name": "hide_in_starmap",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "respawn_location_type": {
+          "name": "respawn_location_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "location_parent_uuid_index": {
+          "name": "location_parent_uuid_index",
+          "columns": [
+            {
+              "expression": "parent_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "location_nav_icon_index": {
+          "name": "location_nav_icon_index",
+          "columns": [
+            {
+              "expression": "nav_icon",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "location_first_seen_import_id_import_id_fk": {
+          "name": "location_first_seen_import_id_import_id_fk",
+          "tableFrom": "location",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "location_last_seen_import_id_import_id_fk": {
+          "name": "location_last_seen_import_id_import_id_fk",
+          "tableFrom": "location",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.manufacturer": {
+      "name": "manufacturer",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description_key": {
+          "name": "description_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "manufacturer_first_seen_import_id_import_id_fk": {
+          "name": "manufacturer_first_seen_import_id_import_id_fk",
+          "tableFrom": "manufacturer",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manufacturer_last_seen_import_id_import_id_fk": {
+          "name": "manufacturer_last_seen_import_id_import_id_fk",
+          "tableFrom": "manufacturer",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.quality_quantization": {
+      "name": "quality_quantization",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bands": {
+          "name": "bands",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "quality_quantization_first_seen_import_id_import_id_fk": {
+          "name": "quality_quantization_first_seen_import_id_import_id_fk",
+          "tableFrom": "quality_quantization",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "quality_quantization_last_seen_import_id_import_id_fk": {
+          "name": "quality_quantization_last_seen_import_id_import_id_fk",
+          "tableFrom": "quality_quantization",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.raw_record": {
+      "name": "raw_record",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "raw_record_type_index": {
+          "name": "raw_record_type_index",
+          "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "raw_record_first_seen_import_id_import_id_fk": {
+          "name": "raw_record_first_seen_import_id_import_id_fk",
+          "tableFrom": "raw_record",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "raw_record_last_seen_import_id_import_id_fk": {
+          "name": "raw_record_last_seen_import_id_import_id_fk",
+          "tableFrom": "raw_record",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.resource": {
+      "name": "resource",
+      "schema": "catalog",
+      "columns": {
+        "uuid": {
+          "name": "uuid",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "group_path": {
+          "name": "group_path",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description_key": {
+          "name": "description_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_ore": {
+          "name": "is_ore",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refined_uuid": {
+          "name": "refined_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "density_g_per_cc": {
+          "name": "density_g_per_cc",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "box_sizes_scu": {
+          "name": "box_sizes_scu",
+          "type": "numeric[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "crafting_data": {
+          "name": "crafting_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_import_id": {
+          "name": "first_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_import_id": {
+          "name": "last_seen_import_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "resource_key_index": {
+          "name": "resource_key_index",
+          "columns": [
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "resource_first_seen_import_id_import_id_fk": {
+          "name": "resource_first_seen_import_id_import_id_fk",
+          "tableFrom": "resource",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "first_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "resource_last_seen_import_id_import_id_fk": {
+          "name": "resource_last_seen_import_id_import_id_fk",
+          "tableFrom": "resource",
+          "tableTo": "import",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "last_seen_import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "web.session": {
+      "name": "session",
+      "schema": "web",
+      "columns": {
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "discord_username": {
+          "name": "discord_username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "discord_global_name": {
+          "name": "discord_global_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "discord_avatar": {
+          "name": "discord_avatar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "session_user_id_index": {
+          "name": "session_user_id_index",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "session_expires_at_index": {
+          "name": "session_expires_at_index",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "session_token_hash_format": {
+          "name": "session_token_hash_format",
+          "value": "\"web\".\"session\".\"token_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "session_user_id_format": {
+          "name": "session_user_id_format",
+          "value": "\"web\".\"session\".\"user_id\" ~ '^[0-9]{17,20}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "web.user_setting": {
+      "name": "user_setting",
+      "schema": "web",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "lang": {
+          "name": "lang",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "user_setting_user_id_format": {
+          "name": "user_setting_user_id_format",
+          "value": "\"web\".\"user_setting\".\"user_id\" ~ '^[0-9]{17,20}$'"
+        },
+        "user_setting_lang": {
+          "name": "user_setting_lang",
+          "value": "\"web\".\"user_setting\".\"lang\" IS NULL OR \"web\".\"user_setting\".\"lang\" IN ('de', 'en')"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "app": "app",
+    "bot": "bot",
+    "catalog": "catalog",
+    "web": "web"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {
+    "catalog.localization_effective": {
+      "columns": {
+        "lang": {
+          "name": "lang",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "definition": "\n  SELECT DISTINCT ON (l.lang, l.key) l.lang, l.key, l.value, l.source\n  FROM \"catalog\".\"localization\" l\n  JOIN \"catalog\".\"localization_source\" s ON s.source = l.source AND s.lang = l.lang\n  ORDER BY l.lang, l.key, s.priority DESC, l.source",
+      "name": "localization_effective",
+      "schema": "catalog",
+      "isExisting": false,
+      "materialized": false
+    }
+  },
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

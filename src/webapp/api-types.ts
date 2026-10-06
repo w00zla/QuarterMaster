@@ -1,4 +1,5 @@
 // Response types of the user web app API, shared with its SPA. Pure types: no server imports.
+import type { ResourceDetail } from '../web/api-types.ts';
 
 export interface MeOrg {
   guildId: string;
@@ -23,6 +24,285 @@ export interface MeResponse {
   avatarUrl: string;
   // Active memberships only
   orgs: MeOrg[];
+  // Star Citizen account name, shown to the user's orgs; null = not set
+  rsiHandle: string | null;
+  // The web app's language override (the bot keeps its own); null = follow the browser
+  langOverride: Lang | null;
+}
+
+export type Lang = 'de' | 'en';
+
+// --- errors -----------------------------------------------------------------------------------
+// Every non-2xx answer: { error: code }. Stock codes as in src/stock/service.ts (StockErrorCode);
+// further codes: notLoggedIn (401), notMember (403: not an active member of that org), rosterStale
+// (409: org stock is read-only while the bot cannot vouch for the roster), invalid (400: malformed
+// request), notFound (404), unknownBlueprint, blueprintDefault, blueprintRetired, invalidHandle (422).
+export interface ApiErrorBody {
+  error: string;
+}
+
+// --- catalog (GET /api/catalog?lang=de|en) -------------------------------------------------------
+// Everything the pickers need, in the requested language; filter and search in the browser.
+
+export interface CatalogMaterial {
+  uuid: string;
+  kind: 'resource' | 'item';
+  name: string;
+  // Ores go through the refinery only (never "add")
+  isOre: boolean;
+  // SCU for resources, pieces for items
+  unit: 'SCU' | 'pcs';
+  // Items: the item type (for its icon) and its display name; null for resources
+  type: string | null;
+  typeLabel: string | null;
+}
+
+export interface CatalogLocation {
+  uuid: string;
+  // "Area18 · ArcCorp · Stanton"
+  label: string;
+  // "Area18", plus the system where the name alone is ambiguous
+  short: string;
+}
+
+export interface CatalogBlueprint {
+  uuid: string;
+  // Unique display label ("Name · S3 · B Industrial · CHCO")
+  label: string;
+  // The output's name and properties, for table columns; type = the output item's type (icon)
+  name: string;
+  type: string | null;
+  typeLabel: string | null;
+  size: number | null;
+  gradeLetter: string | null;
+  itemClass: string | null;
+  manufacturerCode: string | null;
+  // Category group label for grouping lists, null = other
+  category: string | null;
+  // Everyone has it: never registered
+  isDefault: boolean;
+  retired: boolean;
+}
+
+export interface CatalogResponse {
+  materials: CatalogMaterial[];
+  locations: CatalogLocation[];
+  blueprints: CatalogBlueprint[];
+}
+
+// --- stock -------------------------------------------------------------------------------------
+// All three take &lang=de|en for material and location names and answer StockListResponse.
+// GET /api/stock?scope=personal                       your personal stock (incl. refinery jobs)
+// GET /api/stock?scope=org&guildId=G[&holder=U]       the org's stock (active members only)
+// GET /api/stock/find?subject=UUID&minQuality=N[&guildId=G]
+//                                                     stored batches of a material: the org's (if
+//                                                     guildId) plus your personal, best quality first
+// Writes: POST /api/stock/add | remove | adjust | move with the request types below.
+
+export interface StockBatch {
+  id: number;
+  designation: 'personal' | 'org';
+  guildId: string | null;
+  kind: 'resource' | 'item';
+  subjectUuid: string;
+  material: string;
+  locationUuid: string;
+  location: string;
+  state: 'stored' | 'refining';
+  quality: number;
+  // Exact decimal text without trailing zeros ("12.5"); send it back as `expected`
+  quantity: string;
+  unit: 'SCU' | 'pcs';
+  // Who holds it (personal: the owner)
+  holderUserId: string;
+  // Org stock: the holder's name in that org
+  holderName: string | null;
+  // Whether you may remove/adjust/move it (personal: yours; org: officers of that org)
+  canChange: boolean;
+}
+
+export interface StockListResponse {
+  batches: StockBatch[];
+  // Sum per material (subjectUuid -> exact decimal text) over the listed batches
+  totals: Record<string, string>;
+}
+
+// Writes: POST, JSON. `guildId` = the org the action happens in; required for anything touching org
+// stock (add as org stock, donate, change an org batch), omitted for personal stock. `expected` = the
+// quantity the user saw: the server refuses with batchChanged if the batch changed meanwhile.
+// Amounts are text as typed ("12,5" or "12.5"); null = the whole batch.
+
+export interface StockAddRequest {
+  subjectUuid: string;
+  locationUuid: string;
+  quality: number;
+  amount: string;
+  // Book as org stock of this org (else personal)
+  guildId?: string;
+  // Org stock: holder (default you; others for officers only)
+  holderUserId?: string;
+}
+
+export interface StockRemoveRequest {
+  batchId: number;
+  amount: string | null;
+  expected: string;
+  guildId?: string;
+}
+
+export interface StockAdjustRequest {
+  batchId: number;
+  // Counted amount ("0" empties the batch)
+  amount: string;
+  expected: string;
+  guildId?: string;
+}
+
+export interface StockMoveRequest {
+  batchId: number;
+  amount: string | null;
+  expected: string;
+  guildId?: string;
+  toLocationUuid?: string;
+  // true: becomes org stock of guildId (donation); false: becomes personal stock
+  toOrg?: boolean;
+  // New holder (org) or the member who gets org stock as personal stock
+  toHolderUserId?: string;
+}
+
+// Refinery jobs are always personal (POST /api/refinery/start, /api/refinery/done)
+export interface RefineryStartRequest {
+  oreUuid: string;
+  locationUuid: string;
+  quality: number;
+  amount: string;
+}
+
+export interface RefineryDoneRequest {
+  batchId: number;
+  // The refined quantity and quality as the game shows them
+  amount: string;
+  quality: number;
+  expected: string;
+}
+
+// Every successful write answers { ok: true }; lists update through the realtime channel
+export interface OkResponse {
+  ok: true;
+}
+
+// --- orgs ----------------------------------------------------------------------------------------
+// GET /api/orgs/:guildId/members                       OrgMember[]: active members (holder pickers, lists)
+// GET /api/orgs/:guildId/blueprints                    OrgBlueprintsResponse: every blueprint an active
+//                                                      member registered, with who has it
+
+export interface OrgMember {
+  userId: string;
+  displayName: string;
+  rsiHandle: string | null;
+  officer: boolean;
+}
+
+export interface BlueprintOwner {
+  userId: string;
+  displayName: string;
+  rsiHandle: string | null;
+}
+
+export interface OrgBlueprintsResponse {
+  // Owners alphabetical
+  entries: Array<{ uuid: string; owners: BlueprintOwner[] }>;
+}
+
+// --- blueprints (yours) ----------------------------------------------------------------------------
+// GET /api/blueprints                 your registered blueprints
+// POST /api/blueprints/add            { uuid }   (not default, not retired)
+// POST /api/blueprints/remove         { uuid }
+
+export interface BlueprintListResponse {
+  uuids: string[];
+}
+
+export interface BlueprintRequest {
+  uuid: string;
+}
+
+// --- summary (GET /api/summary) for the overview --------------------------------------------------
+
+export interface StockMetrics {
+  // Distinct materials and batches in stored stock
+  materials: number;
+  batches: number;
+  // Stored resources in SCU and items in pieces, exact decimal text
+  scu: string;
+  pieces: string;
+}
+
+export interface SummaryResponse {
+  personal: StockMetrics & { refiningJobs: number; blueprints: number };
+  // Your active memberships, in the order of /api/me
+  orgs: Array<StockMetrics & { guildId: string; members: number; blueprints: number }>;
+}
+
+// --- crafting check (the admin UI's planner; all take &lang=de|en) ---------------------------------
+// GET /api/crafting/blueprints                       BlueprintRow[]  (types from src/web/api-types.ts)
+// GET /api/crafting/resources                        ResourceRow[]
+// GET /api/crafting/items                            ItemRow[]
+// GET /api/crafting/used-by?kind=resource|item&uuid=  CraftingUse[]: recipes that take it
+// GET /api/crafting/recipes?uuids=a,b                PlannerData (src/planner/types.ts), max 200
+
+export type CraftingUse = ResourceDetail['usedBy'][number];
+
+// --- info cards (hover tooltips with game data; &lang=de|en) -------------------------------------
+// GET /api/info/blueprint/:uuid   BlueprintInfo
+// GET /api/info/material/:uuid    MaterialInfo (a resource or an item)
+
+export interface BlueprintInfo {
+  name: string;
+  type: string | null;
+  typeLabel: string | null;
+  subTypeLabel: string | null;
+  size: number | null;
+  gradeLetter: string | null;
+  itemClass: string | null;
+  manufacturer: string | null;
+  category: string | null;
+  isDefault: boolean;
+  retired: boolean;
+  craftSeconds: number | null;
+  // First tier: requiredSlots of the slots are filled, each with one of its inputs
+  requiredSlots: number;
+  slots: Array<{ name: string | null; inputs: Array<{ name: string; kind: 'resource' | 'item'; quantity: string; minQuality: number }> }>;
+}
+
+export interface MaterialInfo {
+  kind: 'resource' | 'item';
+  name: string;
+  // Items: the item type (icon)
+  type: string | null;
+  // The game's description text
+  description: string | null;
+  // Resources: "Group › Subgroup", ore and refined counterparts
+  group: string | null;
+  isOre: boolean;
+  refined: string | null;
+  ores: string[];
+  // Items
+  typeLabel: string | null;
+  subTypeLabel: string | null;
+  size: number | null;
+  gradeLetter: string | null;
+  itemClass: string | null;
+  manufacturer: string | null;
+  // Blueprints that take it
+  usedIn: number;
+}
+
+// --- profile (POST /api/profile) ------------------------------------------------------------------
+// Fields left out stay as they are; null clears. RSI handle: 3-60 letters, digits, - or _.
+export interface ProfileRequest {
+  rsiHandle?: string | null;
+  langOverride?: Lang | null;
 }
 
 // --- realtime (WebSocket /api/ws) ------------------------------------------------------------

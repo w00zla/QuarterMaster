@@ -1,6 +1,6 @@
 // Who is logged in (GET /api/me), shared by all views. 401 = not logged in.
 import { ref } from "vue";
-import type { MeResponse } from "../../src/webapp/api-types";
+import type { MeResponse, OkResponse, ProfileRequest } from "../../src/webapp/api-types";
 import { api, ApiError } from "./api";
 
 export const me = ref<MeResponse | null>(null);
@@ -59,4 +59,11 @@ export async function logout() {
     me.value = null;
     status.value = "anon";
   } else await loadMe();
+}
+
+/** Saves profile fields (RSI handle, language) and reloads /api/me; throws ApiError when refused. */
+export async function saveProfile(body: ProfileRequest) {
+  await api<OkResponse>("/profile", { method: "POST", body });
+  // The realtime 'me' message would reload it too; not waiting for it keeps the UI in step if the socket is down
+  await loadMe();
 }

@@ -13,6 +13,7 @@ import type { Db } from '../db/client.ts';
 import type { DiscordLogin } from './discord.ts';
 import { clientAddress, rateKey } from './ip.ts';
 import { getMe } from './me.ts';
+import { HttpError, registerRoutes } from './routes.ts';
 import {
   ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, validateSession, type Session,
 } from './session.ts';
@@ -161,12 +162,14 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
   api.use('*', bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: 'request too large' }, 413) }));
 
   api.get('/me', async (c) => c.json(await getMe(db, c.get('session'))));
+  registerRoutes(api, db);
 
   // Last: a sub-app's notFound does not apply once mounted, and the SPA fallback must never answer /api
   api.all('*', (c) => c.json({ error: 'not found' }, 404));
   app.route('/api', api);
 
   app.onError((err, c) => {
+    if (err instanceof HttpError) return c.json({ error: err.message }, err.status);
     console.error(err);
     return c.json({ error: 'internal error' }, 500);
   });

@@ -181,6 +181,15 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     assert.ok(!stranger.received.some((m) => m.type === 'blueprints' || m.type === 'profile'));
   });
 
+  it('the web app language: the other tabs of that user reload, nobody else hears about it', async () => {
+    const me = await socket(await session(ME));
+    const mate = await socket(await session(MATE));
+    await db.execute(sql`INSERT INTO web.user_setting (user_id, lang) VALUES (${ME}, 'de')`);
+    assert.deepEqual(await me.next(), { type: 'me' });
+    await quiet();
+    assert.equal(mate.received.length, 0);
+  });
+
   it('answers a ping, closes on anything else', async () => {
     const me = await socket(await session(ME));
     me.ws.send(JSON.stringify({ type: 'ping' }));

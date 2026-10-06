@@ -22,6 +22,10 @@ export interface ColumnSpec {
   dim?: boolean;
   // Help text behind an info icon after the label
   help?: string;
+  // Always its default width: no grip, nothing stored (action columns)
+  fixed?: boolean;
+  // A separator line before the column, over the full row height
+  sep?: boolean;
 }
 
 const MIN_WIDTH = 40;
@@ -55,7 +59,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     (list) => {
       for (const c of list) {
         if (c.width === null || widths.value[c.key] !== undefined) continue;
-        const w = stored.widths?.[c.key];
+        const w = c.fixed ? undefined : stored.widths?.[c.key];
         widths.value[c.key] = typeof w === "number" && w >= MIN_WIDTH ? w : c.width;
       }
     },

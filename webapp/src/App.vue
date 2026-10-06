@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, watch } from "vue";
 import { RouterView } from "vue-router";
+import AppFooter from "./components/AppFooter.vue";
+import Toasts from "./components/Toasts.vue";
 import TopBar from "./components/TopBar.vue";
 import LoginView from "./views/LoginView.vue";
 import { t } from "./i18n";
@@ -22,6 +24,8 @@ watch(status, (s) => (s === "in" ? startRealtime() : stopRealtime()));
     </template>
     <LoginView v-else-if="status === 'anon'" />
     <div v-else-if="status === 'error'" class="empty-line">{{ t("error.backend") }}</div>
+    <AppFooter />
+    <Toasts />
   </div>
 </template>
 
@@ -34,6 +38,7 @@ watch(status, (s) => (s === "in" ? startRealtime() : stopRealtime()));
 
 .main {
   flex: 1;
+  min-width: 0;
   padding: 16px;
 }
 </style>

@@ -1,7 +1,7 @@
 // What the logged-in user may do, read from the roster on every request (never from the session).
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
-import type { MeResponse } from './api-types.ts';
+import type { Lang, MeResponse } from './api-types.ts';
 import type { Session } from './session.ts';
 
 // The bot refreshes app.org.roster_checked_at every minute while it vouches for the org's roster
@@ -27,6 +27,9 @@ export async function getMe(db: Db, session: Session): Promise<MeResponse> {
       g.left_at IS NULL AS bot_present
     FROM app.member m JOIN app.org o ON o.guild_id = m.guild_id LEFT JOIN bot.guild g ON g.guild_id = o.guild_id
     WHERE m.user_id = ${userId} AND m.active ORDER BY lower(o.name)`);
+  const [profile] = await db.execute<{ rsi_handle: string | null; lang: Lang | null }>(sql`
+    SELECT (SELECT rsi_handle FROM app.app_user WHERE user_id = ${userId}) AS rsi_handle,
+      (SELECT lang FROM web.user_setting WHERE user_id = ${userId}) AS lang`);
   return {
     userId,
     // Shown in the user's own header, also without any org
@@ -37,5 +40,7 @@ export async function getMe(db: Db, session: Session): Promise<MeResponse> {
       guildId: o.guild_id, name: o.name, displayName: o.display_name, officer: o.officer,
       rosterFresh: o.roster_fresh, rosterFreshForMs: o.fresh_for_ms, botPresent: o.bot_present,
     })),
+    rsiHandle: profile?.rsi_handle ?? null,
+    langOverride: profile?.lang ?? null,
   };
 }

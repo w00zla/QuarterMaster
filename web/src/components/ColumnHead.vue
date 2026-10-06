@@ -13,8 +13,13 @@ import type { ColumnSpec, SortState } from "../tableColumns";
 const props = defineProps<{ columns: ColumnSpec[]; sort: SortState }>();
 const emit = defineEmits<{ sort: [key: string]; resize: [key: string, e: MouseEvent, fromLeft: boolean]; reset: [key: string] }>();
 
-// The column the grip after column i resizes, see above.
+// The column the grip after column i resizes, see above; none for a fixed column.
 function gripTarget(i: number): { key: string; fromLeft: boolean } | null {
+  const target = gripColumn(i);
+  return target && !props.columns.find((c) => c.key === target.key)?.fixed ? target : null;
+}
+
+function gripColumn(i: number): { key: string; fromLeft: boolean } | null {
   const filler = props.columns.findIndex((c) => c.width === null);
   const c = props.columns[i];
   const next = props.columns[i + 1];
@@ -30,7 +35,7 @@ function gripTarget(i: number): { key: string; fromLeft: boolean } | null {
       v-for="(c, i) in columns"
       :key="c.key"
       class="col"
-      :class="{ sortable: c.sortable !== false, active: c.sortable !== false && sort.key === c.key }"
+      :class="{ sortable: c.sortable !== false, active: c.sortable !== false && sort.key === c.key, sep: c.sep }"
       @click="c.sortable !== false && emit('sort', c.key)"
     >
       <Icon v-if="c.icon" :name="c.icon as IconName" :size="13" class="col-icon" />

@@ -110,9 +110,15 @@ export class RealtimeHub {
         if (g) this.send((c) => c.orgs.has(g), { type: 'stock', scope: 'org', guildId: g });
         else if (u) this.send((c) => c.userId === u, { type: 'stock', scope: 'personal' });
         break;
+      case 'setting':
+        // The web app's own settings (language): the user's other tabs
+        if (u) this.send((c) => c.userId === u, { type: 'me' });
+        break;
       case 'blueprint':
       case 'user': {
         if (!u) break;
+        // The own profile is part of /api/me
+        if (t === 'user') this.send((c) => c.userId === u, { type: 'me' });
         // Visible to the user and to everyone sharing an org with them
         const orgs = await this.orgsOf(u);
         const message: ServerMessage = t === 'blueprint' ? { type: 'blueprints', userId: u } : { type: 'profile', userId: u };

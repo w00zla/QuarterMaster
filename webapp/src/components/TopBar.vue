@@ -1,13 +1,23 @@
 <script setup lang="ts">
-// The app bar in the admin UI's look: wordmark, tabs, the user with avatar, language, logout.
+// The app bar in the admin UI's look: wordmark, tabs, the user with avatar (opens the profile), logout.
+import { ref } from "vue";
 import { RouterLink } from "vue-router";
-import Dropdown from "../../../web/src/components/Dropdown.vue";
+import Icon, { type IconName } from "../../../web/src/components/Icon.vue";
 import logo from "../../../web/src/assets/logo-128.png";
-import { LANGS, lang, t, type Lang } from "../i18n";
+import { t, type Key } from "../i18n";
 import { logout, me } from "../session";
+import ProfileDialog from "./ProfileDialog.vue";
 
-const langOptions = LANGS.map((l) => ({ value: l, label: l }));
-const setLang = (value: string) => (lang.value = value as Lang);
+const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
+  { to: "/", label: "nav.home", icon: "overview" },
+  { to: "/stock", label: "nav.stock", icon: "type-crate" },
+  { to: "/refinery", label: "nav.refinery", icon: "drop" },
+  { to: "/blueprints", label: "nav.blueprints", icon: "blueprint" },
+];
+// Tools, after a divider (as in the admin UI)
+const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [{ to: "/crafting", label: "nav.crafting", icon: "crafter" }];
+
+const profileOpen = ref(false);
 </script>
 
 <template>
@@ -17,15 +27,21 @@ const setLang = (value: string) => (lang.value = value as Lang);
       <span class="wordmark">QUARTER<span class="accent">MASTER</span></span>
     </div>
     <nav class="tabs">
-      <RouterLink to="/" class="tab" :class="{ active: $route.path === '/' }">{{ t("nav.home") }}</RouterLink>
+      <RouterLink v-for="tab in tabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
+        <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
+      </RouterLink>
+      <span class="tab-divider" />
+      <RouterLink v-for="tab in toolTabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
+        <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
+      </RouterLink>
     </nav>
     <div class="spacer" />
-    <div v-if="me" class="user" :title="me.username">
+    <button v-if="me" type="button" class="user" :title="t('profile.open')" @click="profileOpen = true">
       <img class="avatar" :src="me.avatarUrl" alt="" />
       <span class="name">{{ me.name }}</span>
-    </div>
-    <Dropdown :model-value="lang" variant="mono" :options="langOptions" :title="t('lang.title')" @update:model-value="setLang" />
-    <button class="btn small outline" type="button" @click="logout">{{ t("user.logout") }}</button>
+    </button>
+    <ProfileDialog v-if="profileOpen" @close="profileOpen = false" />
+    <button class="btn small outline" type="button" @click="logout"><Icon name="log-out" :size="14" /> {{ t("user.logout") }}</button>
   </header>
 </template>
 
@@ -34,8 +50,9 @@ const setLang = (value: string) => (lang.value = value as Lang);
   position: sticky;
   top: 0;
   z-index: 30;
-  height: 56px;
+  min-height: 56px;
   flex-shrink: 0;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -78,6 +95,9 @@ const setLang = (value: string) => (lang.value = value as Lang);
 }
 
 .tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 14px;
   border-radius: 4px;
   font-weight: 600;
@@ -91,6 +111,15 @@ const setLang = (value: string) => (lang.value = value as Lang);
   text-decoration: none;
 }
 
+.tab-divider {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
 .tab.active {
   background: var(--accent);
   color: var(--accent-text);
@@ -101,6 +130,18 @@ const setLang = (value: string) => (lang.value = value as Lang);
   align-items: center;
   gap: 8px;
   min-width: 0;
+  height: var(--h-chip);
+  padding: 0 10px 0 4px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.user:hover {
+  background: var(--bg-surface-2);
 }
 
 .avatar {
@@ -118,9 +159,25 @@ const setLang = (value: string) => (lang.value = value as Lang);
   white-space: nowrap;
 }
 
-/* Phones: the wordmark gives way to the user */
+/* Narrow screens: the tabs get a row of their own (scrolling sideways if needed) */
+@media (max-width: 900px) {
+  .tabs {
+    order: 10;
+    flex-basis: 100%;
+    overflow-x: auto;
+    margin-bottom: 8px;
+  }
+}
+
+/* Phones: the wordmark and the name give way */
 @media (max-width: 640px) {
-  .wordmark {
+  .topbar {
+    gap: 10px;
+    padding: 0 12px;
+  }
+
+  .wordmark,
+  .name {
     display: none;
   }
 }

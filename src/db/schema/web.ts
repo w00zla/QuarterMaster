@@ -31,3 +31,17 @@ export const session = web.table('session', {
   index().on(t.userId),
   index().on(t.expiresAt),
 ]);
+
+/**
+ * The web app's own user settings (the bot keeps its own in bot.user_config). No FK to app.app_user,
+ * like the sessions: the roster cleanup does not know this table.
+ */
+export const userSetting = web.table('user_setting', {
+  userId: text('user_id').primaryKey(),
+  // NULL = follow the browser language
+  lang: text('lang'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check('user_setting_user_id_format', snowflake(t.userId)),
+  check('user_setting_lang', sql`${t.lang} IS NULL OR ${t.lang} IN ('de', 'en')`),
+]);

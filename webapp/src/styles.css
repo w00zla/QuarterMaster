@@ -1,0 +1,257 @@
+/* Building blocks of the user web app's views, on top of the admin UI's ui.css. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Panels holding pickers: the suggestion lists must not be clipped */
+.panel.unclipped {
+  overflow: visible;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+  padding: 16px;
+  align-items: end;
+}
+
+.form.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Inside a dialog body, which has its own padding */
+.form.flush {
+  padding: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+.input {
+  width: 100%;
+  height: var(--h-chip);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--bg-surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.input:disabled {
+  opacity: 0.5;
+}
+
+.input.invalid {
+  border-color: var(--err);
+}
+
+.input.short {
+  width: 90px;
+}
+
+/* An amount field with its unit after it */
+.with-unit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.with-unit .unit {
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.check input {
+  accent-color: var(--accent);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.hint-line {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* The change a confirmation step books, as a short block */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background: var(--bg-surface-2);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.summary .big {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+/* List rows (stock, blueprints): wrap on phones instead of scrolling sideways */
+.list-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-dim);
+  font-size: 13px;
+}
+
+.list-row:last-child {
+  border-bottom: none;
+}
+
+.group-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 10px 16px 6px;
+  background: var(--bg-base);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.group-head .total {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.q {
+  font-family: var(--font-mono);
+  min-width: 44px;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 80px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-dim);
+  align-items: center;
+}
+
+.filters .search {
+  width: auto;
+  flex: 1 1 180px;
+  max-width: 280px;
+}
+
+/* The big scope switch above a view: personal or one of your orgs */
+.scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--h-control);
+  padding: 0 20px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-2);
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.scope:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.scope.active {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+
+/* Panel heads keep one height whatever they hold (title alone, chips, buttons): no jumping
+   when the content changes, e.g. switching between personal and an org */
+.panel > .head {
+  box-sizing: border-box;
+  min-height: 53px;
+}
+
+/* Icon buttons always with a subtle outline (the admin's ui.css draws them bare) */
+.icon-btn {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}

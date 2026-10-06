@@ -41,7 +41,7 @@ const sorted = computed(() => sortRows(props.rows, cols.sort.value, props.valueO
       :class="{ selected: selected === rowKey(r), ...(rowClass?.(r) ?? {}) }"
       @click="emit('select', r)"
     >
-      <span v-for="c in columns" :key="c.key" :class="{ num: numeric?.includes(c.key) }">
+      <span v-for="c in columns" :key="c.key" :class="{ num: numeric?.includes(c.key), sep: c.sep }">
         <slot :name="`cell-${c.key}`" :row="r">{{ valueOf(r, c.key) }}</slot>
       </span>
     </div>

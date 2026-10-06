@@ -313,6 +313,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A column with a separator line before it (ColumnSpec.sep): the line sits in the middle of the
+   column gap and spans the whole row, row padding included */
+.row > .sep {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin: -8px 0 -8px -6px;
+  padding: 8px 0 8px 6px;
+  border-left: 1px solid var(--border-dim);
+}
+
 /* --- key/value lists in detail panels --- */
 
 .kv {
