@@ -14,7 +14,8 @@ export default defineConfig(({ mode }) => {
       host: "localhost",
       port: 5174,
       strictPort: true,
-      proxy: { "/api": backend, "/auth": backend },
+      // ws: the realtime socket (/api/ws) goes through the proxy too
+      proxy: { "/api": { target: backend, ws: true }, "/auth": backend },
       // Only what the SPA imports (default: the whole workspace, readable by anything on localhost)
       fs: { allow: [".", "../web/src", "../src/webapp/api-types.ts"] },
     },

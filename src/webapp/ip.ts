@@ -1,4 +1,13 @@
-// Rate limit keys for client addresses.
+// Client addresses and their rate limit keys.
+
+/**
+ * The client's address: behind Caddy (trustProxy) the last X-Forwarded-For entry (Caddy drops the
+ * client's own header), else the socket's.
+ */
+export function clientAddress(forwardedFor: string | undefined, remote: string | undefined, trustProxy: boolean): string {
+  const forwarded = trustProxy ? forwardedFor?.split(',').at(-1)?.trim() : undefined;
+  return forwarded || remote || 'unknown';
+}
 
 /**
  * IPv4 as is; IPv6 by its /64, since one subscriber usually holds a whole /64 and could otherwise

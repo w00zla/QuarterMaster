@@ -7,6 +7,7 @@ import { connect } from '../db/client.ts';
 import { createApp } from './app.ts';
 import { loadConfig, type ProcessConfig } from './config.ts';
 import { discordLogin } from './discord.ts';
+import { RealtimeHub, listenForChanges } from './realtime.ts';
 import { deleteExpiredSessions } from './session.ts';
 
 let config: ProcessConfig;
@@ -18,7 +19,7 @@ try {
 }
 const { origin } = config;
 
-const { db, close } = connect(process.env.DATABASE_URL);
+const { db, close, client } = connect(process.env.DATABASE_URL);
 const login = discordLogin({ clientId: config.clientId, clientSecret: config.clientSecret, redirectUri: `${origin}/auth/callback` });
 const app = createApp(db, login, {
   origin,
@@ -30,12 +31,20 @@ const cleanup = () => deleteExpiredSessions(db).catch((err: unknown) => console.
 const cleanupTimer = setInterval(cleanup, 3600_000);
 await cleanup();
 
+const log = (message: string, err?: unknown) => (err === undefined ? console.log(message) : console.error(message, err));
+const realtime = new RealtimeHub(db, { origin, trustProxy: config.trustProxy }, log);
+await listenForChanges(client, realtime, log);
+
 const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
   console.log(`User web app on http://${info.address}:${info.port} (public origin ${origin})`);
 });
+// WebSocket handshakes bypass Hono (realtime.ts checks them itself)
+server.on('upgrade', (req, socket, head) => realtime.handleUpgrade(req, socket, head));
 
 const shutdown = () => {
   clearInterval(cleanupTimer);
+  // Open sockets would keep the server from closing
+  realtime.close();
   server.close(() => void close().then(() => process.exit(0)));
 };
 process.on('SIGINT', shutdown);

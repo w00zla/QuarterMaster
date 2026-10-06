@@ -11,7 +11,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from 'hono-rate-limiter';
 import type { Db } from '../db/client.ts';
 import type { DiscordLogin } from './discord.ts';
-import { rateKey } from './ip.ts';
+import { clientAddress, rateKey } from './ip.ts';
 import { getMe } from './me.ts';
 import {
   ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, validateSession, type Session,
@@ -44,16 +44,13 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
   const limits = config.rateLimit ?? DEFAULT_LIMITS;
 
   const clientIp = (c: Context) => {
-    if (config.trustProxy) {
-      const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim();
-      if (forwarded) return forwarded;
-    }
+    let remote: string | undefined;
     try {
-      return getConnInfo(c).remote.address ?? 'unknown';
+      remote = getConnInfo(c).remote.address;
     } catch {
       // No Node socket (tests)
-      return 'unknown';
     }
+    return clientAddress(c.req.header('x-forwarded-for'), remote, config.trustProxy);
   };
   const sessionToken = (c: Context) => getCookie(c, SESSION_COOKIE, 'host');
 
@@ -64,7 +61,8 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
       styleSrc: ["'self'"],
       imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com'],
       fontSrc: ["'self'"],
-      connectSrc: ["'self'"],
+      // The realtime WebSocket, explicitly: older browsers do not count ws(s) as 'self'
+      connectSrc: ["'self'", config.origin.replace(/^http/, 'ws')],
       objectSrc: ["'none'"],
       baseUri: ["'none'"],
       formAction: ["'self'"],

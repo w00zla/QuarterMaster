@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 import { RouterView } from "vue-router";
 import TopBar from "./components/TopBar.vue";
 import LoginView from "./views/LoginView.vue";
 import { t } from "./i18n";
+import { startRealtime, stopRealtime } from "./realtime";
 import { loadMe, status } from "./session";
 
 onMounted(loadMe);
+// Live updates while logged in
+watch(status, (s) => (s === "in" ? startRealtime() : stopRealtime()));
 </script>
 
 <template>

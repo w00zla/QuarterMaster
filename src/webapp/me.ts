@@ -18,10 +18,12 @@ export const avatarUrl = (userId: string, avatar: string | null) => avatar
 export async function getMe(db: Db, session: Session): Promise<MeResponse> {
   const { userId } = session;
   const orgs = await db.execute<{
-    guild_id: string; name: string; display_name: string; officer: boolean; roster_fresh: boolean; bot_present: boolean;
+    guild_id: string; name: string; display_name: string; officer: boolean; roster_fresh: boolean; fresh_for_ms: number; bot_present: boolean;
   }>(sql`
     SELECT o.guild_id, o.name, m.display_name, m.officer,
       coalesce(o.roster_checked_at > now() - ${`${ROSTER_STALE_MS} milliseconds`}::interval, false) AS roster_fresh,
+      greatest(0, coalesce(extract(epoch FROM o.roster_checked_at + ${`${ROSTER_STALE_MS} milliseconds`}::interval - now()) * 1000, 0))::int
+        AS fresh_for_ms,
       g.left_at IS NULL AS bot_present
     FROM app.member m JOIN app.org o ON o.guild_id = m.guild_id LEFT JOIN bot.guild g ON g.guild_id = o.guild_id
     WHERE m.user_id = ${userId} AND m.active ORDER BY lower(o.name)`);
@@ -33,7 +35,7 @@ export async function getMe(db: Db, session: Session): Promise<MeResponse> {
     avatarUrl: avatarUrl(userId, session.avatar),
     orgs: orgs.map((o) => ({
       guildId: o.guild_id, name: o.name, displayName: o.display_name, officer: o.officer,
-      rosterFresh: o.roster_fresh, botPresent: o.bot_present,
+      rosterFresh: o.roster_fresh, rosterFreshForMs: o.fresh_for_ms, botPresent: o.bot_present,
     })),
   };
 }
