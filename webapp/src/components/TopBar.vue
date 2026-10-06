@@ -51,8 +51,9 @@ const setLang = (value: string) => (lang.value = value as Lang);
 }
 
 .logo {
-  width: 32px;
-  height: 32px;
+  /* Nearly the bar's height (56 px); the file has 128 px, enough for HiDPI */
+  width: 44px;
+  height: 44px;
   display: block;
 }
 

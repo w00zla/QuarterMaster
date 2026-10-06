@@ -100,5 +100,7 @@ const shutdown = async () => {
 };
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);
+// A closed terminal (e.g. a killed VS Code task) hangs up: shut down cleanly, the roster marks go too
+process.once('SIGHUP', shutdown);
 
 await client.login(DISCORD_TOKEN);

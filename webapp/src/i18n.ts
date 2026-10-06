@@ -6,7 +6,8 @@ export type Lang = "de" | "en";
 export const LANGS: Lang[] = ["de", "en"];
 
 const en = {
-  "app.tagline": "Stock and blueprints for Star Citizen",
+  "app.tagline": "StarCitizen Resources Manager",
+  "app.slogan": "Hoarding, but organized!",
   "error.backend": "Server not reachable.",
   "lang.title": "Language",
   "login.button": "Log in with Discord",
@@ -15,7 +16,6 @@ const en = {
   "login.denied": "Login cancelled.",
   "nav.home": "Overview",
   "user.logout": "Log out",
-  "home.welcome": "Logged in as {name}",
   "home.orgs": "Your orgs",
   "home.noOrgs": "You are not in any org. Personal stock and blueprints work without one.",
   "home.officer": "Officer",
@@ -29,7 +29,8 @@ type Key = keyof typeof en;
 
 // Same keys as en, enforced by the type
 const de: Record<Key, string> = {
-  "app.tagline": "Bestand und Blueprints für Star Citizen",
+  "app.tagline": "StarCitizen Resources Manager",
+  "app.slogan": "Hoarding, but organized!",
   "error.backend": "Server nicht erreichbar.",
   "lang.title": "Sprache",
   "login.button": "Mit Discord anmelden",
@@ -38,7 +39,6 @@ const de: Record<Key, string> = {
   "login.denied": "Anmeldung abgebrochen.",
   "nav.home": "Übersicht",
   "user.logout": "Abmelden",
-  "home.welcome": "Angemeldet als {name}",
   "home.orgs": "Deine Orgs",
   "home.noOrgs": "Du bist in keiner Org. Persönlicher Bestand und Blueprints funktionieren auch ohne.",
   "home.officer": "Officer",

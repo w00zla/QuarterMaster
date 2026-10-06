@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Not logged in: the Discord login (a plain link: the server redirects to Discord and back).
-import logo from "../../../web/src/assets/logo-128.png";
+import logo from "../assets/logo-256.png";
 import { t } from "../i18n";
 import { loginNotice } from "../session";
 </script>
@@ -10,7 +10,10 @@ import { loginNotice } from "../session";
     <div class="panel card">
       <img class="logo" :src="logo" alt="" />
       <div class="wordmark">QUARTER<span class="accent">MASTER</span></div>
-      <div class="dim">{{ t("app.tagline") }}</div>
+      <div class="tagline">
+        <div class="dim">{{ t("app.tagline") }}</div>
+        <div class="slogan">{{ t("app.slogan") }}</div>
+      </div>
       <div v-if="loginNotice" class="warning">{{ t(loginNotice === "failed" ? "login.failed" : "login.denied") }}</div>
       <a class="btn primary" href="/auth/login">{{ t("login.button") }}</a>
       <div class="faint hint">{{ t("login.hint") }}</div>
@@ -37,8 +40,9 @@ import { loginNotice } from "../session";
 }
 
 .logo {
-  width: 64px;
-  height: 64px;
+  /* The login's centrepiece; the file has twice the pixels for HiDPI screens */
+  width: 112px;
+  height: 112px;
 }
 
 .wordmark {
@@ -51,8 +55,23 @@ import { loginNotice } from "../session";
   color: var(--accent);
 }
 
+.tagline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.slogan {
+  font-style: italic;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* As wide as its text (the card centers it), with room around it */
 .btn {
-  width: 100%;
+  height: 44px;
+  padding: 0 32px;
+  margin: 12px 0;
   text-decoration: none;
 }
 

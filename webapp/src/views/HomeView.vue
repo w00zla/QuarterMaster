@@ -6,7 +6,6 @@ import { me } from "../session";
 
 <template>
   <div v-if="me" class="home">
-    <div class="dim">{{ t("home.welcome", { name: me.name }) }}</div>
     <section class="panel">
       <div class="head">
         <span class="head-title">{{ t("home.orgs") }}</span>
