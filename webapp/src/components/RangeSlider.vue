@@ -1,9 +1,13 @@
 <script setup lang="ts">
 // A min-max slider: two native range inputs on one track (only their thumbs take the pointer), the
-// chosen range filled in between. Fixed width, the value text keeps its width too.
+// chosen range filled in between. Fixed width, the value text keeps its width too (it reserves the
+// widest text any value can give). `format` turns a value into its text, e.g. a quality tier.
 import { computed } from "vue";
 
-const props = withDefaults(defineProps<{ min: number; max: number; step?: number; label: string }>(), { step: 10 });
+const props = withDefaults(
+  defineProps<{ min: number; max: number; step?: number; label: string; format?: (v: number) => string }>(),
+  { step: 10, format: (v: number) => String(v) },
+);
 const low = defineModel<number>("low", { required: true });
 const high = defineModel<number>("high", { required: true });
 
@@ -11,10 +15,16 @@ const setLow = (v: number) => (low.value = Math.min(v, high.value));
 const setHigh = (v: number) => (high.value = Math.max(v, low.value));
 const pct = (v: number) => ((v - props.min) / (props.max - props.min)) * 100;
 const fill = computed(() => ({ left: `${pct(low.value)}%`, width: `${pct(high.value) - pct(low.value)}%` }));
+const text = computed(() => `${props.format(low.value)}–${props.format(high.value)}`);
+const widest = computed(() => {
+  let w = "";
+  for (let v = props.min; v <= props.max; v += props.step) if (props.format(v).length > w.length) w = props.format(v);
+  return `${w}–${w}`;
+});
 </script>
 
 <template>
-  <div class="range" :title="`${label} ${low}–${high}`">
+  <div class="range" :title="`${label} ${text}`">
     <span class="caption">{{ label }}</span>
     <div class="track">
       <div class="fill" :style="fill" />
@@ -23,7 +33,7 @@ const fill = computed(() => ({ left: `${pct(low.value)}%`, width: `${pct(high.va
       <input type="range" :min="min" :max="max" :step="step" :value="high" :aria-label="`${label} max`"
         @input="setHigh(Number(($event.target as HTMLInputElement).value))" />
     </div>
-    <span class="value">{{ low }}–{{ high }}</span>
+    <span class="value"><span class="sizer" aria-hidden="true">{{ widest }}</span><span>{{ text }}</span></span>
   </div>
 </template>
 
@@ -98,11 +108,20 @@ const fill = computed(() => ({ left: `${pct(low.value)}%`, width: `${pct(high.va
   background: none;
 }
 
-/* "1000–1000" at most: the width never changes while dragging */
+/* Text and the invisible widest text in one cell: the width never changes while dragging */
 .value {
-  min-width: 9ch;
+  display: grid;
+  justify-items: end;
   font-variant-numeric: tabular-nums;
-  text-align: right;
   color: var(--text);
+}
+
+.value > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+
+.sizer {
+  visibility: hidden;
 }
 </style>

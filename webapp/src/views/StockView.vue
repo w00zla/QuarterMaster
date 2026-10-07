@@ -21,7 +21,7 @@ import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import StockFind from "../components/StockFind.vue";
-import { compareBatches, qMark, qty } from "../format";
+import { compareBatches, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
 import { lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf, writable } from "../orgs";
 import { onServerMessage } from "../realtime";
@@ -33,8 +33,9 @@ const data = ref<StockListResponse | null>(null);
 const holder = ref("");
 const materialText = ref("");
 const locationFilter = ref("");
+// Quality filter in tiers (qTier)
 const qualityLow = ref(0);
-const qualityHigh = ref(1000);
+const qualityHigh = ref(Q_TIER_MAX);
 // Adding in a panel below the head: the form, then its own confirmation
 const showAdd = ref(false);
 
@@ -94,7 +95,7 @@ const filtered = computed(() => {
   const words = materialText.value.toLowerCase().split(/\s+/).filter(Boolean);
   return (data.value?.batches ?? []).filter((b) =>
     (!locationFilter.value || b.locationUuid === locationFilter.value)
-    && b.quality >= qualityLow.value && b.quality <= qualityHigh.value
+    && qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value
     && words.every((w) => `${b.material} ${b.location}`.toLowerCase().includes(w)));
 });
 
@@ -212,7 +213,7 @@ function open(batch: StockBatch, action: BatchAction) {
         </label>
         <Dropdown v-model="locationFilter" variant="chip" :options="locationOptions" />
         <Dropdown v-if="org" v-model="holder" variant="chip" :options="holderOptions" />
-        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="1000" label="Q" />
+        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :label="t('field.quality')" />
         <span class="spacer" />
         <span class="head-count">{{ filtered.length }} / {{ data?.batches.length ?? 0 }}</span>
       </div>

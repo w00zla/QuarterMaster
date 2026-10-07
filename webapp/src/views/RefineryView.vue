@@ -14,7 +14,7 @@ import InfoTip from "../components/InfoTip.vue";
 import RangeSlider from "../components/RangeSlider.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import { methods, signedBonus, yieldValue } from "../catalog";
-import { compareBatches, hm, qMark, qty } from "../format";
+import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
 import { lang, t } from "../i18n";
 import { onServerMessage } from "../realtime";
 import { toastError } from "../toasts";
@@ -22,8 +22,9 @@ import { toastError } from "../toasts";
 const data = ref<StockListResponse | null>(null);
 const materialText = ref("");
 const locationFilter = ref("");
+// Quality filter in tiers (qTier)
 const qualityLow = ref(0);
-const qualityHigh = ref(1000);
+const qualityHigh = ref(Q_TIER_MAX);
 // "Start job" in a panel below the head: the form, then its own confirmation
 const showStart = ref(false);
 
@@ -69,7 +70,7 @@ const filtered = computed(() => {
   const words = materialText.value.toLowerCase().split(/\s+/).filter(Boolean);
   return jobs.value.filter((b) =>
     (!locationFilter.value || b.locationUuid === locationFilter.value)
-    && b.quality >= qualityLow.value && b.quality <= qualityHigh.value
+    && qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value
     && words.every((w) => `${b.material} ${b.location}`.toLowerCase().includes(w)));
 });
 
@@ -173,7 +174,7 @@ const bonusText = (b: StockBatch) => {
           <button v-if="materialText" type="button" class="clear" @click="materialText = ''"><Icon name="close" :size="12" /></button>
         </label>
         <Dropdown v-model="locationFilter" variant="chip" :options="locationOptions" />
-        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="1000" label="Q" />
+        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :label="t('field.quality')" />
         <span class="spacer" />
         <span class="head-count">{{ filtered.length }} / {{ jobs.length }}</span>
       </div>

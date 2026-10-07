@@ -28,6 +28,13 @@ const qualityStars = (q: number) => Math.min(5, Math.floor(q / 100) - 4);
 /** The level of a quality: "⊘" (below 500, not usable), "★" to "★★★★★", "♛" (1000) */
 export const qMark = (q: number) => (q < 500 ? "⊘" : q === 1000 ? "♛" : "★".repeat(qualityStars(q)));
 
+/** The tier of a quality for filters: 0 = ⊘, 1-5 = ★ to ★★★★★, 6 = ♛ */
+export const qTier = (q: number) => (q < 500 ? 0 : q === 1000 ? 6 : qualityStars(q));
+export const Q_TIER_MAX = 6;
+
+/** A tier's mark, see qTier */
+export const tierMark = (tier: number) => (tier === 0 ? "⊘" : tier === Q_TIER_MAX ? "♛" : "★".repeat(tier));
+
 /** The quality with its level: "⊘ 480", "★★★ 720", "♛ 1000" */
 export const qText = (q: number | null) => (q === null ? "" : `${qMark(q)} ${q}`);
 
