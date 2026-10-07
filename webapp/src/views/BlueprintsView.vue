@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Blueprints as a table like the admin UI's: scope "personal" (yours: add, remove) or an org (every
-// blueprint its active members registered, with who has it). Filters: text, category, size, and in
+// blueprint its active members registered, with who has it). Filters: text, category, type, size, and in
 // an org the member.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type {
@@ -77,6 +77,7 @@ watch(scope, () => {
 
 // --- filters ---------------------------------------------------------------------------------
 const search = ref("");
+const type = ref("");
 const category = ref("");
 const size = ref("");
 const member = ref("");
@@ -91,10 +92,17 @@ function options(values: (string | null | undefined)[], all: string, label = (v:
   const unique = [...new Set(values.filter((v): v is string => !!v))].sort(byText);
   return [{ value: "", label: all }, ...unique.map((v) => ({ value: v, label: label(v) }))];
 }
-const categoryOptions = computed(() => options(allRows.value.map((r) => r.bp?.category ?? t("bp.other")), t("filter.allCategories")));
+// Filter chain like the admin UI's: category -> type -> size; each list only offers what the previous
+// choice leaves. Blueprints without a type are a choice of their own, "(none)".
+const categoryOf = (r: Row) => r.bp?.category ?? t("bp.other");
+const typeOf = (r: Row) => r.bp?.typeLabel ?? t("filter.noType");
+const inCategory = computed(() => allRows.value.filter((r) => !category.value || categoryOf(r) === category.value));
+const inType = computed(() => inCategory.value.filter((r) => !type.value || typeOf(r) === type.value));
+const categoryOptions = computed(() => options(allRows.value.map(categoryOf), t("filter.allCategories")));
+const typeOptions = computed(() => options(inCategory.value.map(typeOf), t("filter.allTypes")));
 const sizeOptions = computed(() => [
   { value: "", label: t("filter.allSizes") },
-  ...[...new Set(allRows.value.map((r) => r.bp?.size).filter((s): s is number => s !== null && s !== undefined))]
+  ...[...new Set(inType.value.map((r) => r.bp?.size).filter((s): s is number => s !== null && s !== undefined))]
     .sort((a, b) => a - b).map((s) => ({ value: String(s), label: `S${s}` })),
 ]);
 const memberOptions = computed(() => [
@@ -104,12 +112,12 @@ const memberOptions = computed(() => [
 ]);
 // A choice the list no longer offers is dropped
 watch(categoryOptions, (o) => { if (!o.some((x) => x.value === category.value)) category.value = ""; });
+watch(typeOptions, (o) => { if (!o.some((x) => x.value === type.value)) type.value = ""; });
 watch(sizeOptions, (o) => { if (!o.some((x) => x.value === size.value)) size.value = ""; });
 
 const rows = computed(() => {
   const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
-  return allRows.value.filter((r) => {
-    if (category.value && (r.bp?.category ?? t("bp.other")) !== category.value) return false;
+  return inType.value.filter((r) => {
     if (size.value && String(r.bp?.size) !== size.value) return false;
     if (member.value && !r.owners.some((o) => o.userId === member.value)) return false;
     const hay = [r.bp?.label, r.bp?.category, ...r.owners.map(memberLabel)].join(" ").toLowerCase();
@@ -230,6 +238,7 @@ onUnmounted(() => unsubscribe());
           </button>
         </label>
         <Dropdown v-model="category" :options="categoryOptions" variant="chip" />
+        <Dropdown v-model="type" :options="typeOptions" variant="chip" />
         <Dropdown v-model="size" :options="sizeOptions" variant="chip" />
         <Dropdown v-if="org" v-model="member" :options="memberOptions" variant="chip" />
         <span class="spacer" />

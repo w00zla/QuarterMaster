@@ -35,10 +35,13 @@ function options(pairs: [string | null, string | null][], all: string, byValue =
   return [{ value: "", label: all }, ...unique.map(([value, label]) => ({ value, label }))];
 }
 const active = computed(() => (list.data.value ?? []).filter((r) => showRetired.value || !r.retired));
+// Blueprints without an output type are a choice of their own (type keys never look like this)
+const NO_TYPE = "-";
+const typeOf = (r: BlueprintRow) => r.outputType ?? NO_TYPE;
 const inGroup = computed(() => active.value.filter((r) => !group.value || r.categoryGroup === group.value));
-const inType = computed(() => inGroup.value.filter((r) => !type.value || r.outputType === type.value));
+const inType = computed(() => inGroup.value.filter((r) => !type.value || typeOf(r) === type.value));
 const groupOptions = computed(() => options(active.value.map((r) => [r.categoryGroup, r.categoryLabel]), "All categories"));
-const typeOptions = computed(() => options(inGroup.value.map((r) => [r.outputType, r.outputTypeLabel]), "All types"));
+const typeOptions = computed(() => options(inGroup.value.map((r) => [typeOf(r), r.outputType ? r.outputTypeLabel : "(none)"]), "All types"));
 const sizeOptions = computed(() => options(inType.value.map((r) => [r.size === null ? null : String(r.size), r.size === null ? null : `S${r.size}`]), "All sizes", true));
 // A narrower choice that the wider one no longer offers is dropped
 watch(group, () => { if (!typeOptions.value.some((o) => o.value === type.value)) type.value = ""; });
