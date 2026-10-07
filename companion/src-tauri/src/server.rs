@@ -5,6 +5,9 @@
 //! short codes the frontend translates (`noToken`, `invalidToken`,
 //! `invalidServer`, …) or a message for anything else.
 
+use std::fs::File;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::{Client, Method, StatusCode, Url};
@@ -72,6 +75,58 @@ pub async fn api(client: &Client, origin: &str, token: &str, method: &str, path:
     }
     let body = res.json::<Value>().await.unwrap_or(Value::Null);
     Ok(ApiResponse { status: status.as_u16(), body })
+}
+
+/// Downloads an update file of the server (`url` below its `/downloads/`)
+/// with the token to `dest`: written to `<dest>.part` first, renamed when
+/// complete (removed on failure). `progress(done, total)` gets the bytes so far.
+/// The file is left as downloaded (no permission changes).
+pub async fn download(
+    client: &Client,
+    origin: &str,
+    token: &str,
+    url: &str,
+    dest: &Path,
+    mut progress: impl FnMut(u64, Option<u64>),
+) -> Result<(), String> {
+    if !url.starts_with(&format!("{origin}/downloads/")) {
+        return Err("invalidServer".into());
+    }
+    if token.is_empty() {
+        return Err("noToken".into());
+    }
+    // A large file on a slow line: far beyond the client's API timeout
+    let mut res = client.get(url).bearer_auth(token).timeout(Duration::from_secs(30 * 60)).send().await.map_err(|e| {
+        log::warn!("download failed: {e}");
+        "network".to_string()
+    })?;
+    match res.status() {
+        StatusCode::OK => {}
+        StatusCode::UNAUTHORIZED => return Err("invalidToken".into()),
+        status => return Err(format!("HTTP {}", status.as_u16())),
+    }
+    let total = res.content_length();
+    let part = PathBuf::from(format!("{}.part", dest.display()));
+    let result = async {
+        let mut file = File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+        let mut done = 0;
+        while let Some(chunk) = res.chunk().await.map_err(|e| {
+            log::warn!("download failed: {e}");
+            "network".to_string()
+        })? {
+            file.write_all(&chunk).map_err(|e| format!("{}: {e}", part.display()))?;
+            done += chunk.len() as u64;
+            progress(done, total);
+        }
+        file.flush().map_err(|e| format!("{}: {e}", part.display()))?;
+        drop(file);
+        std::fs::rename(&part, dest).map_err(|e| format!("{}: {e}", dest.display()))
+    }
+    .await;
+    if result.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    result
 }
 
 #[cfg(test)]

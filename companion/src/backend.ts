@@ -26,6 +26,10 @@ export interface LogState {
 /** A refusal: an error code (translated by the UI) or a message. */
 export class AppError extends Error {}
 
+// Codes that mean the connection itself is refused (shown as the connection state, not as a toast)
+const CONNECTION_CODES = new Set(["noServer", "noToken", "invalidServer", "insecureServer", "invalidToken", "network", "companionOutdated"]);
+export const isConnectionError = (e: unknown) => e instanceof AppError && CONNECTION_CODES.has(e.message);
+
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(cmd, args);
@@ -39,7 +43,8 @@ export const setConfig = (config: Config) => call<Config>("set_config", { config
 export const logState = () => call<LogState>("log_state");
 export const scanBackups = () => call<{ found: number; failed: number }>("scan_backups");
 export const appInfo = () => call<{ version: string; platform: CompanionPlatform }>("app_info");
-export const openDownload = (url: string) => call<void>("open_download", { url });
+export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });
+export const openWebapp = () => call<void>("open_webapp");
 
 // Set when the server refused this version (426): the app does no work until updated
 export const outdated = ref<CompanionOutdated | null>(null);

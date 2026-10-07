@@ -1,22 +1,36 @@
 <script setup lang="ts">
-// The app bar (wordmark, connection, settings) and the unlocks panel. Settings open by themselves
-// while the app is not connected (no server or token, or the token is refused). An app the server
-// calls outdated shows only the update hint (no work until updated).
+// The title bar, a row with the game log state (a small tag while found), the user (avatar, name) or
+// why the connection is down (chip only then) with a button that opens the web app, and the unlocks panel. The chips open
+// the settings; the settings also open by themselves while the app is not connected (no
+// server or token, or the token is refused). An app the server calls outdated shows only the update
+// hint (no work until updated).
 import { computed, onMounted, ref } from "vue";
-import logo from "../../adminapp/src/assets/logo-128.png";
 import Icon from "../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../adminapp/src/components/Tooltip.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import Toasts from "./components/Toasts.vue";
+import TopBar from "./components/TopBar.vue";
 import UnlocksPanel from "./components/UnlocksPanel.vue";
-import { appInfo, openDownload, outdated } from "./backend";
-import { t } from "./i18n";
-import { connected, loadConfig, meName, refreshConnection } from "./state";
+import UpdatePanel from "./components/UpdatePanel.vue";
+import WindowEdges from "./components/WindowEdges.vue";
+import { AppError, appInfo, openWebapp, outdated } from "./backend";
+import { isKey, t } from "./i18n";
+import { config, connectError, connected, connectionText, loadConfig, log, meAvatar, meName, refreshConnection, watchConnection, watchLog } from "./state";
 import { toastError } from "./toasts";
 
 const settingsOpen = ref(false);
 const ready = ref(false);
 const info = ref<{ version: string; platform: "windows" | "linux" } | null>(null);
 const downloadUrl = computed(() => (info.value && outdated.value?.downloads[info.value.platform]) ?? null);
+
+// Why not connected, short (the full text in the tooltip)
+const serverLabel = computed(() => {
+  const key = `conn.short.${connectError.value instanceof AppError ? connectError.value.message : String(connectError.value)}`;
+  return isKey(key) ? t(key) : t("conn.off");
+});
+const serverTip = computed(() => [connectionText.value, config.value?.server].filter(Boolean).join(" · "));
+// Found: just the path; missing: where it was looked for
+const logTip = computed(() => (!log.value ? null : log.value.found ? log.value.path : t("log.notFound", { path: log.value.path })));
 
 onMounted(async () => {
   try {
@@ -26,6 +40,8 @@ onMounted(async () => {
   } catch (e) {
     toastError(e);
   }
+  watchConnection();
+  await watchLog().catch(toastError);
   ready.value = true;
   if (!connected.value && !outdated.value) settingsOpen.value = true;
 });
@@ -33,37 +49,44 @@ onMounted(async () => {
 
 <template>
   <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <img class="logo" :src="logo" alt="" />
-        <span class="wordmark">QUARTER<span class="accent">MASTER</span></span>
-        <span class="sub">{{ t("app.name") }}</span>
-      </div>
+    <TopBar @settings="settingsOpen = true" />
+    <div class="states">
+      <Tooltip v-if="log?.found" :text="logTip">
+        <span class="tag ok"><Icon name="check" :size="12" /> {{ t("log.found") }}</span>
+      </Tooltip>
+      <Tooltip v-else-if="log" :text="logTip">
+        <button type="button" class="tag warn problem" @click="settingsOpen = true">
+          <Icon name="warning" :size="12" /> {{ t("log.missing") }}
+        </button>
+      </Tooltip>
       <div class="spacer" />
-      <span class="user" :class="{ off: !connected }">
-        <Icon name="user" :size="14" />
-        {{ connected ? meName : t("conn.off") }}
-      </span>
-      <button type="button" class="btn small outline square" :title="t('settings.title')" @click="settingsOpen = true">
-        <Icon name="settings" :size="14" />
-      </button>
-    </header>
-    <main v-if="ready && outdated" class="main">
-      <section class="panel outdated">
-        <div class="head"><Icon name="warning" :size="16" /><span class="head-title">{{ t("outdated.title") }}</span></div>
-        <div class="body">
-          <div>{{ t("outdated.text", { current: info?.version ?? "?", version: outdated.version }) }}</div>
-          <button v-if="downloadUrl" type="button" class="btn primary" @click="openDownload(downloadUrl).catch(toastError)">
-            <Icon name="imports" :size="14" /> {{ t("outdated.download", { version: outdated.version }) }}
+      <Tooltip v-if="!connected && connectError" :text="serverTip">
+        <button type="button" class="tag err problem" @click="settingsOpen = true">
+          <Icon name="warning" :size="12" /> {{ serverLabel }}
+        </button>
+      </Tooltip>
+      <template v-if="connected">
+        <span class="user">
+          <img v-if="meAvatar" class="avatar" :src="meAvatar" alt="" />
+          <span class="name">{{ meName }}</span>
+        </span>
+        <span class="divider" />
+        <Tooltip :text="t('webapp.open')">
+          <button type="button" class="icon-btn" @click="openWebapp().catch(toastError)">
+            <Icon name="external" :size="14" />
           </button>
-        </div>
-      </section>
+        </Tooltip>
+      </template>
+    </div>
+    <main v-if="ready && outdated" class="main">
+      <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :url="downloadUrl" />
     </main>
     <main v-else-if="ready" class="main">
       <UnlocksPanel />
     </main>
     <SettingsDialog v-if="settingsOpen" @close="settingsOpen = false" />
     <Toasts />
+    <WindowEdges />
   </div>
 </template>
 
@@ -74,72 +97,55 @@ onMounted(async () => {
   height: 100vh;
 }
 
-.topbar {
+/* Below the title bar (keeps it free and the app narrow): the game log state on the left, the
+   connection (user or problem) on the right; the row keeps its height whatever it holds */
+.states {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 56px;
+  gap: 8px;
+  height: 40px;
   flex-shrink: 0;
   padding: 0 16px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* Problems (game log missing, connection down): a tag like "Data available", but a button (opens
+   the settings) */
+.problem {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.logo {
-  width: 44px;
-  height: 44px;
-  display: block;
-}
-
-.wordmark {
-  font-weight: 700;
-  font-size: 16px;
-  letter-spacing: 0.22em;
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.wordmark .accent {
-  color: var(--accent);
-}
-
-.sub {
-  color: var(--text-2);
-  font-size: 13px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
+/* The user like the web app's top bar: avatar and name */
 .user {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
   color: var(--text);
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-dim);
+}
+
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: block;
+}
+
+.name {
+  font-weight: 600;
   font-size: 13px;
-}
-
-.user.off {
-  color: var(--text-3);
-}
-
-.outdated {
-  max-width: 520px;
-  margin: 48px auto 0;
-  width: 100%;
-}
-
-.outdated .body {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .main {

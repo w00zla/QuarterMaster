@@ -1,15 +1,18 @@
 <script setup lang="ts">
 // The blueprint unlocks from Game.log (and, on request, the old logs), matched to the catalog and
-// compared with the user's registered blueprints; new ones are registered after a confirmation.
+// compared with the user's registered blueprints. New ones are registered one by one right away
+// (ambiguous ones after picking the variant) or all at once after a confirmation.
+// The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { BlueprintListResponse, CatalogBlueprint, CatalogResponse, OkResponse } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { api, logState, scanBackups, type LogState } from "../backend";
+import { scanBackups } from "../backend";
 import { lang, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
-import { connected } from "../state";
+import { api, connected, loadLog, log } from "../state";
 import { toast, toastError } from "../toasts";
 
 type RowState = "owned" | "default" | "unknown" | "new" | "pick";
@@ -20,25 +23,19 @@ interface Row {
   candidates: CatalogEntry[];
 }
 
-const log = ref<LogState | null>(null);
 const index = ref(new Map<string, CatalogEntry[]>());
 // Labels in the UI language ("Name · S3 · B Industrial · CHCO")
 const labels = ref(new Map<string, string>());
 const owned = ref(new Set<string>());
-// Unticked new rows, picked candidates of ambiguous ones (by logged name)
-const excluded = ref(new Set<string>());
+// Picked candidates of ambiguous rows, rows being registered one by one (by logged name)
 const picked = ref<Record<string, string>>({});
+const pending = ref(new Set<string>());
 const busy = ref(false);
 const scanning = ref(false);
+// Full scan progress in log files (Rust event scan-progress), null until the first report
+const progress = ref<{ done: number; total: number } | null>(null);
+const progressPct = computed(() => (progress.value?.total ? (progress.value.done / progress.value.total) * 100 : 0));
 const confirming = ref(false);
-
-async function loadLog() {
-  try {
-    log.value = await logState();
-  } catch (e) {
-    toastError(e);
-  }
-}
 
 async function loadCatalog() {
   if (!connected.value) return;
@@ -73,22 +70,34 @@ const rows = computed<Row[]>(() => (log.value?.unlocks ?? [])
 
 /** The blueprint a row would register, null when none. */
 function selection(row: Row): string | null {
-  if (row.state === "new") return excluded.value.has(row.name) ? null : row.candidates[0]!.uuid;
+  if (row.state === "new") return row.candidates[0]!.uuid;
   if (row.state === "pick") return picked.value[row.name] ?? null;
   return null;
 }
+// What "Register all" registers: every new row, every ambiguous one with a picked variant
 const selected = computed(() => [...new Set(rows.value.map(selection).filter((u): u is string => u !== null))]);
 
-function toggle(row: Row) {
-  const next = new Set(excluded.value);
-  if (next.has(row.name)) next.delete(row.name);
-  else next.add(row.name);
-  excluded.value = next;
+/** Registers one row's blueprint right away. */
+async function registerOne(row: Row) {
+  const uuid = selection(row);
+  if (!uuid || pending.value.has(row.name)) return;
+  pending.value = new Set(pending.value).add(row.name);
+  try {
+    await api<OkResponse>("POST", "/blueprints/add", { uuid });
+    toast(t("unlocks.addedOne", { name: labels.value.get(uuid) ?? row.name }));
+    await loadOwned();
+  } catch (e) {
+    toastError(e);
+  } finally {
+    const next = new Set(pending.value);
+    next.delete(row.name);
+    pending.value = next;
+  }
 }
 
 const confirmButtons = computed<ConfirmButton[]>(() => [
   { label: t("common.cancel"), kind: "outline", value: "cancel" },
-  { label: t("unlocks.add"), kind: "primary", value: "add", icon: "plus", disabled: busy.value },
+  { label: t("unlocks.add"), kind: "primary", value: "add", icon: "check", disabled: busy.value },
 ]);
 
 async function register(value: string) {
@@ -111,6 +120,7 @@ async function register(value: string) {
 }
 
 async function scan() {
+  progress.value = null;
   scanning.value = true;
   try {
     const result = await scanBackups();
@@ -125,13 +135,44 @@ async function scan() {
 }
 
 const stateKey = (s: RowState) => `state.${s}` as Key;
-const when = (at: string) => (at ? new Date(at).toLocaleString(lang) : "");
+// Local time as "2026-10-07 14:05" in every language
+const pad = (n: number) => String(n).padStart(2, "0");
+function when(at: string): string {
+  if (!at) return "";
+  const d = new Date(at);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 const label = (c: CatalogEntry) => labels.value.get(c.uuid) ?? c.name;
+// Why registering is locked (on the disabled controls)
+const lockTip = computed(() => (connected.value ? null : t("conn.off")));
+
+// The status column is as wide as its widest content in the UI language (state texts, the
+// Register button, the candidate select's placeholder plus its padding and arrow next to its
+// button), measured once the font is loaded
+const SELECT_EXTRA = 44;
+const BUTTON_EXTRA = 42; // small button: padding, border, icon, gap
+const ICON_BUTTON = 24 + 6; // icon button and gap
+const statusWidth = ref(150);
+async function measureStatus() {
+  await document.fonts.ready;
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return;
+  const family = getComputedStyle(document.body).fontFamily;
+  ctx.font = `13px ${family}`;
+  const texts = (["owned", "default", "unknown"] as const).map((s) => ctx.measureText(t(stateKey(s))).width);
+  const pick = ctx.measureText(t("unlocks.pick")).width + SELECT_EXTRA + ICON_BUTTON;
+  ctx.font = `600 12px ${family}`;
+  const button = ctx.measureText(t("unlocks.add")).width + BUTTON_EXTRA;
+  ctx.font = `600 11px ${family}`;
+  const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1;
+  statusWidth.value = Math.ceil(Math.max(...texts, pick, button, head));
+}
+const cols = computed(() => ({ "--cols": `minmax(0, 1fr) 170px ${statusWidth.value}px` }));
 
 let unlisten: UnlistenFn | undefined;
 onMounted(async () => {
-  unlisten = await listen("log-changed", () => void loadLog());
-  await loadLog();
+  unlisten = await listen<{ done: number; total: number }>("scan-progress", (e) => (progress.value = e.payload));
+  void measureStatus();
   await loadCatalog();
 });
 onUnmounted(() => unlisten?.());
@@ -142,34 +183,54 @@ watch(connected, () => void loadCatalog());
   <section class="panel unlocks">
     <div class="head">
       <Icon name="blueprint" :size="16" />
-      <span class="head-title">{{ t("unlocks.title") }}</span>
-      <span v-if="log && !log.found" class="missing" :title="log.path"><Icon name="warning" :size="14" /> {{ t("log.missing") }}</span>
+      <div v-if="scanning" class="head-title scan">
+        <span>{{ t("unlocks.scanning", { done: progress?.done ?? 0, total: progress?.total ?? "…" }) }}</span>
+        <div class="bar"><div class="fill" :style="{ width: `${progressPct}%` }" /></div>
+      </div>
+      <span v-else class="head-title">{{ t("unlocks.title") }}</span>
       <button type="button" class="btn small outline" :disabled="scanning" @click="scan">
         <Icon name="history" :size="14" /> {{ t("unlocks.scan") }}
       </button>
-      <button type="button" class="btn small primary" :disabled="!connected || !selected.length || busy" @click="confirming = true">
-        <Icon name="plus" :size="14" /> {{ t("unlocks.add") }}
-      </button>
+      <Tooltip :text="lockTip">
+        <button type="button" class="btn small primary" :disabled="!connected || !selected.length || busy" @click="confirming = true">
+          <Icon name="check" :size="14" /> {{ t("unlocks.addAll") }}
+        </button>
+      </Tooltip>
     </div>
     <div v-if="!rows.length" class="empty-line">{{ t("unlocks.empty") }}</div>
-    <div v-else class="table">
+    <div v-else class="table" :style="cols">
       <div class="row cols-head">
-        <span />
         <span>{{ t("col.blueprint") }}</span>
         <span>{{ t("col.at") }}</span>
         <span>{{ t("col.state") }}</span>
       </div>
       <div v-for="row in rows" :key="row.name" class="row item" :class="{ done: row.state !== 'new' && row.state !== 'pick' }">
-        <span>
-          <input v-if="row.state === 'new'" type="checkbox" :checked="!excluded.has(row.name)" :disabled="!connected" @change="toggle(row)" />
-        </span>
         <span class="name" :title="row.candidates.length === 1 ? label(row.candidates[0]!) : row.name">{{ row.name }}</span>
         <span class="faint">{{ when(row.at) }}</span>
-        <span>
-          <select v-if="row.state === 'pick'" v-model="picked[row.name]" class="input pick" :disabled="!connected">
-            <option :value="undefined">{{ t("unlocks.pick") }}</option>
-            <option v-for="c in row.candidates" :key="c.uuid" :value="c.uuid">{{ label(c) }}</option>
-          </select>
+        <span class="state-cell">
+          <Tooltip v-if="row.state === 'new'" :text="lockTip">
+            <button type="button" class="btn small outline" :disabled="!connected || busy || pending.has(row.name)" @click="registerOne(row)">
+              <Icon name="check" :size="14" /> {{ t("unlocks.add") }}
+            </button>
+          </Tooltip>
+          <span v-else-if="row.state === 'pick'" class="pick-line">
+            <Tooltip :text="lockTip">
+              <select v-model="picked[row.name]" class="input pick" :disabled="!connected">
+                <option :value="undefined">{{ t("unlocks.pick") }}</option>
+                <option v-for="c in row.candidates" :key="c.uuid" :value="c.uuid">{{ label(c) }}</option>
+              </select>
+            </Tooltip>
+            <Tooltip :text="lockTip ?? t('unlocks.add')">
+              <button
+                type="button"
+                class="icon-btn"
+                :disabled="!connected || busy || !picked[row.name] || pending.has(row.name)"
+                @click="registerOne(row)"
+              >
+                <Icon name="check" :size="14" />
+              </button>
+            </Tooltip>
+          </span>
           <template v-else>{{ t(stateKey(row.state)) }}</template>
         </span>
       </div>
@@ -190,12 +251,49 @@ watch(connected, () => void loadCatalog());
 }
 
 .table {
-  --cols: 20px minmax(0, 1fr) 170px 240px;
   --cols-min: 0;
 }
 
+/* The full scan's progress in place of the title (no layout change in the head) */
+.scan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-surface-2);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  transition: width 0.15s ease-out;
+}
+
+/* Compact rows: less padding, controls 24 px high */
 .row.item {
-  min-height: 30px;
+  min-height: 24px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.row.item .btn.small,
+.row.item .icon-btn {
+  height: 24px;
+}
+
+.row.item .icon-btn {
+  width: 24px;
 }
 
 .row.item > span {
@@ -204,20 +302,34 @@ watch(connected, () => void loadCatalog());
   white-space: nowrap;
 }
 
+/* Only what can still be registered stands out */
+.row:not(.done) .name {
+  font-weight: 600;
+}
+
 .row.done {
   color: var(--text-3);
 }
 
-.pick {
-  width: 100%;
-  height: var(--h-chip-sm);
-}
-
-.missing {
+/* An ambiguous row: the variant select takes the room left of its Register button */
+.pick-line {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--warn);
-  font-size: 12px;
+}
+
+.pick-line > :deep(.tip-anchor:first-child) {
+  flex: 1;
+  min-width: 0;
+}
+
+.pick {
+  width: 100%;
+  height: 24px;
+}
+
+/* Disabled controls swallow the mouse in some webviews: let the tooltip's anchor get it */
+:disabled {
+  pointer-events: none;
 }
 </style>

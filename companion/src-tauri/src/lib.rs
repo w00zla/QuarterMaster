@@ -20,6 +20,10 @@ use gamelog::Unlock;
 /// Event to the frontend: the log state (file found, unlocks) changed; it
 /// fetches `log_state` again.
 const LOG_CHANGED: &str = "log-changed";
+// Full scan progress: { done, total } (log files)
+const SCAN_PROGRESS: &str = "scan-progress";
+// Update download progress: { done, total } (bytes; total null when unknown)
+const DOWNLOAD_PROGRESS: &str = "download-progress";
 
 struct AppData {
     config: Config,
@@ -131,13 +135,28 @@ struct ScanResult {
     failed: usize,
 }
 
+#[derive(Serialize, Clone)]
+struct ScanProgress {
+    done: usize,
+    total: usize,
+}
+
 /// Reads every old log in `logbackups` once (GBs: off the main thread) and
-/// adds their unlocks to the list.
+/// adds their unlocks to the list; reports progress at most every 50 ms.
 #[tauri::command]
 async fn scan_backups(app: AppHandle) -> Result<ScanResult, String> {
     let dir = app.state::<Mutex<AppData>>().lock().unwrap().config.log_backups();
-    let (found, failed) = tauri::async_runtime::spawn_blocking(move || gamelog::scan_folder(&dir))
-        .await
+    let emitter = app.clone();
+    let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    let (found, failed) = tauri::async_runtime::spawn_blocking(move || {
+        gamelog::scan_folder(&dir, |done, total| {
+            if done == total || last.elapsed() >= std::time::Duration::from_millis(50) {
+                last = std::time::Instant::now();
+                let _ = emitter.emit(SCAN_PROGRESS, ScanProgress { done, total });
+            }
+        })
+    })
+    .await
         .map_err(|e| e.to_string())??;
     let count = found.len();
     let changed = merge_unlocks(&mut app.state::<Mutex<AppData>>().lock().unwrap(), found);
@@ -175,15 +194,34 @@ fn app_info() -> AppInfo {
     AppInfo { version: env!("CARGO_PKG_VERSION"), platform: if cfg!(windows) { "windows" } else { "linux" } }
 }
 
-/// Opens a download of the configured server in the browser.
+#[derive(Serialize, Clone)]
+struct DownloadProgress {
+    done: u64,
+    total: Option<u64>,
+}
+
+/// Downloads an update of the configured server (with the token) to `dest`,
+/// reporting progress at most every 100 ms.
 #[tauri::command]
-fn open_download(app: AppHandle, url: String) -> Result<(), String> {
+async fn download_update(app: AppHandle, http: tauri::State<'_, reqwest::Client>, url: String, dest: String) -> Result<(), String> {
+    let config = app.state::<Mutex<AppData>>().lock().unwrap().config.clone();
+    let origin = server::origin(&config.server)?;
+    let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    server::download(&http, &origin, &config.token, &url, std::path::Path::new(&dest), |done, total| {
+        if Some(done) == total || last.elapsed() >= std::time::Duration::from_millis(100) {
+            last = std::time::Instant::now();
+            let _ = app.emit(DOWNLOAD_PROGRESS, DownloadProgress { done, total });
+        }
+    })
+    .await
+}
+
+/// Opens the configured server's web app in the browser.
+#[tauri::command]
+fn open_webapp(app: AppHandle) -> Result<(), String> {
     let server = app.state::<Mutex<AppData>>().lock().unwrap().config.server.clone();
     let origin = server::origin(&server)?;
-    if !url.starts_with(&format!("{origin}/downloads/")) {
-        return Err("invalidServer".into());
-    }
-    tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|e| e.to_string())
+    tauri_plugin_opener::open_url(format!("{origin}/"), None::<&str>).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -229,7 +267,8 @@ pub fn run() {
             scan_backups,
             api,
             app_info,
-            open_download,
+            download_update,
+            open_webapp,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

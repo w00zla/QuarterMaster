@@ -230,11 +230,19 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     return c.json({ error: 'internal error' }, 500);
   });
 
-  // --- companion app downloads (logged in; only the files the manifest names) ---------------------
+  // --- companion app downloads (logged in or the companion's API token; only the files the manifest names) ---
   app.use('/downloads/*', rateLimiter({ windowMs: limits.windowMs, limit: limits.auth, keyGenerator: (c) => rateKey(clientIp(c)) }));
   app.get('/downloads/companion/:file', async (c) => {
-    const token = sessionToken(c);
-    if (!token || !await validateSession(db, token)) return c.redirect('/', 302);
+    // The companion app downloads its update itself, with its token (no version check here: an
+    // outdated app is exactly the one that needs the file)
+    const auth = c.req.header('authorization');
+    if (auth !== undefined) {
+      const match = API_TOKEN.exec(auth);
+      if (!match || !await validateApiToken(db, match[1]!)) return c.json({ error: 'not logged in' }, 401);
+    } else {
+      const token = sessionToken(c);
+      if (!token || !await validateSession(db, token)) return c.redirect('/', 302);
+    }
     const current = release();
     const file = c.req.param('file');
     const entry = current && PLATFORMS.map((p) => current.files[p]).find((f) => f?.file === file);

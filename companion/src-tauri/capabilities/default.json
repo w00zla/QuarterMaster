@@ -6,6 +6,13 @@
   "permissions": [
     "core:default",
     "dialog:allow-open",
-    "log:default"
+    "dialog:allow-save",
+    "log:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-is-maximized"
   ]
 }

@@ -1,6 +1,6 @@
 // Short messages bottom right (like the web app's): done in green, refused in red.
 import { ref } from "vue";
-import { AppError } from "./backend";
+import { AppError, isConnectionError } from "./backend";
 import { isKey, t } from "./i18n";
 
 export type ToastType = "ok" | "error";
@@ -30,4 +30,7 @@ export function errorText(e: unknown): string {
   return isKey(key) ? t(key) : `${t("err.generic")} (${code})`;
 }
 
-export const toastError = (e: unknown) => toast(errorText(e), "error");
+/** An error as a toast; connection refusals are left to the connection state (top bar). */
+export function toastError(e: unknown) {
+  if (!isConnectionError(e)) toast(errorText(e), "error");
+}

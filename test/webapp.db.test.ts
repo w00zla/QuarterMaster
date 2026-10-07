@@ -445,6 +445,17 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
       }
     });
 
+    it('serves the files to the companion app with its token, also an outdated one; a wrong token gets 401', async () => {
+      const token = await tokenFor(await loginAs());
+      app = build({ companionDir: releaseDir('1.2.0') });
+      const res = await app.request('/downloads/companion/QM_amd64.AppImage', { headers: { authorization: `Bearer ${token}`, 'x-qm-companion': '1.0.0' } });
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'appimage-bytes!');
+      const bad = await app.request('/downloads/companion/QM_amd64.AppImage', { headers: { authorization: `Bearer qmt_${'x'.repeat(43)}` } });
+      assert.equal(bad.status, 401);
+      assert.equal((await app.request('/downloads/companion/QM_amd64.AppImage', { headers: { authorization: 'Basic abc' } })).status, 401);
+    });
+
     it('refuses an outdated or silent app with 426 and the links; same or newer works; no release = no check', async () => {
       const session = await loginAs();
       const token = await tokenFor(session);

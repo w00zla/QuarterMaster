@@ -68,23 +68,25 @@ pub fn unlocks_in_bytes(bytes: &[u8]) -> Vec<Unlock> {
 
 /// The unlocks in every `*.log` of a folder (the game's `logbackups`), oldest
 /// first, each name once (its first unlock). Unreadable files are skipped and
-/// counted.
-pub fn scan_folder(dir: &Path) -> Result<(Vec<Unlock>, usize), String> {
+/// counted. `progress(done, total)` is called after each file.
+pub fn scan_folder(dir: &Path, mut progress: impl FnMut(usize, usize)) -> Result<(Vec<Unlock>, usize), String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let paths: Vec<_> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("log")) == Some(true))
+        .collect();
     let mut all = Vec::new();
     let mut failed = 0;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("log")) != Some(true) {
-            continue;
-        }
-        match std::fs::read(&path) {
+    for (i, path) in paths.iter().enumerate() {
+        match std::fs::read(path) {
             Ok(bytes) => all.extend(unlocks_in_bytes(&bytes)),
             Err(e) => {
                 log::warn!("{}: {e}", path.display());
                 failed += 1;
             }
         }
+        progress(i + 1, paths.len());
     }
     Ok((first_per_name(all), failed))
 }
@@ -150,11 +152,13 @@ mod tests {
         std::fs::write(dir.join("Game Build(1) 01 Jan 26 (10 00 00).log"), LOG).unwrap();
         std::fs::write(dir.join("Game Build(1) 02 Jan 26 (10 00 00).log"), LOG).unwrap();
         std::fs::write(dir.join("notes.txt"), LOG).unwrap();
-        let (found, failed) = scan_folder(&dir).unwrap();
+        let mut calls = Vec::new();
+        let (found, failed) = scan_folder(&dir, |done, total| calls.push((done, total))).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(found, unlocks(LOG));
         assert_eq!(failed, 0);
-        assert!(scan_folder(Path::new("/definitely/not/here")).is_err());
+        assert_eq!(calls, vec![(1, 2), (2, 2)]);
+        assert!(scan_folder(Path::new("/definitely/not/here"), |_, _| {}).is_err());
     }
 
     #[test]
