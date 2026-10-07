@@ -32,7 +32,7 @@ const anomalyGroups = computed(() => {
 const COLUMNS: ColumnSpec[] = [
   { key: "id", label: "#", width: 56 },
   { key: "importedAt", label: "Imported", width: 170 },
-  { key: "game", label: "Game", width: null },
+  { key: "game", label: "Game", width: 260 },
   { key: "anomalyCount", label: "Anomalies", width: 120, help: HELP.anomalies },
 ];
 function valueOf(r: ImportRow, key: string): string | number {

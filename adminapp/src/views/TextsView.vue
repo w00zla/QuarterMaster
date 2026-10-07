@@ -36,7 +36,7 @@ const SOURCE_COLUMNS: ColumnSpec[] = [
   { key: "priority", label: "Priority", width: 80 },
   { key: "keyCount", label: "Texts", width: 80 },
   { key: "importedAt", label: "Imported", width: 160 },
-  { key: "origin", label: "Origin", width: null },
+  { key: "origin", label: "Origin", width: 320 },
 ];
 const sourceValue = (s: LocSource, key: string): string | number => {
   const v = s[key as keyof LocSource];
@@ -45,7 +45,7 @@ const sourceValue = (s: LocSource, key: string): string | number => {
 
 const RESULT_COLUMNS: ColumnSpec[] = [
   { key: "key", label: "Key", width: 340 },
-  { key: "value", label: "Text", width: null },
+  { key: "value", label: "Text", width: 480 },
   { key: "source", label: "Source", width: 120 },
 ];
 const resultValue = (r: LocSearchRow, key: string) => r[key as keyof LocSearchRow];

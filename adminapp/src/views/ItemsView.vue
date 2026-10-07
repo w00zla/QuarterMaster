@@ -40,7 +40,7 @@ const rows = computed(() => (list.data.value ?? []).filter((r) =>
 const retiredCount = computed(() => (list.data.value ?? []).filter((r) => r.retired).length);
 
 const COLUMNS: ColumnSpec[] = [
-  { key: "name", label: "Name", width: null },
+  { key: "name", label: "Name", width: 280 },
   { key: "type", label: "Type", width: 140 },
   { key: "subType", label: "Sub type", width: 120 },
   { key: "manufacturer", label: "Mfr", width: 90, help: HELP.manufacturers },

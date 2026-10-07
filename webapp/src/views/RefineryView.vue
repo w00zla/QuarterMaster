@@ -84,7 +84,7 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: t("stock.col.material"), width: 200 },
   { key: "quality", label: t("stock.col.quality"), width: 130 },
   { key: "amount", label: t("stock.col.amount"), width: 120 },
-  { key: "location", label: t("stock.col.location"), width: null },
+  { key: "location", label: t("stock.col.location"), width: 240 },
   { key: "bonus", label: t("refinery.col.bonus"), width: 90 },
   { key: "method", label: t("refinery.col.method"), width: 170 },
   { key: "expected", label: t("refinery.col.expected"), width: 110 },

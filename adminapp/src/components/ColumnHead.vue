@@ -1,38 +1,22 @@
 <script setup lang="ts">
 // Header row of a grid table: click a column to sort, drag the grip at its
-// right edge to resize, double-click the grip to reset the width. The filler
-// column absorbs every change, so a grip resizes the column on the far side
-// of the filler: left of it the column itself, right of it (and after the
-// filler) the next column from its left edge; the last column's grip is its
-// own. The root carries the parent's `.row.cols-head` styling; the grid
-// template comes from the parent's `--cols` variable.
+// right edge to resize that column, double-click the grip to reset the width.
+// Fixed columns and the filler (fillerKey) have no grip. The root carries the parent's `.row.cols-head`
+// styling; the grid template comes from the parent's `--cols` variable.
 import HelpTip from "./HelpTip.vue";
 import Icon, { type IconName } from "./Icon.vue";
-import type { ColumnSpec, SortState } from "../tableColumns";
+import { computed } from "vue";
+import { fillerKey, type ColumnSpec, type SortState } from "../tableColumns";
 
 const props = defineProps<{ columns: ColumnSpec[]; sort: SortState }>();
-const emit = defineEmits<{ sort: [key: string]; resize: [key: string, e: MouseEvent, fromLeft: boolean]; reset: [key: string] }>();
-
-// The column the grip after column i resizes, see above; none for a fixed column.
-function gripTarget(i: number): { key: string; fromLeft: boolean } | null {
-  const target = gripColumn(i);
-  return target && !props.columns.find((c) => c.key === target.key)?.fixed ? target : null;
-}
-
-function gripColumn(i: number): { key: string; fromLeft: boolean } | null {
-  const filler = props.columns.findIndex((c) => c.width === null);
-  const c = props.columns[i];
-  const next = props.columns[i + 1];
-  if (filler === -1 || i < filler) return { key: c.key, fromLeft: false };
-  if (next) return { key: next.key, fromLeft: true };
-  return c.width === null ? null : { key: c.key, fromLeft: false };
-}
+const filler = computed(() => fillerKey(props.columns));
+const emit = defineEmits<{ sort: [key: string]; resize: [key: string, e: MouseEvent]; reset: [key: string] }>();
 </script>
 
 <template>
   <div class="row cols-head">
     <span
-      v-for="(c, i) in columns"
+      v-for="c in columns"
       :key="c.key"
       class="col"
       :class="{ sortable: c.sortable !== false, active: c.sortable !== false && sort.key === c.key, sep: c.sep }"
@@ -49,10 +33,10 @@ function gripColumn(i: number): { key: string; fromLeft: boolean } | null {
         :size="12"
       />
       <span
-        v-if="gripTarget(i)"
+        v-if="!c.fixed && c.key !== filler"
         class="grip"
-        @mousedown.stop.prevent="emit('resize', gripTarget(i)!.key, $event, gripTarget(i)!.fromLeft)"
-        @dblclick.stop="emit('reset', gripTarget(i)!.key)"
+        @mousedown.stop.prevent="emit('resize', c.key, $event)"
+        @dblclick.stop="emit('reset', c.key)"
         @click.stop
       />
     </span>

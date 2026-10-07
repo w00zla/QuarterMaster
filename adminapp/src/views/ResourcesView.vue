@@ -31,7 +31,7 @@ const rows = computed(() => (list.data.value ?? []).filter((r) =>
 const retiredCount = computed(() => (list.data.value ?? []).filter((r) => r.retired).length);
 
 const COLUMNS: ColumnSpec[] = [
-  { key: "name", label: "Name", width: null },
+  { key: "name", label: "Name", width: 260 },
   { key: "group", label: "Group", width: 200 },
   { key: "ore", label: "Ore", width: 56 },
   { key: "usedIn", label: "Recipes", width: 100, help: HELP.usedIn },

@@ -127,7 +127,7 @@ const rows = computed(() => {
 
 // --- table -------------------------------------------------------------------------------------
 const columns = computed<ColumnSpec[]>(() => [
-  { key: "name", label: t("bp.col.name"), width: null },
+  { key: "name", label: t("bp.col.name"), width: 300 },
   { key: "type", label: t("bp.col.type"), width: 160 },
   { key: "category", label: t("bp.col.category"), width: 170 },
   { key: "size", label: t("bp.col.size"), width: 64 },

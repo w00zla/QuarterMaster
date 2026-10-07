@@ -11,8 +11,8 @@ export interface SortState {
 export interface ColumnSpec {
   key: string;
   label: string;
-  // Default width in px; null = the flexible filler column (never resized).
-  width: number | null;
+  // Default width in px; for the filler column (see fillerKey) its minimum
+  width: number;
   sortable?: boolean;
   // Icon in front of the label (an Icon name).
   icon?: string;
@@ -48,6 +48,12 @@ function load(storageKey: string): Stored {
 
 const GAP = 12;
 
+// The filler column takes the space left over: the last column that is not fixed. Every column
+// before it resizes itself; the filler has no grip and keeps its default width as minimum.
+export function fillerKey(columns: ColumnSpec[]): string | undefined {
+  return [...columns].reverse().find((c) => !c.fixed)?.key;
+}
+
 // `columns` may be reactive (a getter or ref): columns that appear later
 // start at their default width, or the stored one if the key was seen before.
 export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<ColumnSpec[]>, defaultSort: SortState) {
@@ -58,7 +64,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     cols,
     (list) => {
       for (const c of list) {
-        if (c.width === null || widths.value[c.key] !== undefined) continue;
+        if (widths.value[c.key] !== undefined) continue;
         const w = c.fixed ? undefined : stored.widths?.[c.key];
         widths.value[c.key] = typeof w === "number" && w >= MIN_WIDTH ? w : c.width;
       }
@@ -68,29 +74,26 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   const storedSort = cols.value.some((c) => c.key === stored.sort?.key) ? stored.sort! : defaultSort;
   const sort = ref<SortState>({ ...storedSort });
 
+  const filler = computed(() => fillerKey(cols.value));
+  const widthOf = (c: ColumnSpec) => (c.key === filler.value ? c.width : (widths.value[c.key] ?? c.width));
   const template = computed(() =>
-    cols.value.map((c) => (c.width === null ? "minmax(0, 1fr)" : `${widths.value[c.key]}px`)).join(" "),
+    cols.value.map((c) => (c.key === filler.value ? `minmax(${c.width}px, 1fr)` : `${widthOf(c)}px`)).join(" "),
   );
-  // Fixed columns plus gaps: the row width below which the table scrolls
-  // horizontally instead of squeezing the filler column further.
+  // All columns (the filler at its minimum) plus gaps: the row width below which the table scrolls horizontally.
   const minWidth = computed(
-    () =>
-      cols.value.reduce((sum, c) => sum + (c.width === null ? 0 : (widths.value[c.key] ?? 0)), 0) +
-      GAP * (cols.value.length - 1),
+    () => cols.value.reduce((sum, c) => sum + widthOf(c), 0) + GAP * (cols.value.length - 1),
   );
 
   function toggleSort(key: string) {
     sort.value = sort.value.key === key ? { key, dir: sort.value.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" };
   }
 
-  // `fromLeft`: the drag moves the column's left edge, so it grows leftwards.
-  function startResize(key: string, e: MouseEvent, fromLeft = false) {
+  function startResize(key: string, e: MouseEvent) {
     const startX = e.clientX;
     const startWidth = widths.value[key];
     if (startWidth === undefined) return;
-    const sign = fromLeft ? -1 : 1;
     const move = (ev: MouseEvent) => {
-      widths.value[key] = Math.max(MIN_WIDTH, Math.round(startWidth + sign * (ev.clientX - startX)));
+      widths.value[key] = Math.max(MIN_WIDTH, Math.round(startWidth + ev.clientX - startX));
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
@@ -104,7 +107,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
 
   function resetWidth(key: string) {
     const c = cols.value.find((x) => x.key === key);
-    if (c && c.width !== null) widths.value[key] = c.width;
+    if (c) widths.value[key] = c.width;
   }
 
   watch(

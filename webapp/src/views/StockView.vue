@@ -109,7 +109,7 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: t("stock.col.material"), width: 200 },
   { key: "quality", label: t("stock.col.quality"), width: 130 },
   { key: "amount", label: t("stock.col.amount"), width: 120 },
-  { key: "location", label: t("stock.col.location"), width: null },
+  { key: "location", label: t("stock.col.location"), width: 280 },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
   { key: "state", label: t("stock.col.state"), width: 110 },
   { key: "actions", label: "", width: 104, sortable: false, fixed: true, sep: true },

@@ -53,7 +53,7 @@ const rows = computed(() => inType.value.filter((r) =>
 const retiredCount = computed(() => (list.data.value ?? []).filter((r) => r.retired).length);
 
 const COLUMNS: ColumnSpec[] = [
-  { key: "name", label: "Name", width: null },
+  { key: "name", label: "Name", width: 300 },
   { key: "category", label: "Category", width: 170, help: HELP.categories },
   { key: "type", label: "Type", width: 150 },
   { key: "size", label: "Size", width: 56 },
