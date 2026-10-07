@@ -20,7 +20,7 @@ import TypeLabel from "../components/TypeLabel.vue";
 import Picker from "../components/Picker.vue";
 import { lang, t } from "../i18n";
 import { memberLabel, orgOf } from "../orgs";
-import { onServerMessage } from "../realtime";
+import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toast, toastError } from "../toasts";
 
@@ -198,21 +198,27 @@ async function choose(value: string) {
   pending.value = null;
 }
 
+const reloadMine = coalesced(() => void loadMine());
+const reloadOrg = coalesced(() => void loadOrg());
 let unsubscribe = () => {};
 onMounted(() => {
   void loadMine();
   unsubscribe = onServerMessage((m) => {
     if (m.type === "resync") {
-      void loadMine();
-      void loadOrg();
+      reloadMine.schedule();
+      reloadOrg.schedule();
     } else if (m.type === "blueprints") {
-      if (m.userId === me.value?.userId) void loadMine();
+      if (m.userId === me.value?.userId) reloadMine.schedule();
       // Anyone in the org may have added or removed one
-      void loadOrg();
-    } else if ((m.type === "members" && m.guildId === org.value?.guildId) || m.type === "profile") void loadOrg();
+      reloadOrg.schedule();
+    } else if ((m.type === "members" && m.guildId === org.value?.guildId) || m.type === "profile") reloadOrg.schedule();
   });
 });
-onUnmounted(() => unsubscribe());
+onUnmounted(() => {
+  unsubscribe();
+  reloadMine.cancel();
+  reloadOrg.cancel();
+});
 </script>
 
 <template>

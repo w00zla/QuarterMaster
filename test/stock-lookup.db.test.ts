@@ -18,8 +18,8 @@ const G = '930000000000000001';
 const [MEMBER_ROLE, OFFICER_ROLE] = ['931000000000000001', '931000000000000002'];
 const [MIA, OLGA] = ['932000000000000001', '932000000000000002'];
 const JUMP = '10000000-0000-0000-0000-0000000000bb';
-const mia: Actor = { userId: MIA, guildId: G, officer: false };
-const olga: Actor = { userId: OLGA, guildId: G, officer: true };
+const mia: Actor = { userId: MIA, guildId: G, officer: false, source: 'bot' };
+const olga: Actor = { userId: OLGA, guildId: G, officer: true, source: 'bot' };
 
 describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;

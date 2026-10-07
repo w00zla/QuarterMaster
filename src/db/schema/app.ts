@@ -5,7 +5,7 @@
 // catalog rows are never deleted either, only retired.
 import { sql, type SQLWrapper } from 'drizzle-orm';
 import {
-  bigint, boolean, check, foreignKey, index, integer, numeric, pgSchema, primaryKey, text, timestamp, unique, uuid,
+  bigint, boolean, check, foreignKey, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core';
 import { item, location, resource, blueprint } from './catalog.ts';
 
@@ -171,3 +171,40 @@ export const userBlueprint = app.table('user_blueprint', {
   blueprintUuid: uuid('blueprint_uuid').notNull().references(() => blueprint.uuid),
   addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.userId, t.blueprintUuid] }), index().on(t.blueprintUuid)]);
+
+/**
+ * What happened to a user's data, for the user's own history (src/history/history.ts): every stock,
+ * refinery and blueprint action, with where it came from (bot, web app, companion app). Written in
+ * the same transaction as the change; append-only like the journal. The users are plain Discord IDs
+ * without foreign keys: the history outlives the cleanup of users without data.
+ */
+export const history = app.table('history', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  createdAt: createdAt(),
+  source: text('source').notNull(),
+  category: text('category').notNull(),
+  action: text('action').notNull(),
+  // Who did it vs. whose data it touched (differ when an officer books for someone); a move to
+  // another holder touches a second user
+  actorUserId: text('actor_user_id').notNull(),
+  ownerUserId: text('owner_user_id').notNull(),
+  toOwnerUserId: text('to_owner_user_id'),
+  // The org involved (org stock on either side of a move), else NULL
+  guildId: text('guild_id'),
+  targetKind: text('target_kind').notNull(),
+  targetUuid: uuid('target_uuid').notNull(),
+  // Amounts, quality, locations, … as the action had them (catalog UUIDs, NUMERIC text)
+  details: jsonb('details').notNull().default(sql`'{}'::jsonb`),
+}, (t) => [
+  check('history_source', sql`${t.source} IN ('bot', 'webapp', 'companion')`),
+  check('history_action', sql`(${t.category} = 'stock' AND ${t.action} IN ('add', 'remove', 'adjust', 'move'))
+    OR (${t.category} = 'refinery' AND ${t.action} IN ('start', 'done', 'remove', 'adjust'))
+    OR (${t.category} = 'blueprint' AND ${t.action} IN ('add', 'remove'))`),
+  check('history_target', sql`(${t.category} = 'blueprint') = (${t.targetKind} = 'blueprint')
+    AND ${t.targetKind} IN ('resource', 'item', 'blueprint')`),
+  check('history_users', sql`${snowflake(t.actorUserId)} AND ${snowflake(t.ownerUserId)}
+    AND (${t.toOwnerUserId} IS NULL OR ${snowflake(t.toOwnerUserId)}) AND (${t.guildId} IS NULL OR ${snowflake(t.guildId)})`),
+  index().on(t.actorUserId, t.id),
+  index().on(t.ownerUserId, t.id),
+  index().on(t.toOwnerUserId, t.id),
+]);

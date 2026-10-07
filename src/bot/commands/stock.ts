@@ -31,7 +31,7 @@ const opt = (name: string, key: MessageKey, type: ApplicationCommandOptionType, 
 const S = ApplicationCommandOptionType.String;
 const auto = { autocomplete: true };
 
-const actorOf = (a: { userId: string; guildId: string; officer: boolean }): stock.Actor => ({ userId: a.userId, guildId: a.guildId, officer: a.officer });
+const actorOf = (a: { userId: string; guildId: string; officer: boolean }): stock.Actor => ({ userId: a.userId, guildId: a.guildId, officer: a.officer, source: 'bot' });
 
 /** Runs a stock operation; refusals become messages in the user's language. */
 async function book<T>(run: () => Promise<T>): Promise<T> {
@@ -219,7 +219,7 @@ async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db
   const settings = interaction.inGuild() ? await findGuildSettings(db, interaction.guildId) : null;
   const access = settings && interaction.member ? accessOf(memberInfo(interaction.member).roleIds, settings) : null;
   if (!access?.member) return interaction.respond([]);
-  const actor: stock.Actor = { userId: interaction.user.id, guildId: interaction.guildId!, officer: access.officer };
+  const actor: stock.Actor = { userId: interaction.user.id, guildId: interaction.guildId!, officer: access.officer, source: 'bot' };
   const focused = interaction.options.getFocused(true);
   const query = String(focused.value);
   const sub = interaction.options.getSubcommand();

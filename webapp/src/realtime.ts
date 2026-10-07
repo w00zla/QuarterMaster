@@ -17,6 +17,32 @@ export function onServerMessage(handler: Handler): () => void {
   return () => handlers.delete(handler);
 }
 
+/**
+ * A reload for bursts of messages ("Register all" in the companion app sends one per blueprint):
+ * `schedule` runs `fn` once, `quietMs` after the last call and at most `maxWaitMs` after the first;
+ * `cancel` drops a pending run (when the view goes).
+ */
+export function coalesced(fn: () => void, quietMs = 300, maxWaitMs = 3000) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let firstAt = 0;
+  const run = () => {
+    firstAt = 0;
+    fn();
+  };
+  return {
+    schedule() {
+      const now = Date.now();
+      if (!firstAt) firstAt = now;
+      clearTimeout(timer);
+      timer = setTimeout(run, Math.max(0, Math.min(quietMs, firstAt + maxWaitMs - now)));
+    },
+    cancel() {
+      clearTimeout(timer);
+      firstAt = 0;
+    },
+  };
+}
+
 let socket: WebSocket | null = null;
 let attempts = 0;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;

@@ -40,16 +40,20 @@ describe('blueprint registry (database)', { skip: url ? false : 'TEST_DATABASE_U
   });
 
   it('adds and removes blueprints idempotently', async () => {
-    assert.equal(await addBlueprint(db, ANNA, U.blueprint), true);
-    assert.equal(await addBlueprint(db, ANNA, U.blueprint), false);
+    assert.equal(await addBlueprint(db, ANNA, U.blueprint, 'bot'), true);
+    assert.equal(await addBlueprint(db, ANNA, U.blueprint, 'bot'), false);
     // A user row the roster cleanup removed (no data left) comes back with the first blueprint
     const NEW = '720000000000000099';
-    assert.equal(await addBlueprint(db, NEW, U.blueprint), true);
+    assert.equal(await addBlueprint(db, NEW, U.blueprint, 'bot'), true);
     assert.equal((await db.execute(sql`SELECT 1 FROM app.app_user WHERE user_id = ${NEW}`)).length, 1);
-    await removeBlueprint(db, NEW, U.blueprint);
+    await removeBlueprint(db, NEW, U.blueprint, 'bot');
     assert.deepEqual([...await ownedBlueprints(db, ANNA)], [U.blueprint]);
-    assert.equal(await removeBlueprint(db, ANNA, U.blueprint), true);
-    assert.equal(await removeBlueprint(db, ANNA, U.blueprint), false);
+    assert.equal(await removeBlueprint(db, ANNA, U.blueprint, 'bot'), true);
+    assert.equal(await removeBlueprint(db, ANNA, U.blueprint, 'bot'), false);
+    // History: one row per real change, none for the no-ops
+    const found = await db.execute<{ source: string; action: string; target: string }>(sql`
+      SELECT source, action, target_uuid AS target FROM app.history WHERE owner_user_id = ${ANNA} AND category = 'blueprint' ORDER BY id`);
+    assert.deepEqual(found.map((r) => [r.source, r.action, r.target]), [['bot', 'add', U.blueprint], ['bot', 'remove', U.blueprint]]);
   });
 
   it('suggests active org members by display name or RSI handle', async () => {
@@ -63,7 +67,7 @@ describe('blueprint registry (database)', { skip: url ? false : 'TEST_DATABASE_U
   });
 
   it('lists only active members of the org as owners, alphabetical', async () => {
-    for (const id of [CARL, ANNA, BEN]) await addBlueprint(db, id, U.blueprint2);
+    for (const id of [CARL, ANNA, BEN]) await addBlueprint(db, id, U.blueprint2, 'bot');
     await db.execute(sql`UPDATE app.member SET active = false WHERE user_id = ${BEN}`);
     assert.deepEqual(await whoHas(db, G, U.blueprint2), ['Anna', 'Carl']);
     assert.deepEqual(await whoHas(db, '899999999999999999', U.blueprint2), []);

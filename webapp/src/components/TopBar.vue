@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// The app bar in the admin UI's look: wordmark, tabs, the user with avatar (opens the profile), the
-// companion app (Access Key, download), logout.
-import { ref } from "vue";
+// The app bar in the admin UI's look: wordmark, tabs, then your history, the companion app (Access
+// Key, download), the user with avatar (opens the profile) and logout.
+import { onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import Icon, { type IconName } from "../../../adminapp/src/components/Icon.vue";
 import logo from "../../../adminapp/src/assets/logo-128.png";
 import { t, type Key } from "../i18n";
+import { topbarHeight } from "../layout";
 import { logout, me } from "../session";
 import CompanionDialog from "./CompanionDialog.vue";
 import ProfileDialog from "./ProfileDialog.vue";
@@ -21,10 +22,19 @@ const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [{ to: "/cra
 
 const profileOpen = ref(false);
 const companionOpen = ref(false);
+
+// The bar's height (it wraps on narrow screens): the toasts sit right below it
+const bar = ref<HTMLElement | null>(null);
+const observer = new ResizeObserver(([e]) => (topbarHeight.value = e!.target.getBoundingClientRect().height));
+onMounted(() => bar.value && observer.observe(bar.value));
+onUnmounted(() => {
+  observer.disconnect();
+  topbarHeight.value = 0;
+});
 </script>
 
 <template>
-  <header class="topbar">
+  <header ref="bar" class="topbar">
     <div class="brand">
       <img class="logo" :src="logo" alt="" />
       <span class="wordmark">QUARTER<span class="accent">MASTER</span></span>
@@ -39,14 +49,18 @@ const companionOpen = ref(false);
       </RouterLink>
     </nav>
     <div class="spacer" />
+    <RouterLink to="/history" class="btn small outline link-btn" :class="{ active: $route.path === '/history' }">
+      <Icon name="history" :size="14" /> {{ t("nav.history") }}
+    </RouterLink>
+    <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="desktop" :size="14" /> {{ t("companion.open") }}</button>
+    <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
+    <span class="tab-divider" />
     <button v-if="me" type="button" class="user" :title="t('profile.open')" @click="profileOpen = true">
       <img class="avatar" :src="me.avatarUrl" alt="" />
       <span class="name">{{ me.name }}</span>
     </button>
     <ProfileDialog v-if="profileOpen" @close="profileOpen = false" />
-    <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="link" :size="14" /> {{ t("companion.open") }}</button>
-    <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
-    <button class="btn small outline" type="button" @click="logout"><Icon name="log-out" :size="14" /> {{ t("user.logout") }}</button>
+    <button class="icon-btn" type="button" :title="t('user.logout')" @click="logout"><Icon name="log-out" :size="15" /></button>
   </header>
 </template>
 
@@ -123,6 +137,16 @@ const companionOpen = ref(false);
   height: 20px;
   margin: 0 4px;
   background: var(--border);
+}
+
+/* The history button is a link (a route), looking like the buttons next to it */
+.link-btn {
+  text-decoration: none;
+}
+
+.link-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .tab.active {

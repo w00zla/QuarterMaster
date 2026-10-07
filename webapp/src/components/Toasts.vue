@@ -1,20 +1,37 @@
 <script setup lang="ts">
-// The toast stack (see toasts.ts), bottom right; a click dismisses one. Taken from BindSight.
+// The toast stack (see toasts.ts), top right below the top bar, newest first; a click dismisses one.
+// Taken from BindSight. Notices
+// (actions from the bot and the companion app) have a title and a detail line and an × to close.
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import { topbarHeight } from "../layout";
 import { dismissToast, toasts } from "../toasts";
+import { t } from "../i18n";
 </script>
 
 <template>
-  <div class="toasts" aria-live="polite">
-    <button v-for="x in toasts" :key="x.id" type="button" class="toast" :class="x.type" @click="dismissToast(x.id)">
-      {{ x.message }}
-    </button>
+  <div class="toasts" aria-live="polite" :style="{ top: `${topbarHeight + 16}px` }">
+    <template v-for="x in toasts" :key="x.id">
+      <div v-if="x.sticky" class="toast notice" :class="x.type">
+        <div class="notice-text">
+          <div class="notice-title">{{ x.title }}</div>
+          <div>{{ x.message }}</div>
+          <div v-if="x.detail" class="notice-detail">{{ x.detail }}</div>
+        </div>
+        <button type="button" class="close" :title="t('common.close')" @click="dismissToast(x.id)"><Icon name="close" :size="14" /></button>
+      </div>
+      <button v-else type="button" class="toast" :class="x.type" @click="dismissToast(x.id)">
+        {{ x.message }}
+      </button>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .toasts {
   position: fixed;
-  bottom: 16px;
+  /* Below the top bar: `top` comes from its measured height (layout.ts) */
+  top: 16px;
+  bottom: auto;
   right: 16px;
   left: 16px;
   display: flex;
@@ -41,8 +58,54 @@ import { dismissToast, toasts } from "../toasts";
   cursor: pointer;
 }
 
-/* The accent says what kind of message it is: green done, red refused */
+/* The accent says what kind of message it is: green done, red refused, blue a notice */
 .toast.error {
   border-left-color: var(--err);
+}
+
+.toast.info {
+  border-left-color: var(--accent);
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: default;
+}
+
+.notice-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notice-title {
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.notice-detail {
+  color: var(--text-2);
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--text);
 }
 </style>

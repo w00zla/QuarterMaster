@@ -15,9 +15,12 @@ import { formatAmount } from '../stock/amount.ts';
 import { findStock, locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
 import * as stock from '../stock/service.ts';
 import { StockError, type Actor } from '../stock/service.ts';
+import type { Source } from '../history/record.ts';
+import { listHistory } from './history.ts';
 import { refineryMatch, refiningMethods } from '../ext/refineries.ts';
 import type {
-  BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, Lang, MaterialInfo, OkResponse, OrgBlueprintsResponse,
+  BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
+  OrgBlueprintsResponse,
   OrgMember, StockBatch,
   StockListResponse, StockMetrics, SummaryResponse,
 } from './api-types.ts';
@@ -57,6 +60,15 @@ const schemas = {
   }).strict(),
   refineDone: z.object({ batchId: z.number().int().positive(), amount, quality, expected: amount }).strict(),
   blueprint: z.object({ uuid }).strict(),
+  history: z.object({
+    lang: z.string().optional(),
+    before: z.string().regex(/^[1-9][0-9]{0,15}$/).optional(),
+    after: z.string().regex(/^[0-9]{1,16}$/).transform(Number).optional(),
+    source: z.enum(['bot', 'webapp', 'companion']).optional(),
+    category: z.enum(['stock', 'refinery', 'blueprint']).optional(),
+    action: z.enum(['add', 'remove', 'adjust', 'move', 'start', 'done']).optional(),
+    by: z.enum(['me', 'others']).optional(),
+  }).strict(),
   profile: z.object({
     rsiHandle: z.string().regex(/^[A-Za-z0-9_-]{3,60}$/).nullable().optional(),
     langOverride: z.enum(['de', 'en']).nullable().optional(),
@@ -108,12 +120,16 @@ async function membership(db: Db, userId: string, guildId: string): Promise<Memb
   return m;
 }
 
+/** Where a request comes from: the companion app (API token) or the web app (session). */
+const sourceOf = (c: Context<Env>): Source => (c.get('apiToken') ? 'companion' : 'webapp');
+
 /** The stock service's Actor for a write: personal without guildId; in an org only with a vouched-for roster. */
-async function actorFor(db: Db, userId: string, guildId: string | undefined): Promise<Actor> {
-  if (!guildId) return { userId, guildId: null, officer: false };
+async function actorFor(c: Context<Env>, db: Db, userId: string, guildId: string | undefined): Promise<Actor> {
+  const source = sourceOf(c);
+  if (!guildId) return { userId, guildId: null, officer: false, source };
   const m = await membership(db, userId, guildId);
   if (!m.writable) throw new HttpError(409, 'rosterStale');
-  return { userId, guildId, officer: m.officer };
+  return { userId, guildId, officer: m.officer, source };
 }
 
 /** Runs a stock booking; refusals become 422 with the service's code. */
@@ -230,7 +246,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const me = c.get('session').userId;
     const material = (await materialCatalog(db, 'en')).get(input.subjectUuid);
     if (!material) throw new HttpError(422, 'unknownSubject');
-    const actor = await actorFor(db, me, input.guildId);
+    const actor = await actorFor(c, db, me, input.guildId);
     return book(c, () => stock.add(db, actor, {
       kind: material.kind, uuid: input.subjectUuid, locationUuid: input.locationUuid, quality: input.quality, amount: input.amount,
       org: !!input.guildId, holderUserId: input.holderUserId,
@@ -239,32 +255,32 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
 
   api.post('/stock/remove', async (c) => {
     const input = await body(c, schemas.remove);
-    const actor = await actorFor(db, c.get('session').userId, input.guildId);
+    const actor = await actorFor(c, db, c.get('session').userId, input.guildId);
     return book(c, () => stock.remove(db, actor, { batchId: input.batchId, amount: input.amount, expected: input.expected }));
   });
 
   api.post('/stock/adjust', async (c) => {
     const input = await body(c, schemas.adjust);
-    const actor = await actorFor(db, c.get('session').userId, input.guildId);
+    const actor = await actorFor(c, db, c.get('session').userId, input.guildId);
     return book(c, () => stock.adjust(db, actor, { batchId: input.batchId, amount: input.amount, expected: input.expected }));
   });
 
   api.post('/stock/move', async (c) => {
     const { guildId, ...input } = await body(c, schemas.move);
-    const actor = await actorFor(db, c.get('session').userId, guildId);
+    const actor = await actorFor(c, db, c.get('session').userId, guildId);
     return book(c, () => stock.move(db, actor, input));
   });
 
   // --- refinery (always personal) -------------------------------------------------------------
   api.post('/refinery/start', async (c) => {
     const input = await body(c, schemas.refineStart);
-    const actor = await actorFor(db, c.get('session').userId, undefined);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
     return book(c, () => stock.refineStart(db, actor, input));
   });
 
   api.post('/refinery/done', async (c) => {
     const input = await body(c, schemas.refineDone);
-    const actor = await actorFor(db, c.get('session').userId, undefined);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
     return book(c, () => stock.refineDone(db, actor, input));
   });
 
@@ -277,13 +293,13 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     if (!entry) throw new HttpError(422, 'unknownBlueprint');
     if (entry.isDefault) throw new HttpError(422, 'blueprintDefault');
     if (entry.retired) throw new HttpError(422, 'blueprintRetired');
-    await addBlueprint(db, c.get('session').userId, bp);
+    await addBlueprint(db, c.get('session').userId, bp, sourceOf(c));
     return ok(c);
   });
 
   api.post('/blueprints/remove', async (c) => {
     const { uuid: bp } = await body(c, schemas.blueprint);
-    await removeBlueprint(db, c.get('session').userId, bp);
+    await removeBlueprint(db, c.get('session').userId, bp, sourceOf(c));
     return ok(c);
   });
 
@@ -316,6 +332,14 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
   });
 
   // --- summary --------------------------------------------------------------------------------
+  // --- history ----------------------------------------------------------------------------------
+  api.get('/history', async (c) => {
+    const q = schemas.history.safeParse(c.req.query());
+    if (!q.success) throw new HttpError(400, 'invalid');
+    const { before, lang: _lang, ...filter } = q.data;
+    return c.json(await listHistory(db, c.get('session').userId, langOf(c), before === undefined ? undefined : Number(before), filter) satisfies HistoryResponse);
+  });
+
   api.get('/summary', async (c) => {
     const me = c.get('session').userId;
     // Stored stock per scope: personal (guild NULL, yours) and every org you are an active member of

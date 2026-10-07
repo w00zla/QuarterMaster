@@ -19,11 +19,11 @@ const OFFICER_ROLE = '910000000000000002';
 const [MIA, MAX, OLGA, NORA, ZED] = ['920000000000000001', '920000000000000002', '920000000000000003', '920000000000000004', '920000000000000005'];
 const STATION2 = '10000000-0000-0000-0000-0000000000aa';
 
-const mia: Actor = { userId: MIA, guildId: G, officer: false };
-const max: Actor = { userId: MAX, guildId: G, officer: false };
-const olga: Actor = { userId: OLGA, guildId: G, officer: true };
+const mia: Actor = { userId: MIA, guildId: G, officer: false, source: 'bot' };
+const max: Actor = { userId: MAX, guildId: G, officer: false, source: 'bot' };
+const olga: Actor = { userId: OLGA, guildId: G, officer: true, source: 'bot' };
 // Not in any org
-const zed: Actor = { userId: ZED, guildId: null, officer: false };
+const zed: Actor = { userId: ZED, guildId: null, officer: false, source: 'bot' };
 
 const metal = { kind: 'resource' as const, uuid: U.metal, locationUuid: U.station };
 
@@ -204,5 +204,36 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     }
     const journal = await db.execute<{ n: string }>(sql`SELECT count(*)::text AS n FROM app.stock_journal WHERE action = 'remove' AND quality = 430`);
     assert.equal(journal[0]!.n, '1');
+  });
+  it('writes one history row per operation, with source, category and the users involved; none for a refusal', async () => {
+    const web: Actor = { ...max, source: 'webapp' };
+    const app: Actor = { ...olga, source: 'companion' };
+    const last = Number((await db.execute<{ n: string }>(sql`SELECT coalesce(max(id), 0)::text AS n FROM app.history`))[0]!.n);
+    const b = (await add(db, web, { ...metal, quality: 301, amount: '5' })).batch!;
+    await adjust(db, web, { batchId: b.id, amount: '4' });
+    const donated = (await move(db, web, { batchId: b.id, amount: '2', toOrg: true })).batch!;
+    await move(db, app, { batchId: donated.id, amount: '1', toHolderUserId: MIA });
+    await remove(db, web, { batchId: b.id, amount: '1' });
+    await refused(remove(db, web, { batchId: b.id, amount: '99' }), 'insufficient');
+    const job = (await refineStart(db, web, { oreUuid: U.ore, locationUuid: U.station, quality: 602, amount: '3', durationSeconds: 60 })).batch!;
+    await refineDone(db, web, { batchId: job.id, amount: '2', quality: 650 });
+
+    const found = await db.execute<{ source: string; category: string; action: string; actor: string; owner: string; to: string | null;
+      guild: string | null; target: string; details: Record<string, unknown> }>(sql`
+      SELECT source, category, action, actor_user_id AS actor, owner_user_id AS owner, to_owner_user_id AS to, guild_id AS guild,
+        target_uuid AS target, details FROM app.history WHERE id > ${last} ORDER BY id`);
+    assert.deepEqual(found.map((r) => [r.source, r.category, r.action, r.actor, r.owner, r.to, r.guild, r.target]), [
+      ['webapp', 'stock', 'add', MAX, MAX, null, null, U.metal],
+      ['webapp', 'stock', 'adjust', MAX, MAX, null, null, U.metal],
+      ['webapp', 'stock', 'move', MAX, MAX, null, G, U.metal],
+      ['companion', 'stock', 'move', OLGA, MAX, MIA, G, U.metal],
+      ['webapp', 'stock', 'remove', MAX, MAX, null, null, U.metal],
+      ['webapp', 'refinery', 'start', MAX, MAX, null, null, U.ore],
+      ['webapp', 'refinery', 'done', MAX, MAX, null, null, U.metal],
+    ]);
+    assert.deepEqual([found[1]!.details.from, found[1]!.details.quality, found[1]!.details.designation], ['5.000000', 301, 'personal']);
+    assert.deepEqual([found[2]!.details.toDesignation, found[3]!.details.designation], ['org', 'org']);
+    assert.deepEqual([found[5]!.details.durationSeconds, found[6]!.details.oreUuid, found[6]!.details.oreAmount, found[6]!.details.quality],
+      [60, U.ore, '3.000000', 650]);
   });
 });

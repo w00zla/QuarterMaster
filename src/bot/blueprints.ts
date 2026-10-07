@@ -6,6 +6,7 @@ import { importCache } from '../db/import-cache.ts';
 import { categoryText, itemClassText, locText, rows, withCategoryLabel } from '../db/query.ts';
 import { appUser, member, userBlueprint } from '../db/schema/app.ts';
 import type { Lang } from './i18n.ts';
+import { recordHistory, type Source } from '../history/record.ts';
 
 export interface BlueprintEntry {
   uuid: string;
@@ -97,21 +98,29 @@ export async function ownedBlueprints(db: Db, userId: string): Promise<Set<strin
   return new Set(owned.map((r) => r.uuid));
 }
 
-/** true if added, false if it was registered already. */
-export async function addBlueprint(db: Db, userId: string, blueprintUuid: string): Promise<boolean> {
+const blueprintHistory = (source: Source, action: 'add' | 'remove', userId: string, blueprintUuid: string) => ({
+  source, category: 'blueprint' as const, action, actorUserId: userId, ownerUserId: userId, targetKind: 'blueprint' as const, targetUuid: blueprintUuid,
+});
+
+/** true if added, false if it was registered already (no history row then). */
+export async function addBlueprint(db: Db, userId: string, blueprintUuid: string, source: Source): Promise<boolean> {
   return db.transaction(async (tx) => {
     // The roster cleanup may have removed the user row (no data left), e.g. under a web session
     await tx.insert(appUser).values({ userId }).onConflictDoNothing();
     const added = await tx.insert(userBlueprint).values({ userId, blueprintUuid }).onConflictDoNothing().returning();
+    if (added.length) await recordHistory(tx, blueprintHistory(source, 'add', userId, blueprintUuid));
     return added.length > 0;
   });
 }
 
-/** true if removed, false if it was not registered. */
-export async function removeBlueprint(db: Db, userId: string, blueprintUuid: string): Promise<boolean> {
-  const removed = await db.delete(userBlueprint)
-    .where(and(eq(userBlueprint.userId, userId), eq(userBlueprint.blueprintUuid, blueprintUuid))).returning();
-  return removed.length > 0;
+/** true if removed, false if it was not registered (no history row then). */
+export async function removeBlueprint(db: Db, userId: string, blueprintUuid: string, source: Source): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const removed = await tx.delete(userBlueprint)
+      .where(and(eq(userBlueprint.userId, userId), eq(userBlueprint.blueprintUuid, blueprintUuid))).returning();
+    if (removed.length) await recordHistory(tx, blueprintHistory(source, 'remove', userId, blueprintUuid));
+    return removed.length > 0;
+  });
 }
 
 /** Display names of the org's active members who registered the blueprint, alphabetical. */

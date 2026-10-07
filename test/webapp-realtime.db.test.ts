@@ -181,6 +181,20 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     assert.ok(!stranger.received.some((m) => m.type === 'blueprints' || m.type === 'profile'));
   });
 
+  it('history: a new entry goes to who did it and whose data it is, with its source; others not', async () => {
+    const me = await socket(await session(ME));
+    const mate = await socket(await session(MATE));
+    const stranger = await socket(await session(STRANGER));
+    const [row] = await db.execute<{ id: string }>(sql`
+      INSERT INTO app.history (source, category, action, actor_user_id, owner_user_id, guild_id, target_kind, target_uuid)
+      VALUES ('bot', 'stock', 'add', ${MATE}, ${ME}, ${G}, 'resource', ${U.metal}) RETURNING id::text`);
+    const expected = { type: 'history', id: Number(row!.id), source: 'bot' };
+    assert.deepEqual(await me.next(), expected);
+    assert.deepEqual(await mate.next(), expected);
+    await quiet();
+    assert.ok(!stranger.received.some((m) => m.type === 'history'));
+  });
+
   it('the web app language: the other tabs of that user reload, nobody else hears about it', async () => {
     const me = await socket(await session(ME));
     const mate = await socket(await session(MATE));

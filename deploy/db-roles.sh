@@ -2,9 +2,9 @@
 # Production database roles (compose.yaml mounts this into /docker-entrypoint-initdb.d/, so it runs
 # once on a fresh volume; scripts/deploy.sh runs it again after every migration). Idempotent.
 #   qm_owner: owns the database and everything the migrations create; used by "migrate" only
-#   qm_app:   DML for bot and admin; app.stock_journal is append-only (SELECT, INSERT); no access
+#   qm_app:   DML for bot and admin; app.stock_journal and app.history are append-only (SELECT, INSERT); no access
 #             to schema web (bot and admin must not forge web sessions)
-#   qm_web:   user web app; reads catalog and app, writes users, stock, journal (INSERT only) and
+#   qm_web:   user web app; reads catalog and app, writes users, stock, journal and history (INSERT only) and
 #             blueprints, but not org/member (role IDs, officer flag, roster freshness); from bot only
 #             guild_id and left_at of bot.guild;
 #             full DML in web; reads ext
@@ -38,6 +38,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE qm_owner GRANT USAGE, SELECT ON SEQUENCES TO q
 -- Exist only after the migrations. The migration bookkeeping is the owner's alone.
 SELECT 'REVOKE UPDATE, DELETE ON app.stock_journal FROM qm_app'
   WHERE to_regclass('app.stock_journal') IS NOT NULL \gexec
+SELECT 'REVOKE UPDATE, DELETE ON app.history FROM qm_app'
+  WHERE to_regclass('app.history') IS NOT NULL \gexec
 SELECT 'REVOKE ALL ON SCHEMA drizzle FROM qm_app' WHERE to_regnamespace('drizzle') IS NOT NULL \gexec
 SELECT 'REVOKE ALL ON ALL TABLES IN SCHEMA drizzle FROM qm_app' WHERE to_regnamespace('drizzle') IS NOT NULL \gexec
 -- Web sessions are the user web app's alone
@@ -55,6 +57,7 @@ SELECT 'GRANT INSERT, UPDATE ON app.app_user TO qm_web' WHERE to_regclass('app.a
 SELECT 'GRANT INSERT, UPDATE, DELETE ON app.stock_batch TO qm_web'
   WHERE to_regclass('app.stock_batch') IS NOT NULL \gexec
 SELECT 'GRANT INSERT ON app.stock_journal TO qm_web' WHERE to_regclass('app.stock_journal') IS NOT NULL \gexec
+SELECT 'GRANT INSERT ON app.history TO qm_web' WHERE to_regclass('app.history') IS NOT NULL \gexec
 SELECT 'GRANT INSERT, DELETE ON app.user_blueprint TO qm_web'
   WHERE to_regclass('app.user_blueprint') IS NOT NULL \gexec
 -- From bot only whether the bot is still on the server

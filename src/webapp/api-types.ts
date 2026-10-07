@@ -353,7 +353,7 @@ export interface ApiTokenCreated {
   token: string;
 }
 
-// --- companion app release (GET /api/companion; files at GET /downloads/companion/<file>, session only)
+// --- companion app release (GET /api/companion; files at GET /downloads/companion/<file>, session or API token)
 export type CompanionPlatform = 'windows' | 'linux';
 
 export interface CompanionDownload {
@@ -378,6 +378,65 @@ export interface CompanionOutdated {
   downloads: Partial<Record<CompanionPlatform, string>>;
 }
 
+// --- history (GET /api/history?lang&before&after&source&category&action&by) ------------------------
+// Your own actions and what others did to your data (an officer booking your org stock), newest
+// first, 100 per page; `before` = the last id you have, `after` = only newer than this id. Optional
+// filters: source, category, action (add, remove, adjust, move, start, done), by (me | others).
+
+export type HistorySource = 'bot' | 'webapp' | 'companion';
+export type HistoryCategory = 'stock' | 'refinery' | 'blueprint';
+
+// A person in an entry; compare userId with your own to say "you"
+export interface HistoryPerson {
+  userId: string;
+  // Their name in the org ("?" when unknown)
+  name: string;
+}
+
+export interface HistoryEntry {
+  id: number;
+  // ISO
+  at: string;
+  source: HistorySource;
+  category: HistoryCategory;
+  // stock: add, remove, adjust, move; refinery: start, done, remove, adjust; blueprint: add, remove
+  action: string;
+  // Who did it
+  actor: HistoryPerson;
+  // The org involved (org stock), else null
+  org: string | null;
+  // Material or blueprint
+  target: string;
+  unit: 'SCU' | 'pcs' | null;
+  // Exact decimal text without trailing zeros; null where the action has none
+  amount: string | null;
+  quality: number | null;
+  location: string | null;
+  designation: 'personal' | 'org' | null;
+  // Org stock: its holder
+  holder: HistoryPerson | null;
+  // Move: where it went (the holder only when it changed)
+  toLocation: string | null;
+  toDesignation: 'personal' | 'org' | null;
+  toHolder: HistoryPerson | null;
+  // Adjust: the quantity before
+  from: string | null;
+  // Refinery start (estimates as entered)
+  method: string | null;
+  durationSeconds: number | null;
+  expectedYield: string | null;
+  // Refinery done: the ore that went in
+  ore: string | null;
+  oreAmount: string | null;
+  oreQuality: number | null;
+}
+
+export interface HistoryResponse {
+  entries: HistoryEntry[];
+  // Older entries exist
+  more: boolean;
+}
+
 // --- realtime (WebSocket /api/ws) ------------------------------------------------------------
 // The server only says what changed; the SPA fetches it through the normal endpoints.
 
@@ -392,6 +451,8 @@ export type ServerMessage =
   // Blueprints or profile (RSI handle) of you or someone in your orgs changed
   | { type: 'blueprints'; userId: string }
   | { type: 'profile'; userId: string }
+  // A new history entry concerning you (yours, or someone acted on your data): GET /api/history?after
+  | { type: 'history'; id: number; source: HistorySource }
   // Changes may have been missed (the server lost its DB listener): reload everything
   | { type: 'resync' }
   | { type: 'pong' };

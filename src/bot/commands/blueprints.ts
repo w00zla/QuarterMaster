@@ -121,13 +121,13 @@ export const blueprintsCommand: BotCommand = {
       const name = escapeMarkdown(bp.label);
       if (bp.isDefault) throw new UserError('bp.default', { name });
       if (bp.retired) throw new UserError('bp.retired', { name });
-      const added = await addBlueprint(ctx.db, access.userId, bp.uuid);
+      const added = await addBlueprint(ctx.db, access.userId, bp.uuid, 'bot');
       await ctx.reply(ctx.t(added ? 'bp.added' : 'bp.alreadyAdded', { name }));
     },
     async remove(ctx) {
       const access = await requireMember(ctx.db, ctx.interaction);
       const bp = await pickedBlueprint(ctx);
-      const removed = await removeBlueprint(ctx.db, access.userId, bp.uuid);
+      const removed = await removeBlueprint(ctx.db, access.userId, bp.uuid, 'bot');
       await ctx.reply(ctx.t(removed ? 'bp.removed' : 'bp.notRegistered', { name: escapeMarkdown(bp.label) }));
     },
     async list(ctx) {

@@ -3,6 +3,8 @@ import { onMounted, watch } from "vue";
 import { RouterView } from "vue-router";
 import AppFooter from "./components/AppFooter.vue";
 import Toasts from "./components/Toasts.vue";
+// Notices of actions from the bot and the companion app (listens to the realtime messages)
+import "./history";
 import TopBar from "./components/TopBar.vue";
 import LoginView from "./views/LoginView.vue";
 import { t } from "./i18n";

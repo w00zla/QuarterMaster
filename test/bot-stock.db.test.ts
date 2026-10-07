@@ -18,8 +18,8 @@ const url = process.env.TEST_DATABASE_URL;
 const G = '940000000000000001';
 const [MEMBER_ROLE, OFFICER_ROLE] = ['941000000000000001', '941000000000000002'];
 const [MIA, OLGA] = ['942000000000000001', '942000000000000002'];
-const mia: Actor = { userId: MIA, guildId: G, officer: false };
-const olga: Actor = { userId: OLGA, guildId: G, officer: true };
+const mia: Actor = { userId: MIA, guildId: G, officer: false, source: 'bot' };
+const olga: Actor = { userId: OLGA, guildId: G, officer: true, source: 'bot' };
 const metal = { kind: 'resource' as const, uuid: U.metal, locationUuid: U.station };
 
 describe('/qm-stock confirmed bookings and lists (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {

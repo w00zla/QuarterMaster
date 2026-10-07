@@ -1,13 +1,17 @@
 <script setup lang="ts">
 // BindSight's footer: one line with the credits and, instead of version and GitHub link, the fan
-// site disclaimer towards CIG (cut off with an ellipsis on narrow screens, the full text on hover).
+// site disclaimer towards CIG: a short line, the full text on hover; the Star Citizen logo from the
+// official fankit at the right edge (exact sizes from local/Fankit_*/03_LOGOS/STARCITIZEN_WHITE.png).
+import scLogo from "../assets/sc-logo-20.png";
+import scLogo2x from "../assets/sc-logo-40.png";
 import { t } from "../i18n";
 </script>
 
 <template>
   <footer class="footer">
     <span class="credits">Made with ❤️ and ☕ by w00zla &amp; Claude</span>
-    <span class="disclaimer" :title="t('footer.disclaimer')">{{ t("footer.disclaimer") }}</span>
+    <span class="disclaimer" :title="t('footer.disclaimer')">{{ t("footer.disclaimerShort") }}</span>
+    <img class="sc-logo" :src="scLogo" :srcset="`${scLogo} 1x, ${scLogo2x} 2x`" alt="Star Citizen" />
   </footer>
 </template>
 
@@ -31,6 +35,12 @@ import { t } from "../i18n";
 .credits {
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.sc-logo {
+  flex-shrink: 0;
+  height: 20px;
+  display: block;
 }
 
 .disclaimer {

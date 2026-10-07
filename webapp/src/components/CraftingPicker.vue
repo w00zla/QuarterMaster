@@ -2,7 +2,6 @@
 // Picks a blueprint, two ways in:
 // - by result: search name, technical name, item type and size ("s2 quantum");
 // - by ingredient: pick a resource or item, then one of the recipes using it.
-// The manufacturer is shown, not searched.
 import { computed, ref, watch } from "vue";
 import type { BlueprintRow, ItemRow, ResourceRow } from "../../../src/adminapp/api-types";
 import type { CraftingUse } from "../../../src/webapp/api-types";
@@ -135,7 +134,6 @@ const listError = computed(() => (mode.value === "result" ? blueprints.error.val
           <span class="menu-meta">
             <TypeLabel :type="b.outputType" :label="b.outputTypeLabel" :size="13" />
             <span class="mono">{{ sizeGrade(b) }}</span>
-            <span class="faint">{{ b.manufacturer ?? "" }}</span>
           </span>
         </button>
         <div v-if="!blueprintMatches.length" class="menu-empty">

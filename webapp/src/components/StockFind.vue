@@ -9,7 +9,7 @@ import { api } from "../api";
 import { materialOptions } from "../catalog";
 import { ownerText, qText, qty, qualityOf } from "../format";
 import { lang, t } from "../i18n";
-import { onServerMessage } from "../realtime";
+import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toastError } from "../toasts";
 import Picker from "./Picker.vue";
@@ -57,14 +57,18 @@ function run() {
 
 watch(lang, fetchResult);
 
+const refetch = coalesced(() => void fetchResult());
 let unsubscribe = () => {};
 onMounted(() => {
   unsubscribe = onServerMessage((m) => {
     if (!last) return;
-    if (m.type === "resync" || (m.type === "stock" && (m.scope === "personal" || m.guildId === last.guildId))) void fetchResult();
+    if (m.type === "resync" || (m.type === "stock" && (m.scope === "personal" || m.guildId === last.guildId))) refetch.schedule();
   });
 });
-onUnmounted(() => unsubscribe());
+onUnmounted(() => {
+  unsubscribe();
+  refetch.cancel();
+});
 </script>
 
 <template>

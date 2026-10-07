@@ -83,7 +83,6 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
         <span v-if="recipe.size !== null" class="tag" :title="t('crafting.size')">S{{ recipe.size }}</span>
         <span v-if="recipe.itemClass" class="tag">{{ recipe.itemClass }}</span>
         <span v-if="recipe.gradeLetter" class="tag">{{ t("crafting.grade", { grade: recipe.gradeLetter }) }}</span>
-        <span v-if="recipe.manufacturer" class="tag" :title="t('crafting.manufacturer')">{{ recipe.manufacturer }}</span>
         <span v-if="recipe.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
         <span v-if="recipe.retired" class="tag err">{{ t("crafting.retired") }}</span>
       </div>

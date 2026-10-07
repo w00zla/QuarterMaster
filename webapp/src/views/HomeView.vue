@@ -7,7 +7,7 @@ import { api } from "../api";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import StatTile from "../components/StatTile.vue";
 import { lang, t } from "../i18n";
-import { onServerMessage } from "../realtime";
+import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toastError } from "../toasts";
 
@@ -42,12 +42,16 @@ const stockTiles = (s: StockMetrics | undefined) => [
   { label: t("sum.pieces"), value: number(s?.pieces), icon: "item" as const },
 ];
 
+const reload = coalesced(() => void load());
 let unsubscribe = () => {};
 onMounted(() => {
   void load();
-  unsubscribe = onServerMessage(() => void load());
+  unsubscribe = onServerMessage(() => reload.schedule());
 });
-onUnmounted(() => unsubscribe());
+onUnmounted(() => {
+  unsubscribe();
+  reload.cancel();
+});
 </script>
 
 <template>

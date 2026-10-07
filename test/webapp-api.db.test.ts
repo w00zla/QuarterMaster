@@ -10,7 +10,9 @@ import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings, type GuildSettings } from '../src/bot/settings.ts';
-import type { BlueprintInfo, CatalogResponse, MaterialInfo, MeResponse, OrgMember, StockBatch, StockListResponse, SummaryResponse } from '../src/webapp/api-types.ts';
+import type {
+  BlueprintInfo, CatalogResponse, HistoryResponse, MaterialInfo, MeResponse, OrgMember, StockBatch, StockListResponse, SummaryResponse,
+} from '../src/webapp/api-types.ts';
 import { createApp } from '../src/webapp/app.ts';
 import type { DiscordLogin } from '../src/webapp/discord.ts';
 import { createSession } from '../src/webapp/session.ts';
@@ -242,5 +244,47 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.deepEqual((await post(MIA, '/stock/remove', { batchId: 'x', amount: null, expected: '1' })).body, { error: 'invalid' });
     assert.equal((await get(MIA, '/stock?scope=everything')).status, 400);
     assert.deepEqual((await post(MIA, '/stock/add', { subjectUuid: U.station, locationUuid: U.station, quality: 1, amount: '1' })).body, { error: 'unknownSubject' });
+  });
+  it('history: own actions and what others did to your data, with source (web app or companion), names, pages', async () => {
+    const last = Number((await db.execute<{ n: string }>(sql`SELECT coalesce(max(id), 0)::text AS n FROM app.history`))[0]!.n);
+    const since = (r: HistoryResponse) => r.entries.filter((e) => e.id > last);
+    assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 333, amount: '3', guildId: G })).status, 200);
+    const batch = (await org(MIA)).batches.find((b) => b.quality === 333)!;
+    // The officer moves it to another holder from the companion app (API token)
+    const token = ((await (await app.request('/api/token', { method: 'POST', body: '{}', headers: { ...headers(OLGA), 'content-type': 'application/json' } })).json()) as { token: string }).token;
+    const moved = await app.request('/api/stock/move', {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ batchId: batch.id, amount: '1', expected: '3', guildId: G, toHolderUserId: MAX }),
+    });
+    assert.equal(moved.status, 200);
+
+    const mia = since((await get<HistoryResponse>(MIA, '/history?lang=en')).body);
+    assert.deepEqual(mia.map((e) => [e.source, e.category, e.action, e.actor.userId, e.holder?.userId, e.toHolder?.userId ?? null]), [
+      ['companion', 'stock', 'move', OLGA, MIA, MAX],
+      ['webapp', 'stock', 'add', MIA, MIA, null],
+    ]);
+    const [move] = mia;
+    assert.deepEqual([move!.actor.name, move!.holder!.name, move!.toHolder!.name, move!.org, move!.amount, move!.unit, move!.quality],
+      [`n${OLGA.slice(-2)}`, `n${MIA.slice(-2)}`, `n${MAX.slice(-2)}`, 'Feature Org', '1', 'SCU', 333]);
+    assert.ok(move!.target !== U.metal && move!.location !== U.station, 'names, not UUIDs');
+    // The new holder and the officer see the move; someone else sees none of it
+    assert.ok(since((await get<HistoryResponse>(MAX, '/history')).body).some((e) => e.id === move!.id));
+    assert.ok(since((await get<HistoryResponse>(OLGA, '/history')).body).some((e) => e.id === move!.id));
+    assert.deepEqual(since((await get<HistoryResponse>(SOLO, '/history')).body), []);
+
+    // Pages: newest first, `before` continues
+    const older = (await get<HistoryResponse>(MIA, `/history?before=${move!.id}`)).body;
+    assert.ok(older.entries.every((e) => e.id < move!.id) && older.entries[0]!.id === mia[1]!.id);
+    assert.equal((await get(MIA, '/history?before=abc')).status, 400);
+
+    // Filters (on the server, so pages continue within them)
+    const ids = async (query: string) => since((await get<HistoryResponse>(MIA, `/history?${query}`)).body).map((e) => e.id);
+    assert.deepEqual(await ids('source=companion'), [move!.id]);
+    assert.deepEqual(await ids('by=others'), [move!.id]);
+    assert.deepEqual(await ids('by=me&category=stock&action=add'), [mia[1]!.id]);
+    assert.deepEqual(await ids('category=blueprint'), []);
+    assert.deepEqual(await ids(`after=${mia[1]!.id}`), [move!.id]);
+    assert.deepEqual(await ids(`after=${mia[1]!.id}&before=${move!.id}`), []);
+    for (const bad of ['source=discord', 'by=everyone', 'action=fly', 'nope=1']) assert.equal((await get(MIA, `/history?${bad}`)).status, 400, bad);
   });
 });

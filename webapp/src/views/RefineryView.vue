@@ -16,7 +16,7 @@ import StockAddForm from "../components/StockAddForm.vue";
 import { methods, signedBonus, yieldValue } from "../catalog";
 import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
 import { lang, t } from "../i18n";
-import { onServerMessage } from "../realtime";
+import { coalesced, onServerMessage } from "../realtime";
 import { toastError } from "../toasts";
 
 const data = ref<StockListResponse | null>(null);
@@ -51,16 +51,18 @@ watch(lang, load);
 const now = ref(Date.now());
 let tick: ReturnType<typeof setInterval> | undefined;
 
+const reload = coalesced(() => void load());
 let unsubscribe = () => {};
 onMounted(() => {
   tick = setInterval(() => (now.value = Date.now()), 30_000);
   void load();
   unsubscribe = onServerMessage((m) => {
-    if (m.type === "resync" || (m.type === "stock" && m.scope === "personal")) void load();
+    if (m.type === "resync" || (m.type === "stock" && m.scope === "personal")) reload.schedule();
   });
 });
 onUnmounted(() => {
   unsubscribe();
+  reload.cancel();
   clearInterval(tick);
 });
 

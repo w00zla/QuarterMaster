@@ -9,11 +9,14 @@
 // - org stock: members add stock they hold themselves and donate their own stock (holder: themselves);
 //   officers do everything, also for other holders
 // - refinery jobs are personal; their result is personal too and can be donated afterwards
+// Every operation also writes one row of the users' history (src/history/record.ts), with the
+// actor's source (bot, web app, companion app).
 import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db, Tx } from '../db/client.ts';
 import { one } from '../db/query.ts';
 import { refineryLocations } from '../ext/refineries.ts';
+import { recordHistory, type HistoryCategory, type HistoryDetails, type Source } from '../history/record.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
 
 export type Designation = 'personal' | 'org';
@@ -25,6 +28,8 @@ export interface Actor {
   // The org the action happens in; null outside any org (personal stock only)
   guildId: string | null;
   officer: boolean;
+  // Where the action comes from (kept in the history)
+  source: Source;
 }
 
 export interface Batch {
@@ -204,6 +209,20 @@ async function journal(tx: Tx, actor: Actor, action: JournalAction, key: BatchKe
     RETURNING ${JOURNAL_COLUMNS}`))!;
 }
 
+/** The history row of an operation on a batch key (the material is the target). */
+async function history(tx: Tx, actor: Actor, category: HistoryCategory, action: string, key: BatchKey, details: HistoryDetails,
+  to?: BatchKey) {
+  await recordHistory(tx, {
+    source: actor.source, category, action, actorUserId: actor.userId, ownerUserId: key.ownerUserId,
+    toOwnerUserId: to && to.ownerUserId !== key.ownerUserId ? to.ownerUserId : null, guildId: key.guildId ?? to?.guildId ?? null,
+    targetKind: key.kind, targetUuid: key.resourceUuid ?? key.itemUuid!,
+    details: { quality: key.quality, locationUuid: key.locationUuid, designation: key.designation, ...details },
+  });
+}
+
+// A refinery job's batch is in the refinery category, everything else is stock
+const categoryOf = (key: BatchKey): HistoryCategory => (key.state === 'refining' ? 'refinery' : 'stock');
+
 const keyOf = ({ id: _id, quantity: _q, ...key }: Batch): BatchKey => key;
 const negate = (amount: string) => `-${amount}`;
 const sameKey = (a: BatchKey, b: BatchKey) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
@@ -242,6 +261,7 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
       locationUuid: input.locationUuid, state: 'stored', quality: input.quality,
     };
     const batch = await upsert(tx, key, amount);
+    await history(tx, actor, 'stock', 'add', key, { amount });
     return { journal: [await journal(tx, actor, 'add', key, amount)], batch };
   });
 }
@@ -291,6 +311,7 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
       VALUES (${keyValues(key)}, ${amount}::numeric, ${method}, now(),
         now() + ${seconds}::int * interval '1 second', ${expected}::numeric)
       RETURNING ${BATCH_COLUMNS}`))!;
+    await history(tx, actor, 'refinery', 'start', key, { amount, method, durationSeconds: seconds, expectedYield: expected });
     return { journal: [await journal(tx, actor, 'add', key, amount)], batch };
   });
 }
@@ -310,6 +331,7 @@ export async function refineDone(db: Db, actor: Actor, input: { batchId: number;
     await decrease(tx, ore, ore.quantity);
     const key: BatchKey = { ...keyOf(ore), resourceUuid: refined.uuid, state: 'stored', quality: input.quality };
     const batch = await upsert(tx, key, amount);
+    await history(tx, actor, 'refinery', 'done', key, { amount, oreUuid: ore.resourceUuid!, oreAmount: ore.quantity, oreQuality: ore.quality });
     return { journal: [out, await journal(tx, actor, 'refine_in', key, amount, group)], batch };
   });
 }
@@ -321,6 +343,7 @@ export async function remove(db: Db, actor: Actor, input: { batchId: number; amo
     checkMayChange(actor, batch);
     const amount = input.amount === null ? batch.quantity : parse(input.amount, batch.kind);
     const left = await decrease(tx, batch, amount);
+    await history(tx, actor, categoryOf(batch), 'remove', keyOf(batch), { amount });
     return { journal: [await journal(tx, actor, 'remove', keyOf(batch), negate(amount))], batch: left };
   });
 }
@@ -336,6 +359,7 @@ export async function adjust(db: Db, actor: Actor, input: { batchId: number; amo
     let left: Batch | null = null;
     if (target === '0') await tx.execute(sql`DELETE FROM app.stock_batch WHERE id = ${batch.id}`);
     else left = await one<Batch>(tx, sql`UPDATE app.stock_batch SET quantity = ${target}::numeric, updated_at = now() WHERE id = ${batch.id} RETURNING ${BATCH_COLUMNS}`);
+    await history(tx, actor, categoryOf(batch), 'adjust', keyOf(batch), { amount: target, from: batch.quantity });
     return { journal: [await journal(tx, actor, 'adjust', keyOf(batch), delta)], batch: left };
   });
 }
@@ -385,6 +409,7 @@ export async function move(db: Db, actor: Actor, input: MoveInput) {
     const out = await journal(tx, actor, 'move_out', keyOf(batch), negate(amount), group);
     await decrease(tx, batch, amount);
     const moved = await upsert(tx, target, amount);
+    await history(tx, actor, 'stock', 'move', keyOf(batch), { amount, toLocationUuid: target.locationUuid, toDesignation: target.designation }, target);
     return { journal: [out, await journal(tx, actor, 'move_in', target, amount, group)], batch: moved };
   });
 }

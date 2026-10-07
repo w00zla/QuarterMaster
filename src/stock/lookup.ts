@@ -177,7 +177,8 @@ async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBa
     .sort((a, b) => a.material.localeCompare(b.material) || b.batch.quality - a.batch.quality || a.batch.id - b.batch.id);
 }
 
-async function missingNames(db: Db, lang: string, subjects: string[], locations: string[]): Promise<Map<string, string>> {
+/** Names of materials and locations the caches leave out (retired), from the catalog. */
+export async function missingNames(db: Db, lang: string, subjects: string[], locations: string[]): Promise<Map<string, string>> {
   if (!subjects.length && !locations.length) return new Map();
   const list = (ids: string[]) => (ids.length ? sql.join(ids.map((u) => sql`${u}::uuid`), sql`, `) : sql`NULL::uuid`);
   const found = await rows<{ uuid: string; name: string }>(db, sql`

@@ -24,7 +24,7 @@ import StockFind from "../components/StockFind.vue";
 import { compareBatches, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
 import { lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf, writable } from "../orgs";
-import { onServerMessage } from "../realtime";
+import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toastError } from "../toasts";
 
@@ -81,15 +81,19 @@ watch([scope, holder], () => {
 }, { immediate: true });
 watch(lang, load);
 
+const reload = coalesced(() => void load());
 let unsubscribe = () => {};
 onMounted(() => {
   if (scope.value !== "personal") ensureMembers(scope.value);
   unsubscribe = onServerMessage((m) => {
-    if (m.type === "resync") void load();
-    else if (m.type === "stock" && (m.scope === "personal" ? scope.value === "personal" : m.guildId === scope.value)) void load();
+    if (m.type === "resync") reload.schedule();
+    else if (m.type === "stock" && (m.scope === "personal" ? scope.value === "personal" : m.guildId === scope.value)) reload.schedule();
   });
 });
-onUnmounted(() => unsubscribe());
+onUnmounted(() => {
+  unsubscribe();
+  reload.cancel();
+});
 
 const filtered = computed(() => {
   const words = materialText.value.toLowerCase().split(/\s+/).filter(Boolean);

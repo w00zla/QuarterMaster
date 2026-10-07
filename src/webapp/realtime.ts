@@ -20,7 +20,11 @@ const SESSION_COOKIE_NAME = `__Host-${SESSION_COOKIE}`;
 // Closing codes the SPA knows: the session is gone (log in again)
 export const CLOSE_SESSION_ENDED = 4401;
 
-const changeSchema = z.object({ t: z.string(), g: z.string().nullable(), u: z.string().nullable() });
+const changeSchema = z.object({
+  t: z.string(), g: z.string().nullable(), u: z.string().nullable(),
+  // History rows (0012): id, source, actor, new owner
+  id: z.number().int().optional(), s: z.enum(['bot', 'webapp', 'companion']).optional(), a: z.string().optional(), o: z.string().nullable().optional(),
+});
 export type Change = z.infer<typeof changeSchema>;
 const clientMessageSchema = z.object({ type: z.literal('ping') }).strict();
 
@@ -114,6 +118,13 @@ export class RealtimeHub {
         // The web app's own settings (language): the user's other tabs
         if (u) this.send((c) => c.userId === u, { type: 'me' });
         break;
+      case 'history': {
+        // To the users it concerns: who did it, whose data, the new owner
+        if (change.id === undefined || !change.s) break;
+        const users = new Set([change.a, u, change.o].filter((x): x is string => Boolean(x)));
+        this.send((c) => users.has(c.userId), { type: 'history', id: change.id, source: change.s });
+        break;
+      }
       case 'blueprint':
       case 'user': {
         if (!u) break;
