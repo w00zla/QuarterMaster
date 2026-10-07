@@ -28,7 +28,8 @@ const isOrg = b.designation === "org";
 const step = ref<"input" | "confirm">("input");
 const busy = ref(false);
 
-const all = ref(false);
+// "Everything" is the default for remove and move
+const all = ref(props.action === "remove" || props.action === "move");
 // A finished refinery job starts from its expected yield (an estimate: the user enters what the game shows)
 const amount = ref(props.action === "done" ? b.refine?.expectedYield ?? "" : "");
 const quality = ref("");
@@ -94,7 +95,7 @@ const targetText = computed(() => {
 const titles: Record<BatchAction, Parameters<typeof t>[0]> = {
   remove: "stock.remove", move: "stock.move", adjust: "stock.adjust", done: "refinery.doneTitle",
 };
-const icons: Record<BatchAction, IconName> = { remove: "minus", move: "arrow-right", adjust: "settings", done: "check" };
+const icons: Record<BatchAction, IconName> = { remove: "trash", move: "arrow-right", adjust: "settings", done: "check" };
 
 const buttons = computed<ConfirmButton[]>(() => step.value === "input"
   ? [

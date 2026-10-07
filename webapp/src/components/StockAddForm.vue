@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // Books new stock (POST /api/stock/add) or starts a refinery job (POST /api/refinery/start, always
-// personal, ores only), after a confirmation step like every action.
+// personal, ores only) right away; the toast says what was booked.
 import { computed, ref, watch } from "vue";
 import { estimateJob } from "../../../src/ext/refining-estimate";
 import type { OkResponse, RefineryStartRequest, StockAddRequest } from "../../../src/webapp/api-types";
-import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import Dropdown from "./Dropdown.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { locationOptions, locations, materialOptions, materials, methods, oreOptions, refineryLocationOptions, yieldBonus, yieldValue } from "../catalog";
 import { amountOf, hm, qText, qty, qualityOf, unitText } from "../format";
@@ -15,8 +15,7 @@ import { me } from "../session";
 import { toast, toastError } from "../toasts";
 import Picker from "./Picker.vue";
 
-// formId: the dialog's footer button submits the form by this ID
-const props = defineProps<{ refinery?: boolean; target?: string | null; formId: string }>();
+const props = defineProps<{ refinery?: boolean; target?: string | null }>();
 const emit = defineEmits<{ done: [] }>();
 
 const subject = ref<string | null>(null);
@@ -32,8 +31,6 @@ const amount = ref("");
 const target = ref("personal");
 const holder = ref<string | null>(null);
 const busy = ref(false);
-// The summary waiting for confirmation, null while editing
-const pending = ref<string | null>(null);
 
 const targets = computed(() => [
   { value: "personal", label: t("stock.personal") },
@@ -109,28 +106,29 @@ function ownerText(): string {
   return `${org.value.name} (${name})`;
 }
 
-function submit() {
+// Back to an empty form (target and holder as on opening, the method's estimates again)
+function clear() {
+  subject.value = null;
+  location.value = null;
+  quality.value = "";
+  amount.value = "";
+  target.value = props.target && writable(orgOf(props.target)) ? props.target : "personal";
+  holder.value = me.value?.userId ?? null;
+  method.value = methodOptions.value[0]?.value ?? "";
+  hours.value = "";
+  minutes.value = "";
+  expectedYield.value = "";
+  durationEdited.value = false;
+  yieldEdited.value = false;
+}
+
+async function submit() {
   if (!valid.value || busy.value) return;
   const job = props.refinery
     ? ` · ${methods.value.get(method.value)?.name ?? ""}${expectedAmt.value ? ` · ≈ ${qty(expectedAmt.value, "SCU")}` : ""} · ${hm(durationSeconds.value!)}`
     : "";
-  pending.value = `${qty(amt.value!, unit.value)} ${materials.value.get(subject.value!)?.name ?? ""} · ${qText(q.value)} · ${
+  const what = `${qty(amt.value!, unit.value)} ${materials.value.get(subject.value!)?.name ?? ""} · ${qText(q.value)} · ${
     locations.value.get(location.value!)?.short ?? ""} · ${ownerText()}${job}`;
-}
-
-const confirmButtons = computed<ConfirmButton[]>(() => [
-  { label: t("common.cancel"), kind: "outline", value: "cancel" },
-  { label: t("common.confirm"), kind: "primary", value: "confirm", disabled: busy.value },
-]);
-
-function choose(value: string) {
-  if (value === "confirm") void book();
-  else pending.value = null;
-}
-
-async function book() {
-  const what = pending.value;
-  if (!what || !valid.value || busy.value) return;
   busy.value = true;
   try {
     if (props.refinery) {
@@ -158,16 +156,12 @@ async function book() {
     toastError(e);
   } finally {
     busy.value = false;
-    pending.value = null;
   }
 }
-
-// For the dialog's submit button
-defineExpose({ ready: computed(() => valid.value && !busy.value) });
 </script>
 
 <template>
-  <form :id="formId" class="form" @submit.prevent="submit">
+  <form class="form" @submit.prevent="submit">
     <label class="field">
       {{ t(refinery ? "field.ore" : "field.material") }}
       <Picker v-model="subject" :options="refinery ? oreOptions : materialOptions" :placeholder="t(refinery ? 'pick.ore' : 'pick.material')" />
@@ -217,13 +211,11 @@ defineExpose({ ready: computed(() => valid.value && !busy.value) });
       {{ t("field.holder") }}
       <Picker v-model="holder" :options="memberOptions(org.guildId)" :placeholder="t('pick.member')" />
     </label>
-    <ConfirmDialog
-      v-if="pending"
-      :title="t(refinery ? 'confirm.refineryStart' : 'confirm.add')"
-      :subtitle="pending"
-      :icon="refinery ? 'crafter' : 'plus'"
-      :buttons="confirmButtons"
-      @choose="choose"
-    />
+    <div class="form-actions">
+      <button type="button" class="btn outline" @click="clear"><Icon name="close" :size="14" /> {{ t("common.clear") }}</button>
+      <button type="submit" class="btn primary" :disabled="!valid || busy">
+        <Icon name="plus" :size="14" /> {{ t(refinery ? "refinery.start" : "stock.add") }}
+      </button>
+    </div>
   </form>
 </template>

@@ -9,7 +9,6 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
 import BatchDialog from "../components/BatchDialog.vue";
-import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import RangeSlider from "../components/RangeSlider.vue";
@@ -25,13 +24,8 @@ const materialText = ref("");
 const locationFilter = ref("");
 const qualityLow = ref(0);
 const qualityHigh = ref(1000);
-// "Start job" as a dialog: the form, then its own confirmation
+// "Start job" in a panel below the head: the form, then its own confirmation
 const showStart = ref(false);
-const startForm = ref<InstanceType<typeof StockAddForm> | null>(null);
-const startButtons = computed<ConfirmButton[]>(() => [
-  { label: t("common.cancel"), kind: "outline", value: "cancel" },
-  { label: t("refinery.start"), kind: "primary", value: "start", icon: "drop", form: "refinery-start", disabled: !startForm.value?.ready },
-]);
 
 function started() {
   showStart.value = false;
@@ -160,10 +154,15 @@ const bonusText = (b: StockBatch) => {
       <div class="head">
         <Icon name="drop" :size="16" />
         <span class="head-title">{{ t("refinery.jobs") }}</span>
-        <button type="button" class="btn small primary" @click="showStart = true">
-          <Icon name="plus" :size="14" /> {{ t("refinery.start") }}
+        <button type="button" class="btn small primary" @click="showStart = !showStart">
+          <Icon :name="showStart ? 'close' : 'plus'" :size="14" /> {{ t("refinery.start") }}
         </button>
       </div>
+    </section>
+
+    <section v-if="showStart" class="panel unclipped">
+      <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("refinery.start") }}</span></div>
+      <StockAddForm refinery @done="started" />
     </section>
 
     <section class="panel unclipped">
@@ -214,10 +213,6 @@ const bonusText = (b: StockBatch) => {
         </template>
       </div>
     </section>
-
-    <ConfirmDialog v-if="showStart" :title="t('refinery.start')" icon="drop" :buttons="startButtons" @choose="showStart = false">
-      <StockAddForm ref="startForm" refinery form-id="refinery-start" class="flush" @done="started" />
-    </ConfirmDialog>
 
     <BatchDialog v-if="finishing" :key="finishing.id" :batch="finishing" action="done" @close="finishing = null" @done="load" />
   </div>

@@ -149,7 +149,7 @@ function valueOf(r: Row, key: string): string | number {
   }
 }
 
-// --- add / remove (confirmed first, like every action) -----------------------------------------
+// --- add (right away, the toast says what) / remove (confirmed first) ---------------------------
 const adding = ref<string | null>(null);
 const addOptions = computed(() => {
   const owned = new Set(mine.value ?? []);
@@ -160,36 +160,41 @@ const addOptions = computed(() => {
 });
 const label = (uuid: string) => blueprints.value.get(uuid)?.label ?? t("bp.unknown");
 
-const pending = ref<{ action: "add" | "remove"; uuid: string } | null>(null);
-// The add dialog: picking a blueprint moves on to the confirmation
+// The blueprint waiting for the remove confirmation
+const pending = ref<string | null>(null);
+// The add panel below the head: picking a blueprint adds it, an added one closes the panel
 const addOpen = ref(false);
-const addButtons = computed<ConfirmButton[]>(() => [{ label: t("common.cancel"), kind: "outline", value: "cancel" }]);
+// Clear: a new picker drops the typed search
+const pickerKey = ref(0);
 watch(adding, (uuid) => {
   if (!uuid) return;
   adding.value = null;
-  addOpen.value = false;
-  pending.value = { action: "add", uuid };
+  void send("add", uuid);
 });
 const confirmButtons = computed<ConfirmButton[]>(() => [
   { label: t("common.cancel"), kind: "outline", value: "cancel" },
-  { label: t("common.confirm"), kind: pending.value?.action === "remove" ? "danger" : "primary", value: "confirm", disabled: busy.value },
+  { label: t("common.confirm"), kind: "danger", value: "confirm", disabled: busy.value },
 ]);
 
-async function choose(value: string) {
-  const p = pending.value;
-  if (value === "confirm" && p) {
-    busy.value = true;
-    try {
-      const body: BlueprintRequest = { uuid: p.uuid };
-      await api<OkResponse>(`/blueprints/${p.action}`, { method: "POST", body });
-      toast(t(p.action === "add" ? "bp.added" : "bp.removed", { name: label(p.uuid) }));
-      void loadMine();
-    } catch (e) {
-      toastError(e);
-    } finally {
-      busy.value = false;
-    }
+async function send(action: "add" | "remove", uuid: string) {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const body: BlueprintRequest = { uuid };
+    await api<OkResponse>(`/blueprints/${action}`, { method: "POST", body });
+    toast(t(action === "add" ? "bp.added" : "bp.removed", { name: label(uuid) }));
+    if (action === "add") addOpen.value = false;
+    void loadMine();
+  } catch (e) {
+    toastError(e);
+  } finally {
+    busy.value = false;
   }
+}
+
+async function choose(value: string) {
+  const uuid = pending.value;
+  if (value === "confirm" && uuid) await send("remove", uuid);
   pending.value = null;
 }
 
@@ -225,9 +230,18 @@ onUnmounted(() => unsubscribe());
       <div class="head">
         <Icon name="blueprint" :size="16" />
         <span class="head-title">{{ org ? t("bp.orgTitle", { org: org.name }) : t("bp.mine") }}</span>
-        <button v-if="!org" type="button" class="btn small primary" :disabled="!catalog" @click="addOpen = true">
-          <Icon name="plus" :size="14" /> {{ t("bp.add") }}
+        <button v-if="!org" type="button" class="btn small primary" :disabled="!catalog" @click="addOpen = !addOpen">
+          <Icon :name="addOpen ? 'close' : 'plus'" :size="14" /> {{ t("bp.add") }}
         </button>
+      </div>
+      <div v-if="addOpen && !org" class="add">
+        <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("bp.addTitle") }}</span></div>
+        <div class="form single">
+          <Picker :key="pickerKey" v-model="adding" :options="addOptions" :placeholder="t('pick.blueprint')" />
+          <div class="form-actions">
+            <button type="button" class="btn outline" @click="pickerKey++"><Icon name="close" :size="14" /> {{ t("common.clear") }}</button>
+          </div>
+        </div>
       </div>
       <div class="filters">
         <label class="search">
@@ -269,21 +283,18 @@ onUnmounted(() => unsubscribe());
           <span class="owners" :title="row.owners.map(memberLabel).join(', ')">{{ row.owners.map(memberLabel).join(", ") }}</span>
         </template>
         <template #cell-actions="{ row }">
-          <button type="button" class="icon-btn remove" :title="t('bp.remove')" :disabled="busy" @click.stop="pending = { action: 'remove', uuid: row.uuid }">
+          <button type="button" class="icon-btn remove" :title="t('bp.remove')" :disabled="busy" @click.stop="pending = row.uuid">
             <Icon name="trash" :size="14" />
           </button>
         </template>
       </DataTable>
     </section>
 
-    <ConfirmDialog v-if="addOpen" :title="t('bp.addTitle')" icon="plus" :buttons="addButtons" @choose="addOpen = false">
-      <Picker v-model="adding" :options="addOptions" :placeholder="t('pick.blueprint')" />
-    </ConfirmDialog>
     <ConfirmDialog
       v-if="pending"
-      :title="t(pending.action === 'add' ? 'confirm.bpAdd' : 'confirm.bpRemove')"
-      :subtitle="label(pending.uuid)"
-      :icon="pending.action === 'add' ? 'plus' : 'trash'"
+      :title="t('confirm.bpRemove')"
+      :subtitle="label(pending)"
+      icon="trash"
       :buttons="confirmButtons"
       @choose="choose"
     />
@@ -299,6 +310,11 @@ onUnmounted(() => unsubscribe());
 /* Centred in its fixed column (the cell is a flex box, see .sep in ui.css) */
 .remove {
   margin: 0 auto;
+}
+
+/* The add panel inside the list's panel, set off from the filters */
+.add {
+  border-bottom: 1px solid var(--border-dim);
 }
 
 .owners {

@@ -64,6 +64,16 @@ async function copyKey() {
   <ConfirmDialog :title="t('companion.title')" icon="link" :buttons="buttons" @choose="emit('close')">
     <div class="form single flush">
       <div class="field">
+        {{ t("companion.download") }}
+        <template v-if="release?.version">
+          <div class="faint">{{ t("companion.version", { version: release.version }) }}</div>
+          <a v-for="d in release.downloads" :key="d.platform" class="btn outline download" :href="d.url" download>
+            <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform] }} <span class="faint">· {{ size(d.size) }}</span>
+          </a>
+        </template>
+        <div v-else-if="release" class="faint">{{ t("companion.noRelease") }}</div>
+      </div>
+      <div class="field">
         {{ t("companion.key") }}
         <div v-if="newKey" class="line">
           <input class="input key" type="text" :value="newKey" readonly spellcheck="false" @focus="($event.target as HTMLInputElement).select()" />
@@ -75,16 +85,6 @@ async function copyKey() {
             {{ t(keyInfo?.createdAt ? "companion.keyRecreate" : "companion.keyCreate") }}
           </button>
         </div>
-      </div>
-      <div class="field">
-        {{ t("companion.download") }}
-        <template v-if="release?.version">
-          <div class="faint">{{ t("companion.version", { version: release.version }) }}</div>
-          <a v-for="d in release.downloads" :key="d.platform" class="btn outline download" :href="d.url" download>
-            <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform] }} <span class="faint">· {{ size(d.size) }}</span>
-          </a>
-        </template>
-        <div v-else-if="release" class="faint">{{ t("companion.noRelease") }}</div>
       </div>
     </div>
   </ConfirmDialog>

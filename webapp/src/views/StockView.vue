@@ -19,7 +19,6 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
-import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import StockFind from "../components/StockFind.vue";
 import { compareBatches, qMark, qty } from "../format";
@@ -36,13 +35,8 @@ const materialText = ref("");
 const locationFilter = ref("");
 const qualityLow = ref(0);
 const qualityHigh = ref(1000);
-// Adding as a dialog: the form, then its own confirmation
+// Adding in a panel below the head: the form, then its own confirmation
 const showAdd = ref(false);
-const addForm = ref<InstanceType<typeof StockAddForm> | null>(null);
-const addButtons = computed<ConfirmButton[]>(() => [
-  { label: t("common.cancel"), kind: "outline", value: "cancel" },
-  { label: t("stock.add"), kind: "primary", value: "add", icon: "plus", form: "stock-add", disabled: !addForm.value?.ready },
-]);
 
 function added() {
   showAdd.value = false;
@@ -189,8 +183,8 @@ function open(batch: StockBatch, action: BatchAction) {
         <button type="button" class="btn small outline" :class="{ on: showFind }" @click="showFind = !showFind">
           <Icon name="search" :size="14" /> {{ t("stock.find") }}
         </button>
-        <button type="button" class="btn small primary" @click="showAdd = true">
-          <Icon name="plus" :size="14" /> {{ t("stock.add") }}
+        <button type="button" class="btn small primary" @click="showAdd = !showAdd">
+          <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ t("stock.add") }}
         </button>
       </div>
       <div v-if="org && !orgWritable" class="readonly warning">
@@ -199,9 +193,10 @@ function open(batch: StockBatch, action: BatchAction) {
       </div>
     </section>
 
-    <ConfirmDialog v-if="showAdd" :title="t('stock.addTitle')" icon="plus" :buttons="addButtons" @choose="showAdd = false">
-      <StockAddForm ref="addForm" form-id="stock-add" class="flush" :target="scope === 'personal' ? null : scope" @done="added" />
-    </ConfirmDialog>
+    <section v-if="showAdd" class="panel unclipped">
+      <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("stock.addTitle") }}</span></div>
+      <StockAddForm :target="scope === 'personal' ? null : scope" @done="added" />
+    </section>
 
     <section v-if="showFind" class="panel unclipped">
       <div class="head"><Icon name="search" :size="16" /><span class="head-title">{{ t("stock.findTitle") }}</span></div>
@@ -247,7 +242,7 @@ function open(batch: StockBatch, action: BatchAction) {
             <span><span v-if="b.state === 'refining'" class="tag warn">{{ t("stock.refining") }}</span></span>
             <span class="sep actions">
               <template v-if="canChange(b)">
-                <button type="button" class="icon-btn" :title="t('stock.remove')" @click="open(b, 'remove')"><Icon name="minus" :size="15" /></button>
+                <button type="button" class="icon-btn" :title="t('stock.remove')" @click="open(b, 'remove')"><Icon name="trash" :size="15" /></button>
                 <button type="button" class="icon-btn" :title="t('stock.move')" :disabled="b.state !== 'stored'" @click="open(b, 'move')"><Icon name="arrow-right" :size="15" /></button>
                 <button type="button" class="icon-btn" :title="t('stock.adjust')" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
               </template>
