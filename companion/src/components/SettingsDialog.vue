@@ -1,24 +1,22 @@
 <script setup lang="ts">
-// Server, API token (created in the web app's profile and pasted here) and game folder; saving
-// checks the connection and reloads the log state (the path may have changed).
+// API token (created in the web app's Companion dialog and pasted here) and game folder; saving checks
+// the connection and reloads the log state (the path may have changed). The server is fixed (only the
+// config file changes it).
 import { computed, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import Icon from "../../../adminapp/src/components/Icon.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { setConfig } from "../backend";
 import { t } from "../i18n";
-import { config, connectError, connected, connectionText, loadLog, refreshConnection } from "../state";
+import { config, loadLog, refreshConnection } from "../state";
 import { errorText, toast } from "../toasts";
 
 const emit = defineEmits<{ close: [] }>();
 
-const server = ref(config.value?.server ?? "");
 const token = ref(config.value?.token ?? "");
 const gameDir = ref(config.value?.gameDir ?? "");
 const busy = ref(false);
 
-const changed = computed(() => server.value.trim() !== (config.value?.server ?? "")
-  || token.value.trim() !== (config.value?.token ?? "")
+const changed = computed(() => token.value.trim() !== (config.value?.token ?? "")
   || gameDir.value.trim() !== (config.value?.gameDir ?? ""));
 const buttons = computed<ConfirmButton[]>(() => [
   { label: t("common.close"), kind: "outline", value: "close" },
@@ -29,12 +27,11 @@ async function save() {
   if (!changed.value || busy.value) return;
   busy.value = true;
   try {
-    config.value = await setConfig({ server: server.value.trim(), token: token.value.trim(), gameDir: gameDir.value.trim() });
-    server.value = config.value.server;
+    config.value = await setConfig({ server: config.value?.server ?? "", token: token.value.trim(), gameDir: gameDir.value.trim() });
     await Promise.all([refreshConnection(), loadLog()]);
     toast(t("settings.saved"));
   } catch (e) {
-    // Also the connection codes (invalid server address): the save itself failed
+    // The save itself failed
     toast(errorText(e), "error");
   } finally {
     busy.value = false;
@@ -52,14 +49,6 @@ async function pickFolder() {
     <form id="settings" class="form single flush groups" @submit.prevent="save">
       <section class="group">
         <div class="group-title">{{ t("settings.connection") }}</div>
-        <label class="field">
-          {{ t("settings.server") }}
-          <input v-model="server" class="input" type="url" placeholder="https://" autocomplete="off" spellcheck="false" />
-          <span class="status" :class="connected ? 'ok' : connectError ? 'err' : 'off'">
-            <Icon :name="connected ? 'user' : 'warning'" :size="14" />
-            {{ connectionText }}
-          </span>
-        </label>
         <label class="field">
           {{ t("settings.token") }}
           <input v-model="token" class="input" type="password" autocomplete="off" spellcheck="false" />
@@ -120,29 +109,5 @@ async function pickFolder() {
 .line .input {
   flex: 1;
   min-width: 0;
-}
-
-/* The connection state right below the server, tinted like the top bar's chip */
-.status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 4px 10px;
-  border-radius: var(--radius-control);
-  background: var(--bg-surface-2);
-  color: var(--text-3);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.status.ok {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-}
-
-.status.err {
-  color: var(--err);
-  background: color-mix(in srgb, var(--err) 12%, transparent);
 }
 </style>

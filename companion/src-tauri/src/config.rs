@@ -2,7 +2,8 @@
 //! `%APPDATA%\com.w00zla.quartermaster.companion\config.json` on Windows,
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
 //! Quartermaster server, the user's API token and the SC channel folder whose
-//! `Game.log` is followed.
+//! `Game.log` is followed. The server is fixed in the app; only an edit of the
+//! file changes it (e.g. a dev server), the settings UI does not show it.
 
 use std::path::PathBuf;
 
@@ -17,11 +18,18 @@ fn default_game_dir() -> String {
     DEFAULT_GAME_DIR.to_string()
 }
 
+/// The production web app; a `server` in the config file overrides it.
+const DEFAULT_SERVER: &str = "https://quartermaster.w00z.net";
+
+fn default_server() -> String {
+    DEFAULT_SERVER.to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
-    /// Where the web app runs, e.g. `https://qm.example.com`; empty = not set.
-    #[serde(default)]
+    /// Where the web app runs (origin); missing or empty = the production server.
+    #[serde(default = "default_server")]
     pub server: String,
     /// The user's API token from the web app's profile; empty = not set.
     #[serde(default)]
@@ -33,7 +41,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { server: String::new(), token: String::new(), game_dir: default_game_dir() }
+        Self { server: default_server(), token: String::new(), game_dir: default_game_dir() }
     }
 }
 
@@ -55,12 +63,21 @@ fn config_path(app: &AppHandle) -> Option<PathBuf> {
 pub fn load(app: &AppHandle) -> Config {
     let Some(path) = config_path(app) else { return Config::default() };
     match std::fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
+        Ok(text) => parse(&text).unwrap_or_else(|e| {
             log::warn!("{}: {e}, using defaults", path.display());
             Config::default()
         }),
         Err(_) => Config::default(),
     }
+}
+
+/// A config file's content; an empty server (older files) is the production server.
+fn parse(text: &str) -> Result<Config, serde_json::Error> {
+    let mut config: Config = serde_json::from_str(text)?;
+    if config.server.trim().is_empty() {
+        config.server = default_server();
+    }
+    Ok(config)
 }
 
 pub fn save(app: &AppHandle, config: &Config) -> Result<(), String> {
@@ -78,9 +95,11 @@ mod tests {
 
     #[test]
     fn missing_fields_get_defaults() {
-        let c: Config = serde_json::from_str("{}").unwrap();
+        let c = parse("{}").unwrap();
         assert_eq!(c, Config::default());
-        let c: Config = serde_json::from_str(r#"{"server":"https://qm.test"}"#).unwrap();
+        assert_eq!(c.server, DEFAULT_SERVER);
+        assert_eq!(parse(r#"{"server":""}"#).unwrap().server, DEFAULT_SERVER);
+        let c = parse(r#"{"server":"https://qm.test"}"#).unwrap();
         assert_eq!(c.server, "https://qm.test");
         assert_eq!(c.game_dir, DEFAULT_GAME_DIR);
     }

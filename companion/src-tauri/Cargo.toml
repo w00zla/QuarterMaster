@@ -29,6 +29,11 @@ serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 # Finding the blueprint lines in GBs of old logs
 memchr = "2"
+# OCR of the refinery terminal: ONNX Runtime (prebuilt, linked statically) for the PP-OCRv5 models,
+# rustls for its build-time download like reqwest
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-rustls"] }
+# Decoding screenshots (tests, test frames); live frames come as raw pixels
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 [profile.release]
 codegen-units = 1

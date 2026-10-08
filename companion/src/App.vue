@@ -16,6 +16,8 @@ import WindowEdges from "./components/WindowEdges.vue";
 import { AppError, appInfo, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
 import { config, connectError, connected, connectionText, loadConfig, log, meAvatar, meName, refreshConnection, watchConnection, watchLog } from "./state";
+import { watchRefinery } from "./refineryDrafts";
+import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
 
 const settingsOpen = ref(false);
@@ -42,6 +44,7 @@ onMounted(async () => {
   }
   watchConnection();
   await watchLog().catch(toastError);
+  await watchRefinery().catch(toastError);
   ready.value = true;
   if (!connected.value && !outdated.value) settingsOpen.value = true;
 });
@@ -82,6 +85,7 @@ onMounted(async () => {
       <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :url="downloadUrl" />
     </main>
     <main v-else-if="ready" class="main">
+      <RefineryPanel />
       <UnlocksPanel />
     </main>
     <SettingsDialog v-if="settingsOpen" @close="settingsOpen = false" />

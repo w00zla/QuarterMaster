@@ -1,10 +1,15 @@
 //! Quartermaster Companion: follows SC's `Game.log` for blueprint unlocks and
 //! books them, once the user confirms, through the Quartermaster web app's API
 //! with the user's API token. Structure after BindSight (`config.rs`, `logwatch.rs`).
+//! Reads the refinery terminal from frames (`ocr.rs`, `refinery.rs`, `ocrwatch.rs`);
+//! the frames' source (screen capture per platform) is not built yet.
 
 mod config;
 mod gamelog;
 mod logwatch;
+pub mod ocr;
+mod ocrwatch;
+pub mod refinery;
 mod server;
 
 use std::path::PathBuf;
@@ -105,14 +110,10 @@ fn get_config(state: State) -> Config {
     state.lock().unwrap().config.clone()
 }
 
-/// Saves the config; the server is normalized to its origin (empty = unset).
+/// Saves token and game folder; the server stays as loaded (only the config file changes it).
 #[tauri::command]
 fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config, String> {
-    if !config.server.trim().is_empty() {
-        config.server = server::origin(&config.server)?;
-    } else {
-        config.server.clear();
-    }
+    config.server = state.lock().unwrap().config.server.clone();
     config.token = config.token.trim().to_string();
     config.game_dir = config.game_dir.trim().to_string();
     config::save(&app, &config)?;
@@ -216,6 +217,19 @@ async fn download_update(app: AppHandle, http: tauri::State<'_, reqwest::Client>
     .await
 }
 
+/// Whether the refinery detection is on.
+#[tauri::command]
+fn get_detect(detect: tauri::State<ocrwatch::Detect>) -> bool {
+    detect.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Turns the refinery detection on or off.
+#[tauri::command]
+fn set_detect(detect: tauri::State<ocrwatch::Detect>, on: bool) {
+    detect.store(on, std::sync::atomic::Ordering::Relaxed);
+    log::info!("refinery detection {}", if on { "on" } else { "off" });
+}
+
 /// Opens the configured server's web app in the browser.
 #[tauri::command]
 fn open_webapp(app: AppHandle) -> Result<(), String> {
@@ -258,6 +272,10 @@ pub fn run() {
             app.manage(Mutex::new(AppData { config, log_found: false, unlocks: Vec::new() }));
             app.manage(server::client());
             spawn_game_log_watch(app.handle().clone());
+            // The frame channel for the screen capture (to come); QM_OCR_FRAMES feeds test images
+            let detect = ocrwatch::Detect::default();
+            app.manage(Mutex::new(ocrwatch::spawn(app.handle().clone(), detect.clone())));
+            app.manage(detect);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -269,6 +287,8 @@ pub fn run() {
             app_info,
             download_update,
             open_webapp,
+            get_detect,
+            set_detect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
