@@ -74,18 +74,17 @@ describe('companion refinery drafts', () => {
         { uuid: 'ag', name: 'Agricium (Ore)', isOre: true }, { uuid: 'agr', name: 'Agricium', isOre: false },
       ],
       locations: [{ uuid: 'cru', label: 'CRU-L1 Ambitious Dream Station · Crusader · Stanton', refinery: true }],
-      methods: [{ code: 'DIN', name: 'Dinyx Solventation' }],
     } as unknown as CatalogResponse;
     const t = new RefineryTracker();
     t.feed({ atMs: T0, screen: quote('Dinyx Solventation', 3474, [9, 8, 175, 19, 20]) });
     const d = t.feed({ atMs: T0 + 9_000, screen: processing(3465) })!;
     const r = resolveDraft(d, buildCatalog([catalog]));
-    assert.deepEqual([r.locationUuid, r.methodCode], ['cru', 'DIN']);
+    assert.equal(r.locationUuid, 'cru');
     assert.deepEqual(r.rows.map((x) => [x.oreUuid, x.quality, x.amount, x.expectedYield]), [
       ['ti', 516, '0.21', '0.09'], ['as', 575, '0.18', '0.08'], ['ag', 346, '3.89', '1.75'], ['ag', 588, '0.43', '0.19'], ['ag', 667, '0.46', '0.2'],
     ]);
     const body = startRequest(r, d.endsAtMs, T0 + 60_000)!;
-    assert.deepEqual([body.locationUuid, body.method, body.durationSeconds, body.rows.length], ['cru', 'DIN', 3414, 5]);
+    assert.deepEqual([body.locationUuid, body.durationSeconds, body.rows.length], ['cru', 3414, 5]);
     // An unknown station: nothing to register yet
     assert.equal(startRequest({ ...r, locationUuid: null }, d.endsAtMs, T0), null);
   });

@@ -118,12 +118,11 @@ export class RefineryTracker {
 // --- matching against the catalog (names in every language the game may use) ---------------------
 
 export interface RefineryCatalog {
-  // Normalized name -> UUID / code
+  // Normalized name -> UUID
   ores: Map<string, string>;
   // Every ore name split into stem and qualifier (findOre)
   oreParts: { stem: string; qual: string; uuid: string }[];
   refineries: Map<string, string>;
-  methods: Map<string, string>;
 }
 
 /** A name's stem and qualifier, normalized: "Hephaestanite (Raw)" and "HEPH (RAW)" ->
@@ -150,7 +149,7 @@ export function findOre(cat: RefineryCatalog, name: string): string | null {
 
 /** The lookups from the web app's catalog in each language (the game's language is unknown). */
 export function buildCatalog(responses: CatalogResponse[]): RefineryCatalog {
-  const cat: RefineryCatalog = { ores: new Map(), oreParts: [], refineries: new Map(), methods: new Map() };
+  const cat: RefineryCatalog = { ores: new Map(), oreParts: [], refineries: new Map() };
   for (const r of responses) {
     for (const m of r.materials) {
       if (!m.isOre) continue;
@@ -159,21 +158,18 @@ export function buildCatalog(responses: CatalogResponse[]): RefineryCatalog {
     }
     // The location's own name: the label's first part ("Name · planet · system")
     for (const l of r.locations) if (l.refinery) cat.refineries.set(norm(l.label.split(" · ")[0]!), l.uuid);
-    for (const m of r.methods) cat.methods.set(norm(m.name), m.code);
   }
   return cat;
 }
 
 export interface ResolvedDraft {
   locationUuid: string | null;
-  methodCode: string | null;
   rows: { name: string; oreUuid: string | null; quality: number; amount: string; expectedYield: string }[];
 }
 
 export function resolveDraft(d: Draft, cat: RefineryCatalog): ResolvedDraft {
   return {
     locationUuid: d.station ? cat.refineries.get(norm(d.station)) ?? null : null,
-    methodCode: d.method ? cat.methods.get(norm(d.method)) ?? null : null,
     rows: d.rows.map((r) => ({
       name: r.name, oreUuid: findOre(cat, r.name), quality: r.quality,
       amount: cscuToScu(r.qtyCscu), expectedYield: cscuToScu(r.yieldCscu),
@@ -185,11 +181,9 @@ export function resolveDraft(d: Draft, cat: RefineryCatalog): ResolvedDraft {
  * is what is left of the job now, so its end stays the game's. */
 export function startRequest(r: ResolvedDraft, endsAtMs: number, nowMs: number): RefineryStartRequest | null {
   if (!r.locationUuid || r.rows.some((x) => !x.oreUuid)) return null;
-  const body: RefineryStartRequest = {
+  return {
     locationUuid: r.locationUuid,
     durationSeconds: Math.max(1, Math.round((endsAtMs - nowMs) / 1000)),
     rows: r.rows.map((x) => ({ oreUuid: x.oreUuid!, quality: x.quality, amount: x.amount, expectedYield: x.expectedYield })),
   };
-  if (r.methodCode) body.method = r.methodCode;
-  return body;
 }

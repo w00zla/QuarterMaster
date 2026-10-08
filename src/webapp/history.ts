@@ -7,7 +7,6 @@ import type { Db } from '../db/client.ts';
 import { rows } from '../db/query.ts';
 import { blueprintCatalog } from '../bot/blueprints.ts';
 import type { Lang } from '../bot/i18n.ts';
-import { refiningMethods } from '../ext/refineries.ts';
 import type { HistoryDetails } from '../history/record.ts';
 import { formatAmount } from '../stock/amount.ts';
 import { locationCatalog, materialCatalog, missingNames } from '../stock/lookup.ts';
@@ -65,8 +64,8 @@ export async function listHistory(db: Db, userId: string, lang: Lang, before?: n
     LIMIT ${HISTORY_PAGE + 1}`);
   const page = found.slice(0, HISTORY_PAGE);
 
-  const [materials, locations, blueprints, methods] = [
-    await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang), await refiningMethods(db, lang),
+  const [materials, locations, blueprints] = [
+    await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang),
   ];
   const subjects = new Set<string>();
   const places = new Set<string>();
@@ -78,7 +77,6 @@ export async function listHistory(db: Db, userId: string, lang: Lang, before?: n
   const fallback = await missingNames(db, lang, [...subjects].filter((u) => !materials.has(u)), [...places].filter((u) => !locations.has(u)));
   const material = (uuid: string) => materials.get(uuid)?.name ?? fallback.get(uuid) ?? uuid;
   const place = (uuid: string | undefined) => (uuid ? locations.get(uuid)?.short ?? fallback.get(uuid) ?? uuid : null);
-  const methodName = new Map(methods.map((m) => [m.code, m.name]));
   const amount = (text: string | null | undefined) => (text ? formatAmount(text) : null);
   const person = (id: string, name: string | null): HistoryPerson => ({ userId: id, name: name ?? '?' });
 
@@ -105,7 +103,6 @@ export async function listHistory(db: Db, userId: string, lang: Lang, before?: n
       toDesignation: d.toDesignation && d.toDesignation !== d.designation ? d.toDesignation : null,
       toHolder: org && r.toOwnerUserId ? person(r.toOwnerUserId, r.toOwnerName) : null,
       from: amount(d.from),
-      method: d.method ? methodName.get(d.method) ?? d.method : null,
       durationSeconds: d.durationSeconds ?? null,
       expectedYield: amount(d.expectedYield),
       ore: d.oreUuid ? material(d.oreUuid) : null,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Refinery: your running jobs, one group per work order (station, method, time left, the ores below it),
+// Refinery: your running jobs, one group per work order (station, time left, the ores below it),
 // with the stock table's filters; start one, finish one (always the whole work order). Jobs are always
 // personal, so this works the same without any org.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -14,7 +14,7 @@ import InfoTip from "../components/InfoTip.vue";
 import RangeSlider from "../components/RangeSlider.vue";
 import RefineryDoneDialog from "../components/RefineryDoneDialog.vue";
 import RefineryStartForm from "../components/RefineryStartForm.vue";
-import { methods, signedBonus, yieldValue } from "../catalog";
+import { signedBonus, yieldValue } from "../catalog";
 import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
 import { lang, t } from "../i18n";
 import { coalesced, onServerMessage } from "../realtime";
@@ -74,7 +74,6 @@ interface Job {
   id: string;
   location: string;
   locationUuid: string;
-  method: string;
   endsAt: string | null;
   // Every ore batch of the job (finishing takes them all), and those the filters let through
   all: StockBatch[];
@@ -90,7 +89,7 @@ const jobs = computed(() => {
     const b = all[0]!;
     const sum = (values: (string | null)[]) => formatMicros(values.reduce((s, v) => s + toMicros(v ?? "0"), 0n));
     return {
-      id, location: b.location, locationUuid: b.locationUuid, method: methodName(b), endsAt: b.refine!.endsAt, all, rows: all,
+      id, location: b.location, locationUuid: b.locationUuid, endsAt: b.refine!.endsAt, all, rows: all,
       total: sum(all.map((x) => x.quantity)),
       expected: all.some((x) => x.refine!.expectedYield !== null) ? sum(all.map((x) => x.refine!.expectedYield)) : null,
     };
@@ -109,14 +108,13 @@ const filtered = computed(() => {
     .filter((j) => j.rows.length);
 });
 
-// --- the table: one group per job (station, totals, method, time left), its ores below -------------
+// --- the table: one group per job (station, totals, time left), its ores below ---------------------
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: t("refinery.col.job"), width: 240 },
   { key: "quality", label: t("stock.col.quality"), width: 130 },
   { key: "amount", label: t("stock.col.amount"), width: 120 },
   { key: "expected", label: t("refinery.col.expected"), width: 110 },
   { key: "bonus", label: t("refinery.col.bonus"), width: 90 },
-  { key: "method", label: t("refinery.col.method"), width: 170 },
   { key: "ready", label: t("refinery.col.ready"), width: 130 },
   { key: "actions", label: "", width: 56, sortable: false, fixed: true, sep: true },
 ]);
@@ -139,7 +137,6 @@ function jobValue(j: Job, key: string): string | number {
     case "material": return j.location;
     case "amount": return Number(j.total);
     case "expected": return Number(j.expected ?? -1);
-    case "method": return j.method;
     // Jobs without an end sort after every timed one
     default: return j.endsAt ? Date.parse(j.endsAt) : Infinity;
   }
@@ -149,7 +146,7 @@ const groups = computed(() => {
   const { key, dir } = cols.sort.value;
   const sign = dir === "asc" ? 1 : -1;
   // Job columns order the jobs; ore columns order the ores within each job (jobs then by time left)
-  const jobKey = ["material", "amount", "expected", "method", "ready"].includes(key) ? key : "ready";
+  const jobKey = ["material", "amount", "expected", "ready"].includes(key) ? key : "ready";
   const jobSign = jobKey === key ? sign : 1;
   const cmp = (a: string | number, b: string | number) => (typeof a === "string" ? a.localeCompare(String(b), lang.value) : a - Number(b));
   return filtered.value
@@ -165,10 +162,6 @@ const locationOptions = computed(() => {
     ...[...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, lang.value)),
   ];
 });
-
-function methodName(b: StockBatch) {
-  return b.refine?.method ? methods.value.get(b.refine.method)?.name ?? b.refine.method : "";
-}
 
 /** null: no end recorded; "" ready; else the time left */
 function left(j: Job): string | null {
@@ -221,7 +214,7 @@ const bonusText = (b: StockBatch) => {
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
         <template v-for="j in groups" :key="j.id">
-          <!-- The job's row: station, totals, method, time left, finishing it -->
+          <!-- The job's row: station, totals, time left, finishing it -->
           <div class="row data-row group-row">
             <span class="group-name">
               <Icon name="drop" :size="15" class="type-icon" />
@@ -231,7 +224,6 @@ const bonusText = (b: StockBatch) => {
             <span class="num group-total">{{ qty(j.total, "SCU") }}</span>
             <span class="num group-total">{{ j.expected ? qty(j.expected, "SCU") : "" }}</span>
             <span />
-            <span class="cell">{{ j.method }}</span>
             <span :title="endsTitle(j)">
               <span v-if="left(j) === ''" class="tag ok">{{ t("refinery.readyNow") }}</span>
               <template v-else>{{ left(j) }}</template>
@@ -249,7 +241,6 @@ const bonusText = (b: StockBatch) => {
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
             <span class="num">{{ b.refine?.expectedYield ? qty(b.refine.expectedYield, "SCU") : "" }}</span>
             <span class="num">{{ bonusText(b) }}</span>
-            <span />
             <span />
             <span class="sep" />
           </div>

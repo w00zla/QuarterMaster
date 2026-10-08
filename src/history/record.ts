@@ -20,7 +20,6 @@ export interface HistoryDetails {
   // Adjust: the quantity before
   from?: string;
   // Refinery start
-  method?: string | null;
   durationSeconds?: number | null;
   expectedYield?: string | null;
   // Refinery start and done: the work order

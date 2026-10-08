@@ -46,7 +46,6 @@ export function detailsText(e: HistoryEntry): string {
     const to = ownerText(e.toDesignation ?? e.designation, e.org, e.toHolder ?? e.holder);
     parts.push(changed ? `${from} → ${to}` : from);
   }
-  if (e.method) parts.push(e.method);
   if (e.expectedYield) parts.push(`≈ ${qty(e.expectedYield, "SCU")}`);
   if (e.durationSeconds) parts.push(hm(e.durationSeconds));
   if (e.ore && e.oreAmount) parts.push(`← ${e.ore} ${qty(e.oreAmount, "SCU")}${e.oreQuality !== null ? ` ${qText(e.oreQuality)}` : ""}`);

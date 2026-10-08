@@ -88,11 +88,10 @@ export function searchWords<T>(entries: Iterable<T>, query: string, text: (e: T)
 /** remove/adjust: any batch the actor may change; move: not refinery jobs; refining: the actor's own refinery jobs. */
 export type BatchPick = 'change' | 'move' | 'refining';
 
-/** A refinery job's work order, method and estimates (NULLs on jobs from before they were recorded). */
+/** A refinery job's work order and estimates (NULLs on jobs from before they were recorded). */
 export interface RefineInfo {
   // The work order: every ore batch of one job shares it
   jobId: string;
-  method: string | null;
   startedAt: string | null;
   endsAt: string | null;
   // NUMERIC text
@@ -156,7 +155,7 @@ async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBa
     SELECT b.id::int AS id, b.guild_id AS "guildId", b.owner_user_id AS "ownerUserId", b.designation, b.kind,
       b.resource_uuid AS "resourceUuid", b.item_uuid AS "itemUuid", b.location_uuid AS "locationUuid", b.state, b.quality,
       b.quantity::text AS quantity, m.display_name AS "holderName",
-      json_build_object('jobId', b.refine_job, 'method', b.refine_method, 'startedAt', b.refine_started_at, 'endsAt', b.refine_ends_at,
+      json_build_object('jobId', b.refine_job, 'startedAt', b.refine_started_at, 'endsAt', b.refine_ends_at,
         'expected', b.refine_expected::text) AS refine
     FROM app.stock_batch b
     LEFT JOIN app.member m ON b.guild_id IS NOT NULL AND m.guild_id = b.guild_id AND m.user_id = b.owner_user_id

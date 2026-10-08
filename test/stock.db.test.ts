@@ -168,15 +168,14 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await refused(refineDone(db, mia, finish('1')), 'batchNotFound');
   });
 
-  it('refinery: a job is a work order of several ores with method, end and expected yields', async () => {
+  it('refinery: a job is a work order of several ores with end and expected yields', async () => {
     const at = { locationUuid: U.station };
     const row = { oreUuid: U.ore, quality: 610, amount: '4' };
-    await refused(refineStart(db, mia, { ...at, method: 'ABC', rows: [row] }), 'unknownMethod');
     await refused(refineStart(db, mia, { ...at, durationSeconds: 0, rows: [row] }), 'invalidDuration');
     await refused(refineStart(db, mia, { ...at, durationSeconds: 1.5, rows: [row] }), 'invalidDuration');
     await refused(refineStart(db, mia, { ...at, rows: [{ ...row, expectedYield: 'x' }] }), 'invalidAmount');
     // Two qualities of the ore, the first one twice (adds up within the job), one row yields nothing
-    const a = await refineStart(db, mia, { ...at, method: 'DIN', durationSeconds: 3600, rows: [
+    const a = await refineStart(db, mia, { ...at, durationSeconds: 3600, rows: [
       { ...row, expectedYield: '1,7' }, { ...row, amount: '1', expectedYield: '0,3' }, { ...row, quality: 500, amount: '0.02', expectedYield: '0' },
     ] });
     assert.equal(a.batches.length, 2);
@@ -190,11 +189,10 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
       [500, '0.020000', '0.000000'], [610, '5.000000', '2.000000'],
     ]);
     const first = ofA[0]!.refine!;
-    assert.equal(first.method, 'DIN');
     assert.equal(new Date(first.endsAt!).getTime() - new Date(first.startedAt!).getTime(), 3600_000);
     assert.ok(ofA.every((p) => p.refine!.startedAt === first.startedAt && p.refine!.endsAt === first.endsAt));
     const second = listed.find((p) => p.refine!.jobId === b.jobId)!.refine!;
-    assert.deepEqual([second.method, second.endsAt, second.expected], [null, null, null]);
+    assert.deepEqual([second.endsAt, second.expected], [null, null]);
     assert.ok(second.startedAt);
 
     // Finishing takes exactly the job's batches

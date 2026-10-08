@@ -65,7 +65,7 @@ export interface StockResult {
 }
 
 export type StockErrorCode =
-  | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'oreViaRefinery' | 'notOre' | 'unknownLocation' | 'notRefinery' | 'unknownMethod' | 'invalidDuration' | 'retired'
+  | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'oreViaRefinery' | 'notOre' | 'unknownLocation' | 'notRefinery' | 'invalidDuration' | 'retired'
   | 'invalidAmount' | 'invalidQuality' | 'batchNotFound' | 'batchChanged' | 'insufficient' | 'holderNotMember'
   | 'notRefining' | 'refiningFixed' | 'nothingToMove' | 'noChange';
 
@@ -281,8 +281,6 @@ export interface RefineStartRow {
 
 export interface RefineStartInput {
   locationUuid: string;
-  // ext.refining_method code
-  method?: string;
   // Estimate for the whole work order: processing time
   durationSeconds?: number;
   rows: RefineStartRow[];
@@ -297,7 +295,7 @@ export interface RefineJobResult {
 /**
  * A work order at a refinery: one personal batch in state `refining` per ore row, all sharing a new job
  * ID (part of the merge key: rows of the same ore and quality within the job add up, other jobs stay
- * apart), the method, the start and the end. Expected yields are per row.
+ * apart), the start and the end. Expected yields are per row.
  */
 export async function refineStart(db: Db, actor: Actor, input: RefineStartInput): Promise<RefineJobResult> {
   if (!input.rows.length || input.rows.length > MAX_REFINE_ROWS) throw new StockError('invalidAmount');
@@ -313,8 +311,6 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
     // Refineries per UEX; without UEX data yet every selectable location
     const refineries = await refineryLocations(db);
     if (refineries && !refineries.has(input.locationUuid)) throw new StockError('notRefinery');
-    const method = input.method ?? null;
-    if (method !== null && !(await one(tx, sql`SELECT 1 FROM ext.refining_method WHERE code = ${method}`))) throw new StockError('unknownMethod');
     const jobId = randomUUID();
     const started = (await one<{ now: string }>(tx, sql`SELECT now()::text AS now`))!.now;
     const result: RefineJobResult = { jobId, journal: [], batches: [] };
@@ -327,8 +323,8 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
       };
       const batch = (await one<Batch>(tx, sql`
         INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity,
-          refine_job, refine_method, refine_started_at, refine_ends_at, refine_expected)
-        VALUES (${keyValues(key)}, ${row.amount}::numeric, ${jobId}, ${method}, ${started}::timestamptz,
+          refine_job, refine_started_at, refine_ends_at, refine_expected)
+        VALUES (${keyValues(key)}, ${row.amount}::numeric, ${jobId}, ${started}::timestamptz,
           ${started}::timestamptz + ${seconds}::int * interval '1 second', ${row.expected}::numeric)
         ON CONFLICT ON CONSTRAINT stock_batch_merge_key
         DO UPDATE SET quantity = app.stock_batch.quantity + excluded.quantity,
@@ -336,7 +332,7 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
             ELSE coalesce(app.stock_batch.refine_expected, 0) + coalesce(excluded.refine_expected, 0) END
         RETURNING ${BATCH_COLUMNS}`))!;
       await history(tx, actor, 'refinery', 'start', key,
-        { amount: row.amount, method, durationSeconds: seconds, expectedYield: row.expected, jobId });
+        { amount: row.amount, durationSeconds: seconds, expectedYield: row.expected, jobId });
       result.journal.push(await journal(tx, actor, 'add', key, row.amount));
       result.batches = [...result.batches.filter((b) => b.id !== batch.id), batch];
     }

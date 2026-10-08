@@ -55,7 +55,7 @@ const schemas = {
     toLocationUuid: uuid.optional(), toOrg: z.boolean().optional(), toHolderUserId: snowflake.optional(),
   }).strict(),
   refineStart: z.object({
-    locationUuid: uuid, method: z.string().regex(/^[A-Z]{3}$/).optional(), durationSeconds: z.number().int().optional(),
+    locationUuid: uuid, durationSeconds: z.number().int().optional(),
     rows: z.array(z.object({ oreUuid: uuid, quality, amount, expectedYield: amount.optional() }).strict()).min(1).max(MAX_REFINE_ROWS),
   }).strict(),
   refineDone: z.object({
@@ -166,7 +166,6 @@ function toBatch(p: PickableBatch, viewer: string, officerIn: Set<string>): Stoc
     canChange: b.designation === 'personal' ? b.ownerUserId === viewer : officerIn.has(b.guildId!),
     refine: p.refine && {
       jobId: p.refine.jobId,
-      method: p.refine.method,
       startedAt: p.refine.startedAt && new Date(p.refine.startedAt).toISOString(),
       endsAt: p.refine.endsAt && new Date(p.refine.endsAt).toISOString(),
       expectedYield: p.refine.expected && formatAmount(p.refine.expected),

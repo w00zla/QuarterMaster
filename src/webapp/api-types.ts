@@ -138,10 +138,8 @@ export interface StockBatch {
 }
 
 export interface StockRefine {
-  // The work order: the ore batches of one job share it (method, start and end are the job's)
+  // The work order: the ore batches of one job share it (start and end are the job's)
   jobId: string;
-  // CatalogRefiningMethod.code
-  method: string | null;
   // ISO timestamps
   startedAt: string | null;
   endsAt: string | null;
@@ -198,13 +196,11 @@ export interface StockMoveRequest {
   toHolderUserId?: string;
 }
 
-// Refinery jobs are always personal and always work orders: one station, method and time, several ores
+// Refinery jobs are always personal and always work orders: one station and time, several ores
 // (POST /api/refinery/start, /api/refinery/done)
 export interface RefineryStartRequest {
   locationUuid: string;
-  // CatalogRefiningMethod.code
-  method?: string;
-  // Estimate for the whole job, prefilled from the method and editable: processing time
+  // Estimate for the whole job (the SPA prefills it from a refining method the user may pick): processing time
   durationSeconds?: number;
   // 1 to 30 ores
   rows: RefineryStartRow[];
@@ -437,7 +433,6 @@ export interface HistoryEntry {
   // Adjust: the quantity before
   from: string | null;
   // Refinery start (estimates as entered)
-  method: string | null;
   durationSeconds: number | null;
   expectedYield: string | null;
   // Refinery done: the ore that went in

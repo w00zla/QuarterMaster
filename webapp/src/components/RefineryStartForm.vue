@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// Starts a refinery job (POST /api/refinery/start): a work order at one refinery with one method and
-// time, and one row per ore (and quality) as the terminal lists them. Duration and expected yields are
-// prefilled from the method's community values (and the station's UEX bonus per ore) until the user
-// types into them, e.g. the terminal's numbers. Books right away; the toast says what was started.
+// Starts a refinery job (POST /api/refinery/start): a work order at one refinery with one time, and one
+// row per ore (and quality) as the terminal lists them. A refining method may be picked: it only prefills
+// duration and expected yields from its community values (and the station's UEX bonus per ore) until the
+// user types into them, e.g. the terminal's numbers; it is not sent. Books right away; the toast says
+// what was started.
 import { computed, reactive, ref, watch } from "vue";
 import { estimateJob } from "../../../src/ext/refining-estimate";
 import type { OkResponse, RefineryStartRequest } from "../../../src/webapp/api-types";
@@ -33,14 +34,16 @@ const location = ref<string | null>(null);
 const method = ref("");
 const hours = ref("");
 const minutes = ref("");
+const seconds = ref("");
 const durationEdited = ref(false);
 const rows = reactive<OreRow[]>([newRow()]);
 const busy = ref(false);
 
-const methodOptions = computed(() => [...methods.value.values()].map((m) => ({ value: m.code, label: `${m.name} · ${m.yieldPct} %` })));
-watch(methodOptions, (o) => {
-  if (!method.value && o.length) method.value = o[0]!.value;
-}, { immediate: true });
+// Optional, "" = none
+const methodOptions = computed(() => [
+  { value: "", label: "—" },
+  ...[...methods.value.values()].map((m) => ({ value: m.code, label: `${m.name} · ${m.yieldPct} %` })),
+]);
 
 // The refinery picker carries the UEX bonus of the first ore picked
 const refineryOptions = computed(() => refineryLocationOptions.value.map((o) => {
@@ -69,9 +72,10 @@ const totalScu = computed(() => rows.reduce((sum, r) => sum + Number(amt(r) ?? 0
 watch([totalScu, method], () => {
   const m = methods.value.get(method.value);
   if (durationEdited.value || !m || !totalScu.value) return;
-  const total = Math.ceil(estimateJob(totalScu.value, m).seconds / 60);
-  hours.value = String(Math.floor(total / 60));
-  minutes.value = String(total % 60);
+  const total = estimateJob(totalScu.value, m).seconds;
+  hours.value = String(Math.floor(total / 3600));
+  minutes.value = String(Math.floor(total / 60) % 60);
+  seconds.value = String(total % 60);
 });
 watch(() => rows.map((r) => [r.ore, r.amount, method.value, location.value]), () => {
   for (const r of rows) {
@@ -81,11 +85,14 @@ watch(() => rows.map((r) => [r.ore, r.amount, method.value, location.value]), ()
 }, { deep: true });
 
 const wholeOf = (text: string) => (/^\s*\d{0,6}\s*$/.test(text) ? Number(text.trim() || "0") : null);
-// null: invalid (not whole numbers, minutes over 59, or no time at all)
+// h, m and s as the terminal shows the processing time ("4h 17m", "14m 5s"); null: invalid (not whole
+// numbers, minutes or seconds over 59, or no time at all)
 const durationSeconds = computed(() => {
   const h = wholeOf(hours.value);
   const m = wholeOf(minutes.value);
-  return h === null || m === null || m > 59 || h * 60 + m === 0 ? null : (h * 60 + m) * 60;
+  const s = wholeOf(seconds.value);
+  if (h === null || m === null || s === null || m > 59 || s > 59) return null;
+  return h * 3600 + m * 60 + s || null;
 });
 
 const rowValid = (r: OreRow) => !!r.ore && q(r) !== null && !!amt(r) && expectedAmt(r) !== null;
@@ -101,12 +108,13 @@ function removeRow(id: number) {
   if (!rows.length) rows.push(newRow());
 }
 
-// Back to an empty form (the method's estimates again)
+// Back to an empty form
 function clear() {
   location.value = null;
-  method.value = methodOptions.value[0]?.value ?? "";
+  method.value = "";
   hours.value = "";
   minutes.value = "";
+  seconds.value = "";
   durationEdited.value = false;
   rows.splice(0, rows.length, newRow());
 }
@@ -114,7 +122,7 @@ function clear() {
 async function submit() {
   if (!valid.value || busy.value) return;
   const ores = rows.map((r) => `${qty(amt(r)!, "SCU")} ${materials.value.get(r.ore!)?.name ?? ""}`).join(", ");
-  const what = `${ores} · ${locations.value.get(location.value!)?.short ?? ""} · ${methods.value.get(method.value)?.name ?? ""} · ${hm(durationSeconds.value!)}`;
+  const what = `${ores} · ${locations.value.get(location.value!)?.short ?? ""} · ${hm(durationSeconds.value!)}`;
   busy.value = true;
   try {
     const body: RefineryStartRequest = {
@@ -125,7 +133,6 @@ async function submit() {
         return { oreUuid: r.ore!, quality: q(r)!, amount: r.amount.trim(), ...(expected ? { expectedYield: expected } : {}) };
       }),
     };
-    if (method.value) body.method = method.value;
     await api<OkResponse>("/refinery/start", { method: "POST", body });
     toast(t("refinery.started", { what }));
     clear();
@@ -152,9 +159,11 @@ async function submit() {
       {{ t("field.duration") }}
       <span class="with-unit">
         <input v-model="hours" class="input short" :class="{ invalid: durationSeconds === null }" type="text" inputmode="numeric" @input="durationEdited = true" />
-        <span class="unit">{{ t("unit.h") }}</span>
+        <span class="unit">{{ t("time.h") }}</span>
         <input v-model="minutes" class="input short" :class="{ invalid: durationSeconds === null }" type="text" inputmode="numeric" @input="durationEdited = true" />
-        <span class="unit">{{ t("unit.min") }}</span>
+        <span class="unit">{{ t("time.m") }}</span>
+        <input v-model="seconds" class="input short" :class="{ invalid: durationSeconds === null }" type="text" inputmode="numeric" @input="durationEdited = true" />
+        <span class="unit">{{ t("time.s") }}</span>
       </span>
     </div>
 
