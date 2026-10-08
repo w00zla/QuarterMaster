@@ -106,11 +106,11 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
     assert.deepEqual(uex.refineries.map((r) => [r.place, r.location, r.yields]), [
       ['Alpha', null, { 'Gold (Ore)': 8, 'Iron (Ore)': 2 }], ['Zeta', null, { 'Iron (Ore)': -5 }],
     ]);
-    // The seeded community values, with UEX's ratings joined by code
+    // The method values (measured, migration 0015), with UEX's ratings joined by code
     assert.equal(uex.methods.length, 9);
     assert.deepEqual(uex.methods[0]!.code, 'DIN');
     assert.deepEqual(uex.methods.find((m) => m.code === 'COR'), {
-      name: 'COR', code: 'COR', ratingYield: 1, ratingCost: 2, ratingSpeed: 3, yieldPct: 75, secondsPerScu: 9600, source: 'scminer.rocks · 4.10.1',
+      name: 'COR', code: 'COR', ratingYield: 1, ratingCost: 2, ratingSpeed: 3, yieldPct: 31.5, secondsPerScu: 16, source: 'in-game quotes CRU-L1 · 4.10.1',
     });
   });
 });
