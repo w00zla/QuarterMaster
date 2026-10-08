@@ -47,6 +47,7 @@ export const downloadUpdate = (url: string, dest: string) => call<void>("downloa
 export const openWebapp = () => call<void>("open_webapp");
 export const getDetect = () => call<boolean>("get_detect");
 export const setDetect = (on: boolean) => call<void>("set_detect", { on });
+export const getGameSeen = () => call<boolean>("get_game_seen");
 
 // Set when the server refused this version (426): the app does no work until updated
 export const outdated = ref<CompanionOutdated | null>(null);

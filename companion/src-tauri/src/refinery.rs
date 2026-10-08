@@ -8,8 +8,11 @@
 //! pass missed (single digits are small) is read again on its own. Names stay as the game shows them
 //! (its language); matching them to the catalog happens in the frontend (`refinery.ts`).
 //!
-//! Layout as of SC 4.x (screenshots 2026-10-07); anything unexpected yields `None` or empty fields,
-//! never a panic.
+//! The overview shows the work orders side by side (each a panel with its own table, the newest not
+//! necessarily first): every running one is read, finished ones are left out.
+//!
+//! Layout as of SC 4.x (screenshots 2026-10-07/08); anything unexpected yields no panel or empty
+//! fields, never a panic.
 
 use image::RgbImage;
 use serde::Serialize;
@@ -136,26 +139,37 @@ struct Layout {
     columns: Vec<Column>,
 }
 
-fn layout(boxes: &[TextBox]) -> Option<Layout> {
+/// The panels in a frame: the quote (it fills the panel alone), or every running work order. The
+/// overview shows the work orders side by side, each with its own table; finished ones (header
+/// "COMPLETED") are left out.
+fn layouts(boxes: &[TextBox]) -> Vec<Layout> {
+    let find = |prefix: &str| boxes.iter().filter(|b| norm(&b.text).starts_with(prefix)).collect::<Vec<_>>();
+    if let Some(head) = find("MATERIALSSELECTED").first() {
+        return layout_at(boxes, ScreenKind::Quote, head, f32::MAX).into_iter().collect();
+    }
+    let mut heads = find("MATERIALSYIELDED");
+    heads.sort_by(|a, b| a.rect.x0.total_cmp(&b.rect.x0));
+    // Each table ends where the next one to its right starts
+    (0..heads.len())
+        .filter_map(|i| layout_at(boxes, ScreenKind::Processing, heads[i], heads.get(i + 1).map_or(f32::MAX, |n| n.rect.x0)))
+        .collect()
+}
+
+/// The panel whose table head is `head`, left of `right_limit`.
+fn layout_at(boxes: &[TextBox], kind: ScreenKind, head: &TextBox, right_limit: f32) -> Option<Layout> {
     let find = |pred: &dyn Fn(&str) -> bool| boxes.iter().filter(|b| pred(&norm(&b.text))).collect::<Vec<_>>();
-    // The table head decides what the panel shows
-    let (kind, head) = if let Some(h) = find(&|t| t.starts_with("MATERIALSSELECTED")).first().copied() {
-        (ScreenKind::Quote, h)
-    } else {
-        (ScreenKind::Processing, find(&|t| t.starts_with("MATERIALSYIELDED")).first().copied()?)
-    };
     let unit = head.rect.h();
-    // The panel header above the table (the biggest "SETUP"/"PROCESSING" there)
+    // The panel header above the table (the biggest "SETUP"/"PROCESSING" there, within this panel)
     let title = if kind == ScreenKind::Quote { "SETUP" } else { "PROCESSING" };
     let header = find(&|t| t == title)
         .into_iter()
-        .filter(|b| b.rect.cy() < head.rect.y0)
+        .filter(|b| b.rect.cy() < head.rect.y0 && b.rect.x0 > head.rect.x0 - unit * 2.0 && b.rect.x1 < right_limit)
         .max_by(|a, b| a.rect.h().total_cmp(&b.rect.h()))?;
-    let time_label = if kind == ScreenKind::Quote { "PROCESSINGTIME" } else { "TIMEREMAINING" };
-    let time = find(&|t| t == time_label).into_iter().find(|b| b.rect.cy() > head.rect.cy());
     let panel_left = head.rect.x0 - unit;
-    let panel_right = header.rect.x1 + unit;
+    let panel_right = (header.rect.x1 + unit).min(right_limit);
     let in_panel = |b: &TextBox| b.rect.cx() > panel_left && b.rect.cx() < panel_right;
+    let time_label = if kind == ScreenKind::Quote { "PROCESSINGTIME" } else { "TIMEREMAINING" };
+    let time = find(&|t| t == time_label).into_iter().find(|b| b.rect.cy() > head.rect.cy() && in_panel(b));
 
     // Columns: the head's words right of "MATERIALS …"
     let line: Vec<&TextBox> = boxes
@@ -188,7 +202,8 @@ fn layout(boxes: &[TextBox]) -> Option<Layout> {
         .filter(|b| b.rect.cy() > head.rect.y1 && in_panel(b))
         .filter(|b| {
             let t = norm(&b.text);
-            t == "TOTALCOST" || t == time_label || (t == "YIELD" && b.rect.x0 < columns[0].cx - unit)
+            // A section label ("// PROCESSING") too: a message over the panel may hide the summary lines
+            t == "TOTALCOST" || t == time_label || (t == "YIELD" && b.rect.x0 < columns[0].cx - unit) || b.text.trim_start().starts_with("//")
         })
         .map(|b| b.rect.y0)
         .fold(time.map_or(f32::MAX, |t| t.rect.y0), f32::min);
@@ -223,10 +238,10 @@ fn layout(boxes: &[TextBox]) -> Option<Layout> {
         })
         .flatten();
 
-    // The station: the biggest text above the panel header, left of it
+    // The station: the biggest text above the panel header (wholly: not another panel's header), left of it
     let station = boxes
         .iter()
-        .filter(|b| b.rect.cy() < header.rect.cy() && b.rect.x1 < header.rect.x0 && norm(&b.text).len() >= 3)
+        .filter(|b| b.rect.y1 < header.rect.y0 && b.rect.x1 < header.rect.x0 && norm(&b.text).len() >= 3)
         .max_by(|a, b| a.rect.h().total_cmp(&b.rect.h()))
         .map(|b| b.text.trim().to_string());
 
@@ -250,10 +265,14 @@ fn cell(row: Rect, columns: &[Column], i: usize) -> Rect {
     Rect { x0: left, y0: row.y0 - pad, x1: right, y1: row.y1 + pad }
 }
 
-/// Reads the refinery panel in a frame; `None` when there is none (or it cannot be made out).
-pub fn read_screen(ocr: &mut Ocr, frame: &RgbImage) -> Result<Option<Screen>, String> {
+/// Reads the refinery panels in a frame: the quote, or every running work order; empty when there is
+/// none (or it cannot be made out).
+pub fn read_screens(ocr: &mut Ocr, frame: &RgbImage) -> Result<Vec<Screen>, String> {
     let boxes = ocr.read(frame, READ_SIDE)?;
-    let Some(l) = layout(&boxes) else { return Ok(None) };
+    layouts(&boxes).into_iter().map(|l| read_panel(ocr, frame, &boxes, l)).collect()
+}
+
+fn read_panel(ocr: &mut Ocr, frame: &RgbImage, boxes: &[TextBox], l: Layout) -> Result<Screen, String> {
     let mut rows = Vec::new();
     for (rect, name) in l.rows.iter().zip(&l.names) {
         let mut values = Vec::new();
@@ -268,12 +287,17 @@ pub fn read_screen(ocr: &mut Ocr, frame: &RgbImage) -> Result<Option<Screen>, St
             values.push(parse_number(&text));
         }
         let inert = norm(name).ends_with("MATERIALS");
+        // A running job's row always shows its quality: without one it is a stray text (a message over
+        // the panel, "YIELD" half hidden)
+        if l.kind == ScreenKind::Processing && values[0].is_none() {
+            continue;
+        }
         rows.push(match l.kind {
             ScreenKind::Quote => Row { name: name.clone(), inert, quality: values[0], qty: values[1], yield_cscu: values[2], todo: None, done: None },
             ScreenKind::Processing => Row { name: name.clone(), inert, quality: values[0], qty: None, yield_cscu: values[1], todo: values[2], done: values[3] },
         });
     }
-    Ok(Some(Screen { kind: l.kind, station: l.station, method: l.method, seconds: l.seconds, rows }))
+    Ok(Screen { kind: l.kind, station: l.station, method: l.method, seconds: l.seconds, rows })
 }
 
 #[cfg(test)]
@@ -311,8 +335,8 @@ mod tests {
         use super::super::*;
         use std::path::Path;
 
-        fn setup() -> Option<(Ocr, std::path::PathBuf)> {
-            let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/screenshots/refinery flow");
+        fn setup(folder: &str) -> Option<(Ocr, std::path::PathBuf)> {
+            let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/screenshots").join(folder);
             if !shots.is_dir() {
                 eprintln!("screenshots missing, skipped");
                 return None;
@@ -320,14 +344,21 @@ mod tests {
             Some((Ocr::new(4).unwrap(), shots))
         }
 
-        fn read(ocr: &mut Ocr, dir: &Path, suffix: &str) -> Option<Screen> {
+        fn read_all(ocr: &mut Ocr, dir: &Path, suffix: &str) -> Vec<Screen> {
             let file = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).find(|p| p.to_string_lossy().ends_with(&format!("{suffix}.jpg"))).unwrap();
-            read_screen(ocr, &image::open(file).unwrap().to_rgb8()).unwrap()
+            read_screens(ocr, &image::open(file).unwrap().to_rgb8()).unwrap()
+        }
+
+        /// The one panel in the frame, if any.
+        fn read(ocr: &mut Ocr, dir: &Path, suffix: &str) -> Option<Screen> {
+            let mut screens = read_all(ocr, dir, suffix);
+            assert!(screens.len() <= 1, "{suffix}: {} panels", screens.len());
+            screens.pop()
         }
 
         #[test]
         fn quotes_and_the_running_job() {
-            let Some((mut ocr, dir)) = setup() else { return };
+            let Some((mut ocr, dir)) = setup("refinery flow") else { return };
             let quotes = [
                 ("05E", "Cormack Method", [6, 5, 122, 13, 14], 72),
                 ("0F4", "Dinyx Solventation", [9, 8, 175, 19, 20], 3474),
@@ -367,10 +398,69 @@ mod tests {
 
         #[test]
         fn no_panel_on_other_screens() {
-            let Some((mut ocr, dir)) = setup() else { return };
+            let Some((mut ocr, dir)) = setup("refinery flow") else { return };
             // The welcome screen, and the terminal from the side
             for suffix in ["20D", "130"] {
                 assert_eq!(read(&mut ocr, &dir, suffix), None, "{suffix}");
+            }
+        }
+
+        // 2026-10-08: work order 2 started next to the finished work order 1 (right of it)
+        #[test]
+        fn running_work_order_next_to_a_finished_one() {
+            let Some((mut ocr, dir)) = setup("refinery flow 2") else { return };
+            let q = read(&mut ocr, &dir, "775").expect("quote");
+            assert_eq!(q.kind, ScreenKind::Quote);
+            assert_eq!(q.method.as_deref(), Some("Dinyx Solventation"));
+            assert_eq!(q.seconds, Some(4 * 3600 + 17 * 60));
+            let got: Vec<_> = q.rows.iter().filter(|r| !r.inert).map(|r| (r.name.as_str(), r.quality, r.qty, r.yield_cscu)).collect();
+            assert_eq!(got, vec![
+                ("HEPH (RAW)", Some(572), Some(207), Some(91)),
+                ("SILICON (RAW)", Some(310), Some(1201), Some(540)),
+                ("SILICON (RAW)", Some(510), Some(234), Some(105)),
+            ]);
+
+            // Just accepted (a message over the panel), then the overview
+            for suffix in ["2E4", "7A5", "578"] {
+                let p = read(&mut ocr, &dir, suffix).unwrap_or_else(|| panic!("{suffix}: no running work order"));
+                assert_eq!(p.kind, ScreenKind::Processing, "{suffix}");
+                assert_eq!(p.station.as_deref(), Some("CRU-L1 AMBITIOUS DREAM STATION"), "{suffix}");
+                assert_eq!(p.seconds, Some(4 * 3600 + 17 * 60), "{suffix}");
+                let got: Vec<_> = p.rows.iter().map(|r| (r.name.as_str(), r.quality, r.yield_cscu, r.todo, r.done)).collect();
+                assert_eq!(got, vec![
+                    ("HEPHAESTANITE", Some(572), Some(91), Some(92), Some(0)),
+                    ("SILICON", Some(310), Some(540), Some(541), Some(0)),
+                    ("SILICON", Some(510), Some(105), Some(106), Some(0)),
+                ], "{suffix}");
+            }
+
+            // Only the finished work order
+            for suffix in ["DC5", "DF8"] {
+                assert_eq!(read(&mut ocr, &dir, suffix), None, "{suffix}");
+            }
+        }
+
+        // 2026-10-08, later: work order 3 started next to the still running work order 2
+        #[test]
+        fn two_running_work_orders() {
+            let Some((mut ocr, dir)) = setup("refinery flow 3") else { return };
+            let q = read(&mut ocr, &dir, "BB4").expect("quote");
+            assert_eq!(q.seconds, Some(14 * 60 + 5));
+            let got: Vec<_> = q.rows.iter().filter(|r| !r.inert).map(|r| (r.quality, r.yield_cscu)).collect();
+            assert_eq!(got, vec![(Some(516), Some(3)), (Some(575), Some(3)), (Some(346), Some(28)), (Some(588), Some(16))]);
+
+            // Just accepted (a message over the panel), then the overview
+            for suffix in ["84C", "F76", "575"] {
+                let screens = read_all(&mut ocr, &dir, suffix);
+                let got: Vec<Vec<_>> = screens
+                    .iter()
+                    .map(|s| s.rows.iter().map(|r| (r.name.as_str(), r.quality, r.yield_cscu)).collect())
+                    .collect();
+                assert_eq!(got, vec![
+                    vec![("HEPHAESTANITE", Some(572), Some(91)), ("SILICON", Some(310), Some(540)), ("SILICON", Some(510), Some(105))],
+                    vec![("TITANIUM", Some(516), Some(3)), ("ASLARITE", Some(575), Some(3)), ("AGRICIUM", Some(346), Some(28)), ("AGRICIUM", Some(588), Some(16))],
+                ], "{suffix}");
+                assert!(screens.iter().all(|s| s.kind == ScreenKind::Processing && s.seconds.is_some()), "{suffix}");
             }
         }
     }

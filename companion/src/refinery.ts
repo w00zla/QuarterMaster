@@ -120,15 +120,43 @@ export class RefineryTracker {
 export interface RefineryCatalog {
   // Normalized name -> UUID / code
   ores: Map<string, string>;
+  // Every ore name split into stem and qualifier (findOre)
+  oreParts: { stem: string; qual: string; uuid: string }[];
   refineries: Map<string, string>;
   methods: Map<string, string>;
 }
 
+/** A name's stem and qualifier, normalized: "Hephaestanite (Raw)" and "HEPH (RAW)" ->
+ * HEPHAESTANITE/HEPH + RAW, "Raw Silicon" -> SILICON + RAW, "Hephaestanite (R)" -> … + R. */
+export function oreParts(name: string): { stem: string; qual: string } {
+  const paren = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(name);
+  if (paren) return { stem: norm(paren[1]!), qual: norm(paren[2]!) };
+  const raw = /^raw\s+(.+)$/i.exec(name.trim());
+  if (raw) return { stem: norm(raw[1]!), qual: "RAW" };
+  return { stem: norm(name), qual: "" };
+}
+
+/** The ore a terminal name means: the exact name, else the one ore whose stem starts with the
+ * terminal's (it abbreviates: "HEPH (RAW)") and whose qualifier fits ("Raw" / "R"). */
+export function findOre(cat: RefineryCatalog, name: string): string | null {
+  const exact = cat.ores.get(norm(name));
+  if (exact) return exact;
+  const { stem, qual } = oreParts(name);
+  if (!stem) return null;
+  const fits = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+  const uuids = new Set(cat.oreParts.filter((o) => o.stem.startsWith(stem) && fits(o.qual, qual)).map((o) => o.uuid));
+  return uuids.size === 1 ? [...uuids][0]! : null;
+}
+
 /** The lookups from the web app's catalog in each language (the game's language is unknown). */
 export function buildCatalog(responses: CatalogResponse[]): RefineryCatalog {
-  const cat: RefineryCatalog = { ores: new Map(), refineries: new Map(), methods: new Map() };
+  const cat: RefineryCatalog = { ores: new Map(), oreParts: [], refineries: new Map(), methods: new Map() };
   for (const r of responses) {
-    for (const m of r.materials) if (m.isOre) cat.ores.set(norm(m.name), m.uuid);
+    for (const m of r.materials) {
+      if (!m.isOre) continue;
+      cat.ores.set(norm(m.name), m.uuid);
+      cat.oreParts.push({ ...oreParts(m.name), uuid: m.uuid });
+    }
     // The location's own name: the label's first part ("Name · planet · system")
     for (const l of r.locations) if (l.refinery) cat.refineries.set(norm(l.label.split(" · ")[0]!), l.uuid);
     for (const m of r.methods) cat.methods.set(norm(m.name), m.code);
@@ -147,7 +175,7 @@ export function resolveDraft(d: Draft, cat: RefineryCatalog): ResolvedDraft {
     locationUuid: d.station ? cat.refineries.get(norm(d.station)) ?? null : null,
     methodCode: d.method ? cat.methods.get(norm(d.method)) ?? null : null,
     rows: d.rows.map((r) => ({
-      name: r.name, oreUuid: cat.ores.get(norm(r.name)) ?? null, quality: r.quality,
+      name: r.name, oreUuid: findOre(cat, r.name), quality: r.quality,
       amount: cscuToScu(r.qtyCscu), expectedYield: cscuToScu(r.yieldCscu),
     })),
   };

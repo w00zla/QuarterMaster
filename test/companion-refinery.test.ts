@@ -89,4 +89,39 @@ describe('companion refinery drafts', () => {
     // An unknown station: nothing to register yet
     assert.equal(startRequest({ ...r, locationUuid: null }, d.endsAtMs, T0), null);
   });
+
+  // 2026-10-08: the overview shows every running work order, one screen each; the quote abbreviates
+  it('the matching one of several running work orders, abbreviated ore names', () => {
+    const t = new RefineryTracker();
+    const q: Screen = {
+      kind: 'quote', station: 'CRU-L1 AMBITIOUS DREAM STATION', method: 'Dinyx Solventation', seconds: 15420,
+      rows: [
+        row('INERT MATERIALS', 0, 258, 0, { inert: true }),
+        row('HEPH (RAW)', 572, 207, 91), row('SILICON (RAW)', 310, 1201, 540), row('SILICON (RAW)', 510, 234, 105),
+      ],
+    };
+    t.feed({ atMs: T0, screen: q });
+    const at = T0 + 3_000;
+    // Another running job read from the same frame first: no draft, the quote stays
+    assert.equal(t.feed({ atMs: at, screen: processing(3000) }), null);
+    const d = t.feed({ atMs: at, screen: {
+      kind: 'processing', station: q.station, method: null, seconds: 15420,
+      rows: [
+        row('HEPHAESTANITE', 572, null, 91, { todo: 92, done: 0 }),
+        row('SILICON', 310, null, 540, { todo: 541, done: 0 }), row('SILICON', 510, null, 105, { todo: 106, done: 0 }),
+      ],
+    } })!;
+    assert.ok(d);
+    // The names as the catalog has them: en (game) and de (community translation)
+    const names = (pairs: [string, string][]) => ({ materials: pairs.map(([uuid, name]) => ({ uuid, name, isOre: true })), locations: [], methods: [] }) as unknown as CatalogResponse;
+    for (const cat of [
+      buildCatalog([names([['heph', 'Hephaestanite (R)'], ['si', 'Raw Silicon'], ['ice', 'Raw Ice']])]),
+      buildCatalog([names([['heph', 'Hephaestanite (Raw)'], ['si', 'Silicon (Raw)'], ['ice', 'Ice (Raw)']])]),
+    ]) {
+      assert.deepEqual(resolveDraft(d, cat).rows.map((x) => x.oreUuid), ['heph', 'si', 'si']);
+    }
+    // Ambiguous or unknown: no guess
+    const two = buildCatalog([names([['a', 'Hephaestanite (Raw)'], ['b', 'Hephalite (Raw)']])]);
+    assert.equal(resolveDraft(d, two).rows[0]!.oreUuid, null);
+  });
 });

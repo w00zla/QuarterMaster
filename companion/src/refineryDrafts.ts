@@ -4,7 +4,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { ref, shallowRef } from "vue";
 import type { CatalogResponse } from "../../src/webapp/api-types";
-import { getDetect, setDetect } from "./backend";
+import { getDetect, getGameSeen, setDetect } from "./backend";
 import { lang } from "./i18n";
 import { buildCatalog, RefineryTracker, type Draft, type RefineryCatalog, type ScreenEvent } from "./refinery";
 import { api, connected } from "./state";
@@ -12,8 +12,10 @@ import { toastError } from "./toasts";
 
 const tracker = new RefineryTracker();
 export const drafts = ref<Draft[]>([]);
-// Detection on (the panel's button; off at every start)
-export const detecting = ref(false);
+// Detection on (on at every start; the state row's toggle switches it)
+export const detecting = ref(true);
+// Star Citizen runs (seen by the screen capture while detection is on)
+export const gameSeen = ref(false);
 
 export async function toggleDetect() {
   try {
@@ -45,6 +47,10 @@ export function dropDraft(id: string) {
 
 export async function watchRefinery() {
   detecting.value = await getDetect();
+  gameSeen.value = await getGameSeen();
+  await listen<boolean>("game-seen", (e) => {
+    gameSeen.value = e.payload;
+  });
   await listen<ScreenEvent>("refinery-screen", (e) => {
     if (tracker.feed(e.payload)) {
       drafts.value = [...tracker.drafts];

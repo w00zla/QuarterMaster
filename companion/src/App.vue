@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The title bar, a row with the game log state (a small tag while found), the user (avatar, name) or
+// The title bar, a row with the game log state (a small tag while found) and the refinery detection's
+// (a tag: off, on without the game, on with the game; an icon toggle behind it), the user (avatar, name) or
 // why the connection is down (chip only then) with a button that opens the web app, and the unlocks panel. The chips open
 // the settings; the settings also open by themselves while the app is not connected (no
 // server or token, or the token is refused). An app the server calls outdated shows only the update
@@ -16,7 +17,7 @@ import WindowEdges from "./components/WindowEdges.vue";
 import { AppError, appInfo, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
 import { config, connectError, connected, connectionText, loadConfig, log, meAvatar, meName, refreshConnection, watchConnection, watchLog } from "./state";
-import { watchRefinery } from "./refineryDrafts";
+import { detecting, gameSeen, toggleDetect, watchRefinery } from "./refineryDrafts";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
 
@@ -32,6 +33,14 @@ const serverLabel = computed(() => {
 });
 const serverTip = computed(() => [connectionText.value, config.value?.server].filter(Boolean).join(" · "));
 // Found: just the path; missing: where it was looked for
+// Refinery detection: off (red), on without the game (yellow), on with the game running (green)
+const detectState = computed(() =>
+  !detecting.value
+    ? ({ cls: "err", icon: "close", label: "refinery.detectOff" } as const)
+    : gameSeen.value
+      ? ({ cls: "ok", icon: "check", label: "refinery.gameSeen" } as const)
+      : ({ cls: "warn", icon: "warning", label: "refinery.noGame" } as const),
+);
 const logTip = computed(() => (!log.value ? null : log.value.found ? log.value.path : t("log.notFound", { path: log.value.path })));
 
 onMounted(async () => {
@@ -60,6 +69,12 @@ onMounted(async () => {
       <Tooltip v-else-if="log" :text="logTip">
         <button type="button" class="tag warn problem" @click="settingsOpen = true">
           <Icon name="warning" :size="12" /> {{ t("log.missing") }}
+        </button>
+      </Tooltip>
+      <span class="tag" :class="detectState.cls"><Icon :name="detectState.icon" :size="12" /> {{ t(detectState.label) }}</span>
+      <Tooltip :text="t(detecting ? 'refinery.detectStop' : 'refinery.detectStart')">
+        <button type="button" class="icon-btn" @click="toggleDetect">
+          <Icon :name="detecting ? 'eye' : 'eye-off'" :size="14" />
         </button>
       </Tooltip>
       <div class="spacer" />

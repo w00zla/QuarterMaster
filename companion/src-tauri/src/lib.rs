@@ -2,8 +2,10 @@
 //! books them, once the user confirms, through the Quartermaster web app's API
 //! with the user's API token. Structure after BindSight (`config.rs`, `logwatch.rs`).
 //! Reads the refinery terminal from frames (`ocr.rs`, `refinery.rs`, `ocrwatch.rs`);
-//! the frames' source (screen capture per platform) is not built yet.
+//! the frames come from the screen capture (`capture.rs`, Windows only so far).
 
+#[cfg(windows)]
+mod capture;
 mod config;
 mod gamelog;
 mod logwatch;
@@ -230,6 +232,12 @@ fn set_detect(detect: tauri::State<ocrwatch::Detect>, on: bool) {
     log::info!("refinery detection {}", if on { "on" } else { "off" });
 }
 
+/// Whether the screen capture sees Star Citizen running (changes come as `game-seen`).
+#[tauri::command]
+fn get_game_seen(seen: tauri::State<ocrwatch::GameSeen>) -> bool {
+    seen.0.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Opens the configured server's web app in the browser.
 #[tauri::command]
 fn open_webapp(app: AppHandle) -> Result<(), String> {
@@ -272,10 +280,16 @@ pub fn run() {
             app.manage(Mutex::new(AppData { config, log_found: false, unlocks: Vec::new() }));
             app.manage(server::client());
             spawn_game_log_watch(app.handle().clone());
-            // The frame channel for the screen capture (to come); QM_OCR_FRAMES feeds test images
-            let detect = ocrwatch::Detect::default();
-            app.manage(Mutex::new(ocrwatch::spawn(app.handle().clone(), detect.clone())));
+            // The frame channel for the screen capture (Windows so far); QM_OCR_FRAMES feeds test images
+            // Detection is on at every start (the capture only runs while the game is in front)
+            let detect = ocrwatch::Detect::new(std::sync::atomic::AtomicBool::new(true));
+            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone());
+            let seen = ocrwatch::GameSeen::default();
+            #[cfg(windows)]
+            capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone());
+            app.manage(Mutex::new(frames));
             app.manage(detect);
+            app.manage(seen);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -289,6 +303,7 @@ pub fn run() {
             open_webapp,
             get_detect,
             set_detect,
+            get_game_seen,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

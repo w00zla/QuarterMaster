@@ -35,6 +35,20 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "
 # Decoding screenshots (tests, test frames); live frames come as raw pixels
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
+# Screen capture for the refinery OCR (DXGI Desktop Duplication); the version Tauri already uses
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [profile.release]
 codegen-units = 1
 lto = true
