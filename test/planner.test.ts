@@ -110,7 +110,7 @@ describe('computePlan', () => {
   it('warns about qualities below a slot minimum', () => {
     const r = computePlan(data(recipe()), [{ blueprintUuid: 'bp-1', count: 1, quality: { 1: 200 } }]);
     assert.equal(r.entries[0]!.slots[1]!.belowMinQuality, true);
-    assert.ok(r.entries[0]!.warnings.some((w) => w.includes('below the minimum')));
+    assert.deepEqual(r.entries[0]!.warnings, [{ code: 'belowMin', quality: 200, slot: 'Aperture' }]);
   });
 
   it('uses only the chosen slots of "N of M" recipes', () => {
@@ -120,7 +120,7 @@ describe('computePlan', () => {
     assert.deepEqual(second.entries[0]!.slots.map((s) => s.selected), [false, true]);
     const invalid = computePlan(data(nOfM), [{ blueprintUuid: 'bp-1', count: 1, slots: [0, 1] }]);
     assert.deepEqual(invalid.materials.map((m) => m.name), ['Metal']);
-    assert.equal(invalid.entries[0]!.warnings.length, 1);
+    assert.deepEqual(invalid.entries[0]!.warnings, [{ code: 'slots', required: 1, total: 2 }]);
   });
 
   it('ignores modifiers without a curve and warns about unknown curve types', () => {
@@ -129,12 +129,12 @@ describe('computePlan', () => {
     r.slots[1]!.modifiers.push({ propertyUuid: 'p-odd', key: 'GPP_Odd', name: 'Odd', unit: null, ranges: [{ type: 'Curve', startQuality: 0, endQuality: 1000, values: {} }] });
     const e = computePlan(data(r), [{ blueprintUuid: 'bp-1', count: 1 }]).entries[0]!;
     assert.deepEqual(e.stats.map((s) => s.key).sort(), ['GPP_Damage', 'GPP_Fuel']);
-    assert.deepEqual(e.warnings, ['Stat Odd: unsupported modifier in slot Aperture']);
+    assert.deepEqual(e.warnings, [{ code: 'unsupported', stat: 'Odd', slot: 'Aperture' }]);
   });
 
   it('reports unknown blueprints and retired ones', () => {
     const r = computePlan(data(recipe({ retired: true })), [{ blueprintUuid: 'nope', count: 1 }, { blueprintUuid: 'bp-1', count: 1 }]);
-    assert.equal(r.warnings.length, 1);
-    assert.ok(r.entries[0]!.warnings.some((w) => w.includes('no longer')));
+    assert.deepEqual(r.warnings, [{ code: 'notInCatalog', blueprintUuid: 'nope' }]);
+    assert.deepEqual(r.entries[0]!.warnings, [{ code: 'retired' }]);
   });
 });

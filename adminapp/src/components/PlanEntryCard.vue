@@ -8,7 +8,7 @@ import TypeLabel from "./TypeLabel.vue";
 import { typeIcon } from "../typeIcons";
 import { duration } from "../format";
 import { HELP } from "../help";
-import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
+import { MAX_QUALITY, MIN_QUALITY, warningText } from "../../../src/planner/plan";
 import type { EntryResult, PlanEntry, PlannerRecipe, StatResult } from "../../../src/planner/types";
 
 const props = defineProps<{ entry: PlanEntry; result: EntryResult | undefined; recipe: PlannerRecipe | undefined }>();
@@ -118,7 +118,7 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
           </div>
         </div>
 
-        <div v-for="(w, i) in result.warnings" :key="i" class="warning"><Icon name="warning" :size="13" /> {{ w }}</div>
+        <div v-for="(w, i) in result.warnings" :key="i" class="warning"><Icon name="warning" :size="13" /> {{ warningText(w) }}</div>
       </div>
 
       <!-- Stats on the right, apart from the slots -->

@@ -102,6 +102,14 @@ export interface StatResult {
   favorable: boolean | null;
 }
 
+// Warnings as codes with their values: each UI words them in its own language
+export type PlanWarning =
+  | { code: 'slots'; required: number; total: number }
+  | { code: 'retired' }
+  | { code: 'alternatives'; slot: string }
+  | { code: 'belowMin'; quality: number; slot: string }
+  | { code: 'unsupported'; stat: string; slot: string };
+
 export interface EntryResult {
   blueprintUuid: string;
   name: string;
@@ -109,7 +117,7 @@ export interface EntryResult {
   craftSeconds: number;
   slots: SlotResult[];
   stats: StatResult[];
-  warnings: string[];
+  warnings: PlanWarning[];
 }
 
 export interface Material {
@@ -127,5 +135,5 @@ export interface PlanResult {
   entries: EntryResult[];
   materials: Material[];
   craftSeconds: number;
-  warnings: string[];
+  warnings: { code: 'notInCatalog'; blueprintUuid: string }[];
 }

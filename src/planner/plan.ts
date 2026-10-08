@@ -1,7 +1,7 @@
 // Crafting planner logic: material totals and quality-dependent stat modifiers.
 // Pure and dependency-free, so the server, the web UI and the bot run the same code.
 import type {
-  Material, ModifierRange, PlanEntry, PlannerData, PlannerModifier, PlannerRecipe, PlanResult, SlotResult, StatResult,
+  Material, ModifierRange, PlanEntry, PlannerData, PlannerModifier, PlannerRecipe, PlanResult, PlanWarning, SlotResult, StatResult,
 } from './types.ts';
 
 export const MIN_QUALITY = 0;
@@ -76,14 +76,25 @@ function qualityDirection(modifier: PlannerModifier): number {
 
 // --- plan ------------------------------------------------------------------------------
 
+/** A warning in English (the admin UI's language). */
+export function warningText(w: PlanWarning): string {
+  switch (w.code) {
+    case 'slots': return `${w.required} of ${w.total} slots must be chosen; using the first ${w.required}`;
+    case 'retired': return 'This blueprint is no longer in the game data';
+    case 'alternatives': return `Slot ${w.slot} offers alternatives; using the first`;
+    case 'belowMin': return `Quality ${w.quality} is below the minimum for slot ${w.slot}`;
+    case 'unsupported': return `Stat ${w.stat}: unsupported modifier in slot ${w.slot}`;
+  }
+}
+
 /** Slot indexes used for a recipe: the chosen ones when valid, otherwise the first N. */
-export function selectedSlots(recipe: PlannerRecipe, chosen: number[] | undefined, warnings: string[]): Set<number> {
+export function selectedSlots(recipe: PlannerRecipe, chosen: number[] | undefined, warnings: PlanWarning[]): Set<number> {
   const all = recipe.slots.map((s) => s.index);
   if (recipe.requiredSlots >= all.length) return new Set(all);
   if (chosen) {
     const valid = [...new Set(chosen)].filter((i) => all.includes(i));
     if (valid.length === recipe.requiredSlots) return new Set(valid);
-    warnings.push(`${recipe.requiredSlots} of ${all.length} slots must be chosen; using the first ${recipe.requiredSlots}`);
+    warnings.push({ code: 'slots', required: recipe.requiredSlots, total: all.length });
   }
   return new Set(all.slice(0, recipe.requiredSlots));
 }
@@ -96,12 +107,12 @@ export function computePlan(data: PlannerData, entries: PlanEntry[]): PlanResult
   for (const entry of entries) {
     const recipe = recipes.get(entry.blueprintUuid);
     if (!recipe) {
-      result.warnings.push(`Blueprint ${entry.blueprintUuid} is not in the catalog`);
+      result.warnings.push({ code: 'notInCatalog', blueprintUuid: entry.blueprintUuid });
       continue;
     }
     const count = Math.max(0, Math.floor(entry.count));
-    const warnings: string[] = [];
-    if (recipe.retired) warnings.push('This blueprint is no longer in the game data');
+    const warnings: PlanWarning[] = [];
+    if (recipe.retired) warnings.push({ code: 'retired' });
     const selected = selectedSlots(recipe, entry.slots, warnings);
 
     const slots: SlotResult[] = [];
@@ -111,9 +122,9 @@ export function computePlan(data: PlannerData, entries: PlanEntry[]): PlanResult
       const quality = clampQuality(entry.quality?.[slot.index] ?? data.defaultQuality);
       // A slot takes `requiredCount` of its inputs; alternatives do not occur in the game data yet
       const inputs = slot.inputs.slice(0, Math.max(1, slot.requiredCount));
-      if (slot.inputs.length > inputs.length) warnings.push(`Slot ${slot.name} offers alternatives; using the first`);
+      if (slot.inputs.length > inputs.length) warnings.push({ code: 'alternatives', slot: slot.name });
       const belowMinQuality = inputs.some((i) => quality < i.minQuality);
-      if (isSelected && belowMinQuality) warnings.push(`Quality ${quality} is below the minimum for slot ${slot.name}`);
+      if (isSelected && belowMinQuality) warnings.push({ code: 'belowMin', quality, slot: slot.name });
       slots.push({
         index: slot.index,
         key: slot.key,
@@ -141,7 +152,7 @@ export function computePlan(data: PlannerData, entries: PlanEntry[]): PlanResult
         if (modifier.ranges.length === 0) continue;
         const v = modifierAt(modifier.ranges, quality);
         if (!v) {
-          warnings.push(`Stat ${modifier.name}: unsupported modifier in slot ${slot.name}`);
+          warnings.push({ code: 'unsupported', stat: modifier.name, slot: slot.name });
           continue;
         }
         const part = statParts.get(modifier.propertyUuid) ?? { modifier, kind: v.kind, perSlot: [] };

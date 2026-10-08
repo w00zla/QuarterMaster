@@ -8,7 +8,7 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
-import { warningOf } from "../crafting";
+import { warningText } from "../crafting";
 import { duration, unitText } from "../format";
 import { t } from "../i18n";
 import TypeLabel from "./TypeLabel.vue";
@@ -32,9 +32,13 @@ function toggleSlot(slotIndex: number) {
 
 const inputValue = (e: Event) => Number((e.target as HTMLInputElement).value);
 
-const warnings = computed(() => props.result.warnings.map(warningOf));
-const slotWarning = computed(() => warnings.value.find((w) => w.kind === "slots")?.text ?? "");
-const listedWarnings = computed(() => warnings.value.filter((w) => w.kind !== "slots" && w.kind !== "belowMin"));
+const slotWarning = computed(() => {
+  const w = props.result.warnings.find((w) => w.code === "slots");
+  return w ? warningText(w) : "";
+});
+const listedWarnings = computed(() =>
+  props.result.warnings.filter((w) => w.code !== "slots" && w.code !== "belowMin").map(warningText),
+);
 
 // Every stat a slot of the recipe can give, in the planner's order; one not given by the chosen
 // slots shows as a dash. A per-slot line is reserved where several slots give the stat.
@@ -142,7 +146,7 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
           </div>
         </div>
 
-        <div v-for="(w, i) in listedWarnings" :key="i" class="warning"><Icon name="warning" :size="13" /> {{ w.text }}</div>
+        <div v-for="(w, i) in listedWarnings" :key="i" class="warning"><Icon name="warning" :size="13" /> {{ w }}</div>
       </div>
 
       <!-- Stats on the right, apart from the slots -->
