@@ -1,6 +1,6 @@
 [package]
 name = "quartermaster-companion"
-version = "0.1.0"
+version = "0.1.1"
 description = "Quartermaster Companion: reads Star Citizen's Game.log for the Quartermaster web app"
 authors = ["w00zla"]
 edition = "2021"
