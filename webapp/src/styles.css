@@ -131,56 +131,6 @@
   font-size: 16px;
 }
 
-/* List rows (stock, blueprints): wrap on phones instead of scrolling sideways */
-.list-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border-dim);
-  font-size: 13px;
-}
-
-.list-row:last-child {
-  border-bottom: none;
-}
-
-.group-head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  padding: 10px 16px 6px;
-  background: var(--bg-base);
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.group-head .total {
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--text-2);
-}
-
-.row-actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-  flex-wrap: wrap;
-}
-
-.q {
-  font-family: var(--font-mono);
-  min-width: 44px;
-}
-
-.amount {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  min-width: 80px;
-}
-
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -194,6 +144,11 @@
   width: auto;
   flex: 1 1 180px;
   max-width: 280px;
+}
+
+/* The add form inside a list's panel, between its head and the filters */
+.add-area {
+  border-bottom: 1px solid var(--border-dim);
 }
 
 /* The big scope switch above a view: personal or one of your orgs */

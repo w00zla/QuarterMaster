@@ -121,8 +121,9 @@ export async function pickableBatches(db: Db, actor: Actor, pick: BatchPick, lan
 }
 
 export interface StockFilter {
-  // Personal stock of this user, or the org's stock
-  scope: { personalOf: string } | { guildId: string };
+  // Personal stock of this user, the org's stock, or both: the user's personal stock and the stock of
+  // every org they are an active member of
+  scope: { personalOf: string } | { guildId: string } | { allOf: string };
   subjectUuid?: string;
   locationUuid?: string;
   // Org stock only
@@ -131,10 +132,12 @@ export interface StockFilter {
 
 /** What a list shows: personal stock is only ever its owner's; org stock is visible to all members. */
 export function stockList(db: Db, filter: StockFilter, lang: string): Promise<PickableBatch[]> {
+  const s = filter.scope;
   const conds = [
-    'personalOf' in filter.scope
-      ? sql`b.guild_id IS NULL AND b.owner_user_id = ${filter.scope.personalOf}`
-      : sql`b.guild_id = ${filter.scope.guildId}`,
+    'personalOf' in s ? sql`b.guild_id IS NULL AND b.owner_user_id = ${s.personalOf}`
+    : 'guildId' in s ? sql`b.guild_id = ${s.guildId}`
+    : sql`((b.guild_id IS NULL AND b.owner_user_id = ${s.allOf})
+      OR b.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${s.allOf} AND active))`,
   ];
   if (filter.subjectUuid) conds.push(sql`coalesce(b.resource_uuid, b.item_uuid) = ${filter.subjectUuid}`);
   if (filter.locationUuid) conds.push(sql`b.location_uuid = ${filter.locationUuid}`);
@@ -190,7 +193,7 @@ export async function missingNames(db: Db, lang: string, subjects: string[], loc
 }
 
 /** Sum of a material in one stock (a user's personal stock or an org's stock), as NUMERIC text ("0" if none). */
-export async function materialTotal(db: Db, scope: StockFilter['scope'], subjectUuid: string): Promise<string> {
+export async function materialTotal(db: Db, scope: { personalOf: string } | { guildId: string }, subjectUuid: string): Promise<string> {
   const where = 'personalOf' in scope
     ? sql`guild_id IS NULL AND owner_user_id = ${scope.personalOf}`
     : sql`guild_id = ${scope.guildId}`;

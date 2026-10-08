@@ -13,7 +13,7 @@ import { blueprintCatalog, ownedBlueprints, addBlueprint, removeBlueprint } from
 import { loadPlannerData } from '../planner/load.ts';
 import { getBlueprint, getBlueprints, getItem, getItems, getResource, getResources } from '../adminapp/queries.ts';
 import { formatAmount } from '../stock/amount.ts';
-import { findStock, locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
+import { locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
 import * as stock from '../stock/service.ts';
 import { MAX_REFINE_ROWS, StockError, type Actor } from '../stock/service.ts';
 import type { Source } from '../history/record.ts';
@@ -228,28 +228,13 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       const found = await stockList(db, { scope: { guildId: guildId.data }, holderUserId: holder }, lang);
       return c.json(listResponse(found, me, new Set(m.officer ? [guildId.data] : [])));
     }
+    if (c.req.query('scope') === 'all') {
+      const officerIn = await db.execute<{ guild_id: string }>(sql`
+        SELECT guild_id FROM app.member WHERE user_id = ${me} AND active AND officer`);
+      return c.json(listResponse(await stockList(db, { scope: { allOf: me } }, lang), me, new Set(officerIn.map((r) => r.guild_id))));
+    }
     if (c.req.query('scope') !== 'personal') throw new HttpError(400, 'invalid');
     return c.json(listResponse(await stockList(db, { scope: { personalOf: me } }, lang), me, new Set()));
-  });
-
-  api.get('/stock/find', async (c) => {
-    const me = c.get('session').userId;
-    const lang = langOf(c);
-    const subject = uuid.safeParse(c.req.query('subject'));
-    const minQuality = Number(c.req.query('minQuality') ?? 0);
-    if (!subject.success || !Number.isInteger(minQuality)) throw new HttpError(400, 'invalid');
-    const guildId = c.req.query('guildId');
-    if (guildId) {
-      if (!SNOWFLAKE.test(guildId)) throw new HttpError(400, 'invalid');
-      const m = await membership(db, me, guildId);
-      const found = await findStock(db, guildId, me, subject.data, minQuality, lang);
-      return c.json(listResponse(found, me, new Set(m.officer ? [guildId] : [])));
-    }
-    // Without an org: your own stored stock of that material
-    const found = (await stockList(db, { scope: { personalOf: me }, subjectUuid: subject.data }, lang))
-      .filter((p) => p.batch.state === 'stored' && p.batch.quality >= minQuality)
-      .sort((a, b) => b.batch.quality - a.batch.quality || a.batch.id - b.batch.id);
-    return c.json(listResponse(found, me, new Set()));
   });
 
   api.post('/stock/add', async (c) => {

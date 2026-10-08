@@ -15,6 +15,7 @@ import type {
   BlueprintInfo, CatalogResponse, HistoryResponse, MaterialInfo, MeResponse, OrgMember, StockBatch, StockListResponse, SummaryResponse,
 } from '../src/webapp/api-types.ts';
 import { getOverview } from '../src/adminapp/queries.ts';
+import { findStock } from '../src/stock/lookup.ts';
 import { createApp } from '../src/webapp/app.ts';
 import type { DiscordLogin } from '../src/webapp/discord.ts';
 import { createSession } from '../src/webapp/session.ts';
@@ -177,13 +178,12 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     }
   });
 
-  it('find: the org\'s stock plus your own personal, best quality first; without an org your own only', async () => {
-    const { body } = await get<StockListResponse>(MIA, `/stock/find?subject=${U.metal}&minQuality=300&guildId=${G}`);
-    assert.ok(body.batches.length >= 3);
-    assert.ok(body.batches.every((b, i, all) => i === 0 || all[i - 1]!.quality >= b.quality));
-    assert.ok(body.batches.every((b) => b.designation === 'org' || b.holderUserId === MIA));
-    const solo = (await get<StockListResponse>(SOLO, `/stock/find?subject=${U.metal}&minQuality=0`)).body.batches;
-    assert.ok(solo.length > 0 && solo.every((b) => b.designation === 'personal' && b.holderUserId === SOLO));
+  it('findStock (the bot\'s find): the org\'s stock plus your own personal, best quality first', async () => {
+    const found = await findStock(db, G, MIA, U.metal, 300, 'en');
+    assert.ok(found.length >= 3);
+    assert.ok(found.every((p, i, all) => i === 0 || all[i - 1]!.batch.quality >= p.batch.quality));
+    assert.ok(found.every((p) => p.batch.quality >= 300 && p.batch.state === 'stored'));
+    assert.ok(found.every((p) => p.batch.guildId === G || (p.batch.guildId === null && p.batch.ownerUserId === MIA)));
   });
 
   it('org members and their blueprints: for active members of the same org only', async () => {
@@ -213,6 +213,15 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.equal((await get(SOLO, `/crafting/used-by?kind=planet&uuid=${U.metal}`)).status, 400);
     const plan = (await get<{ recipes: Array<{ uuid: string }> }>(SOLO, `/crafting/recipes?uuids=${U.blueprint},nonsense`)).body;
     assert.deepEqual(plan.recipes.map((r) => r.uuid), [U.blueprint]);
+  });
+
+  it('stock scope all: personal stock plus every org of yours, with the change rights of each', async () => {
+    const all = (await get<StockListResponse>(MIA, '/stock?scope=all')).body;
+    const parts = [...(await personal(MIA)).batches, ...(await org(MIA)).batches];
+    assert.deepEqual(all.batches.map((b) => b.id).sort((a, b) => a - b), parts.map((b) => b.id).sort((a, b) => a - b));
+    for (const b of all.batches) assert.equal(b.canChange, parts.find((p) => p.id === b.id)!.canChange);
+    // Without any org: personal only
+    assert.deepEqual((await get<StockListResponse>(SOLO, '/stock?scope=all')).body, (await personal(SOLO)));
   });
 
   it('summary: personal and per org, consistent with the lists', async () => {

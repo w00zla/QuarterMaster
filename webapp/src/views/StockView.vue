@@ -5,8 +5,9 @@ const lastScope = ref("personal");
 </script>
 
 <script setup lang="ts">
-// Stock: personal or one org's, grouped by material (alphabetical), best quality first within. Changes
-// go through BatchDialog (confirmed); adding through StockAddForm; "Find" searches one material.
+// Stock: personal, one org's or all of them, grouped by material (alphabetical), best quality first
+// within. Changes go through BatchDialog (confirmed); adding through StockAddForm, into the scope shown
+// (in "all" the form asks where).
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
 import Dropdown from "../components/Dropdown.vue";
@@ -19,9 +20,9 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
+import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import StockAddForm from "../components/StockAddForm.vue";
-import StockFind from "../components/StockFind.vue";
-import { compareBatches, Q_TIER_MAX, qMark, qTier, qty, tierMark, tierQualities } from "../format";
+import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf, writable } from "../orgs";
 import { coalesced, onServerMessage } from "../realtime";
@@ -43,28 +44,33 @@ function added() {
   showAdd.value = false;
   void load();
 }
-const showFind = ref(false);
 const dialog = ref<{ batch: StockBatch; action: BatchAction } | null>(null);
 
-const org = computed(() => (scope.value === "personal" ? undefined : orgOf(scope.value)));
+const isOrg = (s: string) => s !== "personal" && s !== "all";
+const org = computed(() => (isOrg(scope.value) ? orgOf(scope.value) : undefined));
 const orgWritable = computed(() => writable(org.value));
+// A read-only org takes no new stock; the form never switches to another target by itself
+const canAdd = computed(() => !org.value || orgWritable.value);
+watch(canAdd, (ok) => {
+  if (!ok) showAdd.value = false;
+});
 
 // Left the org (or it went away): back to personal stock
 watch(() => me.value?.orgs, () => {
-  if (scope.value !== "personal" && !org.value) scope.value = "personal";
+  if (isOrg(scope.value) && !org.value) scope.value = "personal";
 }, { immediate: true });
 
 watch(scope, (s) => {
   holder.value = "";
   locationFilter.value = "";
-  if (s !== "personal") ensureMembers(s);
+  if (isOrg(s)) ensureMembers(s);
 });
 
 let seq = 0;
 async function load() {
   const mine = ++seq;
-  const query = scope.value === "personal"
-    ? "scope=personal"
+  const query = !isOrg(scope.value)
+    ? `scope=${scope.value}`
     : `scope=org&guildId=${encodeURIComponent(scope.value)}${holder.value ? `&holder=${encodeURIComponent(holder.value)}` : ""}`;
   try {
     // lang: material and location names (the server reads it, the contract does not list it yet)
@@ -84,10 +90,10 @@ watch(lang, load);
 const reload = coalesced(() => void load());
 let unsubscribe = () => {};
 onMounted(() => {
-  if (scope.value !== "personal") ensureMembers(scope.value);
+  if (isOrg(scope.value)) ensureMembers(scope.value);
   unsubscribe = onServerMessage((m) => {
     if (m.type === "resync") reload.schedule();
-    else if (m.type === "stock" && (m.scope === "personal" ? scope.value === "personal" : m.guildId === scope.value)) reload.schedule();
+    else if (m.type === "stock" && (scope.value === "all" || (m.scope === "personal" ? scope.value === "personal" : m.guildId === scope.value))) reload.schedule();
   });
 });
 onUnmounted(() => {
@@ -110,6 +116,7 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "amount", label: t("stock.col.amount"), width: 120 },
   { key: "location", label: t("stock.col.location"), width: 280 },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
+  ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200 }] : []),
   { key: "state", label: t("stock.col.state"), width: 110 },
   { key: "actions", label: "", width: 104, sortable: false, fixed: true, sep: true },
 ]);
@@ -122,6 +129,7 @@ function valueOf(b: StockBatch, key: string): string | number {
     case "amount": return Number(b.quantity);
     case "location": return b.location;
     case "holder": return b.holderName ?? "";
+    case "owner": return ownerText(b);
     case "state": return b.state === "refining" ? t("stock.refining") : "";
     default: return "";
   }
@@ -174,21 +182,13 @@ function open(batch: StockBatch, action: BatchAction) {
 
 <template>
   <div class="page">
+    <ScopeBar v-model="scope" all />
+
     <section class="panel unclipped">
       <div class="head">
         <Icon name="type-crate" :size="16" />
-        <span class="head-title no-grow">{{ t("nav.stock") }}</span>
-        <div class="chips">
-          <button type="button" class="chip" :class="{ active: scope === 'personal' }" @click="scope = 'personal'"><Icon name="user" :size="14" /> {{ t("stock.personal") }}</button>
-          <button v-for="o in me?.orgs ?? []" :key="o.guildId" type="button" class="chip" :class="{ active: scope === o.guildId }" @click="scope = o.guildId">
-            <Icon name="users" :size="14" /> {{ o.name }}
-          </button>
-        </div>
-        <span class="spacer" />
-        <button type="button" class="btn small outline" :class="{ on: showFind }" @click="showFind = !showFind">
-          <Icon name="search" :size="14" /> {{ t("stock.find") }}
-        </button>
-        <button type="button" class="btn small primary" @click="showAdd = !showAdd">
+        <span class="head-title">{{ t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
+        <button type="button" class="btn small primary" :disabled="!canAdd" @click="showAdd = !showAdd">
           <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ t("stock.add") }}
         </button>
       </div>
@@ -196,19 +196,13 @@ function open(batch: StockBatch, action: BatchAction) {
         <Icon name="warning" :size="14" />
         <span>{{ t("stock.readOnlyHint") }} {{ t(org.botPresent ? "home.rosterStale" : "home.botMissingHint") }}</span>
       </div>
-    </section>
-
-    <section v-if="showAdd" class="panel unclipped">
-      <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("stock.addTitle") }}</span></div>
-      <StockAddForm :target="scope === 'personal' ? null : scope" @done="added" />
-    </section>
-
-    <section v-if="showFind" class="panel unclipped">
-      <div class="head"><Icon name="search" :size="16" /><span class="head-title">{{ t("stock.findTitle") }}</span></div>
-      <StockFind :guild-id="scope === 'personal' ? null : scope" />
-    </section>
-
-    <section class="panel unclipped">
+      <div v-if="showAdd" class="add-area">
+        <div class="head">
+          <Icon name="plus" :size="16" />
+          <span class="head-title">{{ scope === "all" ? t("stock.addTitle") : t("stock.addTo", { scope: scopeName(scope) }) }}</span>
+        </div>
+        <StockAddForm :target="scope === 'all' ? undefined : scope === 'personal' ? null : scope" @done="added" />
+      </div>
       <div class="filters">
         <label class="search">
           <Icon name="search" :size="14" />
@@ -244,6 +238,7 @@ function open(batch: StockBatch, action: BatchAction) {
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
             <span class="cell">{{ b.location }}</span>
             <span v-if="org" class="cell">{{ b.holderName }}</span>
+            <span v-if="scope === 'all'" class="cell">{{ ownerText(b) }}</span>
             <span><span v-if="b.state === 'refining'" class="tag warn">{{ t("stock.refining") }}</span></span>
             <span class="sep actions">
               <template v-if="canChange(b)">
@@ -303,14 +298,9 @@ function open(batch: StockBatch, action: BatchAction) {
 }
 
 
-
 .readonly {
   padding: 10px 16px;
+  border-bottom: 1px solid var(--border-dim);
   align-items: flex-start;
-}
-
-.btn.on {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 </style>

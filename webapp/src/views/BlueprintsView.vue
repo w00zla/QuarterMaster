@@ -18,6 +18,7 @@ import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import TypeLabel from "../components/TypeLabel.vue";
 import Picker from "../components/Picker.vue";
+import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import { lang, t } from "../i18n";
 import { memberLabel, orgOf } from "../orgs";
 import { coalesced, onServerMessage } from "../realtime";
@@ -223,24 +224,17 @@ onUnmounted(() => {
 
 <template>
   <div class="page">
-    <div v-if="me?.orgs.length" class="scope-bar">
-      <button type="button" class="scope" :class="{ active: scope === 'personal' }" @click="scope = 'personal'">
-        <Icon name="user" :size="16" /> {{ t("stock.personal") }}
-      </button>
-      <button v-for="o in me.orgs" :key="o.guildId" type="button" class="scope" :class="{ active: scope === o.guildId }" @click="scope = o.guildId">
-        <Icon name="users" :size="16" /> {{ o.name }}
-      </button>
-    </div>
+    <ScopeBar v-model="scope" />
 
     <section class="panel unclipped">
       <div class="head">
         <Icon name="blueprint" :size="16" />
-        <span class="head-title">{{ org ? t("bp.orgTitle", { org: org.name }) : t("bp.mine") }}</span>
+        <span class="head-title">{{ t("nav.blueprints") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
         <button v-if="!org" type="button" class="btn small primary" :disabled="!catalog" @click="addOpen = !addOpen">
           <Icon :name="addOpen ? 'close' : 'plus'" :size="14" /> {{ t("bp.add") }}
         </button>
       </div>
-      <div v-if="addOpen && !org" class="add">
+      <div v-if="addOpen && !org" class="add-area">
         <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("bp.addTitle") }}</span></div>
         <div class="form single">
           <Picker :key="pickerKey" v-model="adding" :options="addOptions" :placeholder="t('pick.blueprint')" />
@@ -279,7 +273,7 @@ onUnmounted(() => {
         @select="craft"
       >
         <template #cell-name="{ row }">
-          <InfoTip kind="blueprint" :uuid="row.uuid">{{ row.bp?.name ?? t("bp.unknown") }}</InfoTip>
+          <InfoTip kind="blueprint" :uuid="row.uuid"><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span></InfoTip>
           <span v-if="row.bp?.retired" class="tag err">{{ t("bp.retired") }}</span>
         </template>
         <template #cell-type="{ row }"><TypeLabel :type="row.bp?.type" :label="row.bp?.typeLabel" /></template>
@@ -318,9 +312,8 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-/* The add panel inside the list's panel, set off from the filters */
-.add {
-  border-bottom: 1px solid var(--border-dim);
+.bp-name {
+  font-weight: 600;
 }
 
 .owners {

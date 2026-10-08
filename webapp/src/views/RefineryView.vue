@@ -180,7 +180,7 @@ const bonusText = (b: StockBatch) => {
 
 <template>
   <div class="page">
-    <section class="panel">
+    <section class="panel unclipped">
       <div class="head">
         <Icon name="drop" :size="16" />
         <span class="head-title">{{ t("refinery.jobs") }}</span>
@@ -188,14 +188,10 @@ const bonusText = (b: StockBatch) => {
           <Icon :name="showStart ? 'close' : 'plus'" :size="14" /> {{ t("refinery.start") }}
         </button>
       </div>
-    </section>
-
-    <section v-if="showStart" class="panel unclipped">
-      <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("refinery.start") }}</span></div>
-      <RefineryStartForm @done="started" />
-    </section>
-
-    <section class="panel unclipped">
+      <div v-if="showStart" class="add-area">
+        <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("refinery.start") }}</span></div>
+        <RefineryStartForm @done="started" />
+      </div>
       <div class="filters">
         <label class="search">
           <Icon name="search" :size="14" />
@@ -282,14 +278,16 @@ const bonusText = (b: StockBatch) => {
   opacity: 0.8;
 }
 
+/* As the stock table's material rows, only in the quieter colour */
 .group-name,
 .group-total {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
 }
 
-.group-total {
-  font-weight: 600;
+/* The finish button must not make the row taller than the stock table's material rows */
+.group-row .icon-btn {
+  margin-block: -4px;
 }
 
 .data-row {

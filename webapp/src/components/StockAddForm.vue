@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Books new stock (POST /api/stock/add) right away; the toast says what was booked. Ores only go
-// into the refinery (RefineryStartForm).
+// into the refinery (RefineryStartForm). `target`: null = personal, a guildId = that org (fixed, as the
+// list shows it), undefined = the form asks (personal or a writable org).
 import { computed, ref, watch } from "vue";
 import type { OkResponse, StockAddRequest } from "../../../src/webapp/api-types";
 import Dropdown from "./Dropdown.vue";
@@ -26,18 +27,20 @@ const target = ref("personal");
 const holder = ref<string | null>(null);
 const busy = ref(false);
 
+const pickTarget = computed(() => props.target === undefined);
 const targets = computed(() => [
   { value: "personal", label: t("stock.personal") },
   ...(me.value?.orgs ?? []).filter(writable).map((o) => ({ value: o.guildId, label: o.name })),
 ]);
 
-// Follows the list's scope while that org can be booked into
+// A fixed target is the list's scope; picking starts with personal
 watch(() => props.target, (g) => {
-  target.value = g && writable(orgOf(g)) ? g : "personal";
+  target.value = g ?? "personal";
 }, { immediate: true });
-// An org that turned read-only (or was left) is no target anymore
+// A picked org that turned read-only (or was left) is no target anymore; a fixed one stays (the
+// list closes the form) and is never swapped for another
 watch(targets, (list) => {
-  if (!list.some((o) => o.value === target.value)) target.value = "personal";
+  if (pickTarget.value && !list.some((o) => o.value === target.value)) target.value = "personal";
 });
 
 const org = computed(() => (target.value === "personal" ? undefined : orgOf(target.value)));
@@ -52,7 +55,8 @@ const unit = computed(() => (subject.value ? materials.value.get(subject.value)?
 const q = computed(() => qualityOf(quality.value));
 const amt = computed(() => amountOf(amount.value, unit.value));
 
-const valid = computed(() => !!subject.value && !!location.value && q.value !== null && !!amt.value && (!pickHolder.value || !!holder.value));
+const valid = computed(() => !!subject.value && !!location.value && q.value !== null && !!amt.value && (!pickHolder.value || !!holder.value)
+  && (!org.value || writable(org.value)));
 
 function ownerText(): string {
   if (!org.value) return t("stock.pers");
@@ -66,7 +70,7 @@ function clear() {
   location.value = null;
   quality.value = "";
   amount.value = "";
-  target.value = props.target && writable(orgOf(props.target)) ? props.target : "personal";
+  target.value = props.target ?? "personal";
   holder.value = me.value?.userId ?? null;
 }
 
@@ -115,7 +119,7 @@ async function submit() {
         <span class="unit">{{ unitText(unit) }}</span>
       </span>
     </label>
-    <div v-if="targets.length > 1" class="field">
+    <div v-if="pickTarget && targets.length > 1" class="field">
       {{ t("field.target") }}
       <Dropdown v-model="target" variant="chip" :options="targets" />
     </div>

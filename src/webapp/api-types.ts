@@ -105,12 +105,11 @@ export interface CatalogResponse {
 }
 
 // --- stock -------------------------------------------------------------------------------------
-// All three take &lang=de|en for material and location names and answer StockListResponse.
+// All take &lang=de|en for material and location names and answer StockListResponse.
 // GET /api/stock?scope=personal                       your personal stock (incl. refinery jobs)
 // GET /api/stock?scope=org&guildId=G[&holder=U]       the org's stock (active members only)
-// GET /api/stock/find?subject=UUID&minQuality=N[&guildId=G]
-//                                                     stored batches of a material: the org's (if
-//                                                     guildId) plus your personal, best quality first
+// GET /api/stock?scope=all                            both: your personal stock and every org's you are
+//                                                     an active member of
 // Writes: POST /api/stock/add | remove | adjust | move with the request types below.
 
 export interface StockBatch {
