@@ -5,6 +5,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
+import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import WebSocket from 'ws';
 import { connect, type Db } from '../src/db/client.ts';
@@ -81,7 +82,7 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
   before(async () => {
     ({ db, close, client } = connect(url));
     for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     for (const [id, name] of [[G, 'Org G'], [H, 'Org H']] as const) await ensureGuild(db, id, name);

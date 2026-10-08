@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { asc, sql } from 'drizzle-orm';
+import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
 import { snapshot } from '../src/db/schema/ext.ts';
@@ -34,7 +35,7 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
   before(async () => {
     ({ db, close } = connect(url));
     for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
   });
   after(() => close());
   beforeEach(() => db.execute(sql`TRUNCATE ext.snapshot`));

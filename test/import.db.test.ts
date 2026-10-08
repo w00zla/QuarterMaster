@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
+import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
 import { runImport, type ImportOptions } from '../src/catalog/import/apply.ts';
@@ -31,7 +32,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     await db.execute(sql`DROP SCHEMA IF EXISTS app CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS catalog CASCADE`);
     await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE`);
-    await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname });
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
   });
   after(async () => close?.());
 

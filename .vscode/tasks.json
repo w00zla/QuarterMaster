@@ -40,6 +40,8 @@
       "label": "db: up",
       "type": "shell",
       "command": "pnpm db:up",
+      // Windows: Postgres runs as a service (no Podman), only check that it is up
+      "windows": { "command": "sc.exe query postgresql-x64-18 | findstr RUNNING" },
       "presentation": { "group": "webapp-dev", "panel": "shared", "reveal": "silent" },
       "problemMatcher": []
     },
