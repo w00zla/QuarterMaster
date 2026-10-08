@@ -3,6 +3,7 @@
 .env
 local
 adminapp/dist
+webapp/dist
 test
 .claude
 .vscode

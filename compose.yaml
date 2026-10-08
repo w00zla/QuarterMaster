@@ -1,4 +1,4 @@
-# Production stack: Postgres, the Discord bot and the admin web UI. Caddy runs on the host and
+# Production stack: Postgres, the Discord bot, the user web app and the admin web UI. Caddy runs on the host and
 # terminates TLS (example: .claude/Caddyfile.example). Values come from .env next to this file
 # (see .env.example, section "Deployment").
 #
@@ -7,10 +7,11 @@
 name: sc-quartermaster
 
 # DB roles (deploy/db-roles.sh): qm_owner runs the migrations, qm_app is bot, admin and ext, qm_web is
-# the user web app (no service yet).
+# the user web app.
 # The passwords go into URLs unescaped: URL-safe characters only (e.g. openssl rand -hex 32)
 x-db-url-owner: &db-url-owner postgres://qm_owner:${QM_OWNER_PASSWORD:?set QM_OWNER_PASSWORD in .env}@db:5432/quartermaster
 x-db-url: &db-url postgres://qm_app:${QM_APP_PASSWORD:?set QM_APP_PASSWORD in .env}@db:5432/quartermaster
+x-db-url-web: &db-url-web postgres://qm_web:${QM_WEB_PASSWORD:?set QM_WEB_PASSWORD in .env}@db:5432/quartermaster
 
 # The default json-file driver never rotates
 x-logging: &logging
@@ -92,6 +93,26 @@ services:
       ADMINAPP_HOST: 0.0.0.0
       ADMINAPP_PORT: "3000"
     ports: ["127.0.0.1:3001:3000"]
+
+  # The user web app (Discord login, the companion app's API); Caddy serves it on 443
+  webapp:
+    <<: *app
+    command: [node, src/webapp/main.ts]
+    environment:
+      DATABASE_URL: *db-url-web
+      DISCORD_APP_ID: ${DISCORD_APP_ID:?set DISCORD_APP_ID in .env}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?set DISCORD_CLIENT_SECRET in .env}
+      # Where the browser sees the app (https://…); the OAuth2 redirect is this + /auth/callback
+      WEBAPP_ORIGIN: ${WEBAPP_ORIGIN:?set WEBAPP_ORIGIN in .env}
+      # Client IPs from Caddy's X-Forwarded-For
+      WEBAPP_TRUST_PROXY: "1"
+      WEBAPP_HOST: 0.0.0.0
+      WEBAPP_PORT: "3000"
+      COMPANION_DIR: /companion
+    volumes:
+      # The companion app release (companion.json + files), copied there by hand; local/ is gitignored
+      - ./local/companion:/companion:ro
+    ports: ["127.0.0.1:3000:3000"]
 
 volumes:
   pgdata:

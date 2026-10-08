@@ -36,6 +36,6 @@ git push "$host:$path" main
 
 echo "==> Deploy on $host"
 # -t: live output, Ctrl+C reaches the VM. A dropped connection kills deploy.sh; it can simply be
-# run again (a migration rolls back as a whole, bot/admin stay stopped until then).
+# run again (a migration rolls back as a whole, bot/admin/ext/webapp stay stopped until then).
 # shellcheck disable=SC2029  # the path is meant to expand here, quoted for the remote shell
 ssh -t "$host" "cd $(printf %q "$path") && scripts/deploy.sh"

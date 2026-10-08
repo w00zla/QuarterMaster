@@ -1,6 +1,6 @@
-# One image for the bot, the admin web UI and the one-off tasks (migrations, command
+# One image for the bot, both web apps and the one-off tasks (migrations, command
 # registration); the compose service's command picks the process. No build step for the
-# backend: Node runs the .ts files directly. Only the SPA is built.
+# backend: Node runs the .ts files directly. Only the SPAs are built.
 ARG NODE_IMAGE=docker.io/library/node:22-slim
 
 FROM ${NODE_IMAGE} AS base
@@ -12,12 +12,14 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY adminapp/package.json adminapp/
 COPY webapp/package.json webapp/
 
-# All dependencies incl. dev, to build the SPA (it imports shared code from src/)
+# All dependencies incl. dev, to build the SPAs (they import shared code from src/, the web app also
+# from adminapp/src)
 FROM base AS build
 RUN pnpm install --frozen-lockfile
 COPY src src
 COPY adminapp adminapp
-RUN pnpm adminapp:build
+COPY webapp webapp
+RUN pnpm adminapp:build && pnpm webapp:build
 
 # Runtime dependencies of the backend only
 FROM base AS deps
@@ -32,4 +34,5 @@ COPY --from=deps /app/node_modules node_modules
 COPY src src
 COPY drizzle drizzle
 COPY --from=build /app/adminapp/dist adminapp/dist
+COPY --from=build /app/webapp/dist webapp/dist
 USER node
