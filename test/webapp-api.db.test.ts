@@ -94,13 +94,17 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.equal((await personal(SOLO)).totals[U.metal], '20');
 
     // Refinery: start with ore, done consumes the job and stores the refined resource
-    assert.equal((await post(SOLO, '/refinery/start', { oreUuid: U.ore, locationUuid: U.station, quality: 400, amount: '8' })).status, 200);
+    assert.equal((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [] })).status, 400);
+    assert.equal((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 400, amount: '8' }] })).status, 200);
     list = await personal(SOLO);
     const job = list.batches.find((b) => b.state === 'refining')!;
-    assert.equal((await post(SOLO, '/refinery/done', { batchId: job.id, amount: '5', quality: 650, expected: '8' })).status, 200);
+    const jobId = job.refine!.jobId;
+    // Quality is the ore's: the request has none
+    assert.equal((await post(SOLO, '/refinery/done', { jobId, rows: [{ batchId: job.id, amount: '5', quality: 650, expected: '8' }] })).status, 400);
+    assert.equal((await post(SOLO, '/refinery/done', { jobId, rows: [{ batchId: job.id, amount: '5', expected: '8' }] })).status, 200);
     list = await personal(SOLO);
     assert.ok(!list.batches.some((b) => b.state === 'refining'));
-    assert.ok(list.batches.some((b) => b.subjectUuid === U.metal && b.quality === 650 && b.quantity === '5'));
+    assert.ok(list.batches.some((b) => b.subjectUuid === U.metal && b.quality === 400 && b.quantity === '5'));
 
     // No org stock without an org
     assert.deepEqual((await post(SOLO, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'notMember' });
@@ -210,7 +214,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   });
 
   it('summary: personal and per org, consistent with the lists', async () => {
-    await post(MIA, '/refinery/start', { oreUuid: U.ore, locationUuid: U.station, quality: 100, amount: '2' });
+    await post(MIA, '/refinery/start', { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 100, amount: '2' }, { oreUuid: U.ore, quality: 200, amount: '1' }] });
     const sum = (await get<SummaryResponse>(MIA, '/summary')).body;
     const mine = await personal(MIA);
     const stored = mine.batches.filter((b) => b.state === 'stored');

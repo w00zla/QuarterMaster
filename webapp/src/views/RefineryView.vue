@@ -1,18 +1,19 @@
 <script setup lang="ts">
-// Refinery: your running jobs (personal batches in state refining), grouped by ore like the stock
-// table, with its filters; start one, finish one. Jobs are always personal, so this works the same
-// without any org.
+// Refinery: your running jobs, one group per work order (station, method, time left, the ores below it),
+// with the stock table's filters; start one, finish one (always the whole work order). Jobs are always
+// personal, so this works the same without any org.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
+import { formatMicros, toMicros } from "../../../src/planner/plan";
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
-import BatchDialog from "../components/BatchDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import RangeSlider from "../components/RangeSlider.vue";
-import StockAddForm from "../components/StockAddForm.vue";
+import RefineryDoneDialog from "../components/RefineryDoneDialog.vue";
+import RefineryStartForm from "../components/RefineryStartForm.vue";
 import { methods, signedBonus, yieldValue } from "../catalog";
 import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
 import { lang, t } from "../i18n";
@@ -25,14 +26,15 @@ const locationFilter = ref("");
 // Quality filter in tiers (qTier)
 const qualityLow = ref(0);
 const qualityHigh = ref(Q_TIER_MAX);
-// "Start job" in a panel below the head: the form, then its own confirmation
+// "Start job" in a panel below the head
 const showStart = ref(false);
 
 function started() {
   showStart.value = false;
   void load();
 }
-const finishing = ref<StockBatch | null>(null);
+// The ore batches of the job being finished
+const finishing = ref<StockBatch[] | null>(null);
 
 let seq = 0;
 async function load() {
@@ -66,84 +68,116 @@ onUnmounted(() => {
   clearInterval(tick);
 });
 
-const jobs = computed(() => (data.value?.batches ?? []).filter((b) => b.state === "refining"));
+const batches = computed(() => (data.value?.batches ?? []).filter((b) => b.state === "refining" && b.refine));
+
+interface Job {
+  id: string;
+  location: string;
+  locationUuid: string;
+  method: string;
+  endsAt: string | null;
+  // Every ore batch of the job (finishing takes them all), and those the filters let through
+  all: StockBatch[];
+  rows: StockBatch[];
+  total: string;
+  expected: string | null;
+}
+
+const jobs = computed(() => {
+  const by = new Map<string, StockBatch[]>();
+  for (const b of batches.value) by.set(b.refine!.jobId, [...(by.get(b.refine!.jobId) ?? []), b]);
+  return [...by].map(([id, all]): Job => {
+    const b = all[0]!;
+    const sum = (values: (string | null)[]) => formatMicros(values.reduce((s, v) => s + toMicros(v ?? "0"), 0n));
+    return {
+      id, location: b.location, locationUuid: b.locationUuid, method: methodName(b), endsAt: b.refine!.endsAt, all, rows: all,
+      total: sum(all.map((x) => x.quantity)),
+      expected: all.some((x) => x.refine!.expectedYield !== null) ? sum(all.map((x) => x.refine!.expectedYield)) : null,
+    };
+  });
+});
 
 const filtered = computed(() => {
   const words = materialText.value.toLowerCase().split(/\s+/).filter(Boolean);
-  return jobs.value.filter((b) =>
-    (!locationFilter.value || b.locationUuid === locationFilter.value)
-    && qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value
-    && words.every((w) => `${b.material} ${b.location}`.toLowerCase().includes(w)));
+  return jobs.value
+    .filter((j) => !locationFilter.value || j.locationUuid === locationFilter.value)
+    .map((j) => ({
+      ...j,
+      rows: j.all.filter((b) => qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value
+        && words.every((w) => `${b.material} ${b.location}`.toLowerCase().includes(w))),
+    }))
+    .filter((j) => j.rows.length);
 });
 
-// --- the table: one group per ore (header with the total), its jobs below ----------------------
+// --- the table: one group per job (station, totals, method, time left), its ores below -------------
 const columns = computed<ColumnSpec[]>(() => [
-  { key: "material", label: t("stock.col.material"), width: 200 },
+  { key: "material", label: t("refinery.col.job"), width: 240 },
   { key: "quality", label: t("stock.col.quality"), width: 130 },
   { key: "amount", label: t("stock.col.amount"), width: 120 },
-  { key: "location", label: t("stock.col.location"), width: 240 },
+  { key: "expected", label: t("refinery.col.expected"), width: 110 },
   { key: "bonus", label: t("refinery.col.bonus"), width: 90 },
   { key: "method", label: t("refinery.col.method"), width: 170 },
-  { key: "expected", label: t("refinery.col.expected"), width: 110 },
   { key: "ready", label: t("refinery.col.ready"), width: 130 },
   { key: "actions", label: "", width: 56, sortable: false, fixed: true, sep: true },
 ]);
-const cols = useTableColumns("qm.webapp.columns.refinery", columns, { key: "quality", dir: "desc" });
+const cols = useTableColumns("qm.webapp.columns.refinery", columns, { key: "ready", dir: "asc" });
 
-function valueOf(b: StockBatch, key: string): string | number {
+function rowValue(b: StockBatch, key: string): string | number {
   switch (key) {
     case "material": return b.material;
     case "quality": return b.quality;
     case "amount": return Number(b.quantity);
-    case "location": return b.location;
+    case "expected": return Number(b.refine?.expectedYield ?? -1);
     // No UEX value sorts below every reported one
     case "bonus": return yieldValue(b.locationUuid, b.subjectUuid) ?? -Infinity;
-    case "method": return methodName(b);
-    case "expected": return Number(b.refine?.expectedYield ?? -1);
-    // Jobs without an end sort after every timed one
-    case "ready": return b.refine?.endsAt ? Date.parse(b.refine.endsAt) : Infinity;
     default: return "";
   }
 }
 
+function jobValue(j: Job, key: string): string | number {
+  switch (key) {
+    case "material": return j.location;
+    case "amount": return Number(j.total);
+    case "expected": return Number(j.expected ?? -1);
+    case "method": return j.method;
+    // Jobs without an end sort after every timed one
+    default: return j.endsAt ? Date.parse(j.endsAt) : Infinity;
+  }
+}
+
 const groups = computed(() => {
-  const by = new Map<string, StockBatch[]>();
-  for (const b of filtered.value) by.set(b.subjectUuid, [...(by.get(b.subjectUuid) ?? []), b]);
   const { key, dir } = cols.sort.value;
   const sign = dir === "asc" ? 1 : -1;
-  const byName = (a: { material: string }, b: { material: string }) => a.material.localeCompare(b.material, lang.value);
-  return [...by.values()]
-    .map((rows) => ({
-      uuid: rows[0]!.subjectUuid, material: rows[0]!.material, unit: rows[0]!.unit,
-      // Ores only exist as refinery jobs: the material's total is the jobs' total
-      total: data.value?.totals[rows[0]!.subjectUuid] ?? "0",
-      rows: sortRows(rows, cols.sort.value, valueOf, compareBatches),
-    }))
-    // Groups follow the material and amount columns (by name, by total); otherwise alphabetical
-    .sort((a, b) => key === "material" ? sign * byName(a, b)
-      : key === "amount" ? sign * (Number(a.total) - Number(b.total)) || byName(a, b)
-      : byName(a, b));
+  // Job columns order the jobs; ore columns order the ores within each job (jobs then by time left)
+  const jobKey = ["material", "amount", "expected", "method", "ready"].includes(key) ? key : "ready";
+  const jobSign = jobKey === key ? sign : 1;
+  const cmp = (a: string | number, b: string | number) => (typeof a === "string" ? a.localeCompare(String(b), lang.value) : a - Number(b));
+  return filtered.value
+    .map((j) => ({ ...j, rows: sortRows(j.rows, cols.sort.value, rowValue, compareBatches) }))
+    .sort((a, b) => jobSign * cmp(jobValue(a, jobKey), jobValue(b, jobKey)) || a.id.localeCompare(b.id));
 });
 
 const locationOptions = computed(() => {
   const seen = new Map<string, string>();
-  for (const b of jobs.value) seen.set(b.locationUuid, b.location);
+  for (const j of jobs.value) seen.set(j.locationUuid, j.location);
   return [
     { value: "", label: t("stock.allLocations") },
     ...[...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, lang.value)),
   ];
 });
 
-const methodName = (b: StockBatch) => (b.refine?.method ? methods.value.get(b.refine.method)?.name ?? b.refine.method : "");
+function methodName(b: StockBatch) {
+  return b.refine?.method ? methods.value.get(b.refine.method)?.name ?? b.refine.method : "";
+}
 
 /** null: no end recorded; "" ready; else the time left */
-function left(b: StockBatch): string | null {
-  if (!b.refine?.endsAt) return null;
-  const ms = Date.parse(b.refine.endsAt) - now.value;
+function left(j: Job): string | null {
+  if (!j.endsAt) return null;
+  const ms = Date.parse(j.endsAt) - now.value;
   return ms <= 0 ? "" : t("refinery.in", { t: hm(ms / 1000) });
 }
 
-const endsTitle = (b: StockBatch) => (b.refine?.endsAt ? new Date(b.refine.endsAt).toLocaleString(lang.value) : "");
+const endsTitle = (j: Job) => (j.endsAt ? new Date(j.endsAt).toLocaleString(lang.value) : "");
 
 const bonusText = (b: StockBatch) => {
   const v = yieldValue(b.locationUuid, b.subjectUuid);
@@ -165,7 +199,7 @@ const bonusText = (b: StockBatch) => {
 
     <section v-if="showStart" class="panel unclipped">
       <div class="head"><Icon name="plus" :size="16" /><span class="head-title">{{ t("refinery.start") }}</span></div>
-      <StockAddForm refinery @done="started" />
+      <RefineryStartForm @done="started" />
     </section>
 
     <section class="panel unclipped">
@@ -186,38 +220,44 @@ const bonusText = (b: StockBatch) => {
       <div v-else class="table" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
-        <template v-for="g in groups" :key="g.uuid">
-          <!-- The ore's row: its name, and its total under the amounts -->
+        <template v-for="j in groups" :key="j.id">
+          <!-- The job's row: station, totals, method, time left, finishing it -->
           <div class="row data-row group-row">
             <span class="group-name">
-              <Icon name="resource" :size="15" class="type-icon" />
-              <InfoTip kind="material" :uuid="g.uuid">{{ g.material }}</InfoTip>
+              <Icon name="drop" :size="15" class="type-icon" />
+              <span class="cell">{{ j.location }}</span>
             </span>
             <span />
-            <span class="num group-total">{{ qty(g.total, g.unit) }}</span>
-            <span v-for="c in columns.length - 3" :key="c" :class="{ sep: c === columns.length - 3 }" />
-          </div>
-          <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
+            <span class="num group-total">{{ qty(j.total, "SCU") }}</span>
+            <span class="num group-total">{{ j.expected ? qty(j.expected, "SCU") : "" }}</span>
             <span />
-            <span class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
-            <span class="num">{{ qty(b.quantity, b.unit) }}</span>
-            <span class="cell">{{ b.location }}</span>
-            <span class="num">{{ bonusText(b) }}</span>
-            <span class="cell">{{ methodName(b) }}</span>
-            <span class="num">{{ b.refine?.expectedYield ? qty(b.refine.expectedYield, "SCU") : "" }}</span>
-            <span :title="endsTitle(b)">
-              <span v-if="left(b) === ''" class="tag ok">{{ t("refinery.readyNow") }}</span>
-              <template v-else>{{ left(b) }}</template>
+            <span class="cell">{{ j.method }}</span>
+            <span :title="endsTitle(j)">
+              <span v-if="left(j) === ''" class="tag ok">{{ t("refinery.readyNow") }}</span>
+              <template v-else>{{ left(j) }}</template>
             </span>
             <span class="sep actions">
-              <button type="button" class="icon-btn" :title="t('refinery.done')" @click="finishing = b"><Icon name="check" :size="15" /></button>
+              <button type="button" class="icon-btn" :title="t('refinery.done')" @click="finishing = j.all"><Icon name="check" :size="15" /></button>
             </span>
+          </div>
+          <div v-for="b in j.rows" :key="b.id" class="row data-row batch-row">
+            <span class="ore-name">
+              <Icon name="resource" :size="14" class="type-icon" />
+              <InfoTip kind="material" :uuid="b.subjectUuid">{{ b.material }}</InfoTip>
+            </span>
+            <span class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
+            <span class="num">{{ qty(b.quantity, b.unit) }}</span>
+            <span class="num">{{ b.refine?.expectedYield ? qty(b.refine.expectedYield, "SCU") : "" }}</span>
+            <span class="num">{{ bonusText(b) }}</span>
+            <span />
+            <span />
+            <span class="sep" />
           </div>
         </template>
       </div>
     </section>
 
-    <BatchDialog v-if="finishing" :key="finishing.id" :batch="finishing" action="done" @close="finishing = null" @done="load" />
+    <RefineryDoneDialog v-if="finishing" :batches="finishing" @close="finishing = null" @done="load" />
   </div>
 </template>
 
@@ -231,6 +271,16 @@ const bonusText = (b: StockBatch) => {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+/* An ore of the job, indented below it */
+.ore-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 22px;
 }
 
 .type-icon {

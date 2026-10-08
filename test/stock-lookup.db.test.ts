@@ -44,7 +44,7 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     await add(db, mia, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 100, amount: '7' });
     await add(db, mia, { ...metal, quality: 700, amount: '4', org: true });
     await add(db, olga, { ...metal, quality: 800, amount: '3' });
-    await refineStart(db, mia, { oreUuid: U.ore, locationUuid: U.station, quality: 600, amount: '8' });
+    await refineStart(db, mia, { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 600, amount: '8' }] });
   });
   after(async () => close?.());
 

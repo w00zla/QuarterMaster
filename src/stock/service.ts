@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db, Tx } from '../db/client.ts';
-import { one } from '../db/query.ts';
+import { one, rows } from '../db/query.ts';
 import { refineryLocations } from '../ext/refineries.ts';
 import { recordHistory, type HistoryCategory, type HistoryDetails, type Source } from '../history/record.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
@@ -266,73 +266,131 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
   });
 }
 
-// Longest refinery job accepted (the community values give about 19 h per SCU for the slowest method)
+// Longest refinery job accepted
 const MAX_REFINE_SECONDS = 365 * 24 * 3600;
+// Ore rows per work order (the terminal lists a ship's whole load)
+export const MAX_REFINE_ROWS = 30;
 
-export interface RefineStartInput {
+export interface RefineStartRow {
   oreUuid: string;
-  locationUuid: string;
   quality: number;
   amount: string;
-  // ext.refining_method code
-  method?: string;
-  // Estimates (the user may have taken them from the terminal): processing time and refined SCU
-  durationSeconds?: number;
+  // Estimate (the user may have taken it from the terminal): refined SCU of this ore
   expectedYield?: string;
 }
 
+export interface RefineStartInput {
+  locationUuid: string;
+  // ext.refining_method code
+  method?: string;
+  // Estimate for the whole work order: processing time
+  durationSeconds?: number;
+  rows: RefineStartRow[];
+}
+
+export interface RefineJobResult {
+  jobId: string;
+  journal: JournalEntry[];
+  batches: Batch[];
+}
+
 /**
- * Ore delivered to a refinery: a personal batch in state `refining`. Every job is a batch of its own
- * (the start time is part of the merge key), with its method, end and expected yield if given.
+ * A work order at a refinery: one personal batch in state `refining` per ore row, all sharing a new job
+ * ID (part of the merge key: rows of the same ore and quality within the job add up, other jobs stay
+ * apart), the method, the start and the end. Expected yields are per row.
  */
-export async function refineStart(db: Db, actor: Actor, input: RefineStartInput) {
-  const amount = parse(input.amount, 'resource');
-  checkQuality(input.quality);
-  const expected = input.expectedYield === undefined ? null : parse(input.expectedYield, 'resource');
+export async function refineStart(db: Db, actor: Actor, input: RefineStartInput): Promise<RefineJobResult> {
+  if (!input.rows.length || input.rows.length > MAX_REFINE_ROWS) throw new StockError('invalidAmount');
+  const ores = input.rows.map((r) => {
+    checkQuality(r.quality);
+    return { ...r, amount: parse(r.amount, 'resource'), expected: r.expectedYield === undefined ? null : parseYield(r.expectedYield) };
+  });
   const seconds = input.durationSeconds ?? null;
   if (seconds !== null && (!Number.isInteger(seconds) || seconds <= 0 || seconds > MAX_REFINE_SECONDS)) throw new StockError('invalidDuration');
-  return db.transaction(async (tx): Promise<StockResult> => {
+  return db.transaction(async (tx) => {
     await ensureUser(tx, actor.userId);
-    const subject = await subjectInfo(tx, 'resource', input.oreUuid);
-    if (!subject.isOre) throw new StockError('notOre');
     await checkLocation(tx, input.locationUuid);
     // Refineries per UEX; without UEX data yet every selectable location
     const refineries = await refineryLocations(db);
     if (refineries && !refineries.has(input.locationUuid)) throw new StockError('notRefinery');
     const method = input.method ?? null;
     if (method !== null && !(await one(tx, sql`SELECT 1 FROM ext.refining_method WHERE code = ${method}`))) throw new StockError('unknownMethod');
-    const key: BatchKey = {
-      guildId: null, ownerUserId: actor.userId, designation: 'personal', kind: 'resource', resourceUuid: input.oreUuid, itemUuid: null,
-      locationUuid: input.locationUuid, state: 'refining', quality: input.quality,
-    };
-    const batch = (await one<Batch>(tx, sql`
-      INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity,
-        refine_method, refine_started_at, refine_ends_at, refine_expected)
-      VALUES (${keyValues(key)}, ${amount}::numeric, ${method}, now(),
-        now() + ${seconds}::int * interval '1 second', ${expected}::numeric)
-      RETURNING ${BATCH_COLUMNS}`))!;
-    await history(tx, actor, 'refinery', 'start', key, { amount, method, durationSeconds: seconds, expectedYield: expected });
-    return { journal: [await journal(tx, actor, 'add', key, amount)], batch };
+    const jobId = randomUUID();
+    const started = (await one<{ now: string }>(tx, sql`SELECT now()::text AS now`))!.now;
+    const result: RefineJobResult = { jobId, journal: [], batches: [] };
+    for (const row of ores) {
+      const subject = await subjectInfo(tx, 'resource', row.oreUuid);
+      if (!subject.isOre) throw new StockError('notOre');
+      const key: BatchKey = {
+        guildId: null, ownerUserId: actor.userId, designation: 'personal', kind: 'resource', resourceUuid: row.oreUuid, itemUuid: null,
+        locationUuid: input.locationUuid, state: 'refining', quality: row.quality,
+      };
+      const batch = (await one<Batch>(tx, sql`
+        INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity,
+          refine_job, refine_method, refine_started_at, refine_ends_at, refine_expected)
+        VALUES (${keyValues(key)}, ${row.amount}::numeric, ${jobId}, ${method}, ${started}::timestamptz,
+          ${started}::timestamptz + ${seconds}::int * interval '1 second', ${row.expected}::numeric)
+        ON CONFLICT ON CONSTRAINT stock_batch_merge_key
+        DO UPDATE SET quantity = app.stock_batch.quantity + excluded.quantity,
+          refine_expected = CASE WHEN app.stock_batch.refine_expected IS NULL AND excluded.refine_expected IS NULL THEN NULL
+            ELSE coalesce(app.stock_batch.refine_expected, 0) + coalesce(excluded.refine_expected, 0) END
+        RETURNING ${BATCH_COLUMNS}`))!;
+      await history(tx, actor, 'refinery', 'start', key,
+        { amount: row.amount, method, durationSeconds: seconds, expectedYield: row.expected, jobId });
+      result.journal.push(await journal(tx, actor, 'add', key, row.amount));
+      result.batches = [...result.batches.filter((b) => b.id !== batch.id), batch];
+    }
+    return result;
   });
 }
 
-/** Refinery job done: the whole ore batch is consumed, the refined resource is stored at the same location. */
-export async function refineDone(db: Db, actor: Actor, input: { batchId: number; amount: string; quality: number; expected?: string }) {
-  const amount = parse(input.amount, 'resource');
-  checkQuality(input.quality);
-  return db.transaction(async (tx): Promise<StockResult> => {
-    const ore = await lockBatch(tx, input.batchId, input.expected);
-    checkMayChange(actor, ore);
-    if (ore.state !== 'refining') throw new StockError('notRefining');
-    const refined = await one<{ uuid: string | null }>(tx, sql`SELECT refined_uuid AS uuid FROM catalog.resource WHERE uuid = ${ore.resourceUuid}`);
-    if (!refined?.uuid) throw new StockError('notBookable');
+/** A refined amount: like any amount, but 0 is allowed (nothing came out of a tiny ore row). */
+function parseYield(text: string): string {
+  return /^\s*0+(?:[.,]0+)?\s*$/.test(text) ? '0' : parse(text, 'resource');
+}
+
+export interface RefineDoneRow {
+  batchId: number;
+  // Refined SCU as the game shows it ("0": nothing came out)
+  amount: string;
+  // The ore quantity the user saw
+  expected?: string;
+}
+
+/**
+ * Work order done: every ore batch of the job is consumed (all of them, as the game hands out the whole
+ * order), and each row's refined resource is stored at the same location in the ore's quality (the
+ * refinery keeps it). One journal group per job.
+ */
+export async function refineDone(db: Db, actor: Actor, input: { jobId: string; rows: RefineDoneRow[] }): Promise<RefineJobResult> {
+  if (!UUID.test(input.jobId)) throw new StockError('batchNotFound');
+  const results = input.rows.map((r) => ({ ...r, amount: parseYield(r.amount) }));
+  return db.transaction(async (tx) => {
+    const ids = (await rows<{ id: number }>(tx, sql`
+      SELECT id::int AS id FROM app.stock_batch WHERE refine_job = ${input.jobId} ORDER BY id FOR UPDATE`)).map((r) => r.id);
+    if (!ids.length) throw new StockError('batchNotFound');
+    // The request must cover exactly the job's batches (a changed job is refused, not half finished)
+    const asked = new Set(results.map((r) => r.batchId));
+    if (asked.size !== results.length || asked.size !== ids.length || !ids.every((id) => asked.has(id))) throw new StockError('batchChanged');
     const group = randomUUID();
-    const out = await journal(tx, actor, 'refine_out', keyOf(ore), negate(ore.quantity), group);
-    await decrease(tx, ore, ore.quantity);
-    const key: BatchKey = { ...keyOf(ore), resourceUuid: refined.uuid, state: 'stored', quality: input.quality };
-    const batch = await upsert(tx, key, amount);
-    await history(tx, actor, 'refinery', 'done', key, { amount, oreUuid: ore.resourceUuid!, oreAmount: ore.quantity, oreQuality: ore.quality });
-    return { journal: [out, await journal(tx, actor, 'refine_in', key, amount, group)], batch };
+    const result: RefineJobResult = { jobId: input.jobId, journal: [], batches: [] };
+    for (const row of results) {
+      const ore = await lockBatch(tx, row.batchId, row.expected);
+      checkMayChange(actor, ore);
+      if (ore.state !== 'refining') throw new StockError('notRefining');
+      const refined = await one<{ uuid: string | null }>(tx, sql`SELECT refined_uuid AS uuid FROM catalog.resource WHERE uuid = ${ore.resourceUuid}`);
+      if (!refined?.uuid) throw new StockError('notBookable');
+      result.journal.push(await journal(tx, actor, 'refine_out', keyOf(ore), negate(ore.quantity), group));
+      await decrease(tx, ore, ore.quantity);
+      const key: BatchKey = { ...keyOf(ore), resourceUuid: refined.uuid, state: 'stored' };
+      if (row.amount !== '0') {
+        result.batches.push(await upsert(tx, key, row.amount));
+        result.journal.push(await journal(tx, actor, 'refine_in', key, row.amount, group));
+      }
+      await history(tx, actor, 'refinery', 'done', key,
+        { amount: row.amount, oreUuid: ore.resourceUuid!, oreAmount: ore.quantity, oreQuality: ore.quality, jobId: input.jobId });
+    }
+    return result;
   });
 }
 

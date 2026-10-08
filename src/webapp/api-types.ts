@@ -138,12 +138,14 @@ export interface StockBatch {
 }
 
 export interface StockRefine {
+  // The work order: the ore batches of one job share it (method, start and end are the job's)
+  jobId: string;
   // CatalogRefiningMethod.code
   method: string | null;
   // ISO timestamps
   startedAt: string | null;
   endsAt: string | null;
-  // Expected refined SCU (an estimate), exact decimal text
+  // Expected refined SCU of this ore batch (an estimate), exact decimal text
   expectedYield: string | null;
 }
 
@@ -196,24 +198,37 @@ export interface StockMoveRequest {
   toHolderUserId?: string;
 }
 
-// Refinery jobs are always personal (POST /api/refinery/start, /api/refinery/done)
+// Refinery jobs are always personal and always work orders: one station, method and time, several ores
+// (POST /api/refinery/start, /api/refinery/done)
 export interface RefineryStartRequest {
-  oreUuid: string;
   locationUuid: string;
-  quality: number;
-  amount: string;
   // CatalogRefiningMethod.code
   method?: string;
-  // Estimates, prefilled from the method and editable: processing time and refined SCU
+  // Estimate for the whole job, prefilled from the method and editable: processing time
   durationSeconds?: number;
+  // 1 to 30 ores
+  rows: RefineryStartRow[];
+}
+
+export interface RefineryStartRow {
+  oreUuid: string;
+  quality: number;
+  amount: string;
+  // Estimate, prefilled and editable: refined SCU of this ore ("0" allowed)
   expectedYield?: string;
 }
 
+// Finishes the whole job: one row per ore batch of the job (StockRefine.jobId), no more, no less
 export interface RefineryDoneRequest {
+  jobId: string;
+  rows: RefineryDoneRow[];
+}
+
+export interface RefineryDoneRow {
   batchId: number;
-  // The refined quantity and quality as the game shows them
+  // The refined quantity as the game shows it ("0": nothing came out); the quality is the ore's
   amount: string;
-  quality: number;
+  // The ore quantity shown
   expected: string;
 }
 

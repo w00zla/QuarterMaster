@@ -82,9 +82,11 @@ export const stockBatch = app.table('stock_batch', {
   quality: integer('quality').notNull(),
   // SCU for resources, pieces for items
   quantity: quantity('quantity').notNull(),
-  // Refinery jobs only (all NULL for stored stock; NULL on jobs from before migration 0009). The method is an
+  // Refinery jobs only (all NULL for stored stock; NULL on jobs from before migration 0009). A job is a work order:
+  // its ore batches share `refine_job` and carry the same method, start and end. The method is an
   // ext.refining_method code, checked by the stock service (no FK: nothing references schema ext). Ends at and
-  // expected yield are estimates the user may overwrite with the terminal's values.
+  // expected yield (per ore batch) are estimates the user may overwrite with the terminal's values.
+  refineJob: uuid('refine_job'),
   refineMethod: text('refine_method'),
   refineStartedAt: timestamp('refine_started_at', { withTimezone: true }),
   refineEndsAt: timestamp('refine_ends_at', { withTimezone: true }),
@@ -109,14 +111,16 @@ export const stockBatch = app.table('stock_batch', {
     AND ${t.refineEndsAt} IS NULL AND ${t.refineExpected} IS NULL)`),
   check('stock_batch_refine_ends', sql`${t.refineEndsAt} IS NULL OR ${t.refineEndsAt} >= ${t.refineStartedAt}`),
   check('stock_batch_refine_expected', sql`${t.refineExpected} IS NULL OR ${t.refineExpected} >= 0`),
-  // The start time keeps two refinery jobs with the same ore, place and quality apart (stored stock: NULL, merges)
+  check('stock_batch_refine_job_id', sql`(${t.state} = 'refining') = (${t.refineJob} IS NOT NULL)`),
+  // The job keeps two refinery jobs with the same ore, place and quality apart (stored stock: NULL, merges)
   unique('stock_batch_merge_key').on(
-    t.guildId, t.ownerUserId, t.designation, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineStartedAt,
+    t.guildId, t.ownerUserId, t.designation, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineJob,
   ).nullsNotDistinct(),
   index().on(t.guildId, t.resourceUuid),
   index().on(t.guildId, t.itemUuid),
   index().on(t.ownerUserId, t.guildId),
   index().on(t.guildId, t.locationUuid),
+  index().on(t.refineJob),
 ]);
 
 /**

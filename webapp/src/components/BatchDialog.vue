@@ -1,16 +1,16 @@
 <script setup lang="ts">
-// Changes one batch: remove, move, adjust, or finish a refinery job. Two steps: the inputs, then a
+// Changes one batch: remove, move or adjust (finishing a refinery job: RefineryDoneDialog). Two steps: the inputs, then a
 // summary of the change to confirm (every change of existing stock is confirmed). `expected` is the
 // quantity shown, so a batch that changed meanwhile is refused (batchChanged) instead of booked.
 import { computed, ref, watch } from "vue";
 import type {
-  OkResponse, RefineryDoneRequest, StockAdjustRequest, StockBatch, StockMoveRequest, StockRemoveRequest,
+  OkResponse, StockAdjustRequest, StockBatch, StockMoveRequest, StockRemoveRequest,
 } from "../../../src/webapp/api-types";
 import type { IconName } from "../../../adminapp/src/components/Icon.vue";
 import Dropdown from "./Dropdown.vue";
 import { api } from "../api";
 import { locationOptions, locations } from "../catalog";
-import { amountOf, ownerText, qText, qty, qualityOf, unitText } from "../format";
+import { amountOf, ownerText, qText, qty, unitText } from "../format";
 import { t } from "../i18n";
 import { ensureMembers, memberOptions, members, orgOf, writable } from "../orgs";
 import { me } from "../session";
@@ -18,7 +18,7 @@ import { toast, toastError } from "../toasts";
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import Picker from "./Picker.vue";
 
-export type BatchAction = "remove" | "move" | "adjust" | "done";
+export type BatchAction = "remove" | "move" | "adjust";
 
 const props = defineProps<{ batch: StockBatch; action: BatchAction }>();
 const emit = defineEmits<{ close: []; done: [] }>();
@@ -30,18 +30,14 @@ const busy = ref(false);
 
 // "Everything" is the default for remove and move
 const all = ref(props.action === "remove" || props.action === "move");
-// A finished refinery job starts from its expected yield (an estimate: the user enters what the game shows)
-const amount = ref(props.action === "done" ? b.refine?.expectedYield ?? "" : "");
-const quality = ref("");
+const amount = ref("");
 const location = ref<string | null>(b.locationUuid);
 // Move target: personal batch "stay" | guildId (donation); org batch "org" | "personal"
 const target = ref(isOrg ? "org" : "stay");
 const holder = ref<string | null>(isOrg ? b.holderUserId : (me.value?.userId ?? null));
 
-// A refinery job's result is a refined resource: always SCU
-const unit = computed(() => (props.action === "done" ? "SCU" : b.unit));
+const unit = computed(() => b.unit);
 const amt = computed(() => amountOf(amount.value, unit.value));
-const q = computed(() => qualityOf(quality.value));
 
 const targetOptions = computed(() => isOrg
   ? [{ value: "org", label: t("stock.stayOrg", { org: orgOf(b.guildId)?.name ?? "Org" }) }, { value: "personal", label: t("stock.toPersonal") }]
@@ -74,7 +70,6 @@ const valid = computed(() => {
     // "0" empties the batch: allowed here, unlike everywhere else
     case "adjust": return amount.value.trim() !== "" && (!!amt.value || /^0+([.,]0*)?$/.test(amount.value.trim()));
     case "move": return (all.value || !!amt.value) && !!location.value && moveChanges.value && (!pickHolder.value || !!holder.value);
-    case "done": return !!amt.value && q.value !== null;
   }
   return false;
 });
@@ -93,9 +88,9 @@ const targetText = computed(() => {
 });
 
 const titles: Record<BatchAction, Parameters<typeof t>[0]> = {
-  remove: "stock.remove", move: "stock.move", adjust: "stock.adjust", done: "refinery.doneTitle",
+  remove: "stock.remove", move: "stock.move", adjust: "stock.adjust",
 };
-const icons: Record<BatchAction, IconName> = { remove: "trash", move: "arrow-right", adjust: "settings", done: "check" };
+const icons: Record<BatchAction, IconName> = { remove: "trash", move: "arrow-right", adjust: "settings" };
 
 const buttons = computed<ConfirmButton[]>(() => step.value === "input"
   ? [
@@ -137,7 +132,7 @@ async function book() {
       const body: StockAdjustRequest = { batchId: b.id, amount: typed, expected: b.quantity, guildId: guildOf() };
       await api<OkResponse>("/stock/adjust", { method: "POST", body });
       toast(t("stock.adjusted", { what: `${b.quantity} → ${qty(counted.value, b.unit)} ${b.material} · ${qText(b.quality)} · ${b.location}` }));
-    } else if (props.action === "move") {
+    } else {
       const body: StockMoveRequest = { batchId: b.id, amount: all.value ? null : typed, expected: b.quantity };
       if (location.value !== b.locationUuid) body.toLocationUuid = location.value!;
       if (isOrg) {
@@ -151,10 +146,6 @@ async function book() {
       }
       await api<OkResponse>("/stock/move", { method: "POST", body });
       toast(t("stock.moved", { what: `${amountText.value} ${b.material} · ${qText(b.quality)} → ${targetText.value}` }));
-    } else {
-      const body: RefineryDoneRequest = { batchId: b.id, amount: typed, quality: q.value!, expected: b.quantity };
-      await api<OkResponse>("/refinery/done", { method: "POST", body });
-      toast(t("refinery.finished", { what: `${qty(amt.value!, "SCU")} · ${qText(q.value)} · ${b.location}` }));
     }
     emit("done");
     emit("close");
@@ -207,19 +198,6 @@ async function book() {
         </label>
         <div v-if="!moveChanges" class="hint-line">{{ t("stock.nothingToMove") }}</div>
       </template>
-      <template v-if="action === 'done'">
-        <label class="field">
-          {{ t("field.amount") }}
-          <span class="with-unit">
-            <input v-model="amount" class="input" :class="{ invalid: amount.trim() !== '' && !amt }" type="text" inputmode="decimal" />
-            <span class="unit">{{ unitText("SCU") }}</span>
-          </span>
-        </label>
-        <label class="field">
-          {{ t("field.quality") }}
-          <input v-model="quality" class="input" :class="{ invalid: quality.trim() !== '' && q === null }" type="text" inputmode="numeric" placeholder="0–1000" />
-        </label>
-      </template>
     </div>
 
     <div v-else class="summary">
@@ -231,14 +209,10 @@ async function book() {
         <span class="big">{{ qty(b.quantity, b.unit) }} → {{ qty(counted, b.unit) }} {{ b.material }}</span>
         <span class="dim">{{ qText(b.quality) }} · {{ b.location }} · {{ ownerText(b) }}</span>
       </template>
-      <template v-else-if="action === 'move'">
+      <template v-else>
         <span class="big">{{ amountText }} {{ b.material }} · {{ qText(b.quality) }}</span>
         <span><span class="dim">{{ t("stock.from") }}:</span> {{ b.location }} · {{ ownerText(b) }}</span>
         <span><span class="dim">{{ t("stock.to") }}:</span> {{ targetText }}</span>
-      </template>
-      <template v-else>
-        <span class="big">{{ b.material }} · {{ qty(b.quantity, b.unit) }} · {{ qText(b.quality) }}</span>
-        <span><span class="dim">{{ t("refinery.result") }}:</span> {{ qty(amt ?? "", "SCU") }} · {{ qText(q) }} · {{ b.location }} · {{ t("stock.pers") }}</span>
       </template>
     </div>
   </ConfirmDialog>

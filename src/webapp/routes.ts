@@ -14,7 +14,7 @@ import { getBlueprint, getBlueprints, getItem, getItems, getResource, getResourc
 import { formatAmount } from '../stock/amount.ts';
 import { findStock, locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
 import * as stock from '../stock/service.ts';
-import { StockError, type Actor } from '../stock/service.ts';
+import { MAX_REFINE_ROWS, StockError, type Actor } from '../stock/service.ts';
 import type { Source } from '../history/record.ts';
 import { listHistory } from './history.ts';
 import { refineryMatch, refiningMethods } from '../ext/refineries.ts';
@@ -55,10 +55,13 @@ const schemas = {
     toLocationUuid: uuid.optional(), toOrg: z.boolean().optional(), toHolderUserId: snowflake.optional(),
   }).strict(),
   refineStart: z.object({
-    oreUuid: uuid, locationUuid: uuid, quality, amount,
-    method: z.string().regex(/^[A-Z]{3}$/).optional(), durationSeconds: z.number().int().optional(), expectedYield: amount.optional(),
+    locationUuid: uuid, method: z.string().regex(/^[A-Z]{3}$/).optional(), durationSeconds: z.number().int().optional(),
+    rows: z.array(z.object({ oreUuid: uuid, quality, amount, expectedYield: amount.optional() }).strict()).min(1).max(MAX_REFINE_ROWS),
   }).strict(),
-  refineDone: z.object({ batchId: z.number().int().positive(), amount, quality, expected: amount }).strict(),
+  refineDone: z.object({
+    jobId: uuid,
+    rows: z.array(z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict()).min(1).max(MAX_REFINE_ROWS),
+  }).strict(),
   blueprint: z.object({ uuid }).strict(),
   history: z.object({
     lang: z.string().optional(),
@@ -162,6 +165,7 @@ function toBatch(p: PickableBatch, viewer: string, officerIn: Set<string>): Stoc
     holderName: p.holderName,
     canChange: b.designation === 'personal' ? b.ownerUserId === viewer : officerIn.has(b.guildId!),
     refine: p.refine && {
+      jobId: p.refine.jobId,
       method: p.refine.method,
       startedAt: p.refine.startedAt && new Date(p.refine.startedAt).toISOString(),
       endsAt: p.refine.endsAt && new Date(p.refine.endsAt).toISOString(),
@@ -349,7 +353,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         count(*) FILTER (WHERE b.state = 'stored')::int AS batches,
         coalesce(sum(b.quantity) FILTER (WHERE b.state = 'stored' AND b.kind = 'resource'), 0)::text AS scu,
         coalesce(sum(b.quantity) FILTER (WHERE b.state = 'stored' AND b.kind = 'item'), 0)::text AS pieces,
-        count(*) FILTER (WHERE b.state = 'refining')::int AS refining
+        count(DISTINCT b.refine_job)::int AS refining
       FROM app.stock_batch b
       WHERE (b.guild_id IS NULL AND b.owner_user_id = ${me})
         OR b.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${me} AND active)

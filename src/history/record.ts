@@ -23,6 +23,8 @@ export interface HistoryDetails {
   method?: string | null;
   durationSeconds?: number | null;
   expectedYield?: string | null;
+  // Refinery start and done: the work order
+  jobId?: string;
   // Refinery done: the ore that went in
   oreUuid?: string;
   oreAmount?: string;
