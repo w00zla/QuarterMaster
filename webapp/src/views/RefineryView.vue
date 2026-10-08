@@ -15,7 +15,7 @@ import RangeSlider from "../components/RangeSlider.vue";
 import RefineryDoneDialog from "../components/RefineryDoneDialog.vue";
 import RefineryStartForm from "../components/RefineryStartForm.vue";
 import { signedBonus, yieldValue } from "../catalog";
-import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
+import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
 import { coalesced, onServerMessage } from "../realtime";
 import { toastError } from "../toasts";
@@ -203,7 +203,7 @@ const bonusText = (b: StockBatch) => {
           <button v-if="materialText" type="button" class="clear" @click="materialText = ''"><Icon name="close" :size="12" /></button>
         </label>
         <Dropdown v-model="locationFilter" variant="chip" :options="locationOptions" />
-        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :label="t('field.quality')" />
+        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :detail="tierQualities" :label="t('field.quality')" />
         <span class="spacer" />
         <span class="head-count">{{ filtered.length }} / {{ jobs.length }}</span>
       </div>

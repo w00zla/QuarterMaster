@@ -35,6 +35,13 @@ export const Q_TIER_MAX = 6;
 /** A tier's mark, see qTier */
 export const tierMark = (tier: number) => (tier === 0 ? "◌" : tier === Q_TIER_MAX ? "♛" : "★".repeat(tier));
 
+/** The qualities of a tier range: "0–1000", "600–899", "1000" */
+export function tierQualities(low: number, high: number): string {
+  const from = low === 0 ? 0 : low === Q_TIER_MAX ? 1000 : 400 + 100 * low;
+  const to = high === 0 ? 499 : high === Q_TIER_MAX ? 1000 : 499 + 100 * high;
+  return from === to ? String(from) : `${from}–${to}`;
+}
+
 /** The quality with its level: "◌ 480", "★★★ 720", "♛ 1000" */
 export const qText = (q: number | null) => (q === null ? "" : `${qMark(q)} ${q}`);
 

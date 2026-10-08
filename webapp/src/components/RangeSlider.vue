@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // A min-max slider: two native range inputs on one track (only their thumbs take the pointer), the
 // chosen range filled in between. Fixed width, the value text keeps its width too (it reserves the
-// widest text any value can give). `format` turns a value into its text, e.g. a quality tier.
+// widest text any value can give). `format` turns a value into its text, e.g. a quality tier; `detail`
+// adds what the range means in parentheses, e.g. its qualities.
 import { computed } from "vue";
 
 const props = withDefaults(
-  defineProps<{ min: number; max: number; step?: number; label: string; format?: (v: number) => string }>(),
-  { step: 10, format: (v: number) => String(v) },
+  defineProps<{
+    min: number; max: number; step?: number; label: string; format?: (v: number) => string; detail?: (low: number, high: number) => string;
+  }>(),
+  { step: 10, format: (v: number) => String(v), detail: undefined },
 );
 const low = defineModel<number>("low", { required: true });
 const high = defineModel<number>("high", { required: true });
@@ -15,11 +18,14 @@ const setLow = (v: number) => (low.value = Math.min(v, high.value));
 const setHigh = (v: number) => (high.value = Math.max(v, low.value));
 const pct = (v: number) => ((v - props.min) / (props.max - props.min)) * 100;
 const fill = computed(() => ({ left: `${pct(low.value)}%`, width: `${pct(high.value) - pct(low.value)}%` }));
-const text = computed(() => `${props.format(low.value)}–${props.format(high.value)}`);
+const textOf = (lo: number, hi: number) => `${props.format(lo)}–${props.format(hi)}${props.detail ? ` (${props.detail(lo, hi)})` : ""}`;
+const text = computed(() => textOf(low.value, high.value));
 const widest = computed(() => {
   let w = "";
-  for (let v = props.min; v <= props.max; v += props.step) if (props.format(v).length > w.length) w = props.format(v);
-  return `${w}–${w}`;
+  for (let lo = props.min; lo <= props.max; lo += props.step) {
+    for (let hi = lo; hi <= props.max; hi += props.step) if (textOf(lo, hi).length > w.length) w = textOf(lo, hi);
+  }
+  return w;
 });
 </script>
 

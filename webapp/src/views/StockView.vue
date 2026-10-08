@@ -21,7 +21,7 @@ import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import StockFind from "../components/StockFind.vue";
-import { compareBatches, Q_TIER_MAX, qMark, qTier, qty, tierMark } from "../format";
+import { compareBatches, Q_TIER_MAX, qMark, qTier, qty, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf, writable } from "../orgs";
 import { coalesced, onServerMessage } from "../realtime";
@@ -217,7 +217,7 @@ function open(batch: StockBatch, action: BatchAction) {
         </label>
         <Dropdown v-model="locationFilter" variant="chip" :options="locationOptions" />
         <Dropdown v-if="org" v-model="holder" variant="chip" :options="holderOptions" />
-        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :label="t('field.quality')" />
+        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :detail="tierQualities" :label="t('field.quality')" />
         <span class="spacer" />
         <span class="head-count">{{ filtered.length }} / {{ data?.batches.length ?? 0 }}</span>
       </div>
