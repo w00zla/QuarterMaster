@@ -272,16 +272,28 @@ export interface BlueprintRequest {
 // --- summary (GET /api/summary) for the overview --------------------------------------------------
 
 export interface StockMetrics {
-  // Distinct materials and batches in stored stock
-  materials: number;
-  batches: number;
-  // Stored resources in SCU and items in pieces, exact decimal text
-  scu: string;
-  pieces: string;
+  // Stored stock per kind: distinct materials, the amount (resources in SCU, items in pieces; exact
+  // decimal text) and the distinct locations
+  resources: { kinds: number; scu: string; locations: number };
+  items: { kinds: number; pieces: string; locations: number };
+}
+
+export interface RefiningMetrics {
+  jobs: number;
+  // Sum of the ore rows' expected yields in SCU; null when no row has one, partial when some lack it
+  expected: string | null;
+  expectedPartial: boolean;
+  // Distinct stations of the running jobs
+  locations: number;
+  // End of every job that has one (ISO), for the countdown to the next one
+  endsAt: string[];
 }
 
 export interface SummaryResponse {
-  personal: StockMetrics & { refiningJobs: number; blueprints: number };
+  // Blueprints a player can unlock: not retired, not default, in a reward pool of the game data.
+  // The registered counts are not capped by it (a higher count means the game data is incomplete)
+  obtainableBlueprints: number;
+  personal: StockMetrics & { refining: RefiningMetrics; blueprints: number };
   // Your active memberships, in the order of /api/me
   orgs: Array<StockMetrics & { guildId: string; members: number; blueprints: number }>;
 }

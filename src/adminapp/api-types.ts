@@ -96,6 +96,9 @@ export interface Overview {
     texts: { entity: string; total: number; missingInLang: number; missingEverywhere: number }[];
     // Neither default nor in any reward pool of the game data
     noSourceBlueprints: number;
+    // Of those, the ones users registered anyway (bot, web app, companion): proof the game data
+    // misses a source. Most users first
+    registeredNoSource: { uuid: string; name: string; users: number }[];
     noOutputBlueprints: number;
     // Resources no active recipe uses, and how many of them are ores
     unusedResources: number;

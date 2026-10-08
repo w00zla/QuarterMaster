@@ -77,6 +77,14 @@ const priority = (min: number, max: number) => (min === max ? String(min) : `${m
           <dl class="kv pad">
             <dt>Without a known source <HelpTip :text="HELP.noSource" /></dt>
             <dd>{{ data.gaps.noSourceBlueprints }}</dd>
+            <dt>… registered by users <HelpTip :text="HELP.registeredNoSource" /></dt>
+            <dd :class="{ faint: !data.gaps.registeredNoSource.length }">
+              <template v-if="!data.gaps.registeredNoSource.length">0</template>
+              <template v-for="(b, i) in data.gaps.registeredNoSource" :key="b.uuid">
+                <template v-if="i">, </template>
+                <RouterLink :to="`/blueprints/${b.uuid}`">{{ b.name }}</RouterLink> <span class="faint">({{ b.users }})</span>
+              </template>
+            </dd>
             <dt>Default blueprints <HelpTip :text="HELP.defaultBlueprint" /></dt>
             <dd>{{ data.facts.defaultBlueprints }}</dd>
             <dt>Quality-gated <HelpTip :text="HELP.qualityGated" /></dt>

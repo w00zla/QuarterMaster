@@ -14,6 +14,7 @@ import { ensureGuild, updateGuildSettings, type GuildSettings } from '../src/bot
 import type {
   BlueprintInfo, CatalogResponse, HistoryResponse, MaterialInfo, MeResponse, OrgMember, StockBatch, StockListResponse, SummaryResponse,
 } from '../src/webapp/api-types.ts';
+import { getOverview } from '../src/adminapp/queries.ts';
 import { createApp } from '../src/webapp/app.ts';
 import type { DiscordLogin } from '../src/webapp/discord.ts';
 import { createSession } from '../src/webapp/session.ts';
@@ -215,20 +216,48 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   });
 
   it('summary: personal and per org, consistent with the lists', async () => {
-    await post(MIA, '/refinery/start', { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 100, amount: '2' }, { oreUuid: U.ore, quality: 200, amount: '1' }] });
+    await post(MIA, '/refinery/start', {
+      locationUuid: U.station, durationSeconds: 3600,
+      rows: [{ oreUuid: U.ore, quality: 100, amount: '2', expectedYield: '0.75' }, { oreUuid: U.ore, quality: 200, amount: '1' }],
+    });
     const sum = (await get<SummaryResponse>(MIA, '/summary')).body;
     const mine = await personal(MIA);
     const stored = mine.batches.filter((b) => b.state === 'stored');
-    assert.deepEqual(sum.personal, {
-      materials: new Set(stored.map((b) => b.subjectUuid)).size, batches: stored.length,
-      scu: stored.filter((b) => b.unit === 'SCU').reduce((t, b) => t + Number(b.quantity), 0).toString(),
-      pieces: '0', refiningJobs: 1, blueprints: 0,
+    const res = stored.filter((b) => b.unit === 'SCU');
+    assert.deepEqual(sum.personal.resources, {
+      kinds: new Set(res.map((b) => b.subjectUuid)).size,
+      scu: res.reduce((t, b) => t + Number(b.quantity), 0).toString(),
+      locations: new Set(res.map((b) => b.locationUuid)).size,
     });
+    assert.deepEqual(sum.personal.items, { kinds: 0, pieces: '0', locations: 0 });
+    const job = mine.batches.find((b) => b.state === 'refining')!;
+    assert.deepEqual(sum.personal.refining, { jobs: 1, expected: '0.75', expectedPartial: true, locations: 1, endsAt: [job.refine!.endsAt] });
+    assert.equal(sum.personal.blueprints, 0);
+    // The fixture's one pool rewards one blueprint
+    assert.equal(sum.obtainableBlueprints, 1);
     const orgList = await org(MIA);
     assert.deepEqual(sum.orgs.map((o) => o.guildId), [G]);
-    assert.deepEqual([sum.orgs[0]!.members, sum.orgs[0]!.blueprints, sum.orgs[0]!.batches], [3, 1, orgList.batches.length]);
+    assert.deepEqual([sum.orgs[0]!.members, sum.orgs[0]!.blueprints], [3, 1]);
+    const orgRes = orgList.batches.filter((b) => b.unit === 'SCU');
+    assert.equal(sum.orgs[0]!.resources.scu, orgRes.reduce((t, b) => t + Number(b.quantity), 0).toString());
     // Without any org: personal only
     assert.deepEqual((await get<SummaryResponse>(SOLO, '/summary')).body.orgs, []);
+  });
+
+  it('admin overview: registered blueprints the game data has no source for', async () => {
+    // Blueprint 2 is in the fixture's reward pool: no gap
+    assert.equal((await getOverview(db, 'en')).gaps.registeredNoSource.length, 0);
+    const n = (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM app.user_blueprint WHERE blueprint_uuid = ${U.blueprint2}`))[0]!.n;
+    assert.ok(n > 0);
+    // Without the pool it has no known source, but users registered it
+    await db.execute(sql`UPDATE catalog.raw_record SET retired_at = now() WHERE type = 'BlueprintPoolRecord'`);
+    try {
+      const gaps = (await getOverview(db, 'en')).gaps;
+      assert.equal(gaps.noSourceBlueprints, 1);
+      assert.deepEqual(gaps.registeredNoSource.map((b) => [b.uuid, b.users]), [[U.blueprint2, n]]);
+    } finally {
+      await db.execute(sql`UPDATE catalog.raw_record SET retired_at = NULL WHERE type = 'BlueprintPoolRecord'`);
+    }
   });
 
   it('info cards: blueprint with its recipe, resource or item, no raw records', async () => {

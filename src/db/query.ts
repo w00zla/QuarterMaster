@@ -20,6 +20,12 @@ export function withCategoryLabel<T extends { category: string | null; categoryL
   return { ...row, categoryGroup: group, categoryLabel: row.categoryLabel ?? (group ? labelFromKey(group) : null) };
 }
 
+/** Record paths of every blueprint some reward pool of the game data hands out (compare with `raw_record.path`). */
+export const REWARD_POOL_PATHS = sql`(
+  SELECT lower(substring(x->>'blueprintRecord' from 'libs/foundry/.*'))
+  FROM catalog.raw_record p, jsonb_array_elements(p.data->'blueprintRewards') x
+  WHERE p.type = 'BlueprintPoolRecord' AND p.retired_at IS NULL AND x->>'blueprintRecord' IS NOT NULL)`;
+
 /** Display name of the item's class (`alias` = the joined item): app text, else the English class. */
 export const itemClassText = (lang: string, alias: string) => sql`coalesce(
   ${locText(lang, sql.raw(itemClassKeySql(`${alias}.item_class`)))}, ${sql.raw(alias)}.item_class)`;

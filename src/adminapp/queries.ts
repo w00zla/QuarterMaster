@@ -2,7 +2,7 @@
 // requested language, then English, then the technical name.
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
-import { categoryText, itemClassText, locText as text, one, rows, withCategoryLabel } from '../db/query.ts';
+import { REWARD_POOL_PATHS, categoryText, itemClassText, locText as text, one, rows, withCategoryLabel } from '../db/query.ts';
 import {
   BLUEPRINT_CATEGORY_GROUP_SQL, BLUEPRINT_CATEGORY_KEY_PREFIX, ITEM_SUBTYPE_KEY_PREFIX, ITEM_TYPE_KEY_PREFIX, typeLabel,
 } from '../catalog/labels.ts';
@@ -108,13 +108,17 @@ export async function getOverview(db: Db, lang: string): Promise<Overview> {
       count(*) FILTER (WHERE k.key IS NULL OR NOT k.in_lang)::int AS "missingInLang",
       count(*) FILTER (WHERE k.key IS NULL)::int AS "missingEverywhere"
     FROM t LEFT JOIN k ON k.key = t.key GROUP BY entity ORDER BY "missingEverywhere" DESC, "missingInLang" DESC, entity`);
-  const usage = await one<Omit<Overview['gaps'], 'lang' | 'texts'>>(db, sql`
+  const registeredNoSource = await rows<Overview['gaps']['registeredNoSource'][number]>(db, sql`
+    SELECT b.uuid, coalesce(${text(lang, sql`i.name_key`)}, i.class_name, b.key) AS name, count(*)::int AS users
+    FROM app.user_blueprint ub JOIN catalog.blueprint b ON b.uuid = ub.blueprint_uuid
+    JOIN catalog.raw_record r ON r.uuid = b.uuid
+    LEFT JOIN catalog.item i ON i.uuid = b.output_item_uuid
+    WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path NOT IN ${REWARD_POOL_PATHS}
+    GROUP BY b.uuid, 2 ORDER BY users DESC, name`);
+  const usage = await one<Omit<Overview['gaps'], 'lang' | 'texts' | 'registeredNoSource'>>(db, sql`
     SELECT
       (SELECT count(*) FROM catalog.blueprint b JOIN catalog.raw_record r ON r.uuid = b.uuid
-        WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path NOT IN (
-          SELECT lower(substring(x->>'blueprintRecord' from 'libs/foundry/.*'))
-          FROM catalog.raw_record p, jsonb_array_elements(p.data->'blueprintRewards') x
-          WHERE p.type = 'BlueprintPoolRecord' AND p.retired_at IS NULL AND x->>'blueprintRecord' IS NOT NULL))::int AS "noSourceBlueprints",
+        WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path NOT IN ${REWARD_POOL_PATHS})::int AS "noSourceBlueprints",
       (SELECT count(*) FROM catalog.blueprint WHERE retired_at IS NULL AND output_item_uuid IS NULL)::int AS "noOutputBlueprints",
       count(*) FILTER (WHERE NOT used)::int AS "unusedResources",
       count(*) FILTER (WHERE NOT used AND is_ore)::int AS "unusedOres"
@@ -151,6 +155,7 @@ export async function getOverview(db: Db, lang: string): Promise<Overview> {
       lang,
       texts,
       noSourceBlueprints: usage?.noSourceBlueprints ?? 0,
+      registeredNoSource,
       noOutputBlueprints: usage?.noOutputBlueprints ?? 0,
       unusedResources: usage?.unusedResources ?? 0,
       unusedOres: usage?.unusedOres ?? 0,

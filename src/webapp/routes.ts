@@ -7,6 +7,7 @@ import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
+import { REWARD_POOL_PATHS } from '../db/query.ts';
 import { toMicros, formatMicros } from '../planner/plan.ts';
 import { blueprintCatalog, ownedBlueprints, addBlueprint, removeBlueprint } from '../bot/blueprints.ts';
 import { loadPlannerData } from '../planner/load.ts';
@@ -101,6 +102,13 @@ const blueprintTypes = importCache(async (db: Db, lang: string) =>
 const itemTypes = importCache(async (db: Db, lang: string) =>
   new Map((await getItems(db, lang)).map((r) => [r.uuid, { type: r.type, typeLabel: r.typeLabel }])));
 const noType = { type: null, typeLabel: null };
+
+// Blueprints a player can unlock: not retired, not default, in a reward pool (the admin overview's
+// "no source" count is the rest); language-independent, cached under one key
+const obtainableBlueprints = importCache(async (db: Db) =>
+  (await db.execute<{ n: number }>(sql`
+    SELECT count(*)::int AS n FROM catalog.blueprint b JOIN catalog.raw_record r ON r.uuid = b.uuid
+    WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path IN ${REWARD_POOL_PATHS}`))[0]?.n ?? 0);
 
 const langOf = (c: Context): Lang => (c.req.query('lang') === 'de' ? 'de' : 'en');
 const unitOf = (kind: 'resource' | 'item'): 'SCU' | 'pcs' => (kind === 'resource' ? 'SCU' : 'pcs');
@@ -346,17 +354,30 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
   api.get('/summary', async (c) => {
     const me = c.get('session').userId;
     // Stored stock per scope: personal (guild NULL, yours) and every org you are an active member of
-    const stock = await db.execute<{ guild_id: string | null; materials: number; batches: number; scu: string; pieces: string; refining: number }>(sql`
+    const stock = await db.execute<{
+      guild_id: string | null; resources: number; scu: string; resource_locations: number;
+      items: number; pieces: string; item_locations: number;
+    }>(sql`
       SELECT b.guild_id,
-        count(DISTINCT coalesce(b.resource_uuid, b.item_uuid)) FILTER (WHERE b.state = 'stored')::int AS materials,
-        count(*) FILTER (WHERE b.state = 'stored')::int AS batches,
-        coalesce(sum(b.quantity) FILTER (WHERE b.state = 'stored' AND b.kind = 'resource'), 0)::text AS scu,
-        coalesce(sum(b.quantity) FILTER (WHERE b.state = 'stored' AND b.kind = 'item'), 0)::text AS pieces,
-        count(DISTINCT b.refine_job)::int AS refining
+        count(DISTINCT b.resource_uuid)::int AS resources,
+        coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'resource'), 0)::text AS scu,
+        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'resource')::int AS resource_locations,
+        count(DISTINCT b.item_uuid)::int AS items,
+        coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'item'), 0)::text AS pieces,
+        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'item')::int AS item_locations
       FROM app.stock_batch b
-      WHERE (b.guild_id IS NULL AND b.owner_user_id = ${me})
-        OR b.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${me} AND active)
+      WHERE b.state = 'stored' AND ((b.guild_id IS NULL AND b.owner_user_id = ${me})
+        OR b.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${me} AND active))
       GROUP BY b.guild_id`);
+    // Refinery jobs are personal only
+    const [refining] = await db.execute<{ jobs: number; expected: string | null; partial: boolean; locations: number; ends: string[] }>(sql`
+      SELECT count(DISTINCT refine_job)::int AS jobs,
+        sum(refine_expected)::text AS expected,
+        coalesce(bool_or(refine_expected IS NULL), false) AS partial,
+        count(DISTINCT location_uuid)::int AS locations,
+        coalesce(array_agg(DISTINCT to_json(refine_ends_at)#>>'{}') FILTER (WHERE refine_ends_at IS NOT NULL), '{}') AS ends
+      FROM app.stock_batch
+      WHERE state = 'refining' AND guild_id IS NULL AND owner_user_id = ${me}`);
     const orgs = await db.execute<{ guild_id: string; members: number; blueprints: number }>(sql`
       SELECT o.guild_id,
         (SELECT count(*) FROM app.member m WHERE m.guild_id = o.guild_id AND m.active)::int AS members,
@@ -367,10 +388,25 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const [own] = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM app.user_blueprint WHERE user_id = ${me}`);
     const metrics = (guildId: string | null): StockMetrics => {
       const s = stock.find((r) => r.guild_id === guildId);
-      return { materials: s?.materials ?? 0, batches: s?.batches ?? 0, scu: formatAmount(s?.scu ?? '0'), pieces: formatAmount(s?.pieces ?? '0') };
+      return {
+        resources: { kinds: s?.resources ?? 0, scu: formatAmount(s?.scu ?? '0'), locations: s?.resource_locations ?? 0 },
+        items: { kinds: s?.items ?? 0, pieces: formatAmount(s?.pieces ?? '0'), locations: s?.item_locations ?? 0 },
+      };
     };
     return c.json({
-      personal: { ...metrics(null), refiningJobs: stock.find((r) => r.guild_id === null)?.refining ?? 0, blueprints: own?.n ?? 0 },
+      obtainableBlueprints: await obtainableBlueprints(db, ''),
+      personal: {
+        ...metrics(null),
+        refining: {
+          jobs: refining?.jobs ?? 0,
+          expected: refining?.expected == null ? null : formatAmount(refining.expected),
+          // Partial only next to a sum: without any estimate there is nothing to call a minimum
+          expectedPartial: refining?.expected != null && refining.partial,
+          locations: refining?.locations ?? 0,
+          endsAt: (refining?.ends ?? []).map((e) => new Date(e).toISOString()).sort(),
+        },
+        blueprints: own?.n ?? 0,
+      },
       orgs: orgs.map((o) => ({ guildId: o.guild_id, ...metrics(o.guild_id), members: o.members, blueprints: o.blueprints })),
     } satisfies SummaryResponse);
   });

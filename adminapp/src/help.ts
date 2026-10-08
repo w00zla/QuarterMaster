@@ -29,6 +29,7 @@ export const HELP = {
   qualityGated: "Recipes where at least one material needs a minimum quality.",
   topMaterials: "Resources and items needed by the most active recipes.",
   noSource: "Blueprints that are neither default nor in any reward pool of the game data. They may still be handed out by the game servers; the client data does not say.",
+  registeredNoSource: "Blueprints without a known source that users registered anyway (bot, web app, companion app), with the number of users in parentheses. Each one shows the game data misses a source.",
   gaps: "Names without text: none in the selected language (shown in English instead) or none at all (shown by their technical name). Plus what no recipe uses.",
   unusedResources: "Resources no active blueprint needs. Ores are among them: recipes take the refined material.",
 
