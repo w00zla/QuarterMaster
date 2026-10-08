@@ -253,9 +253,10 @@ const bonusText = (b: StockBatch) => {
 </template>
 
 <style scoped>
-/* As in the stock table: an ore's name and total over the whole row */
+/* The work order over its ores: station, totals, time left */
 .group-row {
   background: var(--bg-surface-2);
+  color: var(--text-2);
 }
 
 .group-name {
@@ -272,6 +273,8 @@ const bonusText = (b: StockBatch) => {
   gap: 8px;
   min-width: 0;
   padding-left: 22px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .type-icon {
@@ -281,7 +284,11 @@ const bonusText = (b: StockBatch) => {
 
 .group-name,
 .group-total {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.group-total {
   font-weight: 600;
 }
 

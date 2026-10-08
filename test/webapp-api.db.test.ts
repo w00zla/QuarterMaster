@@ -231,7 +231,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     });
     assert.deepEqual(sum.personal.items, { kinds: 0, pieces: '0', locations: 0 });
     const job = mine.batches.find((b) => b.state === 'refining')!;
-    assert.deepEqual(sum.personal.refining, { jobs: 1, expected: '0.75', expectedPartial: true, locations: 1, endsAt: [job.refine!.endsAt] });
+    assert.deepEqual(sum.personal.refining, { jobs: 1, expected: '0.75', locations: 1, endsAt: [job.refine!.endsAt] });
     assert.equal(sum.personal.blueprints, 0);
     // The fixture's one pool rewards one blueprint
     assert.equal(sum.obtainableBlueprints, 1);

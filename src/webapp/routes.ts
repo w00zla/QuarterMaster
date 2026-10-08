@@ -370,10 +370,9 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         OR b.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${me} AND active))
       GROUP BY b.guild_id`);
     // Refinery jobs are personal only
-    const [refining] = await db.execute<{ jobs: number; expected: string | null; partial: boolean; locations: number; ends: string[] }>(sql`
+    const [refining] = await db.execute<{ jobs: number; expected: string | null; locations: number; ends: string[] }>(sql`
       SELECT count(DISTINCT refine_job)::int AS jobs,
         sum(refine_expected)::text AS expected,
-        coalesce(bool_or(refine_expected IS NULL), false) AS partial,
         count(DISTINCT location_uuid)::int AS locations,
         coalesce(array_agg(DISTINCT to_json(refine_ends_at)#>>'{}') FILTER (WHERE refine_ends_at IS NOT NULL), '{}') AS ends
       FROM app.stock_batch
@@ -400,8 +399,6 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         refining: {
           jobs: refining?.jobs ?? 0,
           expected: refining?.expected == null ? null : formatAmount(refining.expected),
-          // Partial only next to a sum: without any estimate there is nothing to call a minimum
-          expectedPartial: refining?.expected != null && refining.partial,
           locations: refining?.locations ?? 0,
           endsAt: (refining?.ends ?? []).map((e) => new Date(e).toISOString()).sort(),
         },

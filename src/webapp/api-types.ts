@@ -280,9 +280,8 @@ export interface StockMetrics {
 
 export interface RefiningMetrics {
   jobs: number;
-  // Sum of the ore rows' expected yields in SCU; null when no row has one, partial when some lack it
+  // Sum of the ore rows' expected yields in SCU; null when no row has one
   expected: string | null;
-  expectedPartial: boolean;
   // Distinct stations of the running jobs
   locations: number;
   // End of every job that has one (ISO), for the countdown to the next one
