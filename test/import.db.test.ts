@@ -2,9 +2,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { connect, type Db } from '../src/db/client.ts';
+import { type Db } from '../src/db/client.ts';
+import { connectAs, prepareDb } from './roles.ts';
 import { runImport, type ImportOptions } from '../src/catalog/import/apply.ts';
 import { parseIniFile, runLocImport, runLocRemove, type LocImportOptions } from '../src/catalog/import/loc-import.ts';
 import { loadPlannerData } from '../src/planner/load.ts';
@@ -25,14 +24,8 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     Number((await db.execute<{ n: string }>(sql.raw(`SELECT count(*)::text AS n FROM catalog.${table} WHERE ${where}`)))[0]!.n);
 
   before(async () => {
-    ({ db, close } = connect(url));
-    await db.execute(sql`DROP SCHEMA IF EXISTS ext CASCADE`);
-    await db.execute(sql`DROP SCHEMA IF EXISTS web CASCADE`);
-    await db.execute(sql`DROP SCHEMA IF EXISTS bot CASCADE`);
-    await db.execute(sql`DROP SCHEMA IF EXISTS app CASCADE`);
-    await db.execute(sql`DROP SCHEMA IF EXISTS catalog CASCADE`);
-    await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE`);
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    await prepareDb(url);
+    ({ db, close } = connectAs(url, 'qm_app'));
   });
   after(async () => close?.());
 

@@ -8,9 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { connect, type Db } from '../src/db/client.ts';
+import type { Db } from '../src/db/client.ts';
+import { connectAs, prepareDb } from './roles.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { createApp, type WebappConfig } from '../src/webapp/app.ts';
@@ -66,6 +65,8 @@ function fakeDiscord() {
 describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
   let close: () => Promise<void>;
+  let appDb: Db;
+  let closeApp: () => Promise<void>;
   let discord: ReturnType<typeof fakeDiscord>;
 
   const build = (extra: Partial<WebappConfig> = {}) => createApp(db, discordLogin({
@@ -99,16 +100,16 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
   const sameOrigin = { origin: ORIGIN, 'sec-fetch-site': 'same-origin' };
 
   before(async () => {
-    ({ db, close } = connect(url));
-    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    await prepareDb(url);
+    ({ db, close } = connectAs(url, 'qm_web'));
+    ({ db: appDb, close: closeApp } = connectAs(url, 'qm_app')); // fixtures outside the web app's rights
   });
   beforeEach(async () => {
     await db.execute(sql`DELETE FROM web.session`);
     discord = fakeDiscord();
     app = build();
   });
-  after(async () => close?.());
+  after(async () => { await close?.(); await closeApp?.(); });
 
   it('sets the security headers, no HSTS (Caddy), no caching of API responses', async () => {
     const res = await app.request('/api/me');
@@ -151,7 +152,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
   });
 
   it('callback: creates a hashed session and the user row, me answers', async () => {
-    await db.execute(sql`DELETE FROM app.app_user WHERE user_id = ${USER}`);
+    await appDb.execute(sql`DELETE FROM app.app_user WHERE user_id = ${USER}`);
     const token = await loginAs();
     const rows = await sessions();
     assert.equal(rows.length, 1);
@@ -206,14 +207,14 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
   });
 
   it('me: active memberships from the roster', async () => {
-    await ensureGuild(db, G, 'Web Org');
-    const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
-    await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [MEMBER_ROLE], bot: false });
+    await ensureGuild(appDb, G, 'Web Org');
+    const settings = await updateGuildSettings(appDb, G, { memberRoleIds: [MEMBER_ROLE] });
+    await syncMember(appDb, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [MEMBER_ROLE], bot: false });
     const token = await loginAs();
     const orgs = async () => ((await (await me(token)).json()) as { orgs: unknown[] }).orgs;
     assert.deepEqual(await orgs(), [{ guildId: G, name: 'Web Org', displayName: 'Tess' }]);
     // Losing the role takes effect without a new login
-    await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [], bot: false });
+    await syncMember(appDb, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [], bot: false });
     assert.deepEqual(((await (await me(token)).json()) as { orgs: unknown[] }).orgs, []);
   });
 
@@ -236,7 +237,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
 
   it('recreates a user row the roster cleanup removed while logged in', async () => {
     const token = await loginAs();
-    await db.execute(sql`DELETE FROM app.app_user WHERE user_id = ${USER}`);
+    await appDb.execute(sql`DELETE FROM app.app_user WHERE user_id = ${USER}`);
     assert.equal((await me(token)).status, 200);
     assert.equal((await db.execute(sql`SELECT 1 FROM app.app_user WHERE user_id = ${USER}`)).length, 1);
   });

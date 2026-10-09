@@ -3,9 +3,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { connect, type Db } from '../src/db/client.ts';
+import { type Db } from '../src/db/client.ts';
+import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
@@ -29,9 +28,8 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
   const actor = (userId: string, guildId: string | null = null): Actor => ({ userId, guildId, source: 'webapp' });
 
   before(async () => {
-    ({ db, close } = connect(url));
-    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    await prepareDb(url);
+    ({ db, close } = connectAs(url, 'qm_app'));
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
 
@@ -44,9 +42,14 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     await markGuildLeft(db, G2);
 
     // Olga: web login and companion token, shared stock and a blueprint; Mia: bot only; Solo: no org, a refinery job
-    await createSession(db, { id: OLGA, username: 'olga', globalName: 'Olga O.', avatar: null });
-    await createApiToken(db, { userId: OLGA, username: 'olga', globalName: 'Olga O.', avatar: null });
-    await createSession(db, { id: SOLO, username: 'solo', globalName: null, avatar: null });
+    const web = connectAs(url, 'qm_web');
+    try {
+      await createSession(web.db, { id: OLGA, username: 'olga', globalName: 'Olga O.', avatar: null });
+      await createApiToken(web.db, { userId: OLGA, username: 'olga', globalName: 'Olga O.', avatar: null });
+      await createSession(web.db, { id: SOLO, username: 'solo', globalName: null, avatar: null });
+    } finally {
+      await web.close();
+    }
     await add(db, actor(OLGA, G), { kind: 'resource', uuid: U.metal, locationUuid: U.station, quality: 700, amount: '12.5', org: true });
     await add(db, actor(OLGA), { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 500, amount: '3' });
     await add(db, actor(MIA, G), { kind: 'resource', uuid: U.metal, locationUuid: U.station, quality: 800, amount: '2', org: true });

@@ -5,10 +5,9 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import WebSocket from 'ws';
-import { connect, type Db } from '../src/db/client.ts';
+import type { Db } from '../src/db/client.ts';
+import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
@@ -28,7 +27,9 @@ const QUIET_MS = 250;
 describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
   let close: () => Promise<void>;
-  let client: Awaited<ReturnType<typeof connect>>['client'];
+  let webDb: Db;
+  let closeWeb: () => Promise<void>;
+  let client: ReturnType<typeof connectAs>['client'];
   let server: Server;
   let hub: RealtimeHub;
   let port: number;
@@ -37,7 +38,7 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
 
   const member = (userId: string, roleIds: string[], guildId = G) =>
     syncMember(db, guildId, settings, userId, { userId, displayName: `n${userId.slice(-2)}`, roleIds, bot: false });
-  const session = (userId: string) => createSession(db, { id: userId, username: `u${userId.slice(-2)}`, globalName: null, avatar: null });
+  const session = (userId: string) => createSession(webDb, { id: userId, username: `u${userId.slice(-2)}`, globalName: null, avatar: null });
   // A batch, shared in the org when one is given
   const batch = (owner: string, guildId: string | null, quality: number) => db.execute(sql`
     WITH b AS (INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, location_uuid, quality, quantity)
@@ -81,9 +82,10 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
   const quiet = () => new Promise((r) => setTimeout(r, QUIET_MS));
 
   before(async () => {
-    ({ db, close, client } = connect(url));
-    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    await prepareDb(url);
+    // db plays the bot (seeding, roster, org changes), the web app and its LISTEN run as qm_web
+    ({ db, close } = connectAs(url, 'qm_app'));
+    ({ db: webDb, close: closeWeb, client } = connectAs(url, 'qm_web'));
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     for (const [id, name] of [[G, 'Org G'], [H, 'Org H']] as const) await ensureGuild(db, id, name);
@@ -93,7 +95,7 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     await member(MATE, [MEMBER_ROLE]);
     await member(STRANGER, [MEMBER_ROLE], H);
 
-    hub = new RealtimeHub(db, { origin: ORIGIN, trustProxy: false, maxPerUser: 3, pingMs: 150 }, () => {});
+    hub = new RealtimeHub(webDb, { origin: ORIGIN, trustProxy: false, maxPerUser: 3, pingMs: 150 }, () => {});
     await listenForChanges(client, hub, () => {});
     server = createServer((_req, res) => res.end());
     server.on('upgrade', (req, sock, head) => hub.handleUpgrade(req, sock, head));
@@ -108,6 +110,7 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     hub?.close();
     await new Promise((r) => server?.close(r));
     await close?.();
+    await closeWeb?.();
   });
 
   it('refuses a wrong path, a foreign Origin, no session and an unknown session', async () => {
@@ -211,7 +214,7 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
   it('the web app language: the other tabs of that user reload, nobody else hears about it', async () => {
     const me = await socket(await session(ME));
     const mate = await socket(await session(MATE));
-    await db.execute(sql`INSERT INTO web.user_setting (user_id, lang) VALUES (${ME}, 'de')`);
+    await webDb.execute(sql`INSERT INTO web.user_setting (user_id, lang) VALUES (${ME}, 'de')`);
     assert.deepEqual(await me.next(), { type: 'me' });
     await quiet();
     assert.equal(mate.received.length, 0);
@@ -230,7 +233,7 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     const token = await session(ME);
     const me = await socket(token);
     const closed = new Promise<number>((r) => me.ws.once('close', (code) => r(code)));
-    await db.execute(sql`DELETE FROM web.session WHERE token_hash = ${hashToken(token)}`);
+    await webDb.execute(sql`DELETE FROM web.session WHERE token_hash = ${hashToken(token)}`);
     assert.equal(await closed, CLOSE_SESSION_ENDED);
   });
 });

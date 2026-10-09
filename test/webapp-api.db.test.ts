@@ -4,9 +4,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { connect, type Db } from '../src/db/client.ts';
+import type { Db } from '../src/db/client.ts';
+import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
@@ -30,7 +29,9 @@ const noLogin: DiscordLogin = { start: () => Promise.reject(new Error('unused'))
 
 describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
-  let close: () => Promise<void>;
+  let webDb: Db;
+  let closeDb: () => Promise<void>;
+  let closeWeb: () => Promise<void>;
   let app: ReturnType<typeof createApp>;
   let settings: GuildSettings;
   const tokens = new Map<string, string>();
@@ -51,9 +52,10 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   const metal = { subjectUuid: U.metal, locationUuid: U.station };
 
   before(async () => {
-    ({ db, close } = connect(url));
-    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    await prepareDb(url);
+    // db plays the bot and the admin (seeding, roster, overview), the web app itself runs as qm_web
+    ({ db, close: closeDb } = connectAs(url, 'qm_app'));
+    ({ db: webDb, close: closeWeb } = connectAs(url, 'qm_web'));
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     await ensureGuild(db, G, 'Feature Org');
@@ -62,11 +64,11 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
       await syncMember(db, G, settings, id, { userId: id, displayName: `n${id.slice(-2)}`, roleIds: [MEMBER_ROLE], bot: false });
     }
     for (const id of [OLGA, MIA, MAX, SOLO]) {
-      tokens.set(id, await createSession(db, { id, username: `u${id.slice(-2)}`, globalName: null, avatar: null }));
+      tokens.set(id, await createSession(webDb, { id, username: `u${id.slice(-2)}`, globalName: null, avatar: null }));
     }
-    app = createApp(db, noLogin, { origin: ORIGIN, trustProxy: false, distDir: null });
+    app = createApp(webDb, noLogin, { origin: ORIGIN, trustProxy: false, distDir: null });
   });
-  after(async () => close?.());
+  after(async () => { await closeDb?.(); await closeWeb?.(); });
 
   it('catalog: materials with unit and ore flag, locations, blueprints', async () => {
     const { status, body } = await get<CatalogResponse>(SOLO, '/catalog?lang=en');

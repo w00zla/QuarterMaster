@@ -2,9 +2,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { connect, type Db } from '../src/db/client.ts';
+import { type Db } from '../src/db/client.ts';
+import { connectAs, prepareDb } from './roles.ts';
 import { langOverride } from '../src/bot/lang.ts';
 import { loadProfile, saveProfile } from '../src/bot/profile.ts';
 import { syncMember } from '../src/bot/roster.ts';
@@ -23,9 +22,8 @@ describe('/qm-profile storage (database)', { skip: url ? false : 'TEST_DATABASE_
   let close: () => Promise<void>;
 
   before(async () => {
-    ({ db, close } = connect(url));
-    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    await prepareDb(url);
+    ({ db, close } = connectAs(url, 'qm_app'));
   });
   after(async () => close?.());
 

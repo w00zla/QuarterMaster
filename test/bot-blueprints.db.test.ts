@@ -2,9 +2,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { connect, type Db } from '../src/db/client.ts';
+import { type Db } from '../src/db/client.ts';
+import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { addBlueprint, blueprintCatalog, ownedBlueprints, removeBlueprint, whoHas } from '../src/bot/blueprints.ts';
@@ -23,9 +22,8 @@ describe('blueprint registry (database)', { skip: url ? false : 'TEST_DATABASE_U
   let close: () => Promise<void>;
 
   before(async () => {
-    ({ db, close } = connect(url));
-    for (const schema of ['ext', 'web', 'bot', 'app', 'catalog', 'drizzle']) await db.execute(sql.raw(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    await prepareDb(url);
+    ({ db, close } = connectAs(url, 'qm_app'));
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     await ensureGuild(db, G, 'BP Org');
