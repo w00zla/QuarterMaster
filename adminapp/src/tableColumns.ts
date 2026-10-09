@@ -1,6 +1,6 @@
 // Resizable, sortable column state for the grid-based tables (taken from
 // BindSight). Widths and the sort choice persist per table in localStorage.
-import { computed, ref, toValue, watch, type MaybeRefOrGetter } from "vue";
+import { computed, onScopeDispose, ref, toValue, watch, type MaybeRefOrGetter } from "vue";
 
 export type SortDir = "asc" | "desc";
 export interface SortState {
@@ -47,6 +47,8 @@ function load(storageKey: string): Stored {
 }
 
 const GAP = 12;
+// A row's padding left plus right (.row in ui.css)
+const ROW_PADDING = 32;
 
 // The filler column takes the space left over: the last column that is not fixed. Every column
 // before it resizes itself; the filler has no grip and keeps its default width as minimum.
@@ -75,13 +77,46 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   const sort = ref<SortState>({ ...storedSort });
 
   const filler = computed(() => fillerKey(cols.value));
-  const widthOf = (c: ColumnSpec) => (c.key === filler.value ? c.width : (widths.value[c.key] ?? c.width));
+
+  // The width the rows have (the table element, measured; null until a table is bound via `observe`)
+  const room = ref<number | null>(null);
+  let observer: ResizeObserver | null = null;
+  let observed: Element | null = null;
+  /** Bind the `.table` element (`:ref="cols.observe"`): the columns then always fit its width. */
+  function observe(el: unknown) {
+    const next = el instanceof HTMLElement ? el : null;
+    if (next === observed) return;
+    observer?.disconnect();
+    observed = next;
+    room.value = null;
+    if (!next) return;
+    observer = new ResizeObserver(() => (room.value = next.clientWidth - ROW_PADDING));
+    observer.observe(next);
+  }
+  onScopeDispose(() => observer?.disconnect());
+
+  // The widths shown: the chosen ones, or, where they do not fit, the resizable columns shrunk in
+  // proportion (fixed columns and the filler at its minimum stay): the right columns never leave the view
+  const shown = computed(() => {
+    const list = cols.value;
+    const out: Record<string, number> = {};
+    for (const c of list) out[c.key] = c.key === filler.value ? c.width : (widths.value[c.key] ?? c.width);
+    if (room.value === null) return out;
+    const over = list.reduce((sum, c) => sum + out[c.key]!, 0) + GAP * (list.length - 1) - room.value;
+    const resizable = list.filter((c) => !c.fixed && c.key !== filler.value);
+    const sum = resizable.reduce((s, c) => s + out[c.key]!, 0);
+    if (over <= 0 || !sum) return out;
+    const factor = Math.max(0, (sum - over) / sum);
+    for (const c of resizable) out[c.key] = Math.max(MIN_WIDTH, Math.floor(out[c.key]! * factor));
+    return out;
+  });
   const template = computed(() =>
-    cols.value.map((c) => (c.key === filler.value ? `minmax(${c.width}px, 1fr)` : `${widthOf(c)}px`)).join(" "),
+    cols.value.map((c) => (c.key === filler.value ? `minmax(${c.width}px, 1fr)` : `${shown.value[c.key]}px`)).join(" "),
   );
-  // All columns (the filler at its minimum) plus gaps: the row width below which the table scrolls horizontally.
+  // All columns (the filler at its minimum) plus gaps: the row width below which the table scrolls
+  // horizontally (only when even the smallest widths do not fit).
   const minWidth = computed(
-    () => cols.value.reduce((sum, c) => sum + widthOf(c), 0) + GAP * (cols.value.length - 1),
+    () => cols.value.reduce((sum, c) => sum + shown.value[c.key]!, 0) + GAP * (cols.value.length - 1),
   );
 
   function toggleSort(key: string) {
@@ -89,11 +124,15 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   }
 
   function startResize(key: string, e: MouseEvent) {
+    // Resizing starts from what is shown (shrunk columns keep their shown widths from now on)
+    for (const c of cols.value) if (!c.fixed && c.key !== filler.value) widths.value[c.key] = shown.value[c.key]!;
     const startX = e.clientX;
     const startWidth = widths.value[key];
     if (startWidth === undefined) return;
+    // At most what keeps every column in view: a wider column would push the right ones out
+    const max = room.value === null ? Infinity : Math.max(startWidth, room.value - (minWidth.value - startWidth));
     const move = (ev: MouseEvent) => {
-      widths.value[key] = Math.max(MIN_WIDTH, Math.round(startWidth + ev.clientX - startX));
+      widths.value[key] = Math.min(max, Math.max(MIN_WIDTH, Math.round(startWidth + ev.clientX - startX)));
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
@@ -122,7 +161,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     { deep: true },
   );
 
-  return { widths, template, minWidth, sort, toggleSort, startResize, resetWidth };
+  return { widths, template, minWidth, sort, toggleSort, startResize, resetWidth, observe };
 }
 
 // Stable sort by the current column; `valueOf` yields the cell value for a

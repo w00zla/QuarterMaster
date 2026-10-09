@@ -158,7 +158,7 @@ const rows = computed(() => sortRows(entries.value ?? [], cols.sort.value, value
       </div>
       <div v-if="!entries" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!entries.length" class="empty-line">{{ t(filtered ? "stock.noMatch" : "history.none") }}</div>
-      <div v-else class="table" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+      <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-for="e in rows" :key="e.id" class="row data-row">
           <span class="cell mono">{{ when(e.at) }}</span>

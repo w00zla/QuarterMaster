@@ -218,7 +218,7 @@ function open(batch: StockBatch, action: BatchAction) {
 
       <div v-if="!data" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!data.batches.length" class="empty-line">{{ t("stock.empty") }}</div>
-      <div v-else class="table" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+      <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
         <template v-for="g in groups" :key="g.uuid">

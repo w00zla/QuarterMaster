@@ -26,7 +26,7 @@ const sorted = computed(() => sortRows(props.rows, cols.sort.value, props.valueO
 </script>
 
 <template>
-  <div class="table" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+  <div class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
     <ColumnHead
       :columns="columns"
       :sort="cols.sort.value"
