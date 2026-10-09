@@ -57,17 +57,20 @@ async function describe(db: Db, actor: stock.Actor, batchId: number, lang: Lang)
   return (await pickableBatches(db, actor, 'change', lang)).find((p) => p.batch.id === batchId);
 }
 
-// A booking's reply: line 1 what happened ("📥 Booked **2 SCU** · **Metal** Q900"), line 2 the batch
-// as it is now (amount · place · shares), line 3 small: the material in your stock
+// A booking's reply: line 1 what happened ("📥 Booked **2 SCU** · **Metal** Q900"), line 2 the batch as it
+// is now (place · shares, its amount only where it differs from what was booked), line 3 small: the
+// material in your stock (only where that is more than this batch). Nothing said twice.
 
 /** "**Metal** Q900": what a booking was about. */
 const subject = (p: Pick<PickableBatch, 'material'> & { batch: Pick<stock.Batch, 'quality'> }) =>
   `**${escapeMarkdown(p.material)}** Q${p.batch.quality}`;
 
+const same = (a: string, b: string) => formatAmount(a) === formatAmount(b);
+
 /** "12 SCU · Area18 · shared in Org A, Org B" (or "· personal"). */
-async function batchNow(db: Db, p: PickableBatch, lang: Lang, withShares = true): Promise<string> {
-  const parts = [amountText(lang, p.batch.quantity, p.batch.kind), escapeMarkdown(p.location)];
-  if (withShares) {
+async function batchNow(db: Db, p: PickableBatch, lang: Lang, { amount = true, shares = true } = {}): Promise<string> {
+  const parts = [...(amount ? [amountText(lang, p.batch.quantity, p.batch.kind)] : []), escapeMarkdown(p.location)];
+  if (shares) {
     const orgs = (await orgNames(db, p.sharedIn)).map((o) => escapeMarkdown(o.name));
     parts.push(orgs.length ? t(lang, 'stock.result.sharedIn', { orgs: orgs.join(', ') }) : t(lang, 'stock.result.personal'));
   }
@@ -76,14 +79,24 @@ async function batchNow(db: Db, p: PickableBatch, lang: Lang, withShares = true)
 
 /** A modal's head: the batch as in a result ("**Metal** Q900", then "12 SCU · Area18 · personal"). */
 async function batchHead(db: Db, p: PickableBatch, lang: Lang, withShares = true): Promise<string> {
-  return `${subject(p)}\n${await batchNow(db, p, lang, withShares)}`;
+  return `${subject(p)}\n${await batchNow(db, p, lang, { shares: withShares })}`;
 }
 
-/** "-# Metal in your stock: 30 SCU": the material in its owner's stock after the booking. */
-async function totalLine(db: Db, lang: Lang, material: string, b: Pick<stock.Batch, 'ownerUserId' | 'resourceUuid' | 'itemUuid' | 'kind'>) {
+/** Line 2: "Area18 · shared in Org A" when the batch holds just what was booked, else "Batch: 14.5 SCU · Area18 · …". */
+async function batchLine(db: Db, p: PickableBatch, lang: Lang, booked?: string): Promise<string> {
+  if (booked !== undefined && same(p.batch.quantity, booked)) return batchNow(db, p, lang, { amount: false });
+  return t(lang, 'stock.result.batch', { batch: await batchNow(db, p, lang) });
+}
+
+/** "-# Metal in your stock: 30 SCU" after the booking; null when that is just the batch (`batchAmount`). */
+async function totalLine(db: Db, lang: Lang, material: string, b: Pick<stock.Batch, 'ownerUserId' | 'resourceUuid' | 'itemUuid' | 'kind'>,
+  batchAmount: string): Promise<string | null> {
   const total = await materialTotal(db, { personalOf: b.ownerUserId }, b.resourceUuid ?? b.itemUuid!);
+  if (same(total, batchAmount)) return null;
   return `-# ${t(lang, 'stock.result.total', { material: escapeMarkdown(material), amount: amountText(lang, total, b.kind) })}`;
 }
+
+const lines = (...parts: (string | null)[]) => parts.filter((x): x is string => x !== null).join('\n');
 
 // --- bookings (no Discord objects: tested on their own) ---------------------------------------
 
@@ -118,11 +131,12 @@ export async function bookAdd(db: Db, actor: stock.Actor, input: AddBooking, lan
     }
   }
   const after = (await describe(db, actor, r.batch!.id, lang))!;
-  return [
-    t(lang, 'stock.added', { amount: amountText(lang, r.journal[0]!.delta, r.batch!.kind), what: subject(after) }),
-    t(lang, 'stock.result.batch', { batch: await batchNow(db, after, lang) }),
-    await totalLine(db, lang, after.material, r.batch!),
-  ].join('\n') + note;
+  const booked = r.journal[0]!.delta;
+  return lines(
+    t(lang, 'stock.added', { amount: amountText(lang, booked, r.batch!.kind), what: subject(after) }),
+    await batchLine(db, after, lang, booked),
+    await totalLine(db, lang, after.material, r.batch!, after.batch.quantity),
+  ) + note;
 }
 
 /** A change of one batch as submitted in its modal; `expected` = the amount the modal showed. */
@@ -139,22 +153,24 @@ export async function bookChange(db: Db, actor: stock.Actor, c: Change, lang: La
     const r = await book(() => stock.remove(db, actor, { batchId: c.batchId, amount: c.amount, expected: c.expected }));
     const j = r.journal[0]!;
     const removed = amountText(lang, j.delta.replace(/^-/, ''), j.kind);
-    return [
+    const after = await batchAfter(db, actor, r.batch, before, lang);
+    return lines(
       t(lang, 'stock.removed', { amount: removed, what: before ? subject(before) : '?' }),
-      await batchAfter(db, actor, r.batch, before, lang),
-      await totalLine(db, lang, before?.material ?? '?', j),
-    ].join('\n');
+      after.line,
+      await totalLine(db, lang, before?.material ?? '?', j, after.amount),
+    );
   }
   if (c.op === 'adjust') {
     const before = await describe(db, actor, c.batchId, lang);
     const r = await book(() => stock.adjust(db, actor, { batchId: c.batchId, amount: c.amount, expected: c.expected }));
     const j = r.journal[0]!;
     const delta = `${j.delta.startsWith('-') ? '' : '+'}${amountText(lang, j.delta, j.kind)}`;
-    return [
+    const after = await batchAfter(db, actor, r.batch, before, lang);
+    return lines(
       t(lang, 'stock.adjusted', { delta, what: before ? subject(before) : '?' }),
-      await batchAfter(db, actor, r.batch, before, lang),
-      await totalLine(db, lang, before?.material ?? '?', j),
-    ].join('\n');
+      after.line,
+      await totalLine(db, lang, before?.material ?? '?', j, after.amount),
+    );
   }
   const r = await book(() => stock.move(db, actor, {
     batchId: c.batchId, amount: c.amount, expected: c.expected,
@@ -172,23 +188,26 @@ export async function bookChange(db: Db, actor: stock.Actor, c: Change, lang: La
     ].join('\n');
   }
   const moved = (await describe(db, actor, r.batch!.id, lang))!;
-  return [
+  return lines(
     t(lang, 'stock.moved', { amount: amountText(lang, j.delta, j.kind), what: subject(moved) }),
-    t(lang, 'stock.result.batch', { batch: await batchNow(db, moved, lang) }),
-    await totalLine(db, lang, moved.material, r.batch!),
-  ].join('\n');
+    await batchLine(db, moved, lang, j.delta),
+    await totalLine(db, lang, moved.material, r.batch!, moved.batch.quantity),
+  );
 }
 
-/** Line 2 after a remove or correction: what is left of the batch, or "empty" and where it was. */
+/** Line 2 after a remove or correction: what is left of the batch (its amount is news), or "empty" and where it was. */
 async function batchAfter(db: Db, actor: stock.Actor, batch: stock.Batch | null, before: PickableBatch | undefined, lang: Lang) {
   const left = batch ? await describe(db, actor, batch.id, lang) : undefined;
-  if (left) return t(lang, 'stock.result.batch', { batch: await batchNow(db, left, lang) });
-  return t(lang, 'stock.result.empty', { location: escapeMarkdown(before?.location ?? '?') });
+  if (left) return { line: await batchLine(db, left, lang), amount: left.batch.quantity };
+  return { line: t(lang, 'stock.result.empty', { location: escapeMarkdown(before?.location ?? '?') }), amount: '0' };
 }
 
 /** Sets the orgs a batch is shared in; the text for the reply. */
 export async function bookShare(db: Db, actor: stock.Actor, batchId: number, guildIds: string[], lang: Lang): Promise<string> {
-  const r = await book(() => stock.share(db, actor, { batchId, guildIds }));
+  const r = await book(() => stock.share(db, actor, { batchId, guildIds })).catch((err: unknown) => {
+    // "No change" here means the same orgs were submitted again, not an amount
+    throw err instanceof UserError && err.key === 'stock.err.noChange' ? new UserError('stock.err.shareNoChange') : err;
+  });
   const p = (await describe(db, actor, r.batch.id, lang))!;
   const batch = `${subject(p)} · ${amountText(lang, p.batch.quantity, p.batch.kind)} · ${escapeMarkdown(p.location)}`;
   if (!r.guildIds.length) return [t(lang, 'stock.unshared'), batch].join('\n');

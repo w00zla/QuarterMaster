@@ -47,9 +47,9 @@ describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_
   it('books removals from the modal and tells what is left', async () => {
     const b = (await add(db, mia, { ...metal, quality: 820, amount: '12,5' })).batch!;
     assert.equal(await bookChange(db, mia, { op: 'remove', batchId: b.id, amount: '2', expected: b.quantity }, 'en'),
-      '📤 Removed **2 SCU** · **Test Metal** Q820\nBatch: 10.5 SCU · Test Station · personal\n-# Test Metal in your stock: 10.5 SCU');
+      '📤 Removed **2 SCU** · **Test Metal** Q820\nBatch: 10.5 SCU · Test Station · personal');
     assert.equal(await bookChange(db, mia, { op: 'remove', batchId: b.id, amount: '10.5', expected: '10.5' }, 'de'),
-      '📤 Entnommen **10.5 SCU** · **Testmetall** Q820\nBatch: leer · Test Station\n-# Testmetall in deinem Bestand: 0 SCU');
+      '📤 Entnommen **10.5 SCU** · **Testmetall** Q820\nBatch: leer · Test Station');
   });
 
   it('refuses a booking against a batch that changed since the modal showed it', async () => {
@@ -67,8 +67,9 @@ describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_
 
   it('shares what it books in the ticked orgs, on top of the shares the batch already has', async () => {
     const text = await bookAdd(db, mia, { ...metal, quality: 900, amount: '2', shareIn: [G] }, 'en');
-    assert.equal(text, '📥 Booked **2 SCU** · **Test Metal** Q900\nBatch: 2 SCU · Test Station · shared in Stock Cmd Org\n-# Test Metal in your stock: 12 SCU');
-    await bookAdd(db, mia, { ...metal, quality: 900, amount: '1', shareIn: [G2] }, 'en');
+    assert.equal(text, '📥 Booked **2 SCU** · **Test Metal** Q900\nTest Station · shared in Stock Cmd Org\n-# Test Metal in your stock: 12 SCU');
+    // Into an existing batch: its amount differs from the booked one and is shown
+    assert.match(await bookAdd(db, mia, { ...metal, quality: 900, amount: '1', shareIn: [G2] }, 'en'), /\nBatch: 3 SCU · Test Station · shared in /);
     const [batch] = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).filter((p) => p.batch.quality === 900);
     assert.deepEqual(batch!.sharedIn, [G, G2].sort());
     assert.equal(batch!.batch.quantity, '3.000000');
@@ -80,14 +81,14 @@ describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_
   it('sets and takes back shares', async () => {
     const b = (await add(db, mia, { ...metal, quality: 500, amount: '1' })).batch!;
     assert.equal(await bookShare(db, mia, b.id, [G, G2], 'en'), '📢 Shared in Second Org, Stock Cmd Org\n**Test Metal** Q500 · 1 SCU · Test Station');
-    assert.equal(await bookShare(db, mia, b.id, [], 'de'), '🔒 Nicht mehr geteilt\n**Testmetall** Q500 · 1 SCU · Test Station');
-    await assert.rejects(bookShare(db, mia, b.id, [], 'en'), (err: unknown) => err instanceof UserError && err.key === 'stock.err.noChange');
+    assert.equal(await bookShare(db, mia, b.id, [], 'de'), '↩️ Nicht mehr geteilt\n**Testmetall** Q500 · 1 SCU · Test Station');
+    await assert.rejects(bookShare(db, mia, b.id, [], 'en'), (err: unknown) => err instanceof UserError && err.key === 'stock.err.shareNoChange');
   });
 
   it('gives to a member: the batch becomes theirs, unshared', async () => {
     const b = (await add(db, mia, { ...metal, quality: 550, amount: '4' })).batch!;
     assert.equal(await bookChange(db, mia, { op: 'give', batchId: b.id, amount: '1', expected: '4', toOwnerUserId: OLGA, toOwnerName: 'Olga' }, 'en'),
-      '🤝 Gave **1 SCU** · **Test Metal** Q550\nTo **Olga** · Test Station');
+      '📦 Gave **1 SCU** · **Test Metal** Q550\nTo **Olga** · Test Station');
     const olgas = await stockList(db, { scope: { personalOf: OLGA } }, 'en');
     assert.ok(olgas.some((p) => p.batch.quality === 550 && p.batch.quantity === '1.000000' && !p.sharedIn.length));
   });

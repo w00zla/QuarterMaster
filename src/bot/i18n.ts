@@ -1,5 +1,6 @@
 // Bot UI texts (de/en) and language resolution. Game texts come from the catalog, not from here.
-// Private output follows the user's client locale, public output the server's base language.
+// Private output follows the user's language (lang.ts), public output (the logs channel) the server's base
+// language from /qm-setup, never Discord's guildLocale.
 
 export type Lang = 'en' | 'de';
 
@@ -25,7 +26,7 @@ const en = {
   'setup.lang.en': 'English',
   'setup.lang.de': 'Deutsch',
   'setup.level.off': 'Off',
-  'setup.level.org': 'Org stock bookings',
+  'setup.level.org': 'Shared stock: shares, gives, bookings',
   'setup.perms.ok': 'the bot can post there',
   'setup.perms.missing': 'missing bot permissions: {perms}',
   'setup.perms.unknown': 'channel not found, permissions not checked',
@@ -118,6 +119,18 @@ const en = {
   'refinery.err.notReady': 'Fix the marked lines first (Edit).',
   'refinery.err.foreign': 'This panel belongs to someone else.',
 
+  'logs.share': '📢 {who} shared {amount}{what} · {where}',
+  'logs.unshare': '↩️ {who} took back {amount}{what} · {where}',
+  'logs.give': '📦 {who} gave {amount}{what} to {to} · {where}',
+  'logs.giveAway': '📦 {who} gave away {amount}{what} · {where}',
+  'logs.add': '📥 {who} added {amount}{what} · {where}',
+  'logs.addTotal': '📥 {who} added {amount}{what} · {where} · now {total}',
+  'logs.remove': '📤 {who} took out {amount}{what} · {where}',
+  'logs.removeLeft': '📤 {who} took out {amount}{what} · {where} · {left} left',
+  'logs.removeEmpty': '📤 {who} took out {amount}{what} · {where} · batch empty',
+  'logs.adjust': '✏️ {who} corrected {what} · {where}: {change}',
+  'logs.move': '🔀 {who} moved {amount}{what} · {where} → {to}',
+  'logs.merge': '🔀 {who} merged back {amount}{what} · {where}',
   'unit.scu': 'SCU',
   'unit.pcs': 'pcs',
   'stock.org': 'Org',
@@ -164,12 +177,13 @@ const en = {
   'stock.err.refiningFixed': 'Refinery jobs stay where they are until they are done.',
   'stock.err.nothingToMove': 'Nothing would change: the batch is already there.',
   'stock.err.noChange': 'The batch holds exactly that amount already.',
+  'stock.err.shareNoChange': 'Nothing changed: the batch is shared in exactly these orgs already. Tick or untick an org.',
   'stock.err.giveSelf': 'You cannot give stock to yourself.',
 
   'stock.added': '📥 Booked **{amount}** · {what}',
   'stock.removed': '📤 Removed **{amount}** · {what}',
   'stock.moved': '🔀 Moved **{amount}** · {what}',
-  'stock.given': '🤝 Gave **{amount}** · {what}',
+  'stock.given': '📦 Gave **{amount}** · {what}',
   'stock.result.batch': 'Batch: {batch}',
   'stock.result.empty': 'Batch: empty · {location}',
   'stock.result.to': 'To **{name}** · {location}',
@@ -198,7 +212,7 @@ const en = {
   'stock.field.qualityHint': '0–1000, as shown in the game',
   'stock.field.shareIn': 'Share in',
   'stock.sharedIn': '📢 Shared in {orgs}',
-  'stock.unshared': '🔒 Not shared anymore',
+  'stock.unshared': '↩️ Not shared anymore',
   'stock.shareFailed': 'Booked, but not shared: {reason}',
   'stock.btn.yourStock': 'Your stock',
   'stock.list.title': '**Stock · {scope}** ({count} batches)',
@@ -231,7 +245,7 @@ const de: Record<MessageKey, string> = {
   'setup.lang.en': 'English',
   'setup.lang.de': 'Deutsch',
   'setup.level.off': 'Aus',
-  'setup.level.org': 'Buchungen von Org-Bestand',
+  'setup.level.org': 'Geteilter Bestand: Freigaben, Übergaben, Buchungen',
   'setup.perms.ok': 'der Bot kann dort posten',
   'setup.perms.missing': 'dem Bot fehlen Rechte: {perms}',
   'setup.perms.unknown': 'Channel nicht gefunden, Rechte nicht geprüft',
@@ -324,6 +338,18 @@ const de: Record<MessageKey, string> = {
   'refinery.err.notReady': 'Korrigier zuerst die markierten Zeilen (Bearbeiten).',
   'refinery.err.foreign': 'Dieses Panel gehört jemand anderem.',
 
+  'logs.share': '📢 {who} teilt {amount}{what} · {where}',
+  'logs.unshare': '↩️ {who} nimmt zurück: {amount}{what} · {where}',
+  'logs.give': '📦 {who} gibt {amount}{what} an {to} · {where}',
+  'logs.giveAway': '📦 {who} gibt ab: {amount}{what} · {where}',
+  'logs.add': '📥 {who} bucht dazu: {amount}{what} · {where}',
+  'logs.addTotal': '📥 {who} bucht dazu: {amount}{what} · {where} · jetzt {total}',
+  'logs.remove': '📤 {who} entnimmt {amount}{what} · {where}',
+  'logs.removeLeft': '📤 {who} entnimmt {amount}{what} · {where} · noch {left}',
+  'logs.removeEmpty': '📤 {who} entnimmt {amount}{what} · {where} · Batch leer',
+  'logs.adjust': '✏️ {who} korrigiert {what} · {where}: {change}',
+  'logs.move': '🔀 {who} lagert um: {amount}{what} · {where} → {to}',
+  'logs.merge': '🔀 {who} führt zurück: {amount}{what} · {where}',
   'unit.scu': 'SCU',
   'unit.pcs': 'Stk.',
   'stock.org': 'Org',
@@ -370,12 +396,13 @@ const de: Record<MessageKey, string> = {
   'stock.err.refiningFixed': 'Refinery-Jobs bleiben, wo sie sind, bis sie fertig sind.',
   'stock.err.nothingToMove': 'Es würde sich nichts ändern: Der Batch liegt schon dort.',
   'stock.err.noChange': 'Im Batch ist schon genau diese Menge.',
+  'stock.err.shareNoChange': 'Nichts geändert: Der Batch ist schon genau in diesen Orgs geteilt. Hak eine Org an oder ab.',
   'stock.err.giveSelf': 'Du kannst dir nicht selbst etwas übergeben.',
 
   'stock.added': '📥 Eingebucht **{amount}** · {what}',
   'stock.removed': '📤 Entnommen **{amount}** · {what}',
   'stock.moved': '🔀 Umgelagert **{amount}** · {what}',
-  'stock.given': '🤝 Übergeben **{amount}** · {what}',
+  'stock.given': '📦 Übergeben **{amount}** · {what}',
   'stock.result.batch': 'Batch: {batch}',
   'stock.result.empty': 'Batch: leer · {location}',
   'stock.result.to': 'An **{name}** · {location}',
@@ -404,7 +431,7 @@ const de: Record<MessageKey, string> = {
   'stock.field.qualityHint': '0–1000, wie im Spiel angezeigt',
   'stock.field.shareIn': 'Teilen in',
   'stock.sharedIn': '📢 Geteilt in {orgs}',
-  'stock.unshared': '🔒 Nicht mehr geteilt',
+  'stock.unshared': '↩️ Nicht mehr geteilt',
   'stock.shareFailed': 'Eingebucht, aber nicht geteilt: {reason}',
   'stock.btn.yourStock': 'Dein Bestand',
   'stock.list.title': '**Bestand · {scope}** ({count} Batches)',
@@ -424,15 +451,6 @@ export function t(lang: Lang, key: MessageKey, vars: MessageVars = {}): string {
 /** Language for private output: Discord locale `de` → German, everything else → English. */
 export function userLang(locale: string | null | undefined): Lang {
   return locale?.toLowerCase().startsWith('de') ? 'de' : 'en';
-}
-
-/**
- * Language for public output on a server (logs channel, anything several people see).
- * PLACEHOLDER: always English until the guild settings table exists; then read the configured
- * base language. Never use Discord's guildLocale for this (see .claude/requirements.md).
- */
-export async function guildLang(_guildId: string | null): Promise<Lang> {
-  return 'en';
 }
 
 /** `description` + `description_localizations` for a command or option, from one message key. */

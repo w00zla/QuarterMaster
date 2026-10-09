@@ -219,6 +219,9 @@ async function history(tx: Tx, actor: Actor, category: HistoryCategory, action: 
   });
 }
 
+/** `details.sharedIn` of a history row: the orgs the batch was shared in when it changed (nothing if none). */
+const offered = (guildIds: string[]): HistoryDetails => (guildIds.length ? { sharedIn: guildIds } : {});
+
 /** The orgs a batch is shared in. */
 async function sharesOf(tx: Tx, batchId: number): Promise<string[]> {
   return (await rows<{ g: string }>(tx, sql`SELECT guild_id AS g FROM app.stock_share WHERE batch_id = ${batchId} ORDER BY guild_id`)).map((r) => r.g);
@@ -268,10 +271,11 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
       itemUuid: input.kind === 'item' ? input.uuid : null, locationUuid: input.locationUuid, state: 'stored', quality: input.quality, lot: null,
     };
     const { created: _c, ...batch } = await upsert(tx, key, amount);
-    await history(tx, actor, 'stock', 'add', key, { amount });
+    // Added to a batch that is shared already: the orgs see their offer grow
+    await history(tx, actor, 'stock', 'add', key, { amount, batchAmount: batch.quantity, ...offered(await sharesOf(tx, batch.id)) });
     if (input.org) {
       await addShares(tx, batch.id, [actor.guildId!]);
-      await history(tx, actor, 'stock', 'share', key, {}, undefined, actor.guildId);
+      await history(tx, actor, 'stock', 'share', key, { amount: batch.quantity }, undefined, actor.guildId);
     }
     return { journal: [await journal(tx, actor, 'add', key, amount)], batch };
   });
@@ -429,8 +433,10 @@ export async function remove(db: Db, actor: Actor, input: { batchId: number; amo
     const batch = await lockBatch(tx, input.batchId, input.expected);
     checkMayChange(actor, batch);
     const amount = input.amount === null ? batch.quantity : parse(input.amount, batch.kind);
+    // Before the decrease: an emptied batch takes its shares along
+    const sharedIn = await sharesOf(tx, batch.id);
     const left = await decrease(tx, batch, amount);
-    await history(tx, actor, categoryOf(batch), 'remove', keyOf(batch), { amount });
+    await history(tx, actor, categoryOf(batch), 'remove', keyOf(batch), { amount, batchAmount: left?.quantity ?? '0', ...offered(sharedIn) });
     return { journal: [await journal(tx, actor, 'remove', keyOf(batch), negate(amount))], batch: left };
   });
 }
@@ -443,10 +449,11 @@ export async function adjust(db: Db, actor: Actor, input: { batchId: number; amo
     const target = /^\s*0+(?:[.,]0+)?\s*$/.test(input.amount) ? '0' : parse(input.amount, batch.kind);
     const delta = (await one<{ d: string }>(tx, sql`SELECT (${target}::numeric - ${batch.quantity}::numeric)::text AS d`))!.d;
     if (Number(delta) === 0) throw new StockError('noChange');
+    const sharedIn = await sharesOf(tx, batch.id);
     let left: Batch | null = null;
     if (target === '0') await tx.execute(sql`DELETE FROM app.stock_batch WHERE id = ${batch.id}`);
     else left = await one<Batch>(tx, sql`UPDATE app.stock_batch SET quantity = ${target}::numeric, updated_at = now() WHERE id = ${batch.id} RETURNING ${BATCH_COLUMNS}`);
-    await history(tx, actor, categoryOf(batch), 'adjust', keyOf(batch), { amount: target, from: batch.quantity });
+    await history(tx, actor, categoryOf(batch), 'adjust', keyOf(batch), { amount: target, from: batch.quantity, ...offered(sharedIn) });
     return { journal: [await journal(tx, actor, 'adjust', keyOf(batch), delta)], batch: left };
   });
 }
@@ -488,13 +495,14 @@ export async function move(db: Db, actor: Actor, input: MoveInput) {
     if (sameKey(target, keyOf(batch))) throw new StockError('nothingToMove');
 
     const amount = input.amount === null ? batch.quantity : parse(input.amount, batch.kind);
-    const shares = give ? [] : await sharesOf(tx, batch.id);
+    const sharedIn = await sharesOf(tx, batch.id);
+    const shares = give ? [] : sharedIn;
     const group = randomUUID();
     const out = await journal(tx, actor, 'move_out', keyOf(batch), negate(amount), group);
     await decrease(tx, batch, amount);
     const { created, ...moved } = await upsert(tx, target, amount);
     if (created) await addShares(tx, moved.id, shares);
-    await history(tx, actor, 'stock', give ? 'give' : 'move', keyOf(batch), { amount, toLocationUuid: target.locationUuid }, target,
+    await history(tx, actor, 'stock', give ? 'give' : 'move', keyOf(batch), { amount, toLocationUuid: target.locationUuid, ...offered(sharedIn) }, target,
       give ? actor.guildId : null);
     return { journal: [out, await journal(tx, actor, 'move_in', target, amount, group)], batch: moved };
   });
@@ -538,7 +546,7 @@ export async function merge(db: Db, actor: Actor, input: { batchId: number; expe
     await decrease(tx, batch, batch.quantity);
     const { created, ...main } = await upsert(tx, target, batch.quantity);
     if (created) await addShares(tx, main.id, shares);
-    await history(tx, actor, 'stock', 'merge', keyOf(batch), { amount: batch.quantity });
+    await history(tx, actor, 'stock', 'merge', keyOf(batch), { amount: batch.quantity, ...offered(shares) });
     return { journal: [out, await journal(tx, actor, 'move_in', target, batch.quantity, group)], batch: main };
   });
 }

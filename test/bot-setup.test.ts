@@ -22,7 +22,7 @@ describe('/qm-setup', () => {
     const panel = setupPanel(settings, 'en', { missing: [] });
     assert.match(panel.content, /Member roles: <@&100000000000000001>, <@&100000000000000002>/);
     assert.match(panel.content, /Base language \(public output\): Deutsch/);
-    assert.match(panel.content, /Logs: <#200000000000000001> · Org stock bookings · ✅/);
+    assert.match(panel.content, /Logs: <#200000000000000001> · Shared stock: shares, gives, bookings · ✅/);
     assert.deepEqual(panel.allowedMentions, { parse: [] });
   });
 
@@ -37,7 +37,7 @@ describe('/qm-setup', () => {
     assert.deepEqual((channel!.default_values as { id: string }[]).map((v) => v.id), [settings.logsChannelId]);
     assert.deepEqual((lang!.options as { value: string; default: boolean }[]).filter((o) => o.default).map((o) => o.value), ['de']);
     assert.deepEqual((level!.options as { label: string; value: string }[]).map((o) => [o.value, o.label]), [
-      ['off', 'Logs: Aus'], ['org', 'Logs: Buchungen von Org-Bestand'],
+      ['off', 'Logs: Aus'], ['org', 'Logs: Geteilter Bestand: Freigaben, Übergaben, Buchungen'],
     ]);
   });
 

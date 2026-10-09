@@ -89,7 +89,10 @@ export async function updateGuildSettings(db: Db, guildId: string, patch: Partia
       await tx.update(org).set({ memberRoleIds, updatedAt: sql`now()` }).where(eq(org.guildId, guildId));
     }
     if (baseLang !== undefined || logsChannelId !== undefined || logsLevel !== undefined) {
-      await tx.update(guild).set({ baseLang, logsChannelId, logsLevel, updatedAt: sql`now()` }).where(eq(guild.guildId, guildId));
+      // A new logs channel or level starts at the newest history row: the past is never posted
+      const logsAfter = logsChannelId !== undefined || logsLevel !== undefined
+        ? sql`(SELECT coalesce(max(id), 0) FROM app.history)` : undefined;
+      await tx.update(guild).set({ baseLang, logsChannelId, logsLevel, logsAfter, updatedAt: sql`now()` }).where(eq(guild.guildId, guildId));
     }
   });
   return getGuildSettings(db, guildId);

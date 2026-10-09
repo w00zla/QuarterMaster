@@ -19,6 +19,10 @@ export interface HistoryDetails {
   toDesignation?: 'personal' | 'org';
   // Adjust: the quantity before
   from?: string;
+  // Add, remove: what the batch holds afterwards (an add may land in a batch with some already; "0": emptied)
+  batchAmount?: string;
+  // Stock: the orgs the batch was shared in when it changed (an org's logs channel shows these rows)
+  sharedIn?: string[];
   // Refinery start
   durationSeconds?: number | null;
   expectedYield?: string | null;

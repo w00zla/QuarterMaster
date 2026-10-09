@@ -141,6 +141,13 @@
       "when": 1791504547640,
       "tag": "0019_history_notify_action",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791577308119,
+      "tag": "0020_logs_cursor",
+      "breakpoints": true
     }
   ]
 }

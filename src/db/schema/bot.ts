@@ -2,7 +2,7 @@
 // blueprints) lives in schema `app`; nothing in `app` references this schema.
 import { sql } from 'drizzle-orm';
 import { bigint, check, pgSchema, text, timestamp } from 'drizzle-orm/pg-core';
-import { appUser, createdAt, org, snowflake, stockJournal, updatedAt } from './app.ts';
+import { appUser, createdAt, org, snowflake, updatedAt } from './app.ts';
 
 export const bot = pgSchema('bot');
 
@@ -14,6 +14,9 @@ export const guild = bot.table('guild', {
   // NULL = no #logs, whatever the level
   logsChannelId: text('logs_channel_id'),
   logsLevel: text('logs_level').notNull().default('org'),
+  // The last app.history row the logs channel has handled (posted or skipped); NULL = start at the newest
+  // row, never post the past (set again whenever channel or level change)
+  logsAfter: bigint('logs_after', { mode: 'number' }),
   joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   // Bot removed from the server; the data is kept
   leftAt: timestamp('left_at', { withTimezone: true }),
@@ -33,13 +36,3 @@ export const userConfig = bot.table('user_config', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [check('user_config_lang_override', sql`${t.langOverride} IS NULL OR ${t.langOverride} IN ('de', 'en')`)]);
-
-/**
- * #logs outbox: a journal row without an entry here is not posted yet. On startup the bot posts
- * what is missing (filtered by the current logs level) and records older rows as done without
- * posting them, so a crash between commit and post loses nothing.
- */
-export const logsOutbox = bot.table('logs_outbox', {
-  journalId: bigint('journal_id', { mode: 'number' }).primaryKey().references(() => stockJournal.id),
-  postedAt: timestamp('posted_at', { withTimezone: true }).notNull().defaultNow(),
-});

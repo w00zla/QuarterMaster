@@ -3,6 +3,7 @@ import { Client, Events, GatewayIntentBits, type Guild } from 'discord.js';
 import { connect } from '../db/client.ts';
 import { commands } from './commands.ts';
 import { handleInteraction } from './interactions.ts';
+import { LogsPoster } from './logs.ts';
 import { memberInfo } from './roster.ts';
 import { RosterKeeper, onFullSyncRequest } from './roster-keeper.ts';
 import { findGuildSettings, markGuildLeft, markGuildPresent, reconcilePresence } from './settings.ts';
@@ -25,6 +26,7 @@ client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag} on ${c.guilds.cache.size} server(s), ${registry.size} command(s)`);
   // Servers that removed the bot while it was offline (or added it again)
   reconcilePresence(db, [...c.guilds.cache.keys()]).catch((err: unknown) => console.error('Presence check failed', err));
+  logs.start();
 });
 
 // The roster: synced in full whenever member events may have been missed, kept current by the
@@ -32,6 +34,8 @@ client.once(Events.ClientReady, (c) => {
 const shardsUp = new Set<number>();
 const log = (message: string, err?: unknown) => (err === undefined ? console.log(message) : console.error(message, err));
 const keeper = new RosterKeeper(db, log);
+// The logs channels: new history rows of each org, polled
+const logs = new LogsPoster(client, db, log);
 const fullSync = (guild: Guild) =>
   keeper.fullSync(guild.id, guild.name, async () => [...(await guild.members.fetch()).values()].map(memberInfo));
 const guildsOf = (shardId: number) => [...client.guilds.cache.filter((g) => g.shardId === shardId).values()];
@@ -86,6 +90,7 @@ client.on(Events.InteractionCreate, (interaction) => {
 const shutdown = async () => {
   clearInterval(resyncTimer);
   keeper.stop();
+  logs.stop();
   await client.destroy();
   await close();
   process.exit(0);
