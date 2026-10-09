@@ -102,7 +102,7 @@ const titles: Record<BatchAction, Parameters<typeof t>[0]> = {
   share: "field.sharing", split: "stock.split", merge: "stock.merge", remove: "stock.remove", move: "stock.move", adjust: "stock.adjust",
 };
 const icons: Record<BatchAction, IconName> = {
-  share: "users", split: "split", merge: "merge", remove: "arrow-up", move: "arrow-right", adjust: "settings",
+  share: "users", split: "split", merge: "merge", remove: "arrow-up", move: "move", adjust: "settings",
 };
 // Remove, adjust and merge apply right after their check; the others continue to it
 const applies = props.action === "remove" || props.action === "adjust" || props.action === "merge";

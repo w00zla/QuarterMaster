@@ -246,7 +246,7 @@ function open(batch: StockBatch, action: BatchAction) {
                 <button v-if="b.part" type="button" class="icon-btn" :title="t('stock.merge')" @click="open(b, 'merge')"><Icon name="merge" :size="15" /></button>
                 <button v-else type="button" class="icon-btn" :title="t('stock.split')"
                   :disabled="b.state !== 'stored' || b.sharedIn.length > 0" @click="open(b, 'split')"><Icon name="split" :size="15" /></button>
-                <button type="button" class="icon-btn" :title="t('stock.move')" :disabled="b.state !== 'stored'" @click="open(b, 'move')"><Icon name="arrow-right" :size="15" /></button>
+                <button type="button" class="icon-btn" :title="t('stock.move')" :disabled="b.state !== 'stored'" @click="open(b, 'move')"><Icon name="move" :size="15" /></button>
                 <button type="button" class="icon-btn" :title="t('stock.remove')" @click="open(b, 'remove')"><Icon name="arrow-up" :size="15" /></button>
                 <button type="button" class="icon-btn" :title="t('stock.adjust')" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
               </template>
