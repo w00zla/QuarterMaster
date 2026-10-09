@@ -6,14 +6,6 @@ export interface MeOrg {
   name: string;
   // The user's name on that server (roster)
   displayName: string;
-  officer: boolean;
-  // False while the bot cannot vouch for this org's roster: its org stock is read-only then
-  rosterFresh: boolean;
-  // How long it stays fresh without a new beat (0 when stale): the SPA asks again then, since the
-  // bot's minute beat itself is not announced (only fresh <-> stale changes made in the DB are)
-  rosterFreshForMs: number;
-  // False once the bot was removed from the server (the roster is frozen, so never fresh)
-  botPresent: boolean;
 }
 
 export interface MeResponse {
@@ -34,8 +26,7 @@ export type Lang = 'de' | 'en';
 
 // --- errors -----------------------------------------------------------------------------------
 // Every non-2xx answer: { error: code }. Stock codes as in src/stock/service.ts (StockErrorCode);
-// further codes: notLoggedIn (401), notMember (403: not an active member of that org), rosterStale
-// (409: org stock is read-only while the bot cannot vouch for the roster), invalid (400: malformed
+// further codes: notLoggedIn (401), notMember (403: not an active member of that org), invalid (400: malformed
 // request), notFound (404), unknownBlueprint, blueprintDefault, blueprintRetired, invalidHandle (422).
 export interface ApiErrorBody {
   error: string;
@@ -114,8 +105,10 @@ export interface CatalogResponse {
 
 export interface StockBatch {
   id: number;
-  designation: 'personal' | 'org';
-  guildId: string | null;
+  // The orgs it is shared in (guild IDs; someone else's batch: only orgs you are in too)
+  sharedIn: string[];
+  // A part split off from its main batch (POST /api/stock/merge puts it back)
+  part: boolean;
   kind: 'resource' | 'item';
   subjectUuid: string;
   material: string;
@@ -126,11 +119,11 @@ export interface StockBatch {
   // Exact decimal text without trailing zeros ("12.5"); send it back as `expected`
   quantity: string;
   unit: 'SCU' | 'pcs';
-  // Who holds it (personal: the owner)
+  // Whose it is (shared or not)
   holderUserId: string;
-  // Org stock: the holder's name in that org
+  // Shared stock: the owner's name in an org it is shared in
   holderName: string | null;
-  // Whether you may remove/adjust/move it (personal: yours; org: officers of that org)
+  // Whether you may change it: yours only
   canChange: boolean;
   // Refinery jobs only; the fields are NULL on jobs started without them
   refine: StockRefine | null;
@@ -152,9 +145,11 @@ export interface StockListResponse {
   totals: Record<string, string>;
 }
 
-// Writes: POST, JSON. `guildId` = the org the action happens in; required for anything touching org
-// stock (add as org stock, donate, change an org batch), omitted for personal stock. `expected` = the
-// quantity the user saw: the server refuses with batchChanged if the batch changed meanwhile.
+// Writes: POST, JSON. Only the owner changes a batch. Sharing: POST /api/stock/share sets the orgs a
+// batch is shared in (the whole batch; a part is split off first: /api/stock/split, unshared batches
+// only). `guildId` = the org the action happens in: to add shared stock and to give to one of its
+// members; you must be an active member there (403 notMember).
+// `expected` = the quantity the user saw: the server refuses with batchChanged if it changed meanwhile.
 // Amounts are text as typed ("12,5" or "12.5"); null = the whole batch.
 
 export interface StockAddRequest {
@@ -162,17 +157,14 @@ export interface StockAddRequest {
   locationUuid: string;
   quality: number;
   amount: string;
-  // Book as org stock of this org (else personal)
+  // Shared in this org right away (else unshared)
   guildId?: string;
-  // Org stock: holder (default you; others for officers only)
-  holderUserId?: string;
 }
 
 export interface StockRemoveRequest {
   batchId: number;
   amount: string | null;
   expected: string;
-  guildId?: string;
 }
 
 export interface StockAdjustRequest {
@@ -180,7 +172,6 @@ export interface StockAdjustRequest {
   // Counted amount ("0" empties the batch)
   amount: string;
   expected: string;
-  guildId?: string;
 }
 
 export interface StockMoveRequest {
@@ -189,10 +180,26 @@ export interface StockMoveRequest {
   expected: string;
   guildId?: string;
   toLocationUuid?: string;
-  // true: becomes org stock of guildId (donation); false: becomes personal stock
-  toOrg?: boolean;
-  // New holder (org) or the member who gets org stock as personal stock
-  toHolderUserId?: string;
+  // Give it to this active member of guildId: it becomes theirs, unshared (you or omitted: stays yours)
+  toOwnerUserId?: string;
+}
+
+export interface StockSplitRequest {
+  batchId: number;
+  // The part split off into a batch of its own (less than the batch)
+  amount: string;
+  expected: string;
+}
+
+export interface StockMergeRequest {
+  batchId: number;
+  expected: string;
+}
+
+export interface StockShareRequest {
+  batchId: number;
+  // Every org it shall be shared in from now on ([] = unshared)
+  guildIds: string[];
 }
 
 // Refinery jobs are always personal and always work orders: one station and time, several ores
@@ -241,7 +248,6 @@ export interface OrgMember {
   userId: string;
   displayName: string;
   rsiHandle: string | null;
-  officer: boolean;
 }
 
 export interface BlueprintOwner {
@@ -400,9 +406,10 @@ export interface CompanionOutdated {
 }
 
 // --- history (GET /api/history?lang&before&after&source&category&action&by) ------------------------
-// Your own actions and what others did to your data (an officer booking your org stock), newest
-// first, 100 per page; `before` = the last id you have, `after` = only newer than this id. Optional
-// filters: source, category, action (add, remove, adjust, move, start, done), by (me | others).
+// Your own actions, what others did to your data (stock given to you) and what was shared in your
+// orgs, newest first, 100 per
+// page; `before` = the last id you have, `after` = only newer than this id. Optional filters: source,
+// category, action (add, remove, adjust, move, share, unshare, give, start, done), by (me | others).
 
 export type HistorySource = 'bot' | 'webapp' | 'companion';
 export type HistoryCategory = 'stock' | 'refinery' | 'blueprint';
@@ -471,8 +478,9 @@ export type ServerMessage =
   // Blueprints or profile (RSI handle) of you or someone in your orgs changed
   | { type: 'blueprints'; userId: string }
   | { type: 'profile'; userId: string }
-  // A new history entry concerning you (yours, or someone acted on your data): GET /api/history?after
-  | { type: 'history'; id: number; source: HistorySource }
+  // A new history entry concerning you (yours, someone acted on your data, or stock shared in one of
+  // your orgs): GET /api/history?after
+  | { type: 'history'; id: number; source: HistorySource; actor: string }
   // Changes may have been missed (the server lost its DB listener): reload everything
   | { type: 'resync' }
   | { type: 'pong' };

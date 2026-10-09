@@ -1,6 +1,6 @@
 // The user web app's feature endpoints: catalog, stock, refinery, blueprints, org members, profile.
 // Rights: every org-scoped call needs an active membership (roster), the stock service decides who
-// may book what (Actor), and writes in an org need a roster the bot vouches for (else rosterStale).
+// may book what (Actor).
 // Personal stock and blueprints work without any org.
 import { sql } from 'drizzle-orm';
 import type { Context, Hono } from 'hono';
@@ -25,7 +25,6 @@ import type {
   OrgMember, StockBatch,
   StockListResponse, StockMetrics, SummaryResponse,
 } from './api-types.ts';
-import { ROSTER_STALE_MS } from './me.ts';
 import type { Session } from './session.ts';
 
 /** A refusal with an error code the SPA translates. */
@@ -48,13 +47,16 @@ const quality = z.number().int();
 const amount = z.string().max(32);
 
 const schemas = {
-  add: z.object({ subjectUuid: uuid, locationUuid: uuid, quality, amount, guildId: snowflake.optional(), holderUserId: snowflake.optional() }).strict(),
-  remove: z.object({ batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount, guildId: snowflake.optional() }).strict(),
-  adjust: z.object({ batchId: z.number().int().positive(), amount, expected: amount, guildId: snowflake.optional() }).strict(),
+  add: z.object({ subjectUuid: uuid, locationUuid: uuid, quality, amount, guildId: snowflake.optional() }).strict(),
+  remove: z.object({ batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount }).strict(),
+  adjust: z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict(),
   move: z.object({
     batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount, guildId: snowflake.optional(),
-    toLocationUuid: uuid.optional(), toOrg: z.boolean().optional(), toHolderUserId: snowflake.optional(),
+    toLocationUuid: uuid.optional(), toOwnerUserId: snowflake.optional(),
   }).strict(),
+  split: z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict(),
+  merge: z.object({ batchId: z.number().int().positive(), expected: amount }).strict(),
+  share: z.object({ batchId: z.number().int().positive(), guildIds: z.array(snowflake).max(25) }).strict(),
   refineStart: z.object({
     locationUuid: uuid, durationSeconds: z.number().int().optional(),
     rows: z.array(z.object({ oreUuid: uuid, quality, amount, expectedYield: amount.optional() }).strict()).min(1).max(MAX_REFINE_ROWS),
@@ -70,7 +72,7 @@ const schemas = {
     after: z.string().regex(/^[0-9]{1,16}$/).transform(Number).optional(),
     source: z.enum(['bot', 'webapp', 'companion']).optional(),
     category: z.enum(['stock', 'refinery', 'blueprint']).optional(),
-    action: z.enum(['add', 'remove', 'adjust', 'move', 'start', 'done']).optional(),
+    action: z.enum(['add', 'remove', 'adjust', 'move', 'share', 'unshare', 'give', 'split', 'merge', 'start', 'done']).optional(),
     by: z.enum(['me', 'others']).optional(),
   }).strict(),
   profile: z.object({
@@ -114,33 +116,21 @@ const langOf = (c: Context): Lang => (c.req.query('lang') === 'de' ? 'de' : 'en'
 const unitOf = (kind: 'resource' | 'item'): 'SCU' | 'pcs' => (kind === 'resource' ? 'SCU' : 'pcs');
 const ok = (c: Context) => c.json({ ok: true } satisfies OkResponse);
 
-interface Membership {
-  officer: boolean;
-  // The bot vouches for the roster and is on the server: org stock may be written
-  writable: boolean;
-}
-
 /** The caller's active membership in the org; 403 notMember without one. */
-async function membership(db: Db, userId: string, guildId: string): Promise<Membership> {
-  const [m] = await db.execute<{ officer: boolean; writable: boolean }>(sql`
-    SELECT m.officer,
-      coalesce(o.roster_checked_at > now() - ${`${ROSTER_STALE_MS} milliseconds`}::interval, false) AND g.left_at IS NULL AS writable
-    FROM app.member m JOIN app.org o ON o.guild_id = m.guild_id LEFT JOIN bot.guild g ON g.guild_id = m.guild_id
-    WHERE m.guild_id = ${guildId} AND m.user_id = ${userId} AND m.active`);
+async function membership(db: Db, userId: string, guildId: string) {
+  const [m] = await db.execute(sql`SELECT 1 FROM app.member WHERE guild_id = ${guildId} AND user_id = ${userId} AND active`);
   if (!m) throw new HttpError(403, 'notMember');
-  return m;
 }
 
 /** Where a request comes from: the companion app (API token) or the web app (session). */
 const sourceOf = (c: Context<Env>): Source => (c.get('apiToken') ? 'companion' : 'webapp');
 
-/** The stock service's Actor for a write: personal without guildId; in an org only with a vouched-for roster. */
+/** The stock service's Actor for a write: with the org it happens in (adding shared, giving) a member there. */
 async function actorFor(c: Context<Env>, db: Db, userId: string, guildId: string | undefined): Promise<Actor> {
   const source = sourceOf(c);
-  if (!guildId) return { userId, guildId: null, officer: false, source };
-  const m = await membership(db, userId, guildId);
-  if (!m.writable) throw new HttpError(409, 'rosterStale');
-  return { userId, guildId, officer: m.officer, source };
+  if (!guildId) return { userId, guildId: null, source };
+  await membership(db, userId, guildId);
+  return { userId, guildId, source };
 }
 
 /** Runs a stock booking; refusals become 422 with the service's code. */
@@ -154,12 +144,16 @@ async function book(c: Context, run: () => Promise<unknown>) {
   return ok(c);
 }
 
-function toBatch(p: PickableBatch, viewer: string, officerIn: Set<string>): StockBatch {
+// The viewer's active orgs (what someone else's batch may show of its shares)
+const orgsOf = async (db: Db, userId: string) =>
+  new Set((await db.execute<{ g: string }>(sql`SELECT guild_id AS g FROM app.member WHERE user_id = ${userId} AND active`)).map((r) => r.g));
+
+function toBatch(p: PickableBatch, viewer: string, viewerOrgs: Set<string>): StockBatch {
   const b = p.batch;
   return {
     id: b.id,
-    designation: b.designation,
-    guildId: b.guildId,
+    sharedIn: b.ownerUserId === viewer ? p.sharedIn : p.sharedIn.filter((g) => viewerOrgs.has(g)),
+    part: b.lot !== null,
     kind: b.kind,
     subjectUuid: b.resourceUuid ?? b.itemUuid!,
     material: p.material,
@@ -171,7 +165,7 @@ function toBatch(p: PickableBatch, viewer: string, officerIn: Set<string>): Stoc
     unit: unitOf(b.kind),
     holderUserId: b.ownerUserId,
     holderName: p.holderName,
-    canChange: b.designation === 'personal' ? b.ownerUserId === viewer : officerIn.has(b.guildId!),
+    canChange: b.ownerUserId === viewer,
     refine: p.refine && {
       jobId: p.refine.jobId,
       startedAt: p.refine.startedAt && new Date(p.refine.startedAt).toISOString(),
@@ -181,9 +175,9 @@ function toBatch(p: PickableBatch, viewer: string, officerIn: Set<string>): Stoc
   };
 }
 
-function listResponse(found: PickableBatch[], viewer: string, officerIn: Set<string>): StockListResponse {
+function listResponse(found: PickableBatch[], viewer: string, viewerOrgs: Set<string>): StockListResponse {
   const sums = new Map<string, bigint>();
-  const batches = found.map((p) => toBatch(p, viewer, officerIn));
+  const batches = found.map((p) => toBatch(p, viewer, viewerOrgs));
   for (const b of batches) sums.set(b.subjectUuid, (sums.get(b.subjectUuid) ?? 0n) + toMicros(b.quantity));
   return { batches, totals: Object.fromEntries([...sums].map(([k, v]) => [k, formatMicros(v)])) };
 }
@@ -222,17 +216,13 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     if (c.req.query('scope') === 'org') {
       const guildId = snowflake.safeParse(c.req.query('guildId'));
       if (!guildId.success) throw new HttpError(400, 'invalid');
-      const m = await membership(db, me, guildId.data);
+      await membership(db, me, guildId.data);
       const holder = c.req.query('holder');
       if (holder !== undefined && !SNOWFLAKE.test(holder)) throw new HttpError(400, 'invalid');
       const found = await stockList(db, { scope: { guildId: guildId.data }, holderUserId: holder }, lang);
-      return c.json(listResponse(found, me, new Set(m.officer ? [guildId.data] : [])));
+      return c.json(listResponse(found, me, await orgsOf(db, me)));
     }
-    if (c.req.query('scope') === 'all') {
-      const officerIn = await db.execute<{ guild_id: string }>(sql`
-        SELECT guild_id FROM app.member WHERE user_id = ${me} AND active AND officer`);
-      return c.json(listResponse(await stockList(db, { scope: { allOf: me } }, lang), me, new Set(officerIn.map((r) => r.guild_id))));
-    }
+    if (c.req.query('scope') === 'all') return c.json(listResponse(await stockList(db, { scope: { allOf: me } }, lang), me, await orgsOf(db, me)));
     if (c.req.query('scope') !== 'personal') throw new HttpError(400, 'invalid');
     return c.json(listResponse(await stockList(db, { scope: { personalOf: me } }, lang), me, new Set()));
   });
@@ -245,19 +235,19 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const actor = await actorFor(c, db, me, input.guildId);
     return book(c, () => stock.add(db, actor, {
       kind: material.kind, uuid: input.subjectUuid, locationUuid: input.locationUuid, quality: input.quality, amount: input.amount,
-      org: !!input.guildId, holderUserId: input.holderUserId,
+      org: !!input.guildId,
     }));
   });
 
   api.post('/stock/remove', async (c) => {
     const input = await body(c, schemas.remove);
-    const actor = await actorFor(c, db, c.get('session').userId, input.guildId);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
     return book(c, () => stock.remove(db, actor, { batchId: input.batchId, amount: input.amount, expected: input.expected }));
   });
 
   api.post('/stock/adjust', async (c) => {
     const input = await body(c, schemas.adjust);
-    const actor = await actorFor(c, db, c.get('session').userId, input.guildId);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
     return book(c, () => stock.adjust(db, actor, { batchId: input.batchId, amount: input.amount, expected: input.expected }));
   });
 
@@ -265,6 +255,24 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const { guildId, ...input } = await body(c, schemas.move);
     const actor = await actorFor(c, db, c.get('session').userId, guildId);
     return book(c, () => stock.move(db, actor, input));
+  });
+
+  api.post('/stock/split', async (c) => {
+    const input = await body(c, schemas.split);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
+    return book(c, () => stock.split(db, actor, input));
+  });
+
+  api.post('/stock/merge', async (c) => {
+    const input = await body(c, schemas.merge);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
+    return book(c, () => stock.merge(db, actor, input));
+  });
+
+  api.post('/stock/share', async (c) => {
+    const input = await body(c, schemas.share);
+    // The service checks the membership in every org it newly goes to
+    return book(c, () => stock.share(db, { userId: c.get('session').userId, guildId: null, source: sourceOf(c) }, input));
   });
 
   // --- refinery (always personal) -------------------------------------------------------------
@@ -305,7 +313,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     if (!SNOWFLAKE.test(guildId)) throw new HttpError(400, 'invalid');
     await membership(db, c.get('session').userId, guildId);
     const members = await db.execute<OrgMember & Record<string, unknown>>(sql`
-      SELECT m.user_id AS "userId", m.display_name AS "displayName", u.rsi_handle AS "rsiHandle", m.officer
+      SELECT m.user_id AS "userId", m.display_name AS "displayName", u.rsi_handle AS "rsiHandle"
       FROM app.member m JOIN app.app_user u ON u.user_id = m.user_id
       WHERE m.guild_id = ${guildId} AND m.active ORDER BY lower(m.display_name)`);
     return c.json([...members] satisfies OrgMember[]);
@@ -338,12 +346,13 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
 
   api.get('/summary', async (c) => {
     const me = c.get('session').userId;
-    // Stored stock per scope: personal (guild NULL, yours) and every org you are an active member of
+    // Stored stock per scope: yours (shared or not, guild_id NULL here) and what active members shared
+    // in every org you are an active member of; shared stock of yours counts in both
     const stock = await db.execute<{
       guild_id: string | null; resources: number; scu: string; resource_locations: number;
       items: number; pieces: string; item_locations: number;
     }>(sql`
-      SELECT b.guild_id,
+      SELECT s.guild_id,
         count(DISTINCT b.resource_uuid)::int AS resources,
         coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'resource'), 0)::text AS scu,
         count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'resource')::int AS resource_locations,
@@ -351,9 +360,12 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'item'), 0)::text AS pieces,
         count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'item')::int AS item_locations
       FROM app.stock_batch b
-      WHERE b.state = 'stored' AND ((b.guild_id IS NULL AND b.owner_user_id = ${me})
-        OR b.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${me} AND active))
-      GROUP BY b.guild_id`);
+      CROSS JOIN LATERAL (SELECT NULL::text AS guild_id WHERE b.owner_user_id = ${me}
+        UNION ALL SELECT sh.guild_id FROM app.stock_share sh
+          JOIN app.member sm ON sm.guild_id = sh.guild_id AND sm.user_id = b.owner_user_id AND sm.active
+          WHERE sh.batch_id = b.id AND sh.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${me} AND active)) s
+      WHERE b.state = 'stored'
+      GROUP BY s.guild_id`);
     // Refinery jobs are personal only
     const [refining] = await db.execute<{ jobs: number; expected: string | null; locations: number; ends: string[] }>(sql`
       SELECT count(DISTINCT refine_job)::int AS jobs,
@@ -361,7 +373,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         count(DISTINCT location_uuid)::int AS locations,
         coalesce(array_agg(DISTINCT to_json(refine_ends_at)#>>'{}') FILTER (WHERE refine_ends_at IS NOT NULL), '{}') AS ends
       FROM app.stock_batch
-      WHERE state = 'refining' AND guild_id IS NULL AND owner_user_id = ${me}`);
+      WHERE state = 'refining' AND owner_user_id = ${me}`);
     const orgs = await db.execute<{ guild_id: string; members: number; blueprints: number }>(sql`
       SELECT o.guild_id,
         (SELECT count(*) FROM app.member m WHERE m.guild_id = o.guild_id AND m.active)::int AS members,

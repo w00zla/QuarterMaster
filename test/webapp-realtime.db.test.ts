@@ -22,7 +22,6 @@ const url = process.env.TEST_DATABASE_URL;
 const ORIGIN = 'https://qm.test';
 const [G, H] = ['700000000000000041', '700000000000000042'];
 const MEMBER_ROLE = '710000000000000041';
-const OFFICER_ROLE = '710000000000000042';
 const [ME, MATE, STRANGER] = ['730000000000000041', '730000000000000042', '730000000000000043'];
 const QUIET_MS = 250;
 
@@ -39,9 +38,11 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
   const member = (userId: string, roleIds: string[], guildId = G) =>
     syncMember(db, guildId, settings, userId, { userId, displayName: `n${userId.slice(-2)}`, roleIds, bot: false });
   const session = (userId: string) => createSession(db, { id: userId, username: `u${userId.slice(-2)}`, globalName: null, avatar: null });
+  // A batch, shared in the org when one is given
   const batch = (owner: string, guildId: string | null, quality: number) => db.execute(sql`
-    INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, location_uuid, quality, quantity)
-    VALUES (${guildId}, ${owner}, ${guildId ? 'org' : 'personal'}, 'resource', ${U.metal}, ${U.station}, ${quality}, 1)`);
+    WITH b AS (INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, location_uuid, quality, quantity)
+      VALUES (${owner}, 'resource', ${U.metal}, ${U.station}, ${quality}, 1) RETURNING id)
+    INSERT INTO app.stock_share (batch_id, guild_id) SELECT id, ${guildId}::text FROM b WHERE ${guildId}::text IS NOT NULL`);
 
   /** An open socket that records what it receives. */
   async function socket(token: string) {
@@ -86,8 +87,8 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     for (const [id, name] of [[G, 'Org G'], [H, 'Org H']] as const) await ensureGuild(db, id, name);
-    settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
-    await updateGuildSettings(db, H, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
+    settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
+    await updateGuildSettings(db, H, { memberRoleIds: [MEMBER_ROLE] });
     await member(ME, [MEMBER_ROLE]);
     await member(MATE, [MEMBER_ROLE]);
     await member(STRANGER, [MEMBER_ROLE], H);
@@ -137,18 +138,20 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     assert.equal(mate.received.length, 1);
   });
 
-  it('org stock: the org members hear about it, nobody else', async () => {
+  it('shared stock: the owner and the org members hear about it, nobody else', async () => {
     const me = await socket(await session(ME));
     const stranger = await socket(await session(STRANGER));
     await batch(ME, G, 503);
-    assert.deepEqual(await me.next(), { type: 'stock', scope: 'org', guildId: G });
+    const got = [await me.next(), await me.next()].map((m) => JSON.stringify(m));
+    assert.deepEqual(new Set(got), new Set([{ type: 'stock', scope: 'personal' }, { type: 'stock', scope: 'org', guildId: G }].map((m) => JSON.stringify(m))));
     await quiet();
     assert.equal(stranger.received.length, 0);
   });
 
   it('roster: the user reloads their orgs, the org reloads its member list; a joined org counts at once', async () => {
     const me = await socket(await session(ME));
-    await member(ME, [OFFICER_ROLE]);
+    // A new name on the server
+    await syncMember(db, G, settings, ME, { userId: ME, displayName: 'Renamed', roleIds: [MEMBER_ROLE], bot: false });
     const got = [await me.next(), await me.next()];
     assert.deepEqual(new Set(got.map((m) => JSON.stringify(m))), new Set([JSON.stringify({ type: 'me' }), JSON.stringify({ type: 'members', guildId: G })]));
     // Joining H: from then on H's stock reaches this socket
@@ -159,16 +162,14 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     assert.deepEqual(await me.next(), { type: 'stock', scope: 'org', guildId: H });
   });
 
-  it('org: freshness flips and bot presence are announced, the minute beat is not', async () => {
+  it('org: name changes and bot presence are announced', async () => {
     const me = await socket(await session(ME));
-    await db.execute(sql`UPDATE app.org SET roster_checked_at = now() WHERE guild_id = ${G}`);
+    await db.execute(sql`UPDATE app.org SET name = 'Org G2' WHERE guild_id = ${G}`);
     assert.deepEqual(await me.next(), { type: 'me' });
-    await db.execute(sql`UPDATE app.org SET roster_checked_at = now() WHERE guild_id = ${G}`);
-    await quiet();
-    assert.equal(me.received.length, 1, 'beat announced');
     await db.execute(sql`UPDATE bot.guild SET left_at = now() WHERE guild_id = ${G}`);
     assert.deepEqual(await me.next(), { type: 'me' });
     await db.execute(sql`UPDATE bot.guild SET left_at = NULL WHERE guild_id = ${G}`);
+    await db.execute(sql`UPDATE app.org SET name = 'Org G' WHERE guild_id = ${G}`);
   });
 
   it('blueprints and profile: the user and their org mates hear about it, others not', async () => {
@@ -189,9 +190,20 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     const [row] = await db.execute<{ id: string }>(sql`
       INSERT INTO app.history (source, category, action, actor_user_id, owner_user_id, guild_id, target_kind, target_uuid)
       VALUES ('bot', 'stock', 'add', ${MATE}, ${ME}, ${G}, 'resource', ${U.metal}) RETURNING id::text`);
-    const expected = { type: 'history', id: Number(row!.id), source: 'bot' };
+    const expected = { type: 'history', id: Number(row!.id), source: 'bot', actor: MATE };
     assert.deepEqual(await me.next(), expected);
     assert.deepEqual(await mate.next(), expected);
+    await quiet();
+    assert.ok(!stranger.received.some((m) => m.type === 'history'));
+  });
+
+  it('history: stock shared in an org goes to that org\'s members too', async () => {
+    const me = await socket(await session(ME));
+    const stranger = await socket(await session(STRANGER));
+    const [row] = await db.execute<{ id: string }>(sql`
+      INSERT INTO app.history (source, category, action, actor_user_id, owner_user_id, guild_id, target_kind, target_uuid)
+      VALUES ('webapp', 'stock', 'share', ${MATE}, ${MATE}, ${G}, 'resource', ${U.metal}) RETURNING id::text`);
+    assert.deepEqual(await me.next(), { type: 'history', id: Number(row!.id), source: 'webapp', actor: MATE });
     await quiet();
     assert.ok(!stranger.received.some((m) => m.type === 'history'));
   });

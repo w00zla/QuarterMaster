@@ -31,7 +31,7 @@ const opt = (name: string, key: MessageKey, type: ApplicationCommandOptionType, 
 const S = ApplicationCommandOptionType.String;
 const auto = { autocomplete: true };
 
-const actorOf = (a: { userId: string; guildId: string; officer: boolean }): stock.Actor => ({ userId: a.userId, guildId: a.guildId, officer: a.officer, source: 'bot' });
+const actorOf = (a: { userId: string; guildId: string }): stock.Actor => ({ userId: a.userId, guildId: a.guildId, source: 'bot' });
 
 /** Runs a stock operation; refusals become messages in the user's language. */
 async function book<T>(run: () => Promise<T>): Promise<T> {
@@ -58,22 +58,22 @@ async function pickedBatch(ctx: CommandContext, actor: stock.Actor, pick: BatchP
 /** A batch as it looks after a booking (names from the catalog caches). */
 async function describe(db: Db, batch: stock.Batch, lang: Lang): Promise<PickableBatch> {
   const [materials, locations] = [await materialCatalog(db, lang), await locationCatalog(db, lang)];
-  const holder = batch.designation === 'org' ? (await rosterEntry(db, batch.guildId!, batch.ownerUserId))?.displayName ?? null : null;
   return {
     batch,
     material: materials.get(batch.resourceUuid ?? batch.itemUuid!)?.name ?? '?',
     location: locations.get(batch.locationUuid)?.short ?? '?',
-    holderName: holder,
+    // The bot does not show shares after a booking (it gets rebuilt)
+    holderName: null,
+    sharedIn: [],
     // The bot shows no refinery job details
     refine: null,
   };
 }
 
-/** " · In stock (Org): 30 SCU": the material in the stock the booking ended in (personal of its owner, or the org's). */
-async function totalSuffix(db: Db, lang: Lang, b: Pick<stock.Batch, 'guildId' | 'ownerUserId' | 'resourceUuid' | 'itemUuid' | 'kind'>) {
-  const scope = b.guildId ? { guildId: b.guildId } : { personalOf: b.ownerUserId };
-  const total = await materialTotal(db, scope, b.resourceUuid ?? b.itemUuid!);
-  const scopeName = t(lang, b.guildId ? 'stock.org' : 'stock.personal');
+/** " · In stock (Pers.): 30 SCU": the material in its owner's stock after the booking. */
+async function totalSuffix(db: Db, lang: Lang, b: Pick<stock.Batch, 'ownerUserId' | 'resourceUuid' | 'itemUuid' | 'kind'>) {
+  const total = await materialTotal(db, { personalOf: b.ownerUserId }, b.resourceUuid ?? b.itemUuid!);
+  const scopeName = t(lang, 'stock.personal');
   return ` · ${t(lang, 'stock.inStock', { scope: scopeName, amount: amountText(lang, total, b.kind) })}`;
 }
 
@@ -82,7 +82,9 @@ async function totalSuffix(db: Db, lang: Lang, b: Pick<stock.Batch, 'guildId' | 
 export type Pending =
   | { op: 'remove'; batchId: number; amount: string | null; expected: string }
   | { op: 'adjust'; batchId: number; amount: string; expected: string }
-  | { op: 'move'; batchId: number; amount: string | null; expected: string; toLocationUuid?: string; toOrg?: boolean; toHolderUserId?: string };
+  | { op: 'move'; batchId: number; amount: string | null; expected: string; toLocationUuid?: string; toOwnerUserId?: string;
+      // The recipient's name for the reply of a give
+      toOwnerName?: string };
 
 function confirmButtons(token: string, lang: Lang) {
   return [new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -114,8 +116,13 @@ export async function runPending(db: Db, actor: stock.Actor, p: Pending, lang: L
     const after = r.batch ? what(await describe(db, r.batch, lang), lang, true) : t(lang, 'stock.empty');
     return t(lang, 'stock.adjusted', { delta, what: after }) + await totalSuffix(db, lang, j);
   }
-  const r = await book(() => stock.move(db, actor, p));
+  const { op: _op, toOwnerName, ...input } = p;
+  const r = await book(() => stock.move(db, actor, input));
   const j = r.journal[1]!;
+  // A give: the batch is the recipient's now; no total, their stock is private
+  if (r.batch!.ownerUserId !== actor.userId) {
+    return t(lang, 'stock.given', { amount: amountText(lang, j.delta, j.kind), name: escapeMarkdown(toOwnerName ?? '?'), what: what(await describe(db, r.batch!, lang), lang) });
+  }
   return t(lang, 'stock.moved', { amount: amountText(lang, j.delta, j.kind), what: what(await describe(db, r.batch!, lang), lang, true) })
     + await totalSuffix(db, lang, r.batch!);
 }
@@ -166,7 +173,8 @@ export function listPage(entries: PickableBatch[], org: boolean, page: number, l
       `${p.batch.state === 'refining' ? '⚗️ ' : ''}Q${p.batch.quality}`,
       amountText(lang, p.batch.quantity, p.batch.kind),
       escapeMarkdown(p.location),
-      org ? escapeMarkdown(p.holderName ?? '?') : null,
+      // The org list names who shares it; your own list marks what you share
+      org ? escapeMarkdown(p.holderName ?? '?') : p.sharedIn.length ? tr('stock.shared') : null,
     ];
     lines.push(`- ${parts.filter(Boolean).join(' · ')}`);
   }
@@ -195,9 +203,9 @@ async function pickedLocation(ctx: CommandContext, name: string): Promise<string
   return value;
 }
 
-/** Holder option: an active member of the org (user ID from the suggestions); also returns the display name. */
-async function pickedHolder(ctx: CommandContext, guildId: string) {
-  const value = ctx.interaction.options.getString('holder');
+/** A member option (holder, recipient): an active member of the org (user ID from the suggestions); also returns the display name. */
+async function pickedMember(ctx: CommandContext, guildId: string, name: 'holder' | 'recipient') {
+  const value = ctx.interaction.options.getString(name);
   if (value === null) return null;
   const entry = /^\d{17,20}$/.test(value) ? await rosterEntry(ctx.db, guildId, value) : null;
   if (!entry?.active) throw new UserError('stock.err.holderNotMember');
@@ -219,7 +227,7 @@ async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db
   const settings = interaction.inGuild() ? await findGuildSettings(db, interaction.guildId) : null;
   const access = settings && interaction.member ? accessOf(memberInfo(interaction.member).roleIds, settings) : null;
   if (!access?.member) return interaction.respond([]);
-  const actor: stock.Actor = { userId: interaction.user.id, guildId: interaction.guildId!, officer: access.officer, source: 'bot' };
+  const actor: stock.Actor = { userId: interaction.user.id, guildId: interaction.guildId!, source: 'bot' };
   const focused = interaction.options.getFocused(true);
   const query = String(focused.value);
   const sub = interaction.options.getSubcommand();
@@ -227,7 +235,7 @@ async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db
   if (focused.name === 'material') choices = await materialChoices(db, lang, query, false);
   else if (focused.name === 'location') choices = await locationChoices(db, lang, query);
   else if (focused.name === 'batch') choices = await batchChoices(db, actor, sub === 'move' ? 'move' : 'change', lang, query);
-  else if (focused.name === 'holder') {
+  else if (focused.name === 'holder' || focused.name === 'recipient') {
     choices = (await searchMembers(db, actor.guildId!, query)).map((m) => ({
       name: (m.rsiHandle ? `${m.displayName} · ${m.rsiHandle}` : m.displayName).slice(0, 100), value: m.userId,
     }));
@@ -251,7 +259,6 @@ export const stockCommand: BotCommand = {
           opt('quality', 'opt.quality', ApplicationCommandOptionType.Integer, { required: true, min_value: 0, max_value: 1000 }),
           opt('location', 'opt.location', S, { required: true, ...auto }),
           opt('org', 'opt.org', ApplicationCommandOptionType.Boolean),
-          opt('holder', 'opt.holder', S, auto),
         ],
       }),
       opt('remove', 'cmd.stock.remove', ApplicationCommandOptionType.Subcommand, {
@@ -262,8 +269,7 @@ export const stockCommand: BotCommand = {
           opt('batch', 'opt.batch', S, { required: true, ...auto }),
           opt('amount', 'opt.amountOrAll', S),
           opt('location', 'opt.toLocation', S, auto),
-          opt('org', 'opt.toOrg', ApplicationCommandOptionType.Boolean),
-          opt('holder', 'opt.holder', S, auto),
+          opt('recipient', 'opt.recipient', S, auto),
         ],
       }),
       opt('adjust', 'cmd.stock.adjust', ApplicationCommandOptionType.Subcommand, {
@@ -290,15 +296,12 @@ export const stockCommand: BotCommand = {
       const access = await requireMember(ctx.db, ctx.interaction);
       const o = ctx.interaction.options;
       const material = pickedMaterial(ctx)!;
-      const holder = await pickedHolder(ctx, access.guildId);
       const r = await book(() => stock.add(ctx.db, actorOf(access), {
         ...material,
         locationUuid: o.getString('location', true),
         quality: o.getInteger('quality', true),
         amount: o.getString('amount', true),
-        // Naming a holder only makes sense for org stock
-        org: (o.getBoolean('org') ?? false) || holder !== null,
-        holderUserId: holder?.userId,
+        org: o.getBoolean('org') ?? false,
       }));
       const amount = amountText(ctx.lang, r.journal[0]!.delta, r.batch!.kind);
       const content = ctx.t('stock.added', { amount, what: what(await describe(ctx.db, r.batch!, ctx.lang), ctx.lang, true) })
@@ -319,16 +322,16 @@ export const stockCommand: BotCommand = {
       const p = await pickedBatch(ctx, actorOf(access), 'move');
       const amount = checkAmount(o.getString('amount'), p.batch.kind);
       const toLocationUuid = await pickedLocation(ctx, 'location');
-      const toOrg = o.getBoolean('org') ?? undefined;
-      const holder = await pickedHolder(ctx, access.guildId);
-      if (toLocationUuid === undefined && toOrg === undefined && holder === null) throw new UserError('stock.err.nothingToMove');
-      // What the target will look like (the service decides and checks the same way when booking)
-      const targetOrg = toOrg ?? p.batch.designation === 'org';
+      // Giving to yourself is no give
+      const picked = await pickedMember(ctx, access.guildId, 'recipient');
+      const recipient = picked?.userId === access.userId ? null : picked;
+      if (toLocationUuid === undefined && recipient === null) throw new UserError('stock.err.nothingToMove');
+      // What the target will look like (a give ends unshared with the recipient)
       const location = toLocationUuid ? (await locationCatalog(ctx.db, ctx.lang)).get(toLocationUuid)!.short : p.location;
-      const holderName = holder?.name ?? (p.batch.designation === 'org' ? p.holderName : (await rosterEntry(ctx.db, access.guildId, access.userId))?.displayName);
-      const target = `${escapeMarkdown(location)} · ${targetOrg ? `${ctx.t('stock.org')} (${escapeMarkdown(holderName ?? '?')})` : ctx.t('stock.personal')}`;
+      const target = `${escapeMarkdown(location)} · ${recipient ? escapeMarkdown(recipient.name) : ctx.t('stock.personal')}`;
       await askConfirmation(ctx, access.userId, {
-        op: 'move', batchId: p.batch.id, amount, expected: p.batch.quantity, toLocationUuid, toOrg, toHolderUserId: holder?.userId,
+        op: 'move', batchId: p.batch.id, amount, expected: p.batch.quantity, toLocationUuid,
+        toOwnerUserId: recipient?.userId, toOwnerName: recipient?.name,
       }, ctx.t('stock.confirm.move', { amount: amountText(ctx.lang, amount ?? p.batch.quantity, p.batch.kind), what: what(p, ctx.lang), target }));
     },
     async adjust(ctx) {
@@ -340,8 +343,8 @@ export const stockCommand: BotCommand = {
     },
     async list(ctx) {
       const access = await requireMember(ctx.db, ctx.interaction);
-      const holder = await pickedHolder(ctx, access.guildId);
-      // Filtering by holder only makes sense for org stock: others' personal stock is private
+      const holder = await pickedMember(ctx, access.guildId, 'holder');
+      // Filtering by holder only makes sense for shared stock: what others have unshared is private
       const org = (ctx.interaction.options.getBoolean('org') ?? false) || holder !== null;
       const query: ListQuery = {
         org,
@@ -367,7 +370,7 @@ export const stockCommand: BotCommand = {
         `Q${p.batch.quality}`,
         amountText(ctx.lang, p.batch.quantity, p.batch.kind),
         escapeMarkdown(p.location),
-        p.batch.designation === 'org' ? `${ctx.t('stock.org')} (${escapeMarkdown(p.holderName ?? '?')})` : ctx.t('stock.personal'),
+        p.sharedIn.length ? `${ctx.t('stock.org')} (${escapeMarkdown(p.holderName ?? '?')})` : ctx.t('stock.personal'),
       ].join(' · ')}`);
       if (found.length > MAX_FIND) lines.push(ctx.t('bp.who.more', { count: found.length - MAX_FIND }));
       await ctx.reply({

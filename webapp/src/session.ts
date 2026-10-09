@@ -20,7 +20,6 @@ if (params.has("login")) {
 
 let loading: Promise<void> | null = null;
 let again = false;
-let freshTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** (Re)loads /api/me. Calls while a load runs collapse into one more load after it. */
 export function loadMe(): Promise<void> {
@@ -46,10 +45,6 @@ async function fetchMe() {
     me.value = null;
     status.value = e instanceof ApiError && e.status === 401 ? "anon" : "error";
   }
-  // The bot's minute beat is not announced: ask again when an org's roster would turn stale
-  clearTimeout(freshTimer);
-  const due = (me.value?.orgs ?? []).filter((o) => o.rosterFresh).map((o) => o.rosterFreshForMs);
-  if (due.length) freshTimer = setTimeout(() => void loadMe(), Math.min(...due) + 1000);
 }
 
 export async function logout() {

@@ -102,42 +102,48 @@ export interface PickableBatch {
   batch: Batch;
   material: string;
   location: string;
-  // Org stock: who holds it
+  // The owner's name in an org it is shared in (null while unshared)
   holderName: string | null;
+  // The orgs it is shared in (guild IDs, also ones whose roster no longer lists the owner)
+  sharedIn: string[];
   // Refinery jobs only
   refine: RefineInfo | null;
 }
 
 /**
- * Batches the actor may change: their personal stock and, for officers, the org's stock.
- * Ordered by material name, then quality (best first).
+ * Batches the actor may change: their own, shared or not. Ordered by material name, then quality
+ * (best first).
  */
 export async function pickableBatches(db: Db, actor: Actor, pick: BatchPick, lang: string): Promise<PickableBatch[]> {
-  const scope = pick === 'refining' || !actor.officer || !actor.guildId
-    ? sql`b.guild_id IS NULL AND b.owner_user_id = ${actor.userId}`
-    : sql`((b.guild_id IS NULL AND b.owner_user_id = ${actor.userId}) OR b.guild_id = ${actor.guildId})`;
+  const scope = sql`b.owner_user_id = ${actor.userId}`;
   const state = pick === 'refining' ? sql`b.state = 'refining'` : pick === 'move' ? sql`b.state = 'stored'` : sql`true`;
   return loadBatches(db, sql`${scope} AND ${state}`, lang);
 }
 
 export interface StockFilter {
-  // Personal stock of this user, the org's stock, or both: the user's personal stock and the stock of
-  // every org they are an active member of
+  // Everything this user owns (shared or not), what the org's active members shared there, or both:
+  // the user's own plus what was shared in every org they are an active member of
   scope: { personalOf: string } | { guildId: string } | { allOf: string };
   subjectUuid?: string;
   locationUuid?: string;
-  // Org stock only
+  // Of this owner only
   holderUserId?: string;
 }
 
-/** What a list shows: personal stock is only ever its owner's; org stock is visible to all members. */
+// Shared in an org (`guilds`: a guild ID, or a subquery of them): counts there while its owner is an
+// active member (someone who left keeps the batch, the org no longer sees it)
+const sharedIn = (guilds: SQL) => sql`EXISTS (SELECT 1 FROM app.stock_share s
+  JOIN app.member sm ON sm.guild_id = s.guild_id AND sm.user_id = b.owner_user_id AND sm.active
+  WHERE s.batch_id = b.id AND s.guild_id IN (${guilds}))`;
+const myOrgs = (userId: string) => sql`SELECT guild_id FROM app.member WHERE user_id = ${userId} AND active`;
+
+/** What a list shows: unshared stock only ever to its owner; shared stock to the org's members. */
 export function stockList(db: Db, filter: StockFilter, lang: string): Promise<PickableBatch[]> {
   const s = filter.scope;
   const conds = [
-    'personalOf' in s ? sql`b.guild_id IS NULL AND b.owner_user_id = ${s.personalOf}`
-    : 'guildId' in s ? sql`b.guild_id = ${s.guildId}`
-    : sql`((b.guild_id IS NULL AND b.owner_user_id = ${s.allOf})
-      OR b.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${s.allOf} AND active))`,
+    'personalOf' in s ? sql`b.owner_user_id = ${s.personalOf}`
+    : 'guildId' in s ? sharedIn(sql`${s.guildId}`)
+    : sql`(b.owner_user_id = ${s.allOf} OR ${sharedIn(myOrgs(s.allOf))})`,
   ];
   if (filter.subjectUuid) conds.push(sql`coalesce(b.resource_uuid, b.item_uuid) = ${filter.subjectUuid}`);
   if (filter.locationUuid) conds.push(sql`b.location_uuid = ${filter.locationUuid}`);
@@ -145,36 +151,39 @@ export function stockList(db: Db, filter: StockFilter, lang: string): Promise<Pi
   return loadBatches(db, sql.join(conds, sql` AND `), lang);
 }
 
-/** Stored batches of a material in the org plus the user's own personal stock, best quality first. */
+/** Stored batches of a material shared in the org plus the user's own, best quality first. */
 export async function findStock(db: Db, guildId: string, userId: string, subjectUuid: string, minQuality: number, lang: string) {
-  const found = await loadBatches(db, sql`(b.guild_id = ${guildId} OR (b.guild_id IS NULL AND b.owner_user_id = ${userId}))
+  const found = await loadBatches(db, sql`(${sharedIn(sql`${guildId}`)} OR b.owner_user_id = ${userId})
     AND coalesce(b.resource_uuid, b.item_uuid) = ${subjectUuid} AND b.quality >= ${minQuality} AND b.state = 'stored'`, lang);
   return found.sort((a, b) => b.batch.quality - a.batch.quality || a.batch.id - b.batch.id);
 }
 
 /** Batches matching `where` (alias `b`) with display names, ordered by material, then quality (best first). */
 async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBatch[]> {
-  const found = await rows<Batch & { holderName: string | null; refine: RefineInfo }>(db, sql`
-    SELECT b.id::int AS id, b.guild_id AS "guildId", b.owner_user_id AS "ownerUserId", b.designation, b.kind,
+  const found = await rows<Batch & { holderName: string | null; sharedIn: string[]; refine: RefineInfo }>(db, sql`
+    SELECT b.id::int AS id, b.owner_user_id AS "ownerUserId", b.kind,
       b.resource_uuid AS "resourceUuid", b.item_uuid AS "itemUuid", b.location_uuid AS "locationUuid", b.state, b.quality,
-      b.quantity::text AS quantity, m.display_name AS "holderName",
+      b.quantity::text AS quantity, b.lot,
+      coalesce((SELECT array_agg(s.guild_id ORDER BY s.guild_id) FROM app.stock_share s WHERE s.batch_id = b.id), '{}') AS "sharedIn",
+      (SELECT m.display_name FROM app.stock_share s JOIN app.member m ON m.guild_id = s.guild_id AND m.user_id = b.owner_user_id
+        WHERE s.batch_id = b.id ORDER BY m.active DESC, s.guild_id LIMIT 1) AS "holderName",
       json_build_object('jobId', b.refine_job, 'startedAt', b.refine_started_at, 'endsAt', b.refine_ends_at,
         'expected', b.refine_expected::text) AS refine
     FROM app.stock_batch b
-    LEFT JOIN app.member m ON b.guild_id IS NOT NULL AND m.guild_id = b.guild_id AND m.user_id = b.owner_user_id
     WHERE ${where}`);
   const [materials, locations] = [await materialCatalog(db, lang), await locationCatalog(db, lang)];
   // Batches may reference retired catalog entries, which the caches leave out: fall back to the names stored in the catalog
   const fallbackNames = await missingNames(db, lang, found.filter((b) => !materials.has(b.resourceUuid ?? b.itemUuid!)).map((b) => b.resourceUuid ?? b.itemUuid!),
     found.filter((b) => !locations.has(b.locationUuid)).map((b) => b.locationUuid));
   return found
-    .map(({ holderName, refine, ...batch }) => {
+    .map(({ holderName, sharedIn: shares, refine, ...batch }) => {
       const subject = batch.resourceUuid ?? batch.itemUuid!;
       return {
         batch,
         material: materials.get(subject)?.name ?? fallbackNames.get(subject) ?? subject,
         location: locations.get(batch.locationUuid)?.short ?? fallbackNames.get(batch.locationUuid) ?? batch.locationUuid,
-        holderName: batch.designation === 'org' ? holderName : null,
+        holderName,
+        sharedIn: shares,
         refine: batch.state === 'refining' ? refine : null,
       };
     })
@@ -192,13 +201,13 @@ export async function missingNames(db: Db, lang: string, subjects: string[], loc
   return new Map(found.map((f) => [f.uuid, f.name]));
 }
 
-/** Sum of a material in one stock (a user's personal stock or an org's stock), as NUMERIC text ("0" if none). */
+/** Sum of a material in one stock (everything a user owns, or what is shared in an org), as NUMERIC text ("0" if none). */
 export async function materialTotal(db: Db, scope: { personalOf: string } | { guildId: string }, subjectUuid: string): Promise<string> {
   const where = 'personalOf' in scope
-    ? sql`guild_id IS NULL AND owner_user_id = ${scope.personalOf}`
-    : sql`guild_id = ${scope.guildId}`;
+    ? sql`b.owner_user_id = ${scope.personalOf}`
+    : sharedIn(sql`${scope.guildId}`);
   const found = await rows<{ total: string }>(db, sql`
-    SELECT coalesce(sum(quantity), 0)::text AS total FROM app.stock_batch
-    WHERE ${where} AND coalesce(resource_uuid, item_uuid) = ${subjectUuid}`);
+    SELECT coalesce(sum(b.quantity), 0)::text AS total FROM app.stock_batch b
+    WHERE ${where} AND coalesce(b.resource_uuid, b.item_uuid) = ${subjectUuid}`);
   return found[0]!.total;
 }

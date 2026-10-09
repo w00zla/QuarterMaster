@@ -1,6 +1,7 @@
-// Roster: app.member mirrors who holds one of the org's member or officer roles.
+// Roster: app.member mirrors who holds one of the org's member roles.
 // Rows exist only for current role holders. Someone who loses the role (or leaves the server)
-// keeps an inactive row only while this org's stock or journal rows reference them; otherwise
+// keeps an inactive row only while they share stock in this org or its history names them (it shows
+// their name from this row); otherwise
 // the row is deleted. Their app_user row goes too, but only once it holds no data at all:
 // users can work without any org (personal stock, blueprints, profile).
 import { and, eq, sql } from 'drizzle-orm';
@@ -33,15 +34,12 @@ export function memberInfo(m: GuildMember | APIInteractionGuildMember): MemberIn
 }
 
 export interface Access {
-  // Holds a member or an officer role (officers count as members)
+  // Holds a member role
   member: boolean;
-  officer: boolean;
 }
 
-export function accessOf(roleIds: string[], settings: Pick<GuildSettings, 'memberRoleIds' | 'officerRoleIds'>): Access {
-  const has = (ids: string[]) => ids.some((id) => roleIds.includes(id));
-  const officer = has(settings.officerRoleIds);
-  return { member: officer || has(settings.memberRoleIds), officer };
+export function accessOf(roleIds: string[], settings: Pick<GuildSettings, 'memberRoleIds'>): Access {
+  return { member: settings.memberRoleIds.some((id) => roleIds.includes(id)) };
 }
 
 export type SyncResult = 'active' | 'inactive' | 'deleted' | 'none';
@@ -56,11 +54,10 @@ export async function syncMember(
   if (info && access?.member) {
     await db.transaction(async (tx) => {
       await tx.insert(appUser).values({ userId }).onConflictDoNothing();
-      await tx.insert(member).values({ guildId, userId, displayName: info.displayName, officer: access.officer }).onConflictDoUpdate({
+      await tx.insert(member).values({ guildId, userId, displayName: info.displayName }).onConflictDoUpdate({
         target: [member.guildId, member.userId],
-        set: { active: true, inactiveSince: null, displayName: info.displayName, officer: access.officer, updatedAt: sql`now()` },
-        setWhere: sql`NOT ${member.active} OR ${member.displayName} IS DISTINCT FROM excluded.display_name
-          OR ${member.officer} IS DISTINCT FROM excluded.officer`,
+        set: { active: true, inactiveSince: null, displayName: info.displayName, updatedAt: sql`now()` },
+        setWhere: sql`NOT ${member.active} OR ${member.displayName} IS DISTINCT FROM excluded.display_name`,
       });
     });
     return 'active';
@@ -68,9 +65,10 @@ export async function syncMember(
   return db.transaction(async (tx) => {
     const deleted = await tx.execute(sql`
       DELETE FROM app.member m WHERE m.guild_id = ${guildId} AND m.user_id = ${userId}
-        AND NOT EXISTS (SELECT 1 FROM app.stock_batch b WHERE b.guild_id = m.guild_id AND b.owner_user_id = m.user_id)
-        AND NOT EXISTS (SELECT 1 FROM app.stock_journal j WHERE j.guild_id = m.guild_id
-                          AND (j.owner_user_id = m.user_id OR j.actor_user_id = m.user_id))
+        AND NOT EXISTS (SELECT 1 FROM app.stock_share s JOIN app.stock_batch b ON b.id = s.batch_id
+                          WHERE s.guild_id = m.guild_id AND b.owner_user_id = m.user_id)
+        AND NOT EXISTS (SELECT 1 FROM app.history h WHERE h.guild_id = m.guild_id
+                          AND m.user_id IN (h.actor_user_id, h.owner_user_id, h.to_owner_user_id))
       RETURNING 1`);
     if (deleted.length) {
       // In a savepoint: a concurrent first write by this user (e.g. from the web app) makes the
@@ -91,7 +89,6 @@ export async function syncMember(
     const updated = await tx.update(member)
       .set({
         active: false,
-        officer: false,
         inactiveSince: sql`coalesce(${member.inactiveSince}, now())`,
         ...(info ? { displayName: info.displayName } : {}),
         updatedAt: sql`now()`,

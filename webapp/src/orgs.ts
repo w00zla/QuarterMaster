@@ -1,14 +1,11 @@
 // The user's orgs from /api/me and their member lists (GET /api/orgs/:g/members), cached per org and
 // reloaded on 'members' (that org), 'profile' (an RSI handle) and 'resync'.
 import { reactive } from "vue";
-import type { MeOrg, OrgMember } from "../../src/webapp/api-types";
+import type { OrgMember } from "../../src/webapp/api-types";
 import { api } from "./api";
 import { lang } from "./i18n";
 import { onServerMessage } from "./realtime";
 import { me } from "./session";
-
-/** Org stock can be changed only while the bot vouches for the roster (the server refuses otherwise). */
-export const writable = (o: MeOrg | undefined) => !!o && o.rosterFresh && o.botPresent;
 
 export const orgOf = (guildId: string | null | undefined) => me.value?.orgs.find((o) => o.guildId === guildId);
 

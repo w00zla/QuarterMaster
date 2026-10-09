@@ -14,7 +14,6 @@ import { U, fixtureSnapshot } from './fixtures.ts';
 const url = process.env.TEST_DATABASE_URL;
 const G = '700000000000000001';
 const MEMBER_ROLE = '710000000000000001';
-const OFFICER_ROLE = '710000000000000002';
 const [ALICE, BOB, CAROL, DAVE] = ['720000000000000001', '720000000000000002', '720000000000000003', '720000000000000004'];
 const info = (userId: string, roleIds: string[], displayName = `n${userId.slice(-1)}`, bot = false): MemberInfo =>
   ({ userId, displayName, roleIds, bot });
@@ -36,13 +35,13 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     await ensureGuild(db, G, 'Roster Org');
-    settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
+    settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
   });
   after(async () => close?.());
 
-  it('adds role holders (officers too), skips everyone else and bots', async () => {
+  it('adds role holders, skips everyone else and bots', async () => {
     assert.equal(await syncMember(db, G, settings, ALICE, info(ALICE, [MEMBER_ROLE], 'Alice')), 'active');
-    assert.equal(await syncMember(db, G, settings, BOB, info(BOB, [OFFICER_ROLE])), 'active');
+    assert.equal(await syncMember(db, G, settings, BOB, info(BOB, [MEMBER_ROLE])), 'active');
     assert.equal(await syncMember(db, G, settings, CAROL, info(CAROL, ['other'])), 'none');
     assert.equal(await syncMember(db, G, settings, DAVE, info(DAVE, [MEMBER_ROLE], 'Botty', true)), 'none');
     assert.deepEqual(await row(ALICE), { active: true, display_name: 'Alice', inactive: false });
@@ -61,9 +60,10 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
     assert.equal(await userExists(BOB), false);
   });
 
-  it('keeps a referenced member inactive, and reactivates them with the role', async () => {
-    await db.execute(sql`INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, location_uuid, quality, quantity)
-      VALUES (${G}, ${ALICE}, 'org', 'resource', ${U.metal}, ${U.station}, 800, 1)`);
+  it('keeps a member who shares stock in the org inactive, and reactivates them with the role', async () => {
+    await db.execute(sql`WITH b AS (INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, location_uuid, quality, quantity)
+      VALUES (${ALICE}, 'resource', ${U.metal}, ${U.station}, 800, 1) RETURNING id)
+      INSERT INTO app.stock_share (batch_id, guild_id) SELECT id, ${G} FROM b`);
     assert.equal(await syncMember(db, G, settings, ALICE, null), 'inactive');
     assert.deepEqual(await row(ALICE), { active: false, display_name: 'Alice Renamed', inactive: true });
     assert.equal(await userExists(ALICE), true);
@@ -82,24 +82,14 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
     const [EVE, FRANK] = ['720000000000000005', '720000000000000006'];
     await syncMember(db, G, settings, EVE, info(EVE, [MEMBER_ROLE]));
     await syncMember(db, G, settings, FRANK, info(FRANK, [MEMBER_ROLE]));
-    // Personal stock has no org: it does not keep the member row, only the user
-    await db.execute(sql`INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, location_uuid, quality, quantity)
-      VALUES (NULL, ${EVE}, 'personal', 'resource', ${U.metal}, ${U.station}, 700, 2)`);
+    // Unshared stock has no org: it does not keep the member row, only the user
+    await db.execute(sql`INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, location_uuid, quality, quantity)
+      VALUES (${EVE}, 'resource', ${U.metal}, ${U.station}, 700, 2)`);
     await db.execute(sql`UPDATE app.app_user SET rsi_handle = 'frank' WHERE user_id = ${FRANK}`);
     assert.equal(await syncMember(db, G, settings, EVE, null), 'deleted');
     assert.equal(await syncMember(db, G, settings, FRANK, null), 'deleted');
     assert.equal(await userExists(EVE), true);
     assert.equal(await userExists(FRANK), true);
-  });
-
-  it('ties personal stock to no org and org stock to an org', async () => {
-    const insert = (guildId: string | null, designation: string) => db.execute(sql`INSERT INTO app.stock_batch
-      (guild_id, owner_user_id, designation, kind, resource_uuid, location_uuid, quality, quantity)
-      VALUES (${guildId}, ${ALICE}, ${designation}, 'resource', ${U.metal}, ${U.station}, 600, 1)`);
-    // Drizzle wraps the Postgres error; the constraint name is on the cause
-    const violates = (name: string) => (err: unknown) => (err as { cause?: { constraint_name?: string } }).cause?.constraint_name === name;
-    await assert.rejects(insert(G, 'personal'), violates('stock_batch_personal_global'));
-    await assert.rejects(insert(null, 'org'), violates('stock_batch_personal_global'));
   });
 
   it('full sync: adds new role holders and handles members who left while offline', async () => {
@@ -108,22 +98,6 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
     assert.deepEqual(counts, { active: 1, inactive: 1, deleted: 0, none: 0 });
     assert.equal((await row(ALICE))!.active, false);
     assert.equal((await row(BOB))!.active, true);
-  });
-
-  it('stores the officer flag and keeps it current, false while inactive', async () => {
-    const officer = async (userId: string) => (await db.execute<{ officer: boolean }>(
-      sql`SELECT officer FROM app.member WHERE guild_id = ${G} AND user_id = ${userId}`))[0]?.officer;
-    // Bob is an active member from the full sync above
-    assert.equal(await officer(BOB), false);
-    await syncMember(db, G, settings, BOB, info(BOB, [OFFICER_ROLE]));
-    assert.equal(await officer(BOB), true);
-    await syncMember(db, G, settings, BOB, info(BOB, [MEMBER_ROLE]));
-    assert.equal(await officer(BOB), false);
-    // New rows get it on insert; a referenced officer who loses every role keeps an inactive row without it
-    await syncMember(db, G, settings, ALICE, info(ALICE, [MEMBER_ROLE, OFFICER_ROLE], 'Alice Renamed'));
-    assert.equal(await officer(ALICE), true);
-    assert.equal(await syncMember(db, G, settings, ALICE, info(ALICE, [], 'Alice Renamed')), 'inactive');
-    assert.equal(await officer(ALICE), false);
   });
 
   it('a concurrent first write keeps the user row, the member change still commits', async () => {
@@ -135,8 +109,8 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
       // The write holds a key lock on the user row until it commits; the roster's user delete waits
       // for it and then fails on the foreign key
       await other.db.transaction(async (tx) => {
-        await tx.execute(sql`INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, location_uuid, quality, quantity)
-          VALUES (NULL, ${GINA}, 'personal', 'resource', ${U.metal}, ${U.station}, 500, 1)`);
+        await tx.execute(sql`INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, location_uuid, quality, quantity)
+          VALUES (${GINA}, 'resource', ${U.metal}, ${U.station}, 500, 1)`);
         sync = syncMember(db, G, settings, GINA, null);
         await new Promise((r) => setTimeout(r, 300));
       });

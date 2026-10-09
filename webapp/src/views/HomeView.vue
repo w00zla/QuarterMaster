@@ -100,11 +100,8 @@ onUnmounted(() => {
         <div v-for="o in me.orgs" :key="o.guildId" class="org">
           <div class="org-head">
             <span class="org-name">{{ o.name }}</span>
-            <span v-if="!o.botPresent" class="warning" :title="t('home.botMissingHint')"><Icon name="warning" :size="14" /> {{ t("home.botMissing") }}</span>
-            <span v-else-if="!o.rosterFresh" class="warning" :title="t('home.rosterStale')"><Icon name="warning" :size="14" /> {{ t("home.readOnly") }}</span>
             <span class="spacer" />
-            <span class="role members" :class="{ officer: o.officer }">{{ t("home.members", { n: number(orgStats(o.guildId)?.members) ?? "—" }) }}</span>
-            <span class="role" :class="{ officer: o.officer }">{{ t("home.role", { role: t(o.officer ? "home.officer" : "home.member") }) }}</span>
+            <span class="role">{{ t("home.members", { n: number(orgStats(o.guildId)?.members) ?? "—" }) }}</span>
           </div>
           <div class="stats">
             <StatTile v-for="tile in stockTiles(orgStats(o.guildId))" :key="tile.label" :label="tile.label" :value="tile.value" :unit="tile.unit" :icon="tile.icon">{{ tile.sub }}</StatTile>
@@ -167,13 +164,5 @@ onUnmounted(() => {
 .role {
   font-size: 12px;
   color: var(--text-2);
-}
-
-.members {
-  margin-right: 8px;
-}
-
-.role.officer {
-  color: var(--accent);
 }
 </style>

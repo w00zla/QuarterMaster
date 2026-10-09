@@ -24,7 +24,7 @@ const actionFilter = ref("");
 const byFilter = ref("");
 
 const ACTIONS: Record<HistoryEntry["category"], string[]> = {
-  stock: ["add", "remove", "adjust", "move"],
+  stock: ["add", "remove", "adjust", "move", "split", "merge", "share", "unshare", "give"],
   refinery: ["start", "done", "remove", "adjust"],
   blueprint: ["add", "remove"],
 };

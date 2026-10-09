@@ -3,6 +3,7 @@ import type { StockBatch } from "../../src/webapp/api-types";
 import { parseAmount } from "../../src/stock/amount";
 import { t } from "./i18n";
 import { orgOf } from "./orgs";
+import { me } from "./session";
 
 export type Unit = "SCU" | "pcs";
 
@@ -53,9 +54,11 @@ export function hm(seconds: number): string {
   return h ? `${h} ${t("unit.h")} ${m} ${t("unit.min")}` : `${m} ${t("unit.min")}`;
 }
 
-/** "Org (holder)" or "Pers.", as in the bot. */
-export const ownerText = (b: StockBatch) =>
-  b.designation === "org" ? `${orgOf(b.guildId)?.name ?? "Org"} (${b.holderName ?? "?"})` : t("stock.pers");
+/** "Pers." for your own batch, else its owner's name. */
+export const ownerText = (b: StockBatch) => (b.holderUserId === me.value?.userId ? t("stock.pers") : b.holderName ?? "?");
+
+/** "Shared · Org A, Org B": the orgs a batch is shared in. */
+export const sharedText = (b: StockBatch) => t("stock.sharedIn", { org: b.sharedIn.map((g) => orgOf(g)?.name ?? "Org").join(", ") });
 
 /** "Quantanium · ★★★★ 820 · Area18 · Pers." */
 export const batchText = (b: StockBatch) => `${b.material} · ${qText(b.quality)} · ${b.location} · ${ownerText(b)}`;

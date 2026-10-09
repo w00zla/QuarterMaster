@@ -4,7 +4,7 @@ import { connect } from '../db/client.ts';
 import { commands } from './commands.ts';
 import { handleInteraction } from './interactions.ts';
 import { memberInfo } from './roster.ts';
-import { BEAT_INTERVAL_MS, RosterKeeper, onFullSyncRequest } from './roster-keeper.ts';
+import { RosterKeeper, onFullSyncRequest } from './roster-keeper.ts';
 import { findGuildSettings, markGuildLeft, markGuildPresent, reconcilePresence } from './settings.ts';
 import { createRegistry } from './registry.ts';
 
@@ -28,13 +28,10 @@ client.once(Events.ClientReady, (c) => {
 });
 
 // The roster: synced in full whenever member events may have been missed, kept current by the
-// member events in between; per org the keeper records whether it can vouch for it (roster-keeper.ts)
+// member events in between (roster-keeper.ts)
 const shardsUp = new Set<number>();
 const log = (message: string, err?: unknown) => (err === undefined ? console.log(message) : console.error(message, err));
-const keeper = new RosterKeeper(db, (guildId) => {
-  const guild = client.guilds.cache.get(guildId);
-  return !!guild?.available && shardsUp.has(guild.shardId);
-}, log);
+const keeper = new RosterKeeper(db, log);
 const fullSync = (guild: Guild) =>
   keeper.fullSync(guild.id, guild.name, async () => [...(await guild.members.fetch()).values()].map(memberInfo));
 const guildsOf = (shardId: number) => [...client.guilds.cache.filter((g) => g.shardId === shardId).values()];
@@ -46,7 +43,6 @@ const shardUp = (shardId: number) => {
 };
 const shardDown = (shardId: number) => {
   shardsUp.delete(shardId);
-  void keeper.invalidate(guildsOf(shardId).map((g) => g.id));
 };
 // A new session: member events since the last one are lost. A resume too: discord.js drops the
 // member events Discord replays before RESUMED (the shard is not Ready yet)
@@ -63,16 +59,14 @@ client.on(Events.GuildCreate, (guild) => {
 client.on(Events.GuildAvailable, (guild) => {
   if (shardsUp.has(guild.shardId)) void fullSync(guild);
 });
-// Outage, or the bot was removed: nobody keeps that roster current any more
-client.on(Events.GuildUnavailable, (guild) => void keeper.invalidate([guild.id]));
+// The bot was removed: nobody keeps that roster current any more, its members go inactive
 client.on(Events.GuildDelete, (guild) => {
-  void keeper.invalidate([guild.id]);
   markGuildLeft(db, guild.id).catch((err: unknown) => log(`Presence update failed for ${guild.id}`, err));
 });
 // Discord sends no member updates when a role is deleted
 client.on(Events.GuildRoleDelete, (role) => {
   void findGuildSettings(db, role.guild.id).then((settings) => {
-    if (settings && [...settings.memberRoleIds, ...settings.officerRoleIds].includes(role.id)) void fullSync(role.guild);
+    if (settings && settings.memberRoleIds.includes(role.id)) void fullSync(role.guild);
   }, (err: unknown) => log(`Role check failed for ${role.guild.id}`, err));
 });
 
@@ -80,7 +74,6 @@ client.on(Events.GuildMemberAdd, (m) => void keeper.memberEvent(m.guild.id, m.id
 client.on(Events.GuildMemberUpdate, (_old, m) => void keeper.memberEvent(m.guild.id, m.id, memberInfo(m)));
 client.on(Events.GuildMemberRemove, (m) => void keeper.memberEvent(m.guild.id, m.id, null));
 
-const beatTimer = setInterval(() => void keeper.beat(), BEAT_INTERVAL_MS);
 // Backstop for anything the events above miss
 const resyncTimer = setInterval(() => {
   for (const guild of client.guilds.cache.values()) if (guild.available) void fullSync(guild);
@@ -91,9 +84,8 @@ client.on(Events.InteractionCreate, (interaction) => {
 });
 
 const shutdown = async () => {
-  clearInterval(beatTimer);
   clearInterval(resyncTimer);
-  await keeper.stop();
+  keeper.stop();
   await client.destroy();
   await close();
   process.exit(0);

@@ -6,7 +6,6 @@ import type { GuildSettings } from '../src/bot/settings.ts';
 
 const settings: GuildSettings = {
   memberRoleIds: ['100000000000000001', '100000000000000002'],
-  officerRoleIds: [],
   baseLang: 'de',
   logsChannelId: '200000000000000001',
   logsLevel: 'org',
@@ -22,7 +21,6 @@ describe('/qm-setup', () => {
   it('shows the current values and never pings', () => {
     const panel = setupPanel(settings, 'en', { missing: [] });
     assert.match(panel.content, /Member roles: <@&100000000000000001>, <@&100000000000000002>/);
-    assert.match(panel.content, /Officer roles: none/);
     assert.match(panel.content, /Base language \(public output\): Deutsch/);
     assert.match(panel.content, /Logs: <#200000000000000001> · Org stock bookings · ✅/);
     assert.deepEqual(panel.allowedMentions, { parse: [] });
@@ -32,9 +30,9 @@ describe('/qm-setup', () => {
     // Plain JSON view of the first component per row
     const rows = setupPanel(settings, 'de', null).components.map((r) => r.toJSON().components[0] as unknown as Record<string, unknown>);
     assert.deepEqual(rows.map((c) => c.custom_id), [
-      'qm-setup:memberRoles', 'qm-setup:officerRoles', 'qm-setup:baseLang', 'qm-setup:logsChannel', 'qm-setup:logsLevel',
+      'qm-setup:memberRoles', 'qm-setup:baseLang', 'qm-setup:logsChannel', 'qm-setup:logsLevel',
     ]);
-    const [member, , lang, channel, level] = rows;
+    const [member, lang, channel, level] = rows;
     assert.deepEqual((member!.default_values as { id: string }[]).map((v) => v.id), settings.memberRoleIds);
     assert.deepEqual((channel!.default_values as { id: string }[]).map((v) => v.id), [settings.logsChannelId]);
     assert.deepEqual((lang!.options as { value: string; default: boolean }[]).filter((o) => o.default).map((o) => o.value), ['de']);

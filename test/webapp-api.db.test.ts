@@ -1,6 +1,6 @@
 // Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
 // The user web app's feature endpoints through Hono (app.request): catalog, stock, refinery,
-// blueprints, org members, profile — rights, the rosterStale guard and users without any org.
+// blueprints, org members, profile — rights, memberships and users without any org.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
@@ -10,7 +10,7 @@ import { connect, type Db } from '../src/db/client.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
-import { ensureGuild, updateGuildSettings, type GuildSettings } from '../src/bot/settings.ts';
+import { ensureGuild, markGuildLeft, updateGuildSettings, type GuildSettings } from '../src/bot/settings.ts';
 import type {
   BlueprintInfo, CatalogResponse, HistoryResponse, MaterialInfo, MeResponse, OrgMember, StockBatch, StockListResponse, SummaryResponse,
 } from '../src/webapp/api-types.ts';
@@ -25,7 +25,6 @@ const url = process.env.TEST_DATABASE_URL;
 const ORIGIN = 'https://qm.test';
 const G = '700000000000000051';
 const MEMBER_ROLE = '710000000000000051';
-const OFFICER_ROLE = '710000000000000052';
 const [OLGA, MIA, MAX, SOLO] = ['740000000000000051', '740000000000000052', '740000000000000053', '740000000000000054'];
 const noLogin: DiscordLogin = { start: () => Promise.reject(new Error('unused')), finish: () => Promise.reject(new Error('unused')) };
 
@@ -49,7 +48,6 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   };
   const personal = async (user: string) => (await get<StockListResponse>(user, '/stock?scope=personal')).body;
   const org = async (user: string) => (await get<StockListResponse>(user, `/stock?scope=org&guildId=${G}`)).body;
-  const fresh = (on: boolean) => db.execute(sql`UPDATE app.org SET roster_checked_at = ${on ? sql`now()` : sql`NULL`} WHERE guild_id = ${G}`);
   const metal = { subjectUuid: U.metal, locationUuid: U.station };
 
   before(async () => {
@@ -59,14 +57,13 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     await ensureGuild(db, G, 'Feature Org');
-    settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
-    for (const [id, role] of [[OLGA, OFFICER_ROLE], [MIA, MEMBER_ROLE], [MAX, MEMBER_ROLE]] as const) {
-      await syncMember(db, G, settings, id, { userId: id, displayName: `n${id.slice(-2)}`, roleIds: [role], bot: false });
+    settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
+    for (const id of [OLGA, MIA, MAX]) {
+      await syncMember(db, G, settings, id, { userId: id, displayName: `n${id.slice(-2)}`, roleIds: [MEMBER_ROLE], bot: false });
     }
     for (const id of [OLGA, MIA, MAX, SOLO]) {
       tokens.set(id, await createSession(db, { id, username: `u${id.slice(-2)}`, globalName: null, avatar: null }));
     }
-    await fresh(true);
     app = createApp(db, noLogin, { origin: ORIGIN, trustProxy: false, distDir: null });
   });
   after(async () => close?.());
@@ -89,7 +86,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.equal((await post(SOLO, '/stock/add', { ...metal, quality: 700, amount: '12,5' })).status, 200);
     let list = await personal(SOLO);
     const batch = list.batches[0]!;
-    assert.deepEqual([batch.quantity, batch.unit, batch.canChange, batch.designation, list.totals[U.metal]], ['12.5', 'SCU', true, 'personal', '12.5']);
+    assert.deepEqual([batch.quantity, batch.unit, batch.canChange, batch.sharedIn, list.totals[U.metal]], ['12.5', 'SCU', true, [], '12.5']);
     assert.equal((await post(SOLO, '/stock/remove', { batchId: batch.id, amount: '2.5', expected: '12.5' })).status, 200);
     // Booking against what the user saw: a changed batch is refused
     assert.deepEqual((await post(SOLO, '/stock/adjust', { batchId: batch.id, amount: '20', expected: '12.5' })).body, { error: 'batchChanged' });
@@ -135,61 +132,73 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.deepEqual((await post(MIA, '/stock/remove', { batchId: solo.id, amount: null, expected: solo.quantity })).body, { error: 'notAllowed' });
   });
 
-  it('org stock: members add their own and donate, officers change it; others see it but cannot change it', async () => {
+  it('shared stock: everyone shares and changes their own, gives to members; others see it but cannot change it', async () => {
     assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 800, amount: '3', guildId: G })).status, 200);
-    // Members cannot name another holder
-    assert.deepEqual((await post(MIA, '/stock/add', { ...metal, quality: 800, amount: '1', guildId: G, holderUserId: MAX })).body, { error: 'notAllowed' });
-    assert.equal((await post(OLGA, '/stock/add', { ...metal, quality: 810, amount: '2', guildId: G, holderUserId: MAX })).status, 200);
+    assert.equal((await post(OLGA, '/stock/add', { ...metal, quality: 810, amount: '2', guildId: G })).status, 200);
 
     const asMax = await org(MAX);
     assert.equal(asMax.totals[U.metal], '5');
     assert.ok(asMax.batches.every((b) => !b.canChange));
-    const miaBatch = (await org(OLGA)).batches.find((b) => b.holderUserId === MIA)!;
+    assert.equal((await org(OLGA)).batches.find((b) => b.holderUserId === MIA)!.canChange, false);
+    const miaBatch = (await org(MIA)).batches.find((b) => b.holderUserId === MIA)!;
     assert.equal(miaBatch.canChange, true);
     assert.equal(miaBatch.holderName, 'n52');
-    // A member cannot change org stock, not even what they hold
-    assert.deepEqual((await post(MIA, '/stock/remove', { batchId: miaBatch.id, amount: '1', expected: '3', guildId: G })).body, { error: 'notAllowed' });
-    assert.equal((await post(OLGA, '/stock/move', { batchId: miaBatch.id, amount: '1', expected: '3', guildId: G, toHolderUserId: OLGA })).status, 200);
+    // Only the owner changes it, without naming the org
+    assert.deepEqual((await post(OLGA, '/stock/remove', { batchId: miaBatch.id, amount: '1', expected: '3' })).body, { error: 'notAllowed' });
+    assert.equal((await post(MIA, '/stock/remove', { batchId: miaBatch.id, amount: '1', expected: '3' })).status, 200);
+    // Your own list holds what you share
+    assert.ok((await personal(MIA)).batches.some((b) => b.id === miaBatch.id && b.sharedIn.join() === G));
+    // Giving: to a member of the org, who gets it unshared
+    assert.equal((await post(MIA, '/stock/move', { batchId: miaBatch.id, amount: '1', expected: '2', guildId: G, toOwnerUserId: OLGA })).status, 200);
+    assert.ok((await personal(OLGA)).batches.some((b) => b.quality === 800 && !b.sharedIn.length && b.quantity === '1'));
+    assert.deepEqual((await post(MIA, '/stock/move', { batchId: miaBatch.id, amount: '1', expected: '1', guildId: G, toOwnerUserId: SOLO })).body,
+      { error: 'holderNotMember' });
 
-    // Donation: own personal stock becomes org stock
+    // Sharing: own stock offered in the org, a part split off first; taken back again
     await post(MAX, '/stock/add', { ...metal, quality: 300, amount: '4' });
-    const maxPersonal = (await personal(MAX)).batches[0]!;
-    assert.equal((await post(MAX, '/stock/move', { batchId: maxPersonal.id, amount: null, expected: '4', guildId: G, toOrg: true })).status, 200);
-    assert.ok((await org(MAX)).batches.some((b) => b.holderUserId === MAX && b.quality === 300));
+    const maxOwn = (await personal(MAX)).batches[0]!;
+    assert.equal((await post(MAX, '/stock/split', { batchId: maxOwn.id, amount: '1', expected: '4' })).status, 200);
+    const part = (await personal(MAX)).batches.find((b) => b.id !== maxOwn.id && b.quality === 300)!;
+    assert.equal(part.quantity, '1');
+    assert.equal((await post(MAX, '/stock/share', { batchId: part.id, guildIds: [G] })).status, 200);
+    assert.deepEqual((await org(MAX)).batches.filter((b) => b.holderUserId === MAX && b.quality === 300).map((b) => [b.id, b.quantity]), [[part.id, '1']]);
+    assert.deepEqual((await post(OLGA, '/stock/share', { batchId: part.id, guildIds: [] })).body, { error: 'notAllowed' });
+    assert.deepEqual((await post(MAX, '/stock/split', { batchId: part.id, amount: '0.5', expected: '1' })).body, { error: 'sharedSplit' });
+    assert.equal((await post(MAX, '/stock/share', { batchId: part.id, guildIds: [] })).status, 200);
+    assert.equal((await post(MAX, '/stock/share', { batchId: part.id, guildIds: [G] })).status, 200);
 
     // Holder filter
     const held = (await get<StockListResponse>(MAX, `/stock?scope=org&guildId=${G}&holder=${OLGA}`)).body.batches;
     assert.ok(held.length > 0 && held.every((b: StockBatch) => b.holderUserId === OLGA));
   });
 
-  it('org writes need a roster the bot vouches for; reads and personal stock do not', async () => {
-    await fresh(false);
+  it('org writes need an active membership; a server the bot left has none', async () => {
+    assert.deepEqual((await post(SOLO, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'notMember' });
+    // The bot left: it deactivates the org's members, the org is gone for them
+    await markGuildLeft(db, G);
     try {
-      assert.deepEqual((await post(MIA, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'rosterStale' });
-      assert.equal((await get(MIA, `/stock?scope=org&guildId=${G}`)).status, 200);
+      assert.deepEqual((await post(MIA, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'notMember' });
+      assert.equal((await get(MIA, `/stock?scope=org&guildId=${G}`)).status, 403);
       assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 1, amount: '1' })).status, 200);
-      // The bot left the server: same
-      await fresh(true);
-      await db.execute(sql`UPDATE bot.guild SET left_at = now() WHERE guild_id = ${G}`);
-      assert.deepEqual((await post(OLGA, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'rosterStale' });
     } finally {
-      await db.execute(sql`UPDATE bot.guild SET left_at = NULL WHERE guild_id = ${G}`);
-      await fresh(true);
+      for (const id of [OLGA, MIA, MAX]) {
+        await syncMember(db, G, settings, id, { userId: id, displayName: `n${id.slice(-2)}`, roleIds: [MEMBER_ROLE], bot: false });
+      }
     }
   });
 
-  it('findStock (the bot\'s find): the org\'s stock plus your own personal, best quality first', async () => {
+  it('findStock (the bot\'s find): what is shared in the org plus your own, best quality first', async () => {
     const found = await findStock(db, G, MIA, U.metal, 300, 'en');
     assert.ok(found.length >= 3);
     assert.ok(found.every((p, i, all) => i === 0 || all[i - 1]!.batch.quality >= p.batch.quality));
     assert.ok(found.every((p) => p.batch.quality >= 300 && p.batch.state === 'stored'));
-    assert.ok(found.every((p) => p.batch.guildId === G || (p.batch.guildId === null && p.batch.ownerUserId === MIA)));
+    assert.ok(found.every((p) => p.sharedIn.includes(G) || p.batch.ownerUserId === MIA));
   });
 
   it('org members and their blueprints: for active members of the same org only', async () => {
     await post(MAX, '/profile', { rsiHandle: 'MaxPower' });
     const members = (await get<OrgMember[]>(MIA, `/orgs/${G}/members`)).body;
-    assert.deepEqual(members.map((m) => [m.userId, m.officer, m.rsiHandle]), [[OLGA, true, null], [MIA, false, null], [MAX, false, 'MaxPower']]);
+    assert.deepEqual(members.map((m) => [m.userId, m.rsiHandle]), [[OLGA, null], [MIA, null], [MAX, 'MaxPower']]);
     await post(MAX, '/blueprints/add', { uuid: U.blueprint2 });
     await post(OLGA, '/blueprints/add', { uuid: U.blueprint2 });
     // SOLO has it too, but is not in the org: not listed
@@ -215,9 +224,10 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.deepEqual(plan.recipes.map((r) => r.uuid), [U.blueprint]);
   });
 
-  it('stock scope all: personal stock plus every org of yours, with the change rights of each', async () => {
+  it('stock scope all: your own plus what is shared in every org of yours, yours to change only', async () => {
     const all = (await get<StockListResponse>(MIA, '/stock?scope=all')).body;
-    const parts = [...(await personal(MIA)).batches, ...(await org(MIA)).batches];
+    // Your own (shared ones included) and what others share: each batch once
+    const parts = [...new Map([...(await personal(MIA)).batches, ...(await org(MIA)).batches].map((b) => [b.id, b])).values()];
     assert.deepEqual(all.batches.map((b) => b.id).sort((a, b) => a - b), parts.map((b) => b.id).sort((a, b) => a - b));
     for (const b of all.batches) assert.equal(b.canChange, parts.find((p) => p.id === b.id)!.canChange);
     // Without any org: personal only
@@ -293,26 +303,30 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     const since = (r: HistoryResponse) => r.entries.filter((e) => e.id > last);
     assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 333, amount: '3', guildId: G })).status, 200);
     const batch = (await org(MIA)).batches.find((b) => b.quality === 333)!;
-    // The officer moves it to another holder from the companion app (API token)
-    const token = ((await (await app.request('/api/token', { method: 'POST', body: '{}', headers: { ...headers(OLGA), 'content-type': 'application/json' } })).json()) as { token: string }).token;
+    // The owner gives some to another member from the companion app (API token)
+    const token = ((await (await app.request('/api/token', { method: 'POST', body: '{}', headers: { ...headers(MIA), 'content-type': 'application/json' } })).json()) as { token: string }).token;
     const moved = await app.request('/api/stock/move', {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ batchId: batch.id, amount: '1', expected: '3', guildId: G, toHolderUserId: MAX }),
+      body: JSON.stringify({ batchId: batch.id, amount: '1', expected: '3', guildId: G, toOwnerUserId: MAX }),
     });
     assert.equal(moved.status, 200);
 
     const mia = since((await get<HistoryResponse>(MIA, '/history?lang=en')).body);
     assert.deepEqual(mia.map((e) => [e.source, e.category, e.action, e.actor.userId, e.holder?.userId, e.toHolder?.userId ?? null]), [
-      ['companion', 'stock', 'move', OLGA, MIA, MAX],
-      ['webapp', 'stock', 'add', MIA, MIA, null],
+      ['companion', 'stock', 'give', MIA, MIA, MAX],
+      // Adding shared is two steps: the stock, then the share
+      ['webapp', 'stock', 'share', MIA, MIA, null],
+      ['webapp', 'stock', 'add', MIA, undefined, null],
     ]);
+    const added = mia[2]!;
     const [move] = mia;
     assert.deepEqual([move!.actor.name, move!.holder!.name, move!.toHolder!.name, move!.org, move!.amount, move!.unit, move!.quality],
-      [`n${OLGA.slice(-2)}`, `n${MIA.slice(-2)}`, `n${MAX.slice(-2)}`, 'Feature Org', '1', 'SCU', 333]);
+      [`n${MIA.slice(-2)}`, `n${MIA.slice(-2)}`, `n${MAX.slice(-2)}`, 'Feature Org', '1', 'SCU', 333]);
     assert.ok(move!.target !== U.metal && move!.location !== U.station, 'names, not UUIDs');
-    // The new holder and the officer see the move; someone else sees none of it
+    // The recipient sees the give, other members of the org only the share; someone outside it nothing
     assert.ok(since((await get<HistoryResponse>(MAX, '/history')).body).some((e) => e.id === move!.id));
-    assert.ok(since((await get<HistoryResponse>(OLGA, '/history')).body).some((e) => e.id === move!.id));
+    const olga = since((await get<HistoryResponse>(OLGA, '/history')).body);
+    assert.deepEqual(olga.map((e) => [e.action, e.actor.userId]), [['share', MIA]]);
     assert.deepEqual(since((await get<HistoryResponse>(SOLO, '/history')).body), []);
 
     // Pages: newest first, `before` continues
@@ -323,10 +337,12 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     // Filters (on the server, so pages continue within them)
     const ids = async (query: string) => since((await get<HistoryResponse>(MIA, `/history?${query}`)).body).map((e) => e.id);
     assert.deepEqual(await ids('source=companion'), [move!.id]);
-    assert.deepEqual(await ids('by=others'), [move!.id]);
-    assert.deepEqual(await ids('by=me&category=stock&action=add'), [mia[1]!.id]);
+    assert.deepEqual(await ids('by=others'), []);
+    // For the recipient it is someone else's action
+    assert.ok(since((await get<HistoryResponse>(MAX, '/history?by=others')).body).some((e) => e.id === move!.id));
+    assert.deepEqual(await ids('by=me&category=stock&action=add'), [added.id]);
     assert.deepEqual(await ids('category=blueprint'), []);
-    assert.deepEqual(await ids(`after=${mia[1]!.id}`), [move!.id]);
+    assert.deepEqual(await ids(`after=${added.id}`), [move!.id, mia[1]!.id]);
     assert.deepEqual(await ids(`after=${mia[1]!.id}&before=${move!.id}`), []);
     for (const bad of ['source=discord', 'by=everyone', 'action=fly', 'nope=1']) assert.equal((await get(MIA, `/history?${bad}`)).status, 400, bad);
   });

@@ -4,11 +4,11 @@
 // (SELECT … FOR UPDATE) and overdraw is checked in SQL, so concurrent bookings cannot
 // take the same units twice.
 //
-// Who may do what (see .claude/requirements.md "Stock"):
-// - personal stock (guild_id NULL): only its owner, from anywhere (also without any org)
-// - org stock: members add stock they hold themselves and donate their own stock (holder: themselves);
-//   officers do everything, also for other holders
-// - refinery jobs are personal; their result is personal too and can be donated afterwards
+// Who may do what (see .claude/requirements.md "Stock"): every batch belongs to one user, and only
+// that user changes it: add, remove, adjust, move, split, merge, share, give, from anywhere (also without any
+// org). Sharing offers the whole batch in any number of the owner's orgs (app.stock_share); a split-off
+// part (its own `lot`) can be shared apart. Giving hands it to an active member of the actor's org, who
+// gets it unshared. Refinery jobs are never shared; their result can be afterwards.
 // Every operation also writes one row of the users' history (src/history/record.ts), with the
 // actor's source (bot, web app, companion app).
 import { randomUUID } from 'node:crypto';
@@ -19,24 +19,20 @@ import { refineryLocations } from '../ext/refineries.ts';
 import { recordHistory, type HistoryCategory, type HistoryDetails, type Source } from '../history/record.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
 
-export type Designation = 'personal' | 'org';
 export type StockState = 'stored' | 'refining';
 export type JournalAction = 'add' | 'remove' | 'adjust' | 'move_out' | 'move_in' | 'refine_out' | 'refine_in';
 
 export interface Actor {
   userId: string;
-  // The org the action happens in; null outside any org (personal stock only)
+  // The org the action happens in (sharing into it, giving to its members); null outside any org
   guildId: string | null;
-  officer: boolean;
   // Where the action comes from (kept in the history)
   source: Source;
 }
 
 export interface Batch {
   id: number;
-  guildId: string | null;
   ownerUserId: string;
-  designation: Designation;
   kind: SubjectKind;
   resourceUuid: string | null;
   itemUuid: string | null;
@@ -45,11 +41,13 @@ export interface Batch {
   quality: number;
   // NUMERIC text as Postgres returns it ("12.500000")
   quantity: string;
+  // A split-off part (UUID), else null
+  lot: string | null;
 }
 
 type BatchKey = Omit<Batch, 'id' | 'quantity'>;
 
-export interface JournalEntry extends BatchKey {
+export interface JournalEntry extends Omit<BatchKey, 'lot'> {
   id: number;
   groupId: string | null;
   action: JournalAction;
@@ -67,7 +65,7 @@ export interface StockResult {
 export type StockErrorCode =
   | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'oreViaRefinery' | 'notOre' | 'unknownLocation' | 'notRefinery' | 'invalidDuration' | 'retired'
   | 'invalidAmount' | 'invalidQuality' | 'batchNotFound' | 'batchChanged' | 'insufficient' | 'holderNotMember'
-  | 'notRefining' | 'refiningFixed' | 'nothingToMove' | 'noChange';
+  | 'notRefining' | 'refiningFixed' | 'nothingToMove' | 'noChange' | 'sharedSplit';
 
 /** A booking that is refused; the caller turns the code into a message. */
 export class StockError extends Error {
@@ -91,11 +89,11 @@ export const selectableLocationSql = (l = 'l') => sql.raw(`(${l}.nav_icon IN ('S
   AND coalesce(${l}.type, '') NOT IN ('Anomaly', 'PointOfInterest')
   AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);
 
-const BATCH_COLUMNS = sql.raw(`id::int AS id, guild_id AS "guildId", owner_user_id AS "ownerUserId", designation, kind,
-  resource_uuid AS "resourceUuid", item_uuid AS "itemUuid", location_uuid AS "locationUuid", state, quality, quantity::text AS quantity`);
+const BATCH_COLUMNS = sql.raw(`id::int AS id, owner_user_id AS "ownerUserId", kind,
+  resource_uuid AS "resourceUuid", item_uuid AS "itemUuid", location_uuid AS "locationUuid", state, quality, quantity::text AS quantity, lot`);
 
-const JOURNAL_COLUMNS = sql.raw(`id::int AS id, group_id AS "groupId", action, guild_id AS "guildId", actor_user_id AS "actorUserId",
-  owner_user_id AS "ownerUserId", designation, kind, resource_uuid AS "resourceUuid", item_uuid AS "itemUuid",
+const JOURNAL_COLUMNS = sql.raw(`id::int AS id, group_id AS "groupId", action, actor_user_id AS "actorUserId",
+  owner_user_id AS "ownerUserId", kind, resource_uuid AS "resourceUuid", item_uuid AS "itemUuid",
   location_uuid AS "locationUuid", state, quality, delta::text AS delta`);
 
 function parse(text: string, kind: SubjectKind): string {
@@ -151,12 +149,9 @@ async function ensureUser(tx: Tx, userId: string) {
   await tx.execute(sql`INSERT INTO app.app_user (user_id) VALUES (${userId}) ON CONFLICT DO NOTHING`);
 }
 
-/** Who may change an existing batch (remove, move, adjust, refinery completion). */
+/** Who may change an existing batch (remove, move, adjust, refinery completion): its owner only. */
 function checkMayChange(actor: Actor, batch: Batch) {
-  const allowed = batch.designation === 'personal'
-    ? batch.ownerUserId === actor.userId
-    : actor.officer && actor.guildId === batch.guildId;
-  if (!allowed) throw new StockError('notAllowed');
+  if (batch.ownerUserId !== actor.userId) throw new StockError('notAllowed');
 }
 
 /** Locks the batch; `expected` is the quantity the user saw when confirming. */
@@ -167,18 +162,18 @@ async function lockBatch(tx: Tx, id: number, expected?: string): Promise<Batch> 
   return batch;
 }
 
-const keyValues = (k: BatchKey): SQL => sql`${k.guildId}, ${k.ownerUserId}, ${k.designation}, ${k.kind}, ${k.resourceUuid}, ${k.itemUuid},
+const keyValues = (k: Omit<BatchKey, 'lot'>): SQL => sql`${k.ownerUserId}, ${k.kind}, ${k.resourceUuid}, ${k.itemUuid},
   ${k.locationUuid}, ${k.state}, ${k.quality}`;
 
-/** Adds to the batch with this key (merge) or creates it. */
-async function upsert(tx: Tx, key: BatchKey, quantity: string): Promise<Batch> {
+/** Adds to the batch with this key (merge) or creates it; `created` = a new batch. */
+async function upsert(tx: Tx, key: BatchKey, quantity: string): Promise<Batch & { created: boolean }> {
   try {
-    return (await one<Batch>(tx, sql`
-      INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity)
-      VALUES (${keyValues(key)}, ${quantity}::numeric)
+    return (await one<Batch & { created: boolean }>(tx, sql`
+      INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality, lot, quantity)
+      VALUES (${keyValues(key)}, ${key.lot}::uuid, ${quantity}::numeric)
       ON CONFLICT ON CONSTRAINT stock_batch_merge_key
       DO UPDATE SET quantity = app.stock_batch.quantity + excluded.quantity, updated_at = now()
-      RETURNING ${BATCH_COLUMNS}`))!;
+      RETURNING ${BATCH_COLUMNS}, xmax = 0 AS created`))!;
   } catch (err) {
     // numeric field overflow: the merged batch would exceed NUMERIC(14,6)
     if ((err as { cause?: { code?: string } }).cause?.code === '22003') throw new StockError('invalidAmount');
@@ -203,27 +198,44 @@ async function decrease(tx: Tx, batch: Batch, amount: string): Promise<Batch | n
 
 async function journal(tx: Tx, actor: Actor, action: JournalAction, key: BatchKey, delta: string, groupId: string | null = null) {
   return (await one<JournalEntry>(tx, sql`
-    INSERT INTO app.stock_journal (guild_id, owner_user_id, designation, kind, resource_uuid, item_uuid, location_uuid, state, quality,
+    INSERT INTO app.stock_journal (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality,
       action, group_id, actor_user_id, delta)
     VALUES (${keyValues(key)}, ${action}, ${groupId}, ${actor.userId}, ${delta}::numeric)
     RETURNING ${JOURNAL_COLUMNS}`))!;
 }
 
-/** The history row of an operation on a batch key (the material is the target). */
+/**
+ * The history row of an operation on a batch key (the material is the target). `guildId`: the org
+ * involved (sharing, taking back, the org a give happened in).
+ */
 async function history(tx: Tx, actor: Actor, category: HistoryCategory, action: string, key: BatchKey, details: HistoryDetails,
-  to?: BatchKey) {
+  to?: BatchKey, guildId: string | null = null) {
   await recordHistory(tx, {
     source: actor.source, category, action, actorUserId: actor.userId, ownerUserId: key.ownerUserId,
-    toOwnerUserId: to && to.ownerUserId !== key.ownerUserId ? to.ownerUserId : null, guildId: key.guildId ?? to?.guildId ?? null,
+    toOwnerUserId: to && to.ownerUserId !== key.ownerUserId ? to.ownerUserId : null,
+    guildId,
     targetKind: key.kind, targetUuid: key.resourceUuid ?? key.itemUuid!,
-    details: { quality: key.quality, locationUuid: key.locationUuid, designation: key.designation, ...details },
+    details: { quality: key.quality, locationUuid: key.locationUuid, ...details },
   });
+}
+
+/** The orgs a batch is shared in. */
+async function sharesOf(tx: Tx, batchId: number): Promise<string[]> {
+  return (await rows<{ g: string }>(tx, sql`SELECT guild_id AS g FROM app.stock_share WHERE batch_id = ${batchId} ORDER BY guild_id`)).map((r) => r.g);
+}
+
+/** Shares a batch in these orgs (the ones it is in already stay). */
+async function addShares(tx: Tx, batchId: number, guildIds: string[]) {
+  for (const g of guildIds) await tx.execute(sql`INSERT INTO app.stock_share (batch_id, guild_id) VALUES (${batchId}, ${g}) ON CONFLICT DO NOTHING`);
 }
 
 // A refinery job's batch is in the refinery category, everything else is stock
 const categoryOf = (key: BatchKey): HistoryCategory => (key.state === 'refining' ? 'refinery' : 'stock');
 
-const keyOf = ({ id: _id, quantity: _q, ...key }: Batch): BatchKey => key;
+const keyOf = ({ id: _id, quantity: _q, ...key }: Batch & { created?: boolean }): BatchKey => {
+  const { created: _c, ...rest } = key as BatchKey & { created?: boolean };
+  return rest;
+};
 const negate = (amount: string) => `-${amount}`;
 const sameKey = (a: BatchKey, b: BatchKey) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
@@ -234,10 +246,8 @@ export interface AddInput {
   quality: number;
   // As typed by the user
   amount: string;
-  // Org stock of actor.guildId instead of personal stock
+  // Shared in actor.guildId right away (the batch it lands in; one shared already stays shared)
   org?: boolean;
-  // Org stock only: who holds it (default: the actor; others only for officers)
-  holderUserId?: string;
 }
 
 /** Books new stock (ores only via refineStart). */
@@ -249,19 +259,20 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
     const subject = await subjectInfo(tx, input.kind, input.uuid);
     if (subject.isOre) throw new StockError('oreViaRefinery');
     await checkLocation(tx, input.locationUuid);
-    const holder = input.holderUserId ?? actor.userId;
-    if (holder !== actor.userId && !(input.org && actor.officer)) throw new StockError('notAllowed');
     if (input.org) {
       if (!actor.guildId) throw new StockError('notAllowed');
-      await checkHolder(tx, actor.guildId, holder);
+      await checkHolder(tx, actor.guildId, actor.userId);
     }
     const key: BatchKey = {
-      guildId: input.org ? actor.guildId : null, ownerUserId: holder, designation: input.org ? 'org' : 'personal',
-      kind: input.kind, resourceUuid: input.kind === 'resource' ? input.uuid : null, itemUuid: input.kind === 'item' ? input.uuid : null,
-      locationUuid: input.locationUuid, state: 'stored', quality: input.quality,
+      ownerUserId: actor.userId, kind: input.kind, resourceUuid: input.kind === 'resource' ? input.uuid : null,
+      itemUuid: input.kind === 'item' ? input.uuid : null, locationUuid: input.locationUuid, state: 'stored', quality: input.quality, lot: null,
     };
-    const batch = await upsert(tx, key, amount);
+    const { created: _c, ...batch } = await upsert(tx, key, amount);
     await history(tx, actor, 'stock', 'add', key, { amount });
+    if (input.org) {
+      await addShares(tx, batch.id, [actor.guildId!]);
+      await history(tx, actor, 'stock', 'share', key, {}, undefined, actor.guildId);
+    }
     return { journal: [await journal(tx, actor, 'add', key, amount)], batch };
   });
 }
@@ -318,11 +329,11 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
       const subject = await subjectInfo(tx, 'resource', row.oreUuid);
       if (!subject.isOre) throw new StockError('notOre');
       const key: BatchKey = {
-        guildId: null, ownerUserId: actor.userId, designation: 'personal', kind: 'resource', resourceUuid: row.oreUuid, itemUuid: null,
-        locationUuid: input.locationUuid, state: 'refining', quality: row.quality,
+        ownerUserId: actor.userId, kind: 'resource', resourceUuid: row.oreUuid, itemUuid: null,
+        locationUuid: input.locationUuid, state: 'refining', quality: row.quality, lot: null,
       };
       const batch = (await one<Batch>(tx, sql`
-        INSERT INTO app.stock_batch (guild_id, owner_user_id, designation, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity,
+        INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity,
           refine_job, refine_started_at, refine_ends_at, refine_expected)
         VALUES (${keyValues(key)}, ${row.amount}::numeric, ${jobId}, ${started}::timestamptz,
           ${started}::timestamptz + ${seconds}::int * interval '1 second', ${row.expected}::numeric)
@@ -380,7 +391,8 @@ export async function refineDone(db: Db, actor: Actor, input: { jobId: string; r
       await decrease(tx, ore, ore.quantity);
       const key: BatchKey = { ...keyOf(ore), resourceUuid: refined.uuid, state: 'stored' };
       if (row.amount !== '0') {
-        result.batches.push(await upsert(tx, key, row.amount));
+        const { created: _c, ...refinedBatch } = await upsert(tx, key, row.amount);
+        result.batches.push(refinedBatch);
         result.journal.push(await journal(tx, actor, 'refine_in', key, row.amount, group));
       }
       await history(tx, actor, 'refinery', 'done', key,
@@ -424,47 +436,111 @@ export interface MoveInput {
   amount: string | null;
   expected?: string;
   toLocationUuid?: string;
-  // true: becomes org stock of actor.guildId (donation); false: becomes personal stock of the holder
-  toOrg?: boolean;
-  // New holder (org) or owner (org stock handed out as personal stock); not for personal → personal
-  toHolderUserId?: string;
+  // Give it to this user (an active member of actor.guildId): it becomes theirs, unshared. The
+  // actor themselves or omitted: stays theirs
+  toOwnerUserId?: string;
 }
 
-/** Changes location, holder or personal/org of an amount of a batch (refinery jobs stay where they are). */
+/**
+ * Changes the location or the owner of an amount of a batch (refinery jobs stay where they are). A
+ * part that makes a new batch takes the batch's shares along; one that lands in an existing batch takes
+ * that one's. A give lands unshared in the recipient's stock.
+ */
 export async function move(db: Db, actor: Actor, input: MoveInput) {
   return db.transaction(async (tx): Promise<StockResult> => {
     const batch = await lockBatch(tx, input.batchId, input.expected);
     if (batch.state === 'refining') throw new StockError('refiningFixed');
     checkMayChange(actor, batch);
-    const toOrg = input.toOrg ?? batch.designation === 'org';
     const location = input.toLocationUuid ?? batch.locationUuid;
     if (location !== batch.locationUuid) await checkLocation(tx, location);
 
-    let target: BatchKey;
-    if (toOrg) {
-      const guildId = batch.designation === 'org' ? batch.guildId : actor.guildId;
-      if (!guildId) throw new StockError('notAllowed');
-      const holder = input.toHolderUserId ?? (batch.designation === 'org' ? batch.ownerUserId : actor.userId);
-      // Members donate as holders themselves; other holders only for officers
-      if (holder !== actor.userId && !actor.officer) throw new StockError('notAllowed');
-      if (holder !== batch.ownerUserId || guildId !== batch.guildId) await checkHolder(tx, guildId, holder);
-      target = { ...keyOf(batch), guildId, ownerUserId: holder, designation: 'org', locationUuid: location };
-    } else {
-      // Personal stock stays with its owner (no gifts); org stock goes to its holder or another member
-      const owner = batch.designation === 'personal' ? batch.ownerUserId : (input.toHolderUserId ?? batch.ownerUserId);
-      if (input.toHolderUserId && input.toHolderUserId !== owner) throw new StockError('notAllowed');
-      if (batch.designation === 'org' && owner !== batch.ownerUserId) await checkHolder(tx, batch.guildId!, owner);
-      target = { ...keyOf(batch), guildId: null, ownerUserId: owner, designation: 'personal', locationUuid: location };
+    const owner = input.toOwnerUserId ?? actor.userId;
+    const give = owner !== actor.userId;
+    if (give) {
+      // To an active member of the org it happens in
+      if (!actor.guildId) throw new StockError('notAllowed');
+      await checkHolder(tx, actor.guildId, owner);
+      await ensureUser(tx, owner);
     }
+    // A give lands in the recipient's main stock; a split-off part stays one when moved
+    const target: BatchKey = { ...keyOf(batch), ownerUserId: owner, locationUuid: location, lot: give ? null : batch.lot };
     if (sameKey(target, keyOf(batch))) throw new StockError('nothingToMove');
 
     const amount = input.amount === null ? batch.quantity : parse(input.amount, batch.kind);
+    const shares = give ? [] : await sharesOf(tx, batch.id);
     const group = randomUUID();
     const out = await journal(tx, actor, 'move_out', keyOf(batch), negate(amount), group);
     await decrease(tx, batch, amount);
-    const moved = await upsert(tx, target, amount);
-    await history(tx, actor, 'stock', 'move', keyOf(batch), { amount, toLocationUuid: target.locationUuid, toDesignation: target.designation }, target);
+    const { created, ...moved } = await upsert(tx, target, amount);
+    if (created) await addShares(tx, moved.id, shares);
+    await history(tx, actor, 'stock', give ? 'give' : 'move', keyOf(batch), { amount, toLocationUuid: target.locationUuid }, target,
+      give ? actor.guildId : null);
     return { journal: [out, await journal(tx, actor, 'move_in', target, amount, group)], batch: moved };
   });
 }
 
+/** Splits an amount off an unshared batch into a batch of its own (a new lot), e.g. to share it apart. */
+export async function split(db: Db, actor: Actor, input: { batchId: number; amount: string; expected?: string }) {
+  return db.transaction(async (tx): Promise<StockResult> => {
+    const batch = await lockBatch(tx, input.batchId, input.expected);
+    if (batch.state === 'refining') throw new StockError('refiningFixed');
+    checkMayChange(actor, batch);
+    if ((await sharesOf(tx, batch.id)).length) throw new StockError('sharedSplit');
+    const amount = parse(input.amount, batch.kind);
+    // Splitting off everything would leave the same batch under another name
+    if ((await one<{ c: number }>(tx, sql`SELECT sign(${batch.quantity}::numeric - ${amount}::numeric)::int AS c`))!.c === 0) {
+      throw new StockError('nothingToMove');
+    }
+    const target: BatchKey = { ...keyOf(batch), lot: randomUUID() };
+    const group = randomUUID();
+    const out = await journal(tx, actor, 'move_out', keyOf(batch), negate(amount), group);
+    await decrease(tx, batch, amount);
+    const { created: _c, ...part } = await upsert(tx, target, amount);
+    await history(tx, actor, 'stock', 'split', keyOf(batch), { amount });
+    return { journal: [out, await journal(tx, actor, 'move_in', target, amount, group)], batch: part };
+  });
+}
+
+/**
+ * Merges a split-off part back into the main batch of its kind (same material, quality, place; created
+ * if it is gone, then with the part's shares). The main batch keeps its own shares.
+ */
+export async function merge(db: Db, actor: Actor, input: { batchId: number; expected?: string }) {
+  return db.transaction(async (tx): Promise<StockResult> => {
+    const batch = await lockBatch(tx, input.batchId, input.expected);
+    checkMayChange(actor, batch);
+    if (!batch.lot) throw new StockError('nothingToMove');
+    const shares = await sharesOf(tx, batch.id);
+    const target: BatchKey = { ...keyOf(batch), lot: null };
+    const group = randomUUID();
+    const out = await journal(tx, actor, 'move_out', keyOf(batch), negate(batch.quantity), group);
+    await decrease(tx, batch, batch.quantity);
+    const { created, ...main } = await upsert(tx, target, batch.quantity);
+    if (created) await addShares(tx, main.id, shares);
+    await history(tx, actor, 'stock', 'merge', keyOf(batch), { amount: batch.quantity });
+    return { journal: [out, await journal(tx, actor, 'move_in', target, batch.quantity, group)], batch: main };
+  });
+}
+
+/**
+ * Sets the orgs a batch is shared in (the whole batch). New ones need the owner as an active member
+ * there; taking one back always works. One history row per org shared or taken back.
+ */
+export async function share(db: Db, actor: Actor, input: { batchId: number; guildIds: string[] }) {
+  return db.transaction(async (tx): Promise<{ batch: Batch; guildIds: string[] }> => {
+    const batch = await lockBatch(tx, input.batchId);
+    if (batch.state === 'refining') throw new StockError('refiningFixed');
+    checkMayChange(actor, batch);
+    const before = await sharesOf(tx, batch.id);
+    const wanted = [...new Set(input.guildIds)].sort();
+    const added = wanted.filter((g) => !before.includes(g));
+    const removed = before.filter((g) => !wanted.includes(g));
+    if (!added.length && !removed.length) throw new StockError('noChange');
+    for (const g of added) await checkHolder(tx, g, actor.userId);
+    await addShares(tx, batch.id, added);
+    for (const g of removed) await tx.execute(sql`DELETE FROM app.stock_share WHERE batch_id = ${batch.id} AND guild_id = ${g}`);
+    for (const g of added) await history(tx, actor, 'stock', 'share', keyOf(batch), { amount: batch.quantity }, undefined, g);
+    for (const g of removed) await history(tx, actor, 'stock', 'unshare', keyOf(batch), { amount: batch.quantity }, undefined, g);
+    return { batch, guildIds: wanted };
+  });
+}

@@ -27,9 +27,10 @@ export function actionLabel(category: string, action: string): string {
 }
 export const actionText = (e: HistoryEntry) => actionLabel(e.category, e.action);
 export const personText = (p: HistoryPerson) => (p.userId === me.value?.userId ? t("history.you") : p.name);
-/** "Pers." or "Org (holder)", as in the stock lists. */
+/** "Org (owner)" for shared stock, the owner for unshared stock of someone else (a give), else "Pers.". */
 const ownerText = (designation: "personal" | "org" | null, org: string | null, holder: HistoryPerson | null) =>
-  designation === "org" ? `${org ?? "Org"} (${holder ? personText(holder) : "?"})` : t("stock.pers");
+  designation === "org" ? `${org ?? "Org"} (${holder ? personText(holder) : "?"})`
+  : holder && holder.userId !== me.value?.userId ? personText(holder) : t("stock.pers");
 
 /** Amount, quality, place and owner, with what changed (→) and what went in (refinery). */
 export function detailsText(e: HistoryEntry): string {
@@ -40,7 +41,9 @@ export function detailsText(e: HistoryEntry): string {
   else if (e.amount !== null) parts.push(qty(e.amount, unit));
   if (e.quality !== null) parts.push(qText(e.quality));
   if (e.location) parts.push(e.toLocation ? `${e.location} → ${e.toLocation}` : e.location);
-  if (e.category === "stock") {
+  // Sharing names the org only (who did it is in the title or the "by" column, the action says which way)
+  if (e.category === "stock" && (e.action === "share" || e.action === "unshare")) parts.push(e.org ?? "Org");
+  else if (e.category === "stock") {
     const from = ownerText(e.designation, e.org, e.holder);
     const changed = e.toDesignation !== null || e.toHolder !== null;
     const to = ownerText(e.toDesignation ?? e.designation, e.org, e.toHolder ?? e.holder);
@@ -92,14 +95,17 @@ async function flush() {
 function notifyGroup(group: HistoryEntry[]) {
   const e = group[0]!;
   const title = `${sourceText(e)}${e.actor.userId === me.value?.userId ? "" : ` · ${e.actor.name}`}`;
-  if (group.length === 1) return notify(title, `${categoryText(e)} · ${actionText(e)} · ${e.target}`, detailsText(e));
+  const label = `${categoryText(e)} · ${actionText(e)}`;
+  if (group.length === 1) return notify(title, e.target, detailsText(e), label);
   const names = group.slice(0, LISTED).map((x) => x.target).join(", ");
   const rest = group.length - LISTED;
-  notify(title, `${categoryText(e)} · ${actionText(e)} · ${group.length}×`, rest > 0 ? `${names} ${t("history.andMore", { n: rest })}` : names);
+  notify(title, `${group.length}×`, rest > 0 ? `${names} ${t("history.andMore", { n: rest })}` : names, label);
 }
 
+// Everything but your own actions in the web app: from the bot and the companion app, and what others
+// did (gave you, shared in your orgs)
 const off = onServerMessage((m) => {
-  if (m.type !== "history" || m.source === "webapp") return;
+  if (m.type !== "history" || (m.source === "webapp" && m.actor === me.value?.userId)) return;
   pending.add(m.id);
   flushSoon.schedule();
 });

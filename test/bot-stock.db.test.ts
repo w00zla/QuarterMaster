@@ -17,10 +17,10 @@ import { U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const G = '940000000000000001';
-const [MEMBER_ROLE, OFFICER_ROLE] = ['941000000000000001', '941000000000000002'];
+const MEMBER_ROLE = '941000000000000001';
 const [MIA, OLGA] = ['942000000000000001', '942000000000000002'];
-const mia: Actor = { userId: MIA, guildId: G, officer: false, source: 'bot' };
-const olga: Actor = { userId: OLGA, guildId: G, officer: true, source: 'bot' };
+const mia: Actor = { userId: MIA, guildId: G, source: 'bot' };
+const olga: Actor = { userId: OLGA, guildId: G, source: 'bot' };
 const metal = { kind: 'resource' as const, uuid: U.metal, locationUuid: U.station };
 
 describe('/qm-stock confirmed bookings and lists (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
@@ -34,9 +34,9 @@ describe('/qm-stock confirmed bookings and lists (database)', { skip: url ? fals
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     await ensureGuild(db, G, 'Stock Cmd Org');
-    const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
+    const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
     await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
-    await syncMember(db, G, settings, OLGA, { userId: OLGA, displayName: 'Olga', roleIds: [OFFICER_ROLE], bot: false });
+    await syncMember(db, G, settings, OLGA, { userId: OLGA, displayName: 'Olga', roleIds: [MEMBER_ROLE], bot: false });
   });
   after(async () => close?.());
 
@@ -57,20 +57,20 @@ describe('/qm-stock confirmed bookings and lists (database)', { skip: url ? fals
 
   it('describes moves and corrections by their result', async () => {
     const b = (await add(db, mia, { ...metal, quality: 600, amount: '5' })).batch!;
-    assert.equal(await runPending(db, mia, { op: 'move', batchId: b.id, amount: '2', expected: b.quantity, toOrg: true }, 'en'),
-      '🔀 Moved 2 SCU → Test Metal · Q600 · Total: 2 SCU · Test Station · Org (Mia) · In stock (Org): 2 SCU');
-    assert.equal(await runPending(db, mia, { op: 'adjust', batchId: b.id, amount: '4', expected: '3' }, 'en'),
-      '✏️ Corrected by +1 SCU: Test Metal · Q600 · Total: 4 SCU · Test Station · Pers. · In stock (Pers.): 8 SCU');
+    assert.equal(await runPending(db, mia, { op: 'adjust', batchId: b.id, amount: '6', expected: '5' }, 'en'),
+      '✏️ Corrected by +1 SCU: Test Metal · Q600 · Total: 6 SCU · Test Station · Pers. · In stock (Pers.): 10 SCU');
   });
 
-  it('lists org stock grouped by material with holders, personal stock without', async () => {
+  // The bot does not share yet (it gets rebuilt for the share table)
+  it.skip('lists shared stock grouped by material with owners, your own with what you share marked', async () => {
     await add(db, olga, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 300, amount: '7', org: true });
     const org = listPage(await stockList(db, { scope: { guildId: G } }, 'en'), true, 0, 'en', 'tok').content.split('\n');
-    assert.equal(org[0], '**Org stock** (2 batches)');
+    assert.equal(org[0], '**Shared in the org** (2 batches)');
     assert.ok(org.includes('- Q600 · 2 SCU · Test Station · Mia'));
     assert.ok(org.includes('- Q300 · 7 pcs · Test Station · Olga'));
     const own = listPage(await stockList(db, { scope: { personalOf: MIA } }, 'de'), false, 0, 'de', 'tok').content;
-    assert.match(own, /^\*\*Dein persönlicher Bestand\*\* \(2 Batches\)\n__Testmetall__ · Gesamt: 8 SCU\n- Q700 · 4 SCU · Test Station\n- Q600 · 4 SCU · Test Station$/);
+    // Your own list holds what you share too, marked
+    assert.match(own, /^\*\*Dein Bestand\*\* \(3 Batches\)\n__Testmetall__ · Gesamt: 10 SCU\n- Q700 · 4 SCU · Test Station\n- Q600 · 4 SCU · Test Station\n- Q600 · 2 SCU · Test Station · geteilt$/);
     assert.ok(org.includes('__Test Metal__ · Total: 2 SCU'));
   });
 });

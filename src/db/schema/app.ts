@@ -25,10 +25,6 @@ export const org = app.table('org', {
   // Cached server name, for lists outside Discord
   name: text('name').notNull(),
   memberRoleIds: text('member_role_ids').array().notNull().default(sql`'{}'`),
-  officerRoleIds: text('officer_role_ids').array().notNull().default(sql`'{}'`),
-  // Last time the bot vouched for the roster (src/bot/roster-keeper.ts), NULL while it cannot. The
-  // user web app treats an older value as a stale roster: org stock read-only
-  rosterCheckedAt: timestamp('roster_checked_at', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [check('org_guild_id_format', snowflake(t.guildId))]);
@@ -41,17 +37,11 @@ export const appUser = app.table('app_user', {
   updatedAt: updatedAt(),
 }, (t) => [check('app_user_id_format', snowflake(t.userId))]);
 
-/**
- * User × org (roster). Active = holds a configured member or officer role. The officer flag is
- * stored for the user web app, which has no interaction with roles; the bot still resolves rights
- * live from the interaction (and refreshes the row on every requireMember).
- */
+/** User × org (roster). Active = holds a configured member role, while the bot is on the server. */
 export const member = app.table('member', {
   guildId: text('guild_id').notNull().references(() => org.guildId),
   userId: text('user_id').notNull().references(() => appUser.userId),
   active: boolean('active').notNull().default(true),
-  // Holds an officer role; false while inactive
-  officer: boolean('officer').notNull().default(false),
   // Cached for lists and #logs after a member left
   displayName: text('display_name').notNull(),
   defaultLocationUuid: uuid('default_location_uuid').references(() => location.uuid),
@@ -61,19 +51,16 @@ export const member = app.table('member', {
 }, (t) => [primaryKey({ columns: [t.guildId, t.userId] })]);
 
 /**
- * One row = one batch. Personal stock belongs to the user, not to an org (one character, one
- * inventory): guild_id NULL, visible to its owner only, usable without any org. Org stock has a
- * guild_id and a holder who is a member of that org. Booking the same merge key again adds to
+ * One row = one batch. Every batch belongs to one user (who has it in game; one character, one
+ * inventory) and only that user changes it. Visible to its owner only, usable without any org,
+ * unless shared: app.stock_share offers it in any number of the owner's orgs. Booking the same merge key again adds to
  * the quantity; a batch that reaches 0 is deleted. Rules a CHECK cannot express (refining only for ores, only crafting
  * inputs, selectable and non-retired locations/subjects) are enforced by the stock service.
  */
 export const stockBatch = app.table('stock_batch', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-  // NULL for personal stock
-  guildId: text('guild_id'),
-  // Who physically holds it, also for org stock
+  // Whose it is (who has it in game), shared or not
   ownerUserId: text('owner_user_id').notNull().references(() => appUser.userId),
-  designation: text('designation').notNull(),
   kind: text('kind').notNull(),
   resourceUuid: uuid('resource_uuid').references(() => resource.uuid),
   itemUuid: uuid('item_uuid').references(() => item.uuid),
@@ -90,19 +77,16 @@ export const stockBatch = app.table('stock_batch', {
   refineStartedAt: timestamp('refine_started_at', { withTimezone: true }),
   refineEndsAt: timestamp('refine_ends_at', { withTimezone: true }),
   refineExpected: quantity('refine_expected'),
+  // A part split off by its owner (a random UUID): kept apart from the batch it came from, so it can be
+  // shared on its own; NULL for everything booked normally
+  lot: uuid('lot'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
-  // Org stock only: the composite FK is not checked while guild_id is NULL
-  foreignKey({ columns: [t.guildId, t.ownerUserId], foreignColumns: [member.guildId, member.userId] }),
-  check('stock_batch_designation', sql`${t.designation} IN ('personal', 'org')`),
-  check('stock_batch_personal_global', sql`(${t.designation} = 'personal') = (${t.guildId} IS NULL)`),
   check('stock_batch_kind', sql`(${t.kind} = 'resource' AND ${t.resourceUuid} IS NOT NULL AND ${t.itemUuid} IS NULL)
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
   check('stock_batch_state', sql`${t.state} IN ('stored', 'refining')`),
   check('stock_batch_refining_resource', sql`${t.state} = 'stored' OR ${t.kind} = 'resource'`),
-  // Refinery jobs belong to the player who runs them; the result can be donated afterwards
-  check('stock_batch_refining_personal', sql`${t.state} = 'stored' OR ${t.designation} = 'personal'`),
   check('stock_batch_quality', sql`${t.quality} BETWEEN 0 AND 1000`),
   check('stock_batch_quantity', sql`${t.quantity} > 0`),
   check('stock_batch_item_pieces', sql`${t.kind} = 'resource' OR ${t.quantity} = trunc(${t.quantity})`),
@@ -111,33 +95,39 @@ export const stockBatch = app.table('stock_batch', {
   check('stock_batch_refine_ends', sql`${t.refineEndsAt} IS NULL OR ${t.refineEndsAt} >= ${t.refineStartedAt}`),
   check('stock_batch_refine_expected', sql`${t.refineExpected} IS NULL OR ${t.refineExpected} >= 0`),
   check('stock_batch_refine_job_id', sql`(${t.state} = 'refining') = (${t.refineJob} IS NOT NULL)`),
-  // The job keeps two refinery jobs with the same ore, place and quality apart (stored stock: NULL, merges)
+  // The job keeps two refinery jobs with the same ore, place and quality apart, the lot a split-off part
+  // (stored stock: both NULL, merges)
   unique('stock_batch_merge_key').on(
-    t.guildId, t.ownerUserId, t.designation, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineJob,
+    t.ownerUserId, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineJob, t.lot,
   ).nullsNotDistinct(),
-  index().on(t.guildId, t.resourceUuid),
-  index().on(t.guildId, t.itemUuid),
-  index().on(t.ownerUserId, t.guildId),
-  index().on(t.guildId, t.locationUuid),
+  index().on(t.ownerUserId),
   index().on(t.refineJob),
 ]);
 
 /**
- * Append-only journal, the source of truth (also for #logs). Keeps a copy of the batch key
- * instead of a reference (batches get deleted at 0). Moves and refinery completions are two
- * rows sharing a group_id. Rows about personal stock have no guild_id, like the batch.
+ * A batch offered in an org: its members see it. Only the owner shares (while an active member there)
+ * and takes it back; refinery jobs are never shared. Shares of someone who left the org stay but the
+ * org no longer sees them. Gone with the batch.
+ */
+export const stockShare = app.table('stock_share', {
+  batchId: bigint('batch_id', { mode: 'number' }).notNull().references(() => stockBatch.id, { onDelete: 'cascade' }),
+  guildId: text('guild_id').notNull().references(() => org.guildId),
+  sharedAt: timestamp('shared_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.batchId, t.guildId] }), index().on(t.guildId)]);
+
+/**
+ * Append-only journal of quantities, the source of truth. Keeps a copy of the batch key instead of a
+ * reference (batches get deleted at 0). Moves, splits and refinery completions are two rows sharing a
+ * group_id. Sharing changes no quantity: it is in the history only.
  */
 export const stockJournal = app.table('stock_journal', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-  // NULL for personal stock
-  guildId: text('guild_id'),
   createdAt: createdAt(),
   action: text('action').notNull(),
   groupId: uuid('group_id'),
-  // Who executed the booking vs. whose batch it affected (differ when an officer books for someone)
+  // Who executed the booking vs. whose batch it affected (differ on the receiving side of a give)
   actorUserId: text('actor_user_id').notNull().references(() => appUser.userId),
   ownerUserId: text('owner_user_id').notNull().references(() => appUser.userId),
-  designation: text('designation').notNull(),
   kind: text('kind').notNull(),
   resourceUuid: uuid('resource_uuid').references(() => resource.uuid),
   itemUuid: uuid('item_uuid').references(() => item.uuid),
@@ -148,21 +138,15 @@ export const stockJournal = app.table('stock_journal', {
   delta: quantity('delta').notNull(),
   note: text('note'),
 }, (t) => [
-  foreignKey({ columns: [t.guildId, t.actorUserId], foreignColumns: [member.guildId, member.userId] }),
-  foreignKey({ columns: [t.guildId, t.ownerUserId], foreignColumns: [member.guildId, member.userId] }),
-  check('stock_journal_personal_global', sql`(${t.designation} = 'personal') = (${t.guildId} IS NULL)`),
   check('stock_journal_action', sql`${t.action} IN ('add', 'remove', 'adjust', 'move_out', 'move_in', 'refine_out', 'refine_in')`),
   check('stock_journal_group', sql`(${t.action} IN ('move_out', 'move_in', 'refine_out', 'refine_in')) = (${t.groupId} IS NOT NULL)`),
-  check('stock_journal_designation', sql`${t.designation} IN ('personal', 'org')`),
   check('stock_journal_kind', sql`(${t.kind} = 'resource' AND ${t.resourceUuid} IS NOT NULL AND ${t.itemUuid} IS NULL)
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
   check('stock_journal_state', sql`${t.state} IN ('stored', 'refining')`),
-  check('stock_journal_refining_personal', sql`${t.state} = 'stored' OR ${t.designation} = 'personal'`),
   check('stock_journal_quality', sql`${t.quality} BETWEEN 0 AND 1000`),
   check('stock_journal_delta', sql`${t.delta} <> 0`),
-  index().on(t.guildId, t.createdAt.desc()),
   index().on(t.groupId),
-  index().on(t.ownerUserId, t.guildId, t.createdAt.desc()),
+  index().on(t.ownerUserId, t.createdAt.desc()),
 ]);
 
 /**
@@ -187,12 +171,11 @@ export const history = app.table('history', {
   source: text('source').notNull(),
   category: text('category').notNull(),
   action: text('action').notNull(),
-  // Who did it vs. whose data it touched (differ when an officer books for someone); a move to
-  // another holder touches a second user
+  // Who did it vs. whose data it touched; a give touches a second user, the new owner
   actorUserId: text('actor_user_id').notNull(),
   ownerUserId: text('owner_user_id').notNull(),
   toOwnerUserId: text('to_owner_user_id'),
-  // The org involved (org stock on either side of a move), else NULL
+  // The org involved (sharing, taking back, the org a give happened in), else NULL
   guildId: text('guild_id'),
   targetKind: text('target_kind').notNull(),
   targetUuid: uuid('target_uuid').notNull(),
@@ -200,7 +183,7 @@ export const history = app.table('history', {
   details: jsonb('details').notNull().default(sql`'{}'::jsonb`),
 }, (t) => [
   check('history_source', sql`${t.source} IN ('bot', 'webapp', 'companion')`),
-  check('history_action', sql`(${t.category} = 'stock' AND ${t.action} IN ('add', 'remove', 'adjust', 'move'))
+  check('history_action', sql`(${t.category} = 'stock' AND ${t.action} IN ('add', 'remove', 'adjust', 'move', 'share', 'unshare', 'give', 'split', 'merge'))
     OR (${t.category} = 'refinery' AND ${t.action} IN ('start', 'done', 'remove', 'adjust'))
     OR (${t.category} = 'blueprint' AND ${t.action} IN ('add', 'remove'))`),
   check('history_target', sql`(${t.category} = 'blueprint') = (${t.targetKind} = 'blueprint')

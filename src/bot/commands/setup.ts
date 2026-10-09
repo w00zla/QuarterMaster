@@ -37,7 +37,7 @@ function checkLogsChannel(guild: Guild | null, channelId: string | null): LogsCh
   return perms ? { missing: missingLogsPermissions(perms) } : 'unknown';
 }
 
-/** The panel: current values as text, one select per setting (5 rows, Discord's maximum). */
+/** The panel: current values as text, one select per setting (Discord allows 5 rows). */
 export function setupPanel(s: GuildSettings, lang: Lang, logs: LogsCheck) {
   const tr = (key: MessageKey, vars?: Record<string, string>) => t(lang, key, vars);
   const roles = (ids: string[]) => (ids.length ? ids.map((id) => `<@&${id}>`).join(', ') : tr('setup.none'));
@@ -53,7 +53,6 @@ export function setupPanel(s: GuildSettings, lang: Lang, logs: LogsCheck) {
   const content = [
     tr('setup.title'),
     `${tr('setup.memberRoles')}: ${roles(s.memberRoleIds)}`,
-    `${tr('setup.officerRoles')}: ${roles(s.officerRoleIds)}`,
     `${tr('setup.baseLang')}: ${tr(`setup.lang.${s.baseLang}`)}`,
     `${tr('setup.logs')}: ${logsLine}`,
     `-# ${tr('setup.saved')}`,
@@ -66,7 +65,6 @@ export function setupPanel(s: GuildSettings, lang: Lang, logs: LogsCheck) {
       .setMinValues(0).setMaxValues(25).setDefaultRoles(...selected);
   const components = [
     row(roleSelect('memberRoles', 'setup.pick.memberRoles', s.memberRoleIds)),
-    row(roleSelect('officerRoles', 'setup.pick.officerRoles', s.officerRoleIds)),
     row(new StringSelectMenuBuilder().setCustomId(`${NAME}:baseLang`).setPlaceholder(tr('setup.pick.baseLang'))
       .addOptions(LANGS.map((l) => ({ label: tr(`setup.lang.${l}`), value: l, default: l === s.baseLang })))),
     row(new ChannelSelectMenuBuilder().setCustomId(`${NAME}:logsChannel`).setPlaceholder(tr('setup.pick.logsChannel'))
@@ -88,7 +86,6 @@ function requireManageGuild(perms: Readonly<PermissionsBitField> | null) {
 export function patchFor(field: string, values: string[]): Partial<GuildSettings> | null {
   switch (field) {
     case 'memberRoles': return { memberRoleIds: values };
-    case 'officerRoles': return { officerRoleIds: values };
     case 'baseLang': return LANGS.includes(values[0] as Lang) ? { baseLang: values[0] as Lang } : null;
     case 'logsChannel': return { logsChannelId: values[0] ?? null };
     case 'logsLevel': return (LOGS_LEVELS as readonly string[]).includes(values[0] ?? '') ? { logsLevel: values[0] as GuildSettings['logsLevel'] } : null;
@@ -124,6 +121,6 @@ export const setupCommand: BotCommand = {
     const settings = await updateGuildSettings(ctx.db, interaction.guildId, patch);
     await interaction.update(setupPanel(settings, ctx.lang, checkLogsChannel(interaction.guild, settings.logsChannelId)));
     // Different roles mean a different roster (after the update: a large server takes a while)
-    if ((patch.memberRoleIds || patch.officerRoleIds) && interaction.guild) requestFullSync(interaction.guild);
+    if (patch.memberRoleIds && interaction.guild) requestFullSync(interaction.guild);
   },
 };

@@ -4,9 +4,8 @@
 #   qm_owner: owns the database and everything the migrations create; used by "migrate" only
 #   qm_app:   DML for bot and admin; app.stock_journal and app.history are append-only (SELECT, INSERT); no access
 #             to schema web (bot and admin must not forge web sessions)
-#   qm_web:   user web app; reads catalog and app, writes users, stock, journal and history (INSERT only) and
-#             blueprints, but not org/member (role IDs, officer flag, roster freshness); from bot only
-#             guild_id and left_at of bot.guild;
+#   qm_web:   user web app; reads catalog and app, writes users, stock and its shares, journal and history (INSERT only) and
+#             blueprints, but not org/member (role IDs, roster); no access to schema bot;
 #             full DML in web; reads ext
 # Grants for new tables come from default privileges, which only cover objects created BY qm_owner:
 # never run migrations as the superuser. They cover qm_app only; qm_web's grants are explicit and
@@ -48,20 +47,22 @@ SELECT 'REVOKE ALL ON ALL TABLES IN SCHEMA web FROM qm_app' WHERE to_regnamespac
 
 -- qm_web, explicit (also exist only after the migrations). Schema-wide grants pick up new tables
 -- because this script runs after every migration. No grants on drizzle.
-SELECT format('GRANT USAGE ON SCHEMA %I TO qm_web', s) FROM unnest(ARRAY['catalog', 'app', 'bot', 'web', 'ext']) s
+SELECT format('GRANT USAGE ON SCHEMA %I TO qm_web', s) FROM unnest(ARRAY['catalog', 'app', 'web', 'ext']) s
   WHERE to_regnamespace(s) IS NOT NULL \gexec
 SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO qm_web', s) FROM unnest(ARRAY['catalog', 'app', 'ext']) s
   WHERE to_regnamespace(s) IS NOT NULL \gexec
--- app.org and app.member stay read-only: role IDs and the officer flag come from the bot
+-- app.org and app.member stay read-only: role IDs and the roster come from the bot
 SELECT 'GRANT INSERT, UPDATE ON app.app_user TO qm_web' WHERE to_regclass('app.app_user') IS NOT NULL \gexec
 SELECT 'GRANT INSERT, UPDATE, DELETE ON app.stock_batch TO qm_web'
   WHERE to_regclass('app.stock_batch') IS NOT NULL \gexec
+SELECT 'GRANT INSERT, DELETE ON app.stock_share TO qm_web' WHERE to_regclass('app.stock_share') IS NOT NULL \gexec
 SELECT 'GRANT INSERT ON app.stock_journal TO qm_web' WHERE to_regclass('app.stock_journal') IS NOT NULL \gexec
 SELECT 'GRANT INSERT ON app.history TO qm_web' WHERE to_regclass('app.history') IS NOT NULL \gexec
 SELECT 'GRANT INSERT, DELETE ON app.user_blueprint TO qm_web'
   WHERE to_regclass('app.user_blueprint') IS NOT NULL \gexec
--- From bot only whether the bot is still on the server
-SELECT 'GRANT SELECT (guild_id, left_at) ON bot.guild TO qm_web' WHERE to_regclass('bot.guild') IS NOT NULL \gexec
+-- Nothing from bot (it read bot.guild until migration 0018): taken back where an older run granted it
+SELECT 'REVOKE ALL ON ALL TABLES IN SCHEMA bot FROM qm_web' WHERE to_regnamespace('bot') IS NOT NULL \gexec
+SELECT 'REVOKE ALL ON SCHEMA bot FROM qm_web' WHERE to_regnamespace('bot') IS NOT NULL \gexec
 SELECT 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA web TO qm_web'
   WHERE to_regnamespace('web') IS NOT NULL \gexec
 SQL

@@ -22,8 +22,9 @@ export const CLOSE_SESSION_ENDED = 4401;
 
 const changeSchema = z.object({
   t: z.string(), g: z.string().nullable(), u: z.string().nullable(),
-  // History rows (0012): id, source, actor, new owner
+  // History rows (0012): id, source, actor, new owner; the action since 0019
   id: z.number().int().optional(), s: z.enum(['bot', 'webapp', 'companion']).optional(), a: z.string().optional(), o: z.string().nullable().optional(),
+  x: z.string().optional(),
 });
 export type Change = z.infer<typeof changeSchema>;
 const clientMessageSchema = z.object({ type: z.literal('ping') }).strict();
@@ -119,10 +120,12 @@ export class RealtimeHub {
         if (u) this.send((c) => c.userId === u, { type: 'me' });
         break;
       case 'history': {
-        // To the users it concerns: who did it, whose data, the new owner
-        if (change.id === undefined || !change.s) break;
+        // To the users it concerns: who did it, whose data, the new owner; stock shared in an org also
+        // to that org's members
+        if (change.id === undefined || !change.s || !change.a) break;
         const users = new Set([change.a, u, change.o].filter((x): x is string => Boolean(x)));
-        this.send((c) => users.has(c.userId), { type: 'history', id: change.id, source: change.s });
+        const org = change.x === 'share' ? g : null;
+        this.send((c) => users.has(c.userId) || (!!org && c.orgs.has(org)), { type: 'history', id: change.id, source: change.s, actor: change.a });
         break;
       }
       case 'blueprint':

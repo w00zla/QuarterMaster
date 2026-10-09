@@ -1,6 +1,6 @@
 // Read side of a user's history (app.history, written by src/history/record.ts): the user's own
-// actions and what others did to the user's data, newest first, with display names in the
-// language (materials, locations and blueprints from the shared catalogs, retired ones from the
+// actions, what others did to the user's data and what was shared in the user's orgs, newest first,
+// with display names in the language (materials, locations and blueprints from the shared catalogs, retired ones from the
 // catalog tables; people by their name in the org).
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
@@ -53,7 +53,9 @@ export async function listHistory(db: Db, userId: string, lang: Lang, before?: n
     LEFT JOIN app.member ma ON ma.guild_id = h.guild_id AND ma.user_id = h.actor_user_id
     LEFT JOIN app.member mo ON mo.guild_id = h.guild_id AND mo.user_id = h.owner_user_id
     LEFT JOIN app.member mt ON mt.guild_id = h.guild_id AND mt.user_id = h.to_owner_user_id
-    WHERE (h.actor_user_id = ${userId} OR h.owner_user_id = ${userId} OR h.to_owner_user_id = ${userId})
+    WHERE (h.actor_user_id = ${userId} OR h.owner_user_id = ${userId} OR h.to_owner_user_id = ${userId}
+      -- What others shared in your orgs
+      OR (h.action = 'share' AND h.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${userId} AND active)))
       ${before === undefined ? sql`` : sql`AND h.id < ${before}`}
       ${filter.after === undefined ? sql`` : sql`AND h.id > ${filter.after}`}
       ${filter.source ? sql`AND h.source = ${filter.source}` : sql``}
@@ -83,7 +85,12 @@ export async function listHistory(db: Db, userId: string, lang: Lang, before?: n
   const entries = page.map((r): HistoryEntry => {
     const d = r.details;
     const blueprint = r.targetKind === 'blueprint';
-    const org = d.designation === 'org' || d.toDesignation === 'org';
+    // Sharing (since 0017 a row per org, without designations) reads like a move into or out of the org
+    const shared = r.action === 'share' ? ['personal', 'org'] as const : r.action === 'unshare' ? ['org', 'personal'] as const : null;
+    const designation = shared?.[0] ?? d.designation ?? null;
+    const toDesignation = shared?.[1] ?? d.toDesignation ?? null;
+    // Shared stock and gives name the people involved
+    const named = designation === 'org' || toDesignation === 'org' || r.action === 'give';
     return {
       id: r.id,
       at: new Date(r.at).toISOString(),
@@ -97,11 +104,11 @@ export async function listHistory(db: Db, userId: string, lang: Lang, before?: n
       amount: amount(d.amount),
       quality: d.quality ?? null,
       location: place(d.locationUuid),
-      designation: d.designation ?? null,
-      holder: d.designation === 'org' ? person(r.ownerUserId, r.ownerName) : null,
+      designation,
+      holder: named ? person(r.ownerUserId, r.ownerName) : null,
       toLocation: d.toLocationUuid && d.toLocationUuid !== d.locationUuid ? place(d.toLocationUuid) : null,
-      toDesignation: d.toDesignation && d.toDesignation !== d.designation ? d.toDesignation : null,
-      toHolder: org && r.toOwnerUserId ? person(r.toOwnerUserId, r.toOwnerName) : null,
+      toDesignation: toDesignation && toDesignation !== designation ? toDesignation : null,
+      toHolder: named && r.toOwnerUserId ? person(r.toOwnerUserId, r.toOwnerName) : null,
       from: amount(d.from),
       durationSeconds: d.durationSeconds ?? null,
       expectedYield: amount(d.expectedYield),

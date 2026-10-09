@@ -1,5 +1,5 @@
 // Server settings as /qm-setup edits them: roles live in app.org, bot-only settings in bot.guild.
-import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { org } from '../db/schema/app.ts';
 import { guild } from '../db/schema/bot.ts';
@@ -10,7 +10,6 @@ export type LogsLevel = (typeof LOGS_LEVELS)[number];
 
 export interface GuildSettings {
   memberRoleIds: string[];
-  officerRoleIds: string[];
   baseLang: Lang;
   logsChannelId: string | null;
   logsLevel: LogsLevel;
@@ -31,8 +30,17 @@ export async function ensureGuild(db: Db, guildId: string, name: string): Promis
 
 /** The bot was removed from the server (its data is kept). */
 export async function markGuildLeft(db: Db, guildId: string) {
-  await db.update(guild).set({ leftAt: sql`now()`, updatedAt: sql`now()` }).where(and(eq(guild.guildId, guildId), isNull(guild.leftAt)));
+  await db.transaction(async (tx) => {
+    await tx.update(guild).set({ leftAt: sql`now()`, updatedAt: sql`now()` }).where(and(eq(guild.guildId, guildId), isNull(guild.leftAt)));
+    await deactivateMembers(tx, sql`${guildId}`);
+  });
 }
+
+// Nobody keeps a server's roster current once the bot is gone: its members go inactive (the org is
+// gone for them; a full sync after the bot came back makes them active again)
+const deactivateMembers = (tx: Pick<Db, 'execute'>, guildIds: SQL) => tx.execute(sql`
+  UPDATE app.member SET active = false, inactive_since = coalesce(inactive_since, now()), updated_at = now()
+  WHERE active AND guild_id IN (${guildIds})`);
 
 /** The bot joined the server (again). */
 export async function markGuildPresent(db: Db, guildId: string) {
@@ -48,6 +56,7 @@ export async function reconcilePresence(db: Db, presentGuildIds: string[]) {
     }
     await tx.update(guild).set({ leftAt: sql`now()`, updatedAt: sql`now()` })
       .where(and(presentGuildIds.length ? notInArray(guild.guildId, presentGuildIds) : sql`true`, isNull(guild.leftAt)));
+    await deactivateMembers(tx, sql`SELECT guild_id FROM bot.guild WHERE left_at IS NOT NULL`);
   });
 }
 
@@ -62,7 +71,6 @@ export async function findGuildSettings(db: Db, guildId: string): Promise<GuildS
   const [row] = await db
     .select({
       memberRoleIds: org.memberRoleIds,
-      officerRoleIds: org.officerRoleIds,
       baseLang: guild.baseLang,
       logsChannelId: guild.logsChannelId,
       logsLevel: guild.logsLevel,
@@ -75,10 +83,10 @@ export async function findGuildSettings(db: Db, guildId: string): Promise<GuildS
 }
 
 export async function updateGuildSettings(db: Db, guildId: string, patch: Partial<GuildSettings>): Promise<GuildSettings> {
-  const { memberRoleIds, officerRoleIds, baseLang, logsChannelId, logsLevel } = patch;
+  const { memberRoleIds, baseLang, logsChannelId, logsLevel } = patch;
   await db.transaction(async (tx) => {
-    if (memberRoleIds !== undefined || officerRoleIds !== undefined) {
-      await tx.update(org).set({ memberRoleIds, officerRoleIds, updatedAt: sql`now()` }).where(eq(org.guildId, guildId));
+    if (memberRoleIds !== undefined) {
+      await tx.update(org).set({ memberRoleIds, updatedAt: sql`now()` }).where(eq(org.guildId, guildId));
     }
     if (baseLang !== undefined || logsChannelId !== undefined || logsLevel !== undefined) {
       await tx.update(guild).set({ baseLang, logsChannelId, logsLevel, updatedAt: sql`now()` }).where(eq(guild.guildId, guildId));

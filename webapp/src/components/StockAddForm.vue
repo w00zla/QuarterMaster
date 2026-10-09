@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Books new stock (POST /api/stock/add) right away; the toast says what was booked. Ores only go
 // into the refinery (RefineryStartForm). `target`: null = personal, a guildId = that org (fixed, as the
-// list shows it), undefined = the form asks (personal or a writable org).
+// list shows it), undefined = the form asks (personal or one of your orgs).
 import { computed, ref, watch } from "vue";
 import type { OkResponse, StockAddRequest } from "../../../src/webapp/api-types";
 import Dropdown from "./Dropdown.vue";
@@ -10,7 +10,7 @@ import { api } from "../api";
 import { locationOptions, locations, materialOptions, materials } from "../catalog";
 import { amountOf, qText, qty, qualityOf, unitText } from "../format";
 import { t } from "../i18n";
-import { ensureMembers, memberOptions, members, orgOf, writable } from "../orgs";
+import { orgOf } from "../orgs";
 import { me } from "../session";
 import { toast, toastError } from "../toasts";
 import Picker from "./Picker.vue";
@@ -24,13 +24,12 @@ const quality = ref("");
 const amount = ref("");
 // "personal" or a guildId
 const target = ref("personal");
-const holder = ref<string | null>(null);
 const busy = ref(false);
 
 const pickTarget = computed(() => props.target === undefined);
 const targets = computed(() => [
   { value: "personal", label: t("stock.personal") },
-  ...(me.value?.orgs ?? []).filter(writable).map((o) => ({ value: o.guildId, label: o.name })),
+  ...(me.value?.orgs ?? []).map((o) => ({ value: o.guildId, label: o.name })),
 ]);
 
 // A fixed target is the list's scope; picking starts with personal
@@ -44,34 +43,22 @@ watch(targets, (list) => {
 });
 
 const org = computed(() => (target.value === "personal" ? undefined : orgOf(target.value)));
-// Officers book org stock for other holders too
-const pickHolder = computed(() => !!org.value?.officer);
-watch(org, (o) => {
-  holder.value = me.value?.userId ?? null;
-  if (o?.officer) ensureMembers(o.guildId);
-}, { immediate: true });
 
 const unit = computed(() => (subject.value ? materials.value.get(subject.value)?.unit : undefined) ?? "SCU");
 const q = computed(() => qualityOf(quality.value));
 const amt = computed(() => amountOf(amount.value, unit.value));
 
-const valid = computed(() => !!subject.value && !!location.value && q.value !== null && !!amt.value && (!pickHolder.value || !!holder.value)
-  && (!org.value || writable(org.value)));
+const valid = computed(() => !!subject.value && !!location.value && q.value !== null && !!amt.value);
 
-function ownerText(): string {
-  if (!org.value) return t("stock.pers");
-  const name = members[org.value.guildId]?.find((m) => m.userId === holder.value)?.displayName ?? org.value.displayName;
-  return `${org.value.name} (${name})`;
-}
+const ownerText = () => (org.value ? `${org.value.name} (${org.value.displayName})` : t("stock.pers"));
 
-// Back to an empty form (target and holder as on opening, the method's estimates again)
+// Back to an empty form (target as on opening)
 function clear() {
   subject.value = null;
   location.value = null;
   quality.value = "";
   amount.value = "";
   target.value = props.target ?? "personal";
-  holder.value = me.value?.userId ?? null;
 }
 
 async function submit() {
@@ -81,10 +68,7 @@ async function submit() {
   busy.value = true;
   try {
     const body: StockAddRequest = { subjectUuid: subject.value!, locationUuid: location.value!, quality: q.value!, amount: amount.value.trim() };
-    if (org.value) {
-      body.guildId = org.value.guildId;
-      if (holder.value && holder.value !== me.value?.userId) body.holderUserId = holder.value;
-    }
+    if (org.value) body.guildId = org.value.guildId;
     await api<OkResponse>("/stock/add", { method: "POST", body });
     toast(t("stock.added", { what }));
     // The next batch is often the same material at the same place: keep those
@@ -123,10 +107,6 @@ async function submit() {
       {{ t("field.target") }}
       <Dropdown v-model="target" variant="chip" :options="targets" />
     </div>
-    <label v-if="pickHolder && org" class="field">
-      {{ t("field.holder") }}
-      <Picker v-model="holder" :options="memberOptions(org.guildId)" :placeholder="t('pick.member')" />
-    </label>
     <div class="form-actions">
       <button type="button" class="btn outline" @click="clear"><Icon name="close" :size="14" /> {{ t("common.clear") }}</button>
       <button type="submit" class="btn primary" :disabled="!valid || busy">

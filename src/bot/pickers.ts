@@ -43,7 +43,7 @@ export function batchLabel(p: PickableBatch, lang: Lang, asTotal = false): strin
     `Q${b.quality}`,
     asTotal ? t(lang, 'stock.list.total', { amount }) : amount,
     p.location,
-    b.designation === 'org' ? `${t(lang, 'stock.org')} (${p.holderName ?? '?'})` : t(lang, 'stock.personal'),
+    p.sharedIn.length ? `${t(lang, 'stock.org')} (${p.holderName ?? '?'})` : t(lang, 'stock.personal'),
   ].filter(Boolean).join(' · '));
 }
 

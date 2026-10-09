@@ -14,7 +14,7 @@ import { t } from "../i18n";
       <div v-if="x.sticky" class="toast notice" :class="x.type">
         <div class="notice-text">
           <div class="notice-title">{{ x.title }}</div>
-          <div>{{ x.message }}</div>
+          <div><span v-if="x.label" class="notice-label">{{ x.label }} · </span>{{ x.message }}</div>
           <div v-if="x.detail" class="notice-detail">{{ x.detail }}</div>
         </div>
         <button type="button" class="close" :title="t('common.close')" @click="dismissToast(x.id)"><Icon name="close" :size="14" /></button>
@@ -88,6 +88,12 @@ import { t } from "../i18n";
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+/* What was done ("Stock · Shared"), quieter than what it was done to */
+.notice-label {
+  color: var(--text-2);
+  font-size: 12px;
 }
 
 .notice-detail {

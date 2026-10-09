@@ -22,7 +22,6 @@ const ORIGIN = 'https://qm.test';
 const USER = '730000000000000001';
 const G = '700000000000000009';
 const MEMBER_ROLE = '710000000000000011';
-const OFFICER_ROLE = '710000000000000012';
 
 /** A built SPA in a temp dir: index, one hashed asset, two dotfiles that must never be served. */
 function spaDist() {
@@ -206,26 +205,13 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.equal((await me(first)).status, 401);
   });
 
-  it('me: active memberships with the officer flag from the roster, roster freshness per org', async () => {
+  it('me: active memberships from the roster', async () => {
     await ensureGuild(db, G, 'Web Org');
-    const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE], officerRoleIds: [OFFICER_ROLE] });
-    await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [OFFICER_ROLE], bot: false });
+    const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
+    await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [MEMBER_ROLE], bot: false });
     const token = await loginAs();
     const orgs = async () => ((await (await me(token)).json()) as { orgs: unknown[] }).orgs;
-    await db.execute(sql`UPDATE app.org SET roster_checked_at = now() WHERE guild_id = ${G}`);
-    const [org] = (await orgs()) as Array<{ rosterFreshForMs: number }>;
-    const { rosterFreshForMs, ...rest } = org!;
-    assert.deepEqual(rest, { guildId: G, name: 'Web Org', displayName: 'Tess', officer: true, rosterFresh: true, botPresent: true });
-    // Fresh for the next 5 minutes, counting down
-    assert.ok(rosterFreshForMs > 290_000 && rosterFreshForMs <= 300_000, String(rosterFreshForMs));
-    await db.execute(sql`UPDATE bot.guild SET left_at = now() WHERE guild_id = ${G}`);
-    assert.equal(((await orgs()) as Array<{ botPresent: boolean }>)[0]!.botPresent, false);
-    await db.execute(sql`UPDATE bot.guild SET left_at = NULL WHERE guild_id = ${G}`);
-    for (const value of [sql`now() - interval '10 minutes'`, sql`NULL`]) {
-      await db.execute(sql`UPDATE app.org SET roster_checked_at = ${value} WHERE guild_id = ${G}`);
-      const [stale] = (await orgs()) as Array<{ rosterFresh: boolean; rosterFreshForMs: number }>;
-      assert.deepEqual([stale!.rosterFresh, stale!.rosterFreshForMs], [false, 0]);
-    }
+    assert.deepEqual(await orgs(), [{ guildId: G, name: 'Web Org', displayName: 'Tess' }]);
     // Losing the role takes effect without a new login
     await syncMember(db, G, settings, USER, { userId: USER, displayName: 'Tess', roleIds: [], bot: false });
     assert.deepEqual(((await (await me(token)).json()) as { orgs: unknown[] }).orgs, []);

@@ -22,9 +22,9 @@ import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import StockAddForm from "../components/StockAddForm.vue";
-import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, tierMark, tierQualities } from "../format";
+import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, sharedText, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
-import { ensureMembers, memberLabel, members, orgOf, writable } from "../orgs";
+import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
 import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toastError } from "../toasts";
@@ -48,12 +48,6 @@ const dialog = ref<{ batch: StockBatch; action: BatchAction } | null>(null);
 
 const isOrg = (s: string) => s !== "personal" && s !== "all";
 const org = computed(() => (isOrg(scope.value) ? orgOf(scope.value) : undefined));
-const orgWritable = computed(() => writable(org.value));
-// A read-only org takes no new stock; the form never switches to another target by itself
-const canAdd = computed(() => !org.value || orgWritable.value);
-watch(canAdd, (ok) => {
-  if (!ok) showAdd.value = false;
-});
 
 // Left the org (or it went away): back to personal stock
 watch(() => me.value?.orgs, () => {
@@ -93,7 +87,8 @@ onMounted(() => {
   if (isOrg(scope.value)) ensureMembers(scope.value);
   unsubscribe = onServerMessage((m) => {
     if (m.type === "resync") reload.schedule();
-    else if (m.type === "stock" && (scope.value === "all" || (m.scope === "personal" ? scope.value === "personal" : m.guildId === scope.value))) reload.schedule();
+    // Your own list holds your shared batches too: it reloads on every stock change it may contain
+    else if (m.type === "stock" && (!isOrg(scope.value) || (m.scope === "org" && m.guildId === scope.value))) reload.schedule();
   });
 });
 onUnmounted(() => {
@@ -117,8 +112,8 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "location", label: t("stock.col.location"), width: 280 },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
   ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200 }] : []),
-  { key: "state", label: t("stock.col.state"), width: 110 },
-  { key: "actions", label: "", width: 104, sortable: false, fixed: true, sep: true },
+  { key: "state", label: t("stock.col.state"), width: 180 },
+  { key: "actions", label: "", width: 168, sortable: false, fixed: true, sep: true },
 ]);
 const cols = useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
 
@@ -130,7 +125,7 @@ function valueOf(b: StockBatch, key: string): string | number {
     case "location": return b.location;
     case "holder": return b.holderName ?? "";
     case "owner": return ownerText(b);
-    case "state": return b.state === "refining" ? t("stock.refining") : "";
+    case "state": return b.state === "refining" ? t("stock.refining") : b.sharedIn.length ? sharedText(b) : "";
     default: return "";
   }
 }
@@ -172,8 +167,10 @@ const materialIcon = (uuid: string) => {
   return m?.kind === "item" ? typeIcon(m.type) : "resource";
 };
 
-// The server decides (canChange); org stock is also off while the org is read-only
-const canChange = (b: StockBatch) => b.canChange && (b.designation === "personal" || writable(orgOf(b.guildId)));
+// Yours only (the server says so: canChange)
+const canChange = (b: StockBatch) => b.canChange;
+// Whether any of your orgs takes shared stock right now
+const shareable = computed(() => !!me.value?.orgs.length);
 
 function open(batch: StockBatch, action: BatchAction) {
   dialog.value = { batch, action };
@@ -188,13 +185,9 @@ function open(batch: StockBatch, action: BatchAction) {
       <div class="head">
         <Icon name="type-crate" :size="16" />
         <span class="head-title">{{ t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
-        <button type="button" class="btn small primary" :disabled="!canAdd" @click="showAdd = !showAdd">
+        <button type="button" class="btn small primary" @click="showAdd = !showAdd">
           <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ t("stock.add") }}
         </button>
-      </div>
-      <div v-if="org && !orgWritable" class="readonly warning">
-        <Icon name="warning" :size="14" />
-        <span>{{ t("stock.readOnlyHint") }} {{ t(org.botPresent ? "home.rosterStale" : "home.botMissingHint") }}</span>
       </div>
       <div v-if="showAdd" class="add-area">
         <div class="head">
@@ -239,11 +232,22 @@ function open(batch: StockBatch, action: BatchAction) {
             <span class="cell">{{ b.location }}</span>
             <span v-if="org" class="cell">{{ b.holderName }}</span>
             <span v-if="scope === 'all'" class="cell">{{ ownerText(b) }}</span>
-            <span><span v-if="b.state === 'refining'" class="tag warn">{{ t("stock.refining") }}</span></span>
+            <span>
+              <span v-if="b.state === 'refining'" class="tag warn">{{ t("stock.refining") }}</span>
+              <!-- Where it is shared (an org's own list needs no tag for it) -->
+              <span v-else-if="!org && b.sharedIn.length" class="tag accent">{{ sharedText(b) }}</span>
+            </span>
             <span class="sep actions">
               <template v-if="canChange(b)">
-                <button type="button" class="icon-btn" :title="t('stock.remove')" @click="open(b, 'remove')"><Icon name="trash" :size="15" /></button>
+                <!-- Sharing needs an org to share in; taking back always works -->
+                <button type="button" class="icon-btn" :title="t('field.sharing')"
+                  :disabled="b.state !== 'stored' || (!b.sharedIn.length && !shareable)" @click="open(b, 'share')"><Icon name="users" :size="15" /></button>
+                <!-- A part goes back into its main batch; only unshared batches split -->
+                <button v-if="b.part" type="button" class="icon-btn" :title="t('stock.merge')" @click="open(b, 'merge')"><Icon name="merge" :size="15" /></button>
+                <button v-else type="button" class="icon-btn" :title="t('stock.split')"
+                  :disabled="b.state !== 'stored' || b.sharedIn.length > 0" @click="open(b, 'split')"><Icon name="split" :size="15" /></button>
                 <button type="button" class="icon-btn" :title="t('stock.move')" :disabled="b.state !== 'stored'" @click="open(b, 'move')"><Icon name="arrow-right" :size="15" /></button>
+                <button type="button" class="icon-btn" :title="t('stock.remove')" @click="open(b, 'remove')"><Icon name="arrow-up" :size="15" /></button>
                 <button type="button" class="icon-btn" :title="t('stock.adjust')" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
               </template>
             </span>
@@ -297,10 +301,4 @@ function open(batch: StockBatch, action: BatchAction) {
   gap: 6px;
 }
 
-
-.readonly {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border-dim);
-  align-items: flex-start;
-}
 </style>

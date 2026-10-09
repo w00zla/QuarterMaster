@@ -11,8 +11,10 @@ export interface Toast {
   id: number;
   message: string;
   type: ToastType;
-  // Notices: a title line above, a detail line below; they stay until dismissed
+  // Notices: a title line above, a quieter label before the message (what was done), a detail line
+  // below; they stay until dismissed
   title?: string;
+  label?: string;
   detail?: string;
   sticky?: boolean;
 }
@@ -31,10 +33,10 @@ export function toast(message: string, type: ToastType = "ok") {
 }
 
 /** A notice that stays until dismissed (actions from the bot and the companion app). */
-export function notify(title: string, message: string, detail = "") {
+export function notify(title: string, message: string, detail = "", label = "") {
   const notices = toasts.value.filter((x) => x.sticky);
   const drop = new Set(notices.slice(0, Math.max(0, notices.length - MAX_NOTICES + 1)).map((x) => x.id));
-  toasts.value = [...toasts.value.filter((x) => !drop.has(x.id)), { id: nextId++, message, type: "info", title, detail, sticky: true }];
+  toasts.value = [...toasts.value.filter((x) => !drop.has(x.id)), { id: nextId++, message, type: "info", title, label, detail, sticky: true }];
 }
 
 export function dismissToast(id: number) {

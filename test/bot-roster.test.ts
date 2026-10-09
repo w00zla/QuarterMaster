@@ -3,14 +3,13 @@ import { describe, it } from 'node:test';
 import type { APIInteractionGuildMember } from 'discord.js';
 import { accessOf, memberInfo } from '../src/bot/roster.ts';
 
-const settings = { memberRoleIds: ['m1', 'm2'], officerRoleIds: ['o1'] };
+const settings = { memberRoleIds: ['m1', 'm2'] };
 
 describe('roster access', () => {
-  it('counts officers as members and needs one configured role', () => {
-    assert.deepEqual(accessOf(['m2'], settings), { member: true, officer: false });
-    assert.deepEqual(accessOf(['o1'], settings), { member: true, officer: true });
-    assert.deepEqual(accessOf(['x'], settings), { member: false, officer: false });
-    assert.deepEqual(accessOf(['m1'], { memberRoleIds: [], officerRoleIds: [] }), { member: false, officer: false });
+  it('needs one configured member role', () => {
+    assert.deepEqual(accessOf(['m2'], settings), { member: true });
+    assert.deepEqual(accessOf(['x'], settings), { member: false });
+    assert.deepEqual(accessOf(['m1'], { memberRoleIds: [] }), { member: false });
   });
 
   it('reads raw API members: nickname, then global name, then username', () => {
