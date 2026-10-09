@@ -29,15 +29,8 @@ const scope = defineModel<string>({ required: true });
     <button v-for="o in me?.orgs ?? []" :key="o.guildId" type="button" class="scope" :class="{ active: scope === o.guildId }" @click="scope = o.guildId">
       <Icon name="users" :size="16" /> {{ o.name }}
     </button>
-    <button v-if="all" type="button" class="scope all" :class="{ active: scope === 'all' }" @click="scope = 'all'">
+    <button v-if="all" type="button" class="scope" :class="{ active: scope === 'all' }" @click="scope = 'all'">
       <Icon name="list" :size="16" /> {{ t("scope.all") }}
     </button>
   </div>
 </template>
-
-<style scoped>
-/* "All" sits apart at the right edge */
-.all {
-  margin-left: auto;
-}
-</style>
