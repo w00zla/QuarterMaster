@@ -1,8 +1,9 @@
 // Crafting check: the checked blueprints (kept in this browser only), loading the /api/crafting/*
 // data in the effective language, and the planner's warnings in the UI language.
-import { ref, watch, type Ref } from "vue";
+import { reactive, ref, watch, type Ref } from "vue";
 import type { PlanEntry, PlanWarning } from "../../src/planner/types";
 import { ApiError, api } from "./api";
+import { clampCount } from "./craftingStock";
 import { lang, t } from "./i18n";
 import { loadMe } from "./session";
 import { errorText } from "./toasts";
@@ -13,7 +14,7 @@ function load(): PlanEntry[] {
   try {
     const value = JSON.parse(localStorage.getItem(KEY) ?? "[]") as unknown;
     if (!Array.isArray(value)) return [];
-    return (value as PlanEntry[]).filter((e) => typeof e?.blueprintUuid === "string").map((e) => ({ ...e, count: 1 }));
+    return (value as PlanEntry[]).filter((e) => typeof e?.blueprintUuid === "string").map((e) => ({ ...e, count: clampCount(Number(e.count)) }));
   } catch {
     return [];
   }
@@ -34,6 +35,44 @@ watch(
       localStorage.setItem(KEY, JSON.stringify(entries));
     } catch {
       // localStorage unavailable: the list lasts until reload.
+    }
+  },
+  { deep: true },
+);
+
+// The view's own state: Stock panels closed per blueprint
+const UI_KEY = "qm.webapp.crafting.ui";
+
+interface CraftingUi {
+  stockClosed: string[];
+}
+
+function loadUi(): CraftingUi {
+  try {
+    const value = JSON.parse(localStorage.getItem(UI_KEY) ?? "{}") as Partial<CraftingUi>;
+    const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+    return { stockClosed: strings(value?.stockClosed) };
+  } catch {
+    return { stockClosed: [] };
+  }
+}
+
+export const craftingUi = reactive<CraftingUi>(loadUi());
+
+/** Adds or removes an ID in a UI state list. */
+export function toggleIn(list: string[], id: string) {
+  const i = list.indexOf(id);
+  if (i >= 0) list.splice(i, 1);
+  else list.push(id);
+}
+
+watch(
+  craftingUi,
+  (ui) => {
+    try {
+      localStorage.setItem(UI_KEY, JSON.stringify(ui));
+    } catch {
+      // localStorage unavailable: the state lasts until reload.
     }
   },
   { deep: true },

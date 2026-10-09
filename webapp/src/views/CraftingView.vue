@@ -1,23 +1,57 @@
 <script setup lang="ts">
-// Crafting check: a list of blueprints, each with its own material qualities and the resulting
-// stats, one craft each. The math is the shared planner module (src/planner), as in the admin UI.
-import { computed } from "vue";
+// Crafting check: a list of blueprints, each with its count, its own material qualities, the
+// resulting stats and what the stock covers. The math is the shared planner module (src/planner).
+// The stock (yours and what others share in your orgs) loads once for the view and reloads on stock
+// changes.
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { computePlan, MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlanEntry, PlannerData } from "../../../src/planner/types";
+import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
+import { api } from "../api";
 import CraftingPicker from "../components/CraftingPicker.vue";
 import PlanEntryCard from "../components/PlanEntryCard.vue";
 import { addToCrafting, checks, useCrafting } from "../crafting";
-import { t } from "../i18n";
+import { clampCount, withQualityFloor } from "../craftingStock";
+import { lang, t } from "../i18n";
+import { coalesced, onServerMessage } from "../realtime";
+import { toastError } from "../toasts";
 
 const uuids = computed(() => [...new Set(checks.value.map((e) => e.blueprintUuid))].sort().join(","));
 const recipes = useCrafting<PlannerData>(() => (uuids.value ? `/crafting/recipes?uuids=${uuids.value}` : null));
 const recipeOf = (uuid: string) => recipes.data.value?.recipes.find((r) => r.uuid === uuid);
-// While a newly added blueprint loads, the previous data does not have it yet: its card waits
-const results = computed(() => {
+// While a newly added blueprint loads, the previous data does not have it yet: its card waits.
+// Qualities below a slot's minimum (stored or default) count as the minimum.
+const plan = computed(() => {
   const data = recipes.data.value;
-  if (!data) return new Map<string, EntryResult>();
-  return new Map(computePlan(data, checks.value.filter((e) => recipeOf(e.blueprintUuid))).entries.map((e) => [e.blueprintUuid, e]));
+  return data ? computePlan(data, checks.value.filter((e) => recipeOf(e.blueprintUuid)).map((e) => withQualityFloor(data, e))) : null;
+});
+const results = computed(() => new Map<string, EntryResult>((plan.value?.entries ?? []).map((e) => [e.blueprintUuid, e])));
+
+// --- stock ---------------------------------------------------------------------------------
+const stock = ref<StockBatch[] | null>(null);
+let seq = 0;
+async function loadStock() {
+  const mine = ++seq;
+  try {
+    const r = await api<StockListResponse>(`/stock?scope=all&lang=${lang.value}`);
+    if (mine === seq) stock.value = r.batches;
+  } catch (e) {
+    if (mine === seq) toastError(e);
+  }
+}
+watch(lang, loadStock, { immediate: true });
+
+const reload = coalesced(() => void loadStock());
+let unsubscribe = () => {};
+onMounted(() => {
+  unsubscribe = onServerMessage((m) => {
+    if (m.type === "stock" || m.type === "resync") reload.schedule();
+  });
+});
+onUnmounted(() => {
+  unsubscribe();
+  reload.cancel();
 });
 
 const add = addToCrafting;
@@ -29,6 +63,10 @@ function remove(entry: PlanEntry) {
 function setQuality(entry: PlanEntry, slotIndex: number, value: number) {
   const q = Math.max(MIN_QUALITY, Math.min(MAX_QUALITY, Math.round(value) || 0));
   entry.quality = { ...entry.quality, [slotIndex]: q };
+}
+
+function setCount(entry: PlanEntry, n: number) {
+  entry.count = clampCount(n);
 }
 </script>
 
@@ -52,6 +90,8 @@ function setQuality(entry: PlanEntry, slotIndex: number, value: number) {
             v-if="results.has(entry.blueprintUuid)"
             :result="results.get(entry.blueprintUuid)!"
             :recipe="recipeOf(entry.blueprintUuid)"
+            :stock="stock"
+            @count="(n) => setCount(entry, n)"
             @quality="(slot, q) => setQuality(entry, slot, q)"
             @slots="(slots) => (entry.slots = slots)"
             @remove="remove(entry)"
@@ -72,24 +112,21 @@ function setQuality(entry: PlanEntry, slotIndex: number, value: number) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-control);
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-base);
   font-size: 13px;
 }
 
 .entries {
-  padding: 12px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
 }
 
-.head-count {
-  min-width: 7em;
-}
-
-/* Phones: the picker gets a row of its own below the title, count and Clear */
+/* Phones: the picker gets a row of its own below the title and Clear */
 @media (max-width: 640px) {
   .head-divider {
     display: none;

@@ -449,7 +449,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     } satisfies MaterialInfo);
   });
 
-  // --- crafting check (the admin UI's planner; game data only) ----------------------------------
+  // --- crafting check (the planner's game data; the admin's catalog queries) ---------------------
   api.get('/crafting/blueprints', async (c) => c.json(await getBlueprints(db, langOf(c))));
   api.get('/crafting/resources', async (c) => c.json(await getResources(db, langOf(c))));
   api.get('/crafting/items', async (c) => c.json(await getItems(db, langOf(c))));

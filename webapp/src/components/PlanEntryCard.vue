@@ -1,20 +1,27 @@
 <script setup lang="ts">
-// One checked blueprint: slot choice, material quality per slot and the resulting stat changes.
-// Changes go up as events. Nothing in the card changes its height while qualities or the slot
-// choice change: a quality below the minimum shows on the slot's min Q tag, a wrong slot choice
-// next to the slot count, and the stats list every stat the recipe's slots can give.
+// One checked blueprint: count, slot choice, material quality per slot (never below the slot's
+// minimum), the resulting stat changes and, below, what of it the stock covers. Changes go up as
+// events. Nothing in the card changes its height while qualities or the slot choice change: a
+// wrong slot choice shows next to the slot count, and the stats list every stat the recipe's slots
+// can give.
 import { computed } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
-import { warningText } from "../crafting";
-import { duration, unitText } from "../format";
+import type { StockBatch } from "../../../src/webapp/api-types";
+import { craftingUi, toggleIn, warningText } from "../crafting";
+import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../craftingStock";
+import { duration, qty, unitText } from "../format";
 import { t } from "../i18n";
+import { me } from "../session";
+import CoverageTag from "./CoverageTag.vue";
+import StockBatchList from "./StockBatchList.vue";
 import TypeLabel from "./TypeLabel.vue";
 
-const props = defineProps<{ result: EntryResult; recipe: PlannerRecipe | undefined }>();
-const emit = defineEmits<{ quality: [slotIndex: number, q: number]; slots: [indexes: number[]]; remove: [] }>();
+// stock: everything you can see (null while it loads)
+const props = defineProps<{ result: EntryResult; recipe: PlannerRecipe | undefined; stock: StockBatch[] | null }>();
+const emit = defineEmits<{ quality: [slotIndex: number, q: number]; slots: [indexes: number[]]; count: [n: number]; remove: [] }>();
 
 const choosesSlots = computed(() => !!props.recipe && props.recipe.requiredSlots < props.result.slots.length);
 
@@ -30,7 +37,21 @@ function toggleSlot(slotIndex: number) {
   emit("slots", [...set]);
 }
 
-const inputValue = (e: Event) => Number((e.target as HTMLInputElement).value);
+/** A typed or dragged value, clamped; the control shows the clamped value right away. */
+function clamped(e: Event, min: number, max: number): number {
+  const el = e.target as HTMLInputElement;
+  const n = Math.min(max, Math.max(min, Math.round(Number(el.value)) || min));
+  if (el.value !== String(n)) el.value = String(n);
+  return n;
+}
+
+const setQuality = (s: EntryResult["slots"][number], e: Event) => emit("quality", s.index, clamped(e, minQuality(s), MAX_QUALITY));
+const setCount = (e: Event) => emit("count", clamped(e, MIN_COUNT, MAX_COUNT));
+const step = (by: number) => emit("count", clampCount(props.result.count + by));
+
+// The stock part: each card on its own (nothing reserved across cards), open by default
+const stockOpen = computed(() => !craftingUi.stockClosed.includes(props.result.blueprintUuid));
+const coverages = computed(() => needsOf(props.result).map((n) => coverageOf(n, props.stock ?? [], me.value?.userId ?? null)));
 
 const slotWarning = computed(() => {
   const w = props.result.warnings.find((w) => w.code === "slots");
@@ -67,7 +88,7 @@ const slotName = (index: number) => props.result.slots.find((s) => s.index === i
 const perSlotText = (s: StatResult | undefined) => !s || s.perSlot.length < 2 ? "" :
   s.perSlot.map((p) => `${slotName(p.slotIndex)}: ${s.kind === "additive" ? p.value : `×${p.value.toFixed(3)}`}`).join(" · ");
 const unit = (kind: string) => unitText(kind === "resource" ? "SCU" : "pcs");
-const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.map((i) => i.minQuality));
+const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ...s.inputs.map((i) => i.minQuality));
 </script>
 
 <template>
@@ -77,16 +98,22 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
         <Icon :name="typeIcon(recipe?.outputType)" :size="18" class="entry-icon" />
         <span class="entry-name">{{ result.name }}</span>
         <div class="spacer" />
+        <span class="count">
+          <button type="button" class="icon-btn" :title="t('crafting.less')" :disabled="result.count <= MIN_COUNT" @click="step(-1)"><Icon name="minus" :size="14" /></button>
+          <input class="mono q-num count-num" type="number" :min="MIN_COUNT" :max="MAX_COUNT" :value="result.count" :aria-label="t('crafting.count')" :title="t('crafting.count')" @change="setCount" />
+          <button type="button" class="icon-btn" :title="t('crafting.more')" :disabled="result.count >= MAX_COUNT" @click="step(1)"><Icon name="plus" :size="14" /></button>
+        </span>
+        <div class="divider" />
         <button type="button" class="icon-btn" :title="t('crafting.remove')" @click="emit('remove')"><Icon name="trash" :size="14" /></button>
       </div>
       <div v-if="recipe" class="head-line tags">
-        <span v-if="recipe.categoryLabel" class="tag accent">{{ recipe.categoryLabel }}</span>
-        <span v-if="recipe.outputTypeLabel" class="tag">
-          <TypeLabel :type="recipe.outputType" :label="recipe.outputSubTypeLabel ? `${recipe.outputTypeLabel} / ${recipe.outputSubTypeLabel}` : recipe.outputTypeLabel" :size="12" />
+        <span v-if="recipe.categoryLabel" class="meta">{{ recipe.categoryLabel }}</span>
+        <span v-if="recipe.outputTypeLabel" class="meta">
+          <TypeLabel :type="recipe.outputType" :label="recipe.outputSubTypeLabel ? `${recipe.outputTypeLabel} / ${recipe.outputSubTypeLabel}` : recipe.outputTypeLabel" :size="11" />
         </span>
-        <span v-if="recipe.size !== null" class="tag" :title="t('crafting.size')">S{{ recipe.size }}</span>
-        <span v-if="recipe.itemClass" class="tag">{{ recipe.itemClass }}</span>
-        <span v-if="recipe.gradeLetter" class="tag">{{ t("crafting.grade", { grade: recipe.gradeLetter }) }}</span>
+        <span v-if="recipe.size !== null" class="meta" :title="t('crafting.size')">S{{ recipe.size }}</span>
+        <span v-if="recipe.itemClass" class="meta">{{ recipe.itemClass }}</span>
+        <span v-if="recipe.gradeLetter" class="meta">{{ t("crafting.grade", { grade: recipe.gradeLetter }) }}</span>
         <span v-if="recipe.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
         <span v-if="recipe.retired" class="tag err">{{ t("crafting.retired") }}</span>
       </div>
@@ -123,6 +150,7 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
               <span class="min-q">
                 <span v-if="minQuality(s) > 1" class="tag" :class="{ err: s.belowMinQuality }">{{ t("crafting.minQ", { q: minQuality(s) }) }}</span>
               </span>
+              <!-- The track keeps the full scale (slots stay comparable); it stops at the minimum -->
               <input
                 type="range"
                 :min="MIN_QUALITY"
@@ -130,17 +158,17 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
                 :value="s.quality"
                 :disabled="!s.selected"
                 :aria-label="`${t('field.quality')} ${s.name}`"
-                @input="emit('quality', s.index, inputValue($event))"
+                @input="setQuality(s, $event)"
               />
               <input
                 class="mono q-num"
                 type="number"
-                :min="MIN_QUALITY"
+                :min="minQuality(s)"
                 :max="MAX_QUALITY"
                 :value="s.quality"
                 :disabled="!s.selected"
                 :aria-label="`${t('field.quality')} ${s.name}`"
-                @change="emit('quality', s.index, inputValue($event))"
+                @change="setQuality(s, $event)"
               />
             </span>
           </div>
@@ -160,6 +188,25 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
       </div>
     </div>
 
+    <div class="stock-part">
+      <button type="button" class="stock-toggle" :aria-expanded="stockOpen" @click="toggleIn(craftingUi.stockClosed, result.blueprintUuid)">
+        <Icon :name="stockOpen ? 'chevron-down' : 'chevron-right'" :size="14" />
+        <Icon name="type-crate" :size="14" />
+        <span class="panel-title">{{ t("crafting.stock") }}</span>
+      </button>
+      <div v-if="stockOpen" class="needs">
+        <div v-for="c in coverages" :key="`${c.need.kind}:${c.need.uuid}`" class="need">
+          <div class="need-line">
+            <span class="need-name">{{ c.need.name }}</span>
+            <span class="mono need-total" :title="t('crafting.need')">{{ qty(c.need.total, c.unit) }}</span>
+            <span class="need-tag"><CoverageTag :coverage="c" :loading="!stock" /></span>
+          </div>
+          <StockBatchList :rows="c.batches" />
+        </div>
+        <div v-if="!coverages.length" class="faint">—</div>
+      </div>
+    </div>
+
     <div class="entry-foot">
       <Icon name="clock" :size="12" />
       <span>{{ t("crafting.time") }}</span>
@@ -169,16 +216,23 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
 </template>
 
 <style scoped>
+/* A card of its own: darker than the panel, with a framed head; its parts share one inner padding.
+   The layout follows the card's width. */
 .entry {
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-control);
+  container-type: inline-size;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg-base);
+  overflow: hidden;
 }
 
 .entry-head {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px 12px;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  background: var(--bg-surface-2);
+  border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
 
@@ -205,14 +259,120 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
   overflow-wrap: anywhere;
 }
 
+/* The count between its buttons, tight */
+.count {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.count .icon-btn {
+  margin: 0;
+}
+
+/* Just wide enough for two digits */
+.q-num.count-num {
+  width: 2.5ch;
+  padding: 0;
+  background: none;
+}
+
+/* The blueprint's facts (category, type, size, class, grade) as chips, like the filter chips but not
+   clickable; states (default, retired) stay tags */
+.meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid rgba(173, 211, 235, 0.35);
+  border-radius: var(--radius-control);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .entry-foot {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 12px;
+  padding: 10px 16px;
   border-top: 1px solid var(--border-dim);
   font-size: 12px;
+  color: var(--text-3);
+}
+
+.entry-foot .mono {
   color: var(--text-2);
+}
+
+/* The stock part: one block per material (need line, then its batches), set into the card: darker
+   than the card body, not one more of the blue surfaces (the footer's top line closes it) */
+.stock-part {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, #000 35%, var(--bg-base));
+}
+
+.stock-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.stock-toggle:hover {
+  color: var(--text);
+}
+
+.needs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.need {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The material's line, underlined also when nobody holds it (the first batch below draws no line) */
+.need-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12ch 15ch;
+  gap: 12px;
+  align-items: center;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.need-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.need-total {
+  text-align: right;
+  color: var(--text);
+}
+
+.need-tag {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .q-num {
@@ -235,8 +395,8 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
 
 .entry-body {
   display: flex;
-  gap: 20px;
-  padding: 4px 12px 12px;
+  gap: 24px;
+  padding: 14px 16px 16px;
 }
 
 .main-col {
@@ -290,7 +450,7 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
   display: flex;
   align-items: center;
   gap: 6px;
-  font-weight: 600;
+  color: var(--text-2);
 }
 
 .slot-name input {
@@ -311,6 +471,10 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.slot-inputs > span:not(.faint) {
+  color: var(--text);
 }
 
 .quality {
@@ -356,6 +520,7 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
 }
 
 .stat-name {
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -387,8 +552,8 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
   white-space: nowrap;
 }
 
-/* Narrower screens: the stats go below the slots */
-@media (max-width: 1100px) {
+/* Narrower cards: the stats go below the slots */
+@container (max-width: 1040px) {
   .entry-body {
     flex-direction: column;
   }
@@ -401,8 +566,8 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
   }
 }
 
-/* Phones: one block per slot (name, then material and amount, then quality) */
-@media (max-width: 760px) {
+/* Phone-wide cards: one block per slot (name, then material and amount, then quality) */
+@container (max-width: 700px) {
   .main-col {
     flex: 1;
   }
@@ -432,6 +597,11 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(0, ...s.inputs.
 
   .slot-inputs.amount-col > span {
     justify-content: flex-end;
+  }
+
+  .need-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px;
   }
 }
 </style>
