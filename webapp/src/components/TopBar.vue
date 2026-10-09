@@ -55,10 +55,11 @@ onUnmounted(() => {
     <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="desktop" :size="14" /> {{ t("companion.open") }}</button>
     <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
     <span class="tab-divider" />
-    <button v-if="me" type="button" class="user" :title="t('profile.open')" @click="profileOpen = true">
+    <span v-if="me" class="user">
       <img class="avatar" :src="me.avatarUrl" alt="" />
       <span class="name">{{ me.name }}</span>
-    </button>
+    </span>
+    <button v-if="me" class="icon-btn" type="button" :title="t('profile.open')" @click="profileOpen = true"><Icon name="settings" :size="15" /></button>
     <ProfileDialog v-if="profileOpen" @close="profileOpen = false" />
     <button class="icon-btn" type="button" :title="t('user.logout')" @click="logout"><Icon name="log-out" :size="15" /></button>
   </header>
@@ -161,16 +162,6 @@ onUnmounted(() => {
   min-width: 0;
   height: var(--h-chip);
   padding: 0 10px 0 4px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.user:hover {
-  background: var(--bg-surface-2);
 }
 
 .avatar {
