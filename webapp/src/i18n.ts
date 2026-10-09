@@ -220,7 +220,6 @@ const en = {
   "crafting.lacking": "missing {n}",
   "crafting.me": "Me",
 
-  "profile.title": "Profile",
   "profile.rsi": "RSI handle",
   "profile.saved": "Saved.",
   "history.title": "History",
@@ -271,7 +270,6 @@ const en = {
   "companion.keyRecreate": "Create new",
   "companion.copy": "Copy",
   "companion.copied": "Copied.",
-  "companion.download": "Download",
   "companion.keyActive": "Active",
   "companion.noRelease": "No download available.",
 
@@ -521,7 +519,6 @@ const de: Record<Key, string> = {
   "crafting.lacking": "fehlt {n}",
   "crafting.me": "Ich",
 
-  "profile.title": "Profil",
   "profile.rsi": "RSI-Handle",
   "profile.saved": "Gespeichert.",
   "history.title": "Verlauf",
@@ -572,7 +569,6 @@ const de: Record<Key, string> = {
   "companion.keyRecreate": "Neu erzeugen",
   "companion.copy": "Kopieren",
   "companion.copied": "Kopiert.",
-  "companion.download": "Download",
   "companion.keyActive": "Aktiv",
   "companion.noRelease": "Kein Download verfügbar.",
 

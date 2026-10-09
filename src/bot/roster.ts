@@ -5,7 +5,7 @@
 // the row is deleted. Their app_user row goes too, but only once it holds no data at all:
 // users can work without any org (personal stock, blueprints, profile).
 import { and, eq, sql } from 'drizzle-orm';
-import { GuildMemberRoleManager, type APIInteractionGuildMember, type Guild, type GuildMember } from 'discord.js';
+import { GuildMemberRoleManager, type APIInteractionGuildMember, type GuildMember } from 'discord.js';
 import type { Db } from '../db/client.ts';
 import { appUser, member } from '../db/schema/app.ts';
 import { findGuildSettings, type GuildSettings } from './settings.ts';

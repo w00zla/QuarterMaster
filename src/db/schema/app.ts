@@ -5,7 +5,7 @@
 // catalog rows are never deleted either, only retired.
 import { sql, type SQLWrapper } from 'drizzle-orm';
 import {
-  bigint, boolean, check, foreignKey, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, unique, uuid,
+  bigint, boolean, check, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core';
 import { item, location, resource, blueprint } from './catalog.ts';
 
