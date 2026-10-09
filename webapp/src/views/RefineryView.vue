@@ -278,11 +278,15 @@ const bonusText = (b: StockBatch) => {
   opacity: 0.8;
 }
 
-/* As the stock table's material rows, only in the quieter colour */
+/* As the stock table's material rows, only in the quieter colour and the station not bold */
 .group-name,
 .group-total {
   font-size: 14px;
   font-weight: 600;
+}
+
+.group-name {
+  font-weight: 500;
 }
 
 /* The finish button must not make the row taller than the stock table's material rows */
