@@ -76,17 +76,6 @@ function qualityDirection(modifier: PlannerModifier): number {
 
 // --- plan ------------------------------------------------------------------------------
 
-/** A warning in English (the admin UI's language). */
-export function warningText(w: PlanWarning): string {
-  switch (w.code) {
-    case 'slots': return `${w.required} of ${w.total} slots must be chosen; using the first ${w.required}`;
-    case 'retired': return 'This blueprint is no longer in the game data';
-    case 'alternatives': return `Slot ${w.slot} offers alternatives; using the first`;
-    case 'belowMin': return `Quality ${w.quality} is below the minimum for slot ${w.slot}`;
-    case 'unsupported': return `Stat ${w.stat}: unsupported modifier in slot ${w.slot}`;
-  }
-}
-
 /** Slot indexes used for a recipe: the chosen ones when valid, otherwise the first N. */
 export function selectedSlots(recipe: PlannerRecipe, chosen: number[] | undefined, warnings: PlanWarning[]): Set<number> {
   const all = recipe.slots.map((s) => s.index);

@@ -419,7 +419,7 @@
   gap: 6px;
 }
 
-/* A warning line (planner, imports). */
+/* A warning line (imports). */
 .warning {
   display: flex;
   align-items: center;

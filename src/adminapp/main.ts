@@ -13,7 +13,6 @@ import { connect } from '../db/client.ts';
 import { runImport, summarize, textDiffCounts } from '../catalog/import/apply.ts';
 import { loadSnapshot } from '../catalog/import/load.ts';
 import { parseIniFile, runLocImport } from '../catalog/import/loc-import.ts';
-import { loadPlannerData } from '../planner/load.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
 import * as q from './queries.ts';
 
@@ -81,10 +80,6 @@ api.get('/localization/search', async (c) => {
   return c.json(query ? await q.searchLoc(db, lang(c), query, limit) : { total: 0, rows: [] });
 });
 api.get('/localization/keys/:key', async (c) => c.json(await q.getLocKey(db, c.req.param('key').toLowerCase())));
-api.get('/planner/recipes', async (c) => {
-  const uuids = [...new Set((c.req.query('uuids') ?? '').split(',').filter((u) => UUID.test(u)))].slice(0, 200);
-  return c.json(await loadPlannerData(db, uuids, lang(c)));
-});
 // --- imports (write) ----------------------------------------------------------------
 // The file is the raw request body. Writing endpoints require a custom header: a form on
 // another site cannot set it, so the browser's stored basic auth cannot be abused (CSRF).

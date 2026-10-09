@@ -19,6 +19,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "../src/adminapp/api-types.ts", "../src/planner/types.ts", "../src/planner/plan.ts"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "../src/adminapp/api-types.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -19,8 +19,6 @@ const TABS: { to: string; label: string; icon: IconName }[] = [
   { to: "/localisation", label: "Localisation", icon: "texts" },
   { to: "/3rd-party", label: "3rd Party", icon: "link" },
 ];
-// The tool, apart from the data views
-const TOOL_TABS: typeof TABS = [{ to: "/crafting", label: "Crafting", icon: "crafter" }];
 const isActive = (to: string, path: string) => (to === "/" ? path === "/" : path.startsWith(to));
 
 const langOptions = computed(() => props.langs.map((l) => ({ value: l, label: l })));
@@ -34,11 +32,6 @@ const langOptions = computed(() => props.langs.map((l) => ({ value: l, label: l 
     </div>
     <nav class="tabs">
       <RouterLink v-for="t in TABS" :key="t.to" :to="t.to" class="tab" :class="{ active: isActive(t.to, $route.path) }">
-        <Icon :name="t.icon" :size="16" />
-        {{ t.label }}
-      </RouterLink>
-      <span class="tab-divider" />
-      <RouterLink v-for="t in TOOL_TABS" :key="t.to" :to="t.to" class="tab" :class="{ active: isActive(t.to, $route.path) }">
         <Icon :name="t.icon" :size="16" />
         {{ t.label }}
       </RouterLink>
@@ -121,14 +114,6 @@ const langOptions = computed(() => props.langs.map((l) => ({ value: l, label: l 
 .tab:hover {
   color: var(--text);
   text-decoration: none;
-}
-
-.tab-divider {
-  align-self: center;
-  width: 1px;
-  height: 20px;
-  margin: 0 4px;
-  background: var(--border);
 }
 
 .tab.active {

@@ -56,11 +56,4 @@ export const HELP = {
   forceImport: "Override the safeguards against many retired or changed entries, and re-import identical data. Needs a new dry run.",
   allowDowngrade: "Allow a snapshot of an older game build than the last import. Needs a new dry run.",
   locImport: "An externally maintained global.ini, e.g. a community translation, as an extra text source. The source with the highest priority wins per text.",
-
-  // Planner
-  planner: "Pick blueprints and set the material qualities: each card shows what one craft needs and how its stats change. Kept in this browser only.",
-  quality: "Quality (0–1000) of the material you put into this slot. It moves the slot's stats along the recipe's curves; the game's default is 500.",
-  planStats: "Change of each stat against the base item, from the chosen qualities. Green: better, red: worse. Several slots affecting one stat are assumed to multiply (not verified in game). Base values are not shown yet.",
-  materials: "What one craft needs. Min Q is the lowest material quality the recipe accepts.",
-  chooseSlots: "This recipe needs only some of its slots: pick which ones you fill.",
 } as const;
