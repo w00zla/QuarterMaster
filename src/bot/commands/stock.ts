@@ -4,7 +4,7 @@
 import {
   ActionRowBuilder, ApplicationCommandOptionType, ApplicationIntegrationType, ButtonBuilder, ButtonStyle, CheckboxGroupBuilder,
   CheckboxGroupOptionBuilder, ContainerBuilder, InteractionContextType, LabelBuilder, MessageFlags, ModalBuilder, SeparatorBuilder,
-  TextDisplayBuilder, escapeMarkdown,
+  TextDisplayBuilder,
   type APIApplicationCommandOption, type AutocompleteInteraction, type ModalSubmitInteraction,
 } from 'discord.js';
 import type { Db } from '../../db/client.ts';
@@ -23,6 +23,7 @@ import { batchChoices, locationChoices, materialChoices, type Choice } from '../
 import { bySubcommand, type BotCommand, type CommandContext } from '../registry.ts';
 import { accessOf, memberInfo, searchMembers } from '../roster.ts';
 import { findGuildSettings } from '../settings.ts';
+import { escapeMarkdown } from '../markdown.ts';
 import { customId, panel, textField, textValue, webAppButton } from '../ui.ts';
 
 const NAME = 'qm-stock';

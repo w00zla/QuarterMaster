@@ -2,7 +2,7 @@
 // blueprint as an option; list and who answer as panels.
 import {
   ActionRowBuilder, ApplicationCommandOptionType, ApplicationIntegrationType, ButtonBuilder, ButtonStyle, ContainerBuilder,
-  InteractionContextType, SeparatorBuilder, TextDisplayBuilder, escapeMarkdown, type AutocompleteInteraction,
+  InteractionContextType, SeparatorBuilder, TextDisplayBuilder, type AutocompleteInteraction,
 } from 'discord.js';
 import type { Db } from '../../db/client.ts';
 import { requireMember } from '../access.ts';
@@ -14,6 +14,7 @@ import { localizedDescription, t, type Lang, type MessageKey } from '../i18n.ts'
 import { bySubcommand, type BotCommand, type CommandContext } from '../registry.ts';
 import { accessOf, memberInfo, searchMembers } from '../roster.ts';
 import { findGuildSettings } from '../settings.ts';
+import { escapeMarkdown } from '../markdown.ts';
 import { customId, panel, webAppButton, webAppRow } from '../ui.ts';
 
 const NAME = 'qm-bp';

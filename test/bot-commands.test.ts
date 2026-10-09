@@ -33,3 +33,13 @@ describe('button state', () => {
     assert.deepEqual(getState(short, 'u1'), { ok: false, reason: 'expired' });
   });
 });
+
+describe('escapeMarkdown for user-controlled names', () => {
+  it('neutralizes masked links, headings, lists and mentions', async () => {
+    const { escapeMarkdown } = await import('../src/bot/markdown.ts');
+    assert.equal(escapeMarkdown('[Free aUEC](https://evil.example)'), '\\[Free aUEC](https://evil.example)');
+    assert.equal(escapeMarkdown('# Head'), '\\# Head');
+    assert.equal(escapeMarkdown('- item'), '\\- item');
+    assert.equal(escapeMarkdown('<@123> <#5>'), '\\<@123> \\<#5>');
+  });
+});

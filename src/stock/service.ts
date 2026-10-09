@@ -154,10 +154,14 @@ function checkMayChange(actor: Actor, batch: Batch) {
   if (batch.ownerUserId !== actor.userId) throw new StockError('notAllowed');
 }
 
-/** Locks the batch; `expected` is the quantity the user saw when confirming. */
-async function lockBatch(tx: Tx, id: number, expected?: string): Promise<Batch> {
+/**
+ * Locks the batch of the actor; `expected` is the quantity the user saw when confirming.
+ * The owner is checked first: a stranger's batch must not answer with its quantity or state.
+ */
+async function lockBatch(tx: Tx, actor: Actor, id: number, expected?: string): Promise<Batch> {
   const batch = await one<Batch>(tx, sql`SELECT ${BATCH_COLUMNS} FROM app.stock_batch WHERE id = ${id} FOR UPDATE`);
   if (!batch) throw new StockError('batchNotFound');
+  checkMayChange(actor, batch);
   if (expected !== undefined && formatAmount(expected) !== formatAmount(batch.quantity)) throw new StockError('batchChanged');
   return batch;
 }
@@ -386,8 +390,7 @@ export async function refineDone(db: Db, actor: Actor, input: { jobId: string; r
     const group = randomUUID();
     const result: RefineJobResult = { jobId: input.jobId, journal: [], batches: [] };
     for (const row of results) {
-      const ore = await lockBatch(tx, row.batchId, row.expected);
-      checkMayChange(actor, ore);
+      const ore = await lockBatch(tx, actor, row.batchId, row.expected);
       if (ore.state !== 'refining') throw new StockError('notRefining');
       const refined = await one<{ uuid: string | null }>(tx, sql`SELECT refined_uuid AS uuid FROM catalog.resource WHERE uuid = ${ore.resourceUuid}`);
       if (!refined?.uuid) throw new StockError('notBookable');
@@ -430,8 +433,7 @@ export async function refineSetDuration(db: Db, actor: Actor, input: { jobId: st
 /** Takes an amount (null: everything) off a batch. */
 export async function remove(db: Db, actor: Actor, input: { batchId: number; amount: string | null; expected?: string }) {
   return db.transaction(async (tx): Promise<StockResult> => {
-    const batch = await lockBatch(tx, input.batchId, input.expected);
-    checkMayChange(actor, batch);
+    const batch = await lockBatch(tx, actor, input.batchId, input.expected);
     const amount = input.amount === null ? batch.quantity : parse(input.amount, batch.kind);
     // Before the decrease: an emptied batch takes its shares along
     const sharedIn = await sharesOf(tx, batch.id);
@@ -444,8 +446,7 @@ export async function remove(db: Db, actor: Actor, input: { batchId: number; amo
 /** Sets a batch to a counted amount ("0" empties it). */
 export async function adjust(db: Db, actor: Actor, input: { batchId: number; amount: string; expected?: string }) {
   return db.transaction(async (tx): Promise<StockResult> => {
-    const batch = await lockBatch(tx, input.batchId, input.expected);
-    checkMayChange(actor, batch);
+    const batch = await lockBatch(tx, actor, input.batchId, input.expected);
     const target = /^\s*0+(?:[.,]0+)?\s*$/.test(input.amount) ? '0' : parse(input.amount, batch.kind);
     const delta = (await one<{ d: string }>(tx, sql`SELECT (${target}::numeric - ${batch.quantity}::numeric)::text AS d`))!.d;
     if (Number(delta) === 0) throw new StockError('noChange');
@@ -476,9 +477,8 @@ export interface MoveInput {
  */
 export async function move(db: Db, actor: Actor, input: MoveInput) {
   return db.transaction(async (tx): Promise<StockResult> => {
-    const batch = await lockBatch(tx, input.batchId, input.expected);
+    const batch = await lockBatch(tx, actor, input.batchId, input.expected);
     if (batch.state === 'refining') throw new StockError('refiningFixed');
-    checkMayChange(actor, batch);
     const location = input.toLocationUuid ?? batch.locationUuid;
     if (location !== batch.locationUuid) await checkLocation(tx, location);
 
@@ -511,9 +511,8 @@ export async function move(db: Db, actor: Actor, input: MoveInput) {
 /** Splits an amount off an unshared batch into a batch of its own (a new lot), e.g. to share it apart. */
 export async function split(db: Db, actor: Actor, input: { batchId: number; amount: string; expected?: string }) {
   return db.transaction(async (tx): Promise<StockResult> => {
-    const batch = await lockBatch(tx, input.batchId, input.expected);
+    const batch = await lockBatch(tx, actor, input.batchId, input.expected);
     if (batch.state === 'refining') throw new StockError('refiningFixed');
-    checkMayChange(actor, batch);
     if ((await sharesOf(tx, batch.id)).length) throw new StockError('sharedSplit');
     const amount = parse(input.amount, batch.kind);
     // Splitting off everything would leave the same batch under another name
@@ -536,8 +535,7 @@ export async function split(db: Db, actor: Actor, input: { batchId: number; amou
  */
 export async function merge(db: Db, actor: Actor, input: { batchId: number; expected?: string }) {
   return db.transaction(async (tx): Promise<StockResult> => {
-    const batch = await lockBatch(tx, input.batchId, input.expected);
-    checkMayChange(actor, batch);
+    const batch = await lockBatch(tx, actor, input.batchId, input.expected);
     if (!batch.lot) throw new StockError('nothingToMove');
     const shares = await sharesOf(tx, batch.id);
     const target: BatchKey = { ...keyOf(batch), lot: null };
@@ -557,9 +555,8 @@ export async function merge(db: Db, actor: Actor, input: { batchId: number; expe
  */
 export async function share(db: Db, actor: Actor, input: { batchId: number; guildIds: string[] }) {
   return db.transaction(async (tx): Promise<{ batch: Batch; guildIds: string[] }> => {
-    const batch = await lockBatch(tx, input.batchId);
+    const batch = await lockBatch(tx, actor, input.batchId);
     if (batch.state === 'refining') throw new StockError('refiningFixed');
-    checkMayChange(actor, batch);
     const before = await sharesOf(tx, batch.id);
     const wanted = [...new Set(input.guildIds)].sort();
     const added = wanted.filter((g) => !before.includes(g));

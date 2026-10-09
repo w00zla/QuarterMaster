@@ -92,6 +92,18 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await refused(add(db, nora, { ...metal, quality: 600, amount: '2', org: true }), 'holderNotMember');
   });
 
+  it('a stranger learns nothing about a batch: the owner is checked before the quantity and the state', async () => {
+    const b = (await add(db, max, { ...metal, quality: 411, amount: '10' })).batch!;
+    for (const expected of ['10', '3']) {
+      await refused(remove(db, mia, { batchId: b.id, amount: '1', expected }), 'notAllowed');
+      await refused(adjust(db, mia, { batchId: b.id, amount: '1', expected }), 'notAllowed');
+    }
+    const job = await refineStart(db, max, { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 300, amount: '4' }] });
+    const jobBatch = job.batches[0]!;
+    await refused(move(db, mia, { batchId: jobBatch.id, amount: '1', toLocationUuid: STATION2 }), 'notAllowed');
+    await refused(share(db, mia, { batchId: jobBatch.id, guildIds: [G] }), 'notAllowed');
+  });
+
   it('removes amounts or everything; only the owner, shared or not', async () => {
     const b = (await add(db, max, { ...metal, quality: 400, amount: '10' })).batch!;
     await refused(remove(db, mia, { batchId: b.id, amount: '1' }), 'notAllowed');

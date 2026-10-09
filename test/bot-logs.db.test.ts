@@ -1,7 +1,7 @@
 // Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import type { Client } from 'discord.js';
+import { DiscordAPIError, type Client } from 'discord.js';
 import { type Db } from '../src/db/client.ts';
 import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
@@ -22,12 +22,19 @@ const mia: Actor = { userId: MIA, guildId: G, source: 'bot' };
 const metal = { kind: 'resource' as const, uuid: U.metal, locationUuid: U.station };
 
 /** A client whose channels record what is sent; unknown channels fail like a deleted one. */
-function fakeClient(sent: Map<string, string[]>) {
+function fakeClient(sent: Map<string, string[]>, failSend?: () => Error | null) {
   return {
     channels: {
       async fetch(id: string) {
-        if (!sent.has(id)) throw new Error('Unknown Channel');
-        return { isSendable: () => true, send: async (m: { content: string }) => void sent.get(id)!.push(m.content) };
+        if (!sent.has(id)) throw new DiscordAPIError({ code: 10003, message: 'Unknown Channel' }, 10003, 404, 'GET', '', {});
+        return {
+          isSendable: () => true,
+          send: async (m: { content: string }) => {
+            const err = failSend?.();
+            if (err) throw err;
+            sent.get(id)!.push(m.content);
+          },
+        };
       },
     },
   } as unknown as Client;
@@ -91,6 +98,41 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     // Nothing twice
     await poster.round();
     assert.equal(sent.get(CHANNEL_G)!.length + sent.get(CHANNEL_H)!.length, 2);
+  });
+
+  it('stops posting what a former member does with shares left behind', async () => {
+    const MAX = '963000000000000009';
+    const max: Actor = { userId: MAX, guildId: G, source: 'bot' };
+    const settings = await updateGuildSettings(db, G, {});
+    await syncMember(db, G, settings, MAX, { userId: MAX, displayName: 'Max', roleIds: [ROLE], bot: false });
+    const sent = new Map([[CHANNEL_G, [] as string[]], [CHANNEL_H, [] as string[]]]);
+    const poster = new LogsPoster(fakeClient(sent), db, quiet);
+    const b = (await add(db, max, { ...metal, quality: 910, amount: '6', org: true })).batch!;
+    await poster.round();
+    assert.equal(sent.get(CHANNEL_G)!.length, 1);
+    // Max loses the role: the row stays inactive because the share still exists
+    await syncMember(db, G, settings, MAX, { userId: MAX, displayName: 'Max', roleIds: [], bot: false });
+    await remove(db, max, { batchId: b.id, amount: '1' });
+    await poster.round();
+    assert.equal(sent.get(CHANNEL_G)!.length, 1);
+  });
+
+  it('keeps the lines when Discord or the network fails, without repeating what already went out', async () => {
+    const sent = new Map([[CHANNEL_G, [] as string[]]]);
+    await new LogsPoster(fakeClient(sent), db, quiet).round(); // catch up with the history so far
+    sent.get(CHANNEL_G)!.length = 0;
+    // About 3000 characters of lines: two messages
+    for (let q = 100; q < 130; q++) await add(db, mia, { ...metal, quality: q, amount: '1', org: true });
+    // The second message fails once (not a Discord error): the first stays marked, the rest follows next round
+    let sends = 0;
+    const flaky = new LogsPoster(fakeClient(sent, () => (++sends === 2 ? new Error('socket hang up') : null)), db, quiet);
+    await flaky.round();
+    assert.equal(sent.get(CHANNEL_G)!.length, 1);
+    await flaky.round();
+    assert.equal(sent.get(CHANNEL_G)!.length, 2);
+    const lines = sent.get(CHANNEL_G)!.join('\n').split('\n');
+    assert.equal(lines.length, 30);
+    assert.equal(new Set(lines).size, 30);
   });
 
   it('skips the lines of a channel that cannot be used, and starts anew when the channel changes', async () => {

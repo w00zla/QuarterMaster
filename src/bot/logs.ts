@@ -2,15 +2,16 @@
 // posts sharing and taking back in this org, gives among its members and bookings on batches shared
 // in it (`details.sharedIn` of the history row). Unshared stock, refinery jobs and blueprints are private
 // or too noisy and never posted. The source is app.history; `bot.guild.logs_after` marks the last row
-// handled, so a restart neither loses nor repeats lines (a crash between post and mark repeats at most
-// one message).
-import { DiscordAPIError, RESTJSONErrorCodes, escapeMarkdown, type Client } from 'discord.js';
+// handled, so a restart neither loses nor repeats lines (the mark moves after each message; a crash between
+// a post and its mark repeats at most that message).
+import { DiscordAPIError, RESTJSONErrorCodes, type Client } from 'discord.js';
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { rows } from '../db/query.ts';
 import { formatAmount } from '../stock/amount.ts';
 import { locationCatalog, materialCatalog, missingNames } from '../stock/lookup.ts';
 import { t, type Lang, type MessageKey } from './i18n.ts';
+import { escapeMarkdown } from './markdown.ts';
 
 export interface LogRow {
   id: number;
@@ -37,7 +38,8 @@ export function logRows(db: Db, guildId: string, after: number, limit = BATCH): 
     FROM app.history
     WHERE id > ${after} AND category = 'stock' AND (
       (guild_id = ${guildId} AND action IN ('share', 'unshare', 'give'))
-      OR (details->'sharedIn' @> jsonb_build_array(${guildId}::text) AND action IN ('add', 'remove', 'adjust', 'move', 'merge', 'give')))
+      OR (details->'sharedIn' @> jsonb_build_array(${guildId}::text) AND action IN ('add', 'remove', 'adjust', 'move', 'merge', 'give')
+        AND EXISTS (SELECT 1 FROM app.member m WHERE m.guild_id = ${guildId} AND m.user_id = actor_user_id AND m.active)))
     ORDER BY id LIMIT ${limit}`);
 }
 
@@ -72,20 +74,27 @@ export function logLine(r: LogRow, guildId: string, names: LogNames, lang: Lang)
   return t(lang, `logs.${r.action}` as MessageKey, vars);
 }
 
-/** Lines joined into as few messages as Discord takes. */
-export function messagesOf(lines: string[]): string[] {
-  const messages: string[] = [];
+/** Lines joined into as few messages as Discord takes; `lastId` is the last history row a message covers. */
+export function packRows(items: { id: number; line: string }[]): { text: string; lastId: number }[] {
+  const messages: { text: string; lastId: number }[] = [];
   let current = '';
-  for (const line of lines) {
+  let lastId = 0;
+  for (const { id, line } of items) {
     const fitting = line.length > MAX_MESSAGE ? `${line.slice(0, MAX_MESSAGE - 1)}…` : line;
     if (current && current.length + 1 + fitting.length > MAX_MESSAGE) {
-      messages.push(current);
+      messages.push({ text: current, lastId });
       current = '';
     }
     current = current ? `${current}\n${fitting}` : fitting;
+    lastId = id;
   }
-  if (current) messages.push(current);
+  if (current) messages.push({ text: current, lastId });
   return messages;
+}
+
+/** Lines joined into as few messages as Discord takes. */
+export function messagesOf(lines: string[]): string[] {
+  return packRows(lines.map((line, id) => ({ id, line }))).map((m) => m.text);
 }
 
 /** Catalog names in `lang`, retired ones too. */
@@ -103,6 +112,9 @@ async function namesFor(db: Db, lang: Lang, logRowsList: LogRow[]): Promise<LogN
 
 // The channel cannot be used (gone, no access): its lines are skipped, not kept for later
 const PERMANENT = new Set<number>([RESTJSONErrorCodes.UnknownChannel, RESTJSONErrorCodes.MissingAccess, RESTJSONErrorCodes.MissingPermissions]);
+
+// The configured channel is not a channel the bot can write to
+class UnusableChannel extends Error {}
 
 type Log = (message: string, err?: unknown) => void;
 
@@ -162,18 +174,37 @@ export class LogsPoster {
     if (!found.length) return;
     const last = found[found.length - 1]!.id;
     const names = await namesFor(this.db, g.lang, found);
-    const lines = found.map((r) => logLine(r, g.guildId, names, g.lang));
+    // A row that cannot be worded is skipped, it must not stop the server's log for good
+    const items: { id: number; line: string }[] = [];
+    for (const r of found) {
+      try {
+        items.push({ id: r.id, line: logLine(r, g.guildId, names, g.lang) });
+      } catch (err) {
+        this.log(`Logs for guild ${g.guildId}: history row ${r.id} skipped`, err);
+      }
+    }
+    // Only forward and one step at a time: a message that went out is marked at once, so a later failure
+    // does not repeat it; /qm-setup may have reset the mark meanwhile (then nothing matches and we stop)
+    let mark = g.after;
+    const advance = async (id: number) => {
+      const res = await this.db.execute(sql`UPDATE bot.guild SET logs_after = ${id} WHERE guild_id = ${g.guildId} AND logs_after = ${mark}`);
+      if (res.count === 0) return false;
+      mark = id;
+      return true;
+    };
     try {
       const channel = await this.client.channels.fetch(g.channelId);
-      if (!channel?.isSendable()) throw new Error(`Logs channel ${g.channelId} of guild ${g.guildId} cannot take messages`);
-      for (const content of messagesOf(lines)) await channel.send({ content, allowedMentions: { parse: [] } });
+      if (!channel?.isSendable()) throw new UnusableChannel(`Logs channel ${g.channelId} of guild ${g.guildId} cannot take messages`);
+      for (const m of packRows(items)) {
+        await channel.send({ content: m.text, allowedMentions: { parse: [] } });
+        if (!(await advance(m.lastId))) return;
+      }
     } catch (err) {
-      // Discord trouble: try again next round; a channel that cannot be used: skip these lines
-      const permanent = !(err instanceof DiscordAPIError) || PERMANENT.has(Number(err.code));
+      // Network or Discord trouble (5xx, rate limit): try again next round; a channel that cannot be used: skip these lines
+      const permanent = err instanceof UnusableChannel || (err instanceof DiscordAPIError && PERMANENT.has(Number(err.code)));
       this.log(`Logs channel ${g.channelId} of guild ${g.guildId}: ${permanent ? 'lines skipped' : 'retrying'}`, err);
       if (!permanent) return;
     }
-    // Only forward: /qm-setup may have reset the mark meanwhile
-    await this.db.execute(sql`UPDATE bot.guild SET logs_after = ${last} WHERE guild_id = ${g.guildId} AND logs_after = ${g.after}`);
+    await advance(last);
   }
 }

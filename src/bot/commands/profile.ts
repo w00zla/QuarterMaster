@@ -1,12 +1,13 @@
 // /qm-profile: RSI handle and the bot's language for you, in a modal. No org needed.
 import {
   ApplicationIntegrationType, InteractionContextType, LabelBuilder, MessageFlags, ModalBuilder, RadioGroupBuilder,
-  RadioGroupOptionBuilder, escapeMarkdown,
+  RadioGroupOptionBuilder,
 } from 'discord.js';
 import { UserError } from '../errors.ts';
 import { localizedDescription, t, userLang, type Lang } from '../i18n.ts';
 import { loadProfile, parseRsiHandle, saveProfile, type Profile } from '../profile.ts';
 import type { BotCommand } from '../registry.ts';
+import { escapeMarkdown } from '../markdown.ts';
 import { customId, textField, textValue, webAppRow } from '../ui.ts';
 
 const NAME = 'qm-profile';
