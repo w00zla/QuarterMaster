@@ -8,11 +8,14 @@ import type { MessageKey, MessageVars } from './i18n.ts';
 export class UserError extends Error {
   readonly key: MessageKey;
   readonly vars: MessageVars;
+  // The message offers the user web app (it also works without an org)
+  readonly webApp: boolean;
 
-  constructor(key: MessageKey, vars: MessageVars = {}) {
+  constructor(key: MessageKey, vars: MessageVars = {}, options: { webApp?: boolean } = {}) {
     super(key);
     this.name = 'UserError';
     this.key = key;
     this.vars = vars;
+    this.webApp = options.webApp ?? false;
   }
 }

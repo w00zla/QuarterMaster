@@ -7,7 +7,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { connect, type Db } from '../src/db/client.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
-import { listPage, runPending } from '../src/bot/commands/stock.ts';
+import { bookAdd, bookChange, bookShare, listLines } from '../src/bot/commands/stock.ts';
 import { UserError } from '../src/bot/errors.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
@@ -17,13 +17,14 @@ import { U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const G = '940000000000000001';
+const G2 = '940000000000000002';
 const MEMBER_ROLE = '941000000000000001';
 const [MIA, OLGA] = ['942000000000000001', '942000000000000002'];
 const mia: Actor = { userId: MIA, guildId: G, source: 'bot' };
 const olga: Actor = { userId: OLGA, guildId: G, source: 'bot' };
 const metal = { kind: 'resource' as const, uuid: U.metal, locationUuid: U.station };
 
-describe('/qm-stock confirmed bookings and lists (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
+describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
   let close: () => Promise<void>;
 
@@ -37,40 +38,70 @@ describe('/qm-stock confirmed bookings and lists (database)', { skip: url ? fals
     const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
     await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
     await syncMember(db, G, settings, OLGA, { userId: OLGA, displayName: 'Olga', roleIds: [MEMBER_ROLE], bot: false });
+    await ensureGuild(db, G2, 'Second Org');
+    const settings2 = await updateGuildSettings(db, G2, { memberRoleIds: [MEMBER_ROLE] });
+    await syncMember(db, G2, settings2, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
   });
   after(async () => close?.());
 
-  it('books confirmed removals and tells what is left', async () => {
+  it('books removals from the modal and tells what is left', async () => {
     const b = (await add(db, mia, { ...metal, quality: 820, amount: '12,5' })).batch!;
-    assert.equal(await runPending(db, mia, { op: 'remove', batchId: b.id, amount: '2', expected: b.quantity }, 'en'),
-      '➖ Removed 2 SCU: Test Metal · Q820 · Total: 10.5 SCU · Test Station · Pers. · In stock (Pers.): 10.5 SCU');
-    assert.equal(await runPending(db, mia, { op: 'remove', batchId: b.id, amount: null, expected: '10.5' }, 'de'),
-      '➖ Entnommen 10.5 SCU: Testmetall · Q820 · 10.5 SCU · Test Station · Pers. · Batch leer · Im Bestand (Pers.): 0 SCU');
+    assert.equal(await bookChange(db, mia, { op: 'remove', batchId: b.id, amount: '2', expected: b.quantity }, 'en'),
+      '📤 Removed **2 SCU** · **Test Metal** Q820\nBatch: 10.5 SCU · Test Station · personal\n-# Test Metal in your stock: 10.5 SCU');
+    assert.equal(await bookChange(db, mia, { op: 'remove', batchId: b.id, amount: '10.5', expected: '10.5' }, 'de'),
+      '📤 Entnommen **10.5 SCU** · **Testmetall** Q820\nBatch: leer · Test Station\n-# Testmetall in deinem Bestand: 0 SCU');
   });
 
-  it('refuses a confirmation against a batch that changed since it was shown', async () => {
+  it('refuses a booking against a batch that changed since the modal showed it', async () => {
     const b = (await add(db, mia, { ...metal, quality: 700, amount: '3' })).batch!;
     await add(db, mia, { ...metal, quality: 700, amount: '1' });
-    await assert.rejects(runPending(db, mia, { op: 'adjust', batchId: b.id, amount: '1', expected: '3' }, 'en'),
+    await assert.rejects(bookChange(db, mia, { op: 'adjust', batchId: b.id, amount: '1', expected: '3' }, 'en'),
       (err: unknown) => err instanceof UserError && err.key === 'stock.err.batchChanged');
   });
 
-  it('describes moves and corrections by their result', async () => {
+  it('describes corrections by their result', async () => {
     const b = (await add(db, mia, { ...metal, quality: 600, amount: '5' })).batch!;
-    assert.equal(await runPending(db, mia, { op: 'adjust', batchId: b.id, amount: '6', expected: '5' }, 'en'),
-      '✏️ Corrected by +1 SCU: Test Metal · Q600 · Total: 6 SCU · Test Station · Pers. · In stock (Pers.): 10 SCU');
+    assert.equal(await bookChange(db, mia, { op: 'adjust', batchId: b.id, amount: '6', expected: '5' }, 'en'),
+      '✏️ Corrected by **+1 SCU** · **Test Metal** Q600\nBatch: 6 SCU · Test Station · personal\n-# Test Metal in your stock: 10 SCU');
   });
 
-  // The bot does not share yet (it gets rebuilt for the share table)
-  it.skip('lists shared stock grouped by material with owners, your own with what you share marked', async () => {
+  it('shares what it books in the ticked orgs, on top of the shares the batch already has', async () => {
+    const text = await bookAdd(db, mia, { ...metal, quality: 900, amount: '2', shareIn: [G] }, 'en');
+    assert.equal(text, '📥 Booked **2 SCU** · **Test Metal** Q900\nBatch: 2 SCU · Test Station · shared in Stock Cmd Org\n-# Test Metal in your stock: 12 SCU');
+    await bookAdd(db, mia, { ...metal, quality: 900, amount: '1', shareIn: [G2] }, 'en');
+    const [batch] = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).filter((p) => p.batch.quality === 900);
+    assert.deepEqual(batch!.sharedIn, [G, G2].sort());
+    assert.equal(batch!.batch.quantity, '3.000000');
+    // Nothing ticked: an existing batch keeps its shares
+    await bookAdd(db, mia, { ...metal, quality: 900, amount: '1', shareIn: [] }, 'en');
+    assert.equal((await stockList(db, { scope: { guildId: G2 } }, 'en')).find((p) => p.batch.id === batch!.batch.id)?.batch.quantity, '4.000000');
+  });
+
+  it('sets and takes back shares', async () => {
+    const b = (await add(db, mia, { ...metal, quality: 500, amount: '1' })).batch!;
+    assert.equal(await bookShare(db, mia, b.id, [G, G2], 'en'), '📢 Shared in Second Org, Stock Cmd Org\n**Test Metal** Q500 · 1 SCU · Test Station');
+    assert.equal(await bookShare(db, mia, b.id, [], 'de'), '🔒 Nicht mehr geteilt\n**Testmetall** Q500 · 1 SCU · Test Station');
+    await assert.rejects(bookShare(db, mia, b.id, [], 'en'), (err: unknown) => err instanceof UserError && err.key === 'stock.err.noChange');
+  });
+
+  it('gives to a member: the batch becomes theirs, unshared', async () => {
+    const b = (await add(db, mia, { ...metal, quality: 550, amount: '4' })).batch!;
+    assert.equal(await bookChange(db, mia, { op: 'give', batchId: b.id, amount: '1', expected: '4', toOwnerUserId: OLGA, toOwnerName: 'Olga' }, 'en'),
+      '🤝 Gave **1 SCU** · **Test Metal** Q550\nTo **Olga** · Test Station');
+    const olgas = await stockList(db, { scope: { personalOf: OLGA } }, 'en');
+    assert.ok(olgas.some((p) => p.batch.quality === 550 && p.batch.quantity === '1.000000' && !p.sharedIn.length));
+  });
+
+  it('lists shared stock with owners, all stock with your own marked, your own with what you share marked', async () => {
     await add(db, olga, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 300, amount: '7', org: true });
-    const org = listPage(await stockList(db, { scope: { guildId: G } }, 'en'), true, 0, 'en', 'tok').content.split('\n');
-    assert.equal(org[0], '**Shared in the org** (2 batches)');
-    assert.ok(org.includes('- Q600 · 2 SCU · Test Station · Mia'));
+    const org = listLines(await stockList(db, { scope: { guildId: G } }, 'en'), 'o', MIA, 0, 'en').lines;
     assert.ok(org.includes('- Q300 · 7 pcs · Test Station · Olga'));
-    const own = listPage(await stockList(db, { scope: { personalOf: MIA } }, 'de'), false, 0, 'de', 'tok').content;
-    // Your own list holds what you share too, marked
-    assert.match(own, /^\*\*Dein Bestand\*\* \(3 Batches\)\n__Testmetall__ · Gesamt: 10 SCU\n- Q700 · 4 SCU · Test Station\n- Q600 · 4 SCU · Test Station\n- Q600 · 2 SCU · Test Station · geteilt$/);
-    assert.ok(org.includes('__Test Metal__ · Total: 2 SCU'));
+    assert.ok(org.includes('- Q900 · 4 SCU · Test Station · Mia'));
+    const all = listLines(await stockList(db, { scope: { allOf: MIA } }, 'en'), 'a', MIA, 0, 'en').lines;
+    assert.ok(all.includes('- Q300 · 7 pcs · Test Station · Olga'));
+    assert.ok(all.includes('- Q900 · 4 SCU · Test Station · Pers.'));
+    const own = listLines(await stockList(db, { scope: { personalOf: MIA } }, 'de'), 'p', MIA, 0, 'de').lines;
+    assert.ok(own.includes('- Q900 · 4 SCU · Test Station · geteilt'));
+    assert.ok(own.includes('- Q700 · 4 SCU · Test Station'));
   });
 });

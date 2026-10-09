@@ -1,5 +1,6 @@
-// Short-lived state behind buttons (confirmations, list pages): a button's custom ID only carries a
-// random token, the data stays here. In memory: a bot restart just means "please run it again".
+// Short-lived state behind buttons and modals whose data does not fit into a custom ID (the refinery's
+// draft work order): the custom ID only carries a random token, the data stays here. In memory: a bot
+// restart just means "please run it again".
 import { randomBytes } from 'node:crypto';
 
 interface Entry {
@@ -11,7 +12,6 @@ interface Entry {
 const entries = new Map<string, Entry>();
 
 export const CONFIRM_TTL_MS = 10 * 60_000;
-export const LIST_TTL_MS = 15 * 60_000;
 
 /** Stores a value for this user; returns the token for the custom ID. */
 export function putState(userId: string, value: unknown, ttlMs: number): string {

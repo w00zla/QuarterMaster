@@ -211,3 +211,22 @@ export async function materialTotal(db: Db, scope: { personalOf: string } | { gu
     WHERE ${where} AND coalesce(b.resource_uuid, b.item_uuid) = ${subjectUuid}`);
   return found[0]!.total;
 }
+
+export interface OrgName {
+  guildId: string;
+  name: string;
+}
+
+/** The orgs the user is an active member of (where they may share), by name. */
+export function activeOrgs(db: Db, userId: string): Promise<OrgName[]> {
+  return rows<OrgName>(db, sql`
+    SELECT o.guild_id AS "guildId", o.name FROM app.member m JOIN app.org o ON o.guild_id = m.guild_id
+    WHERE m.user_id = ${userId} AND m.active ORDER BY lower(o.name)`);
+}
+
+/** Names of these orgs (e.g. where a batch is shared), unknown ones left out. */
+export function orgNames(db: Db, guildIds: string[]): Promise<OrgName[]> {
+  if (!guildIds.length) return Promise.resolve([]);
+  return rows<OrgName>(db, sql`
+    SELECT guild_id AS "guildId", name FROM app.org WHERE guild_id IN (${sql.join(guildIds.map((g) => sql`${g}`), sql`, `)}) ORDER BY lower(name)`);
+}

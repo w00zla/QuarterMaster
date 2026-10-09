@@ -19,6 +19,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../adminapp/src/components/Icon.vue", "../adminapp/src/components/Tooltip.vue", "../webapp/src/components/ConfirmDialog.vue"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../src/stock/ore-names.ts", "../adminapp/src/components/Icon.vue", "../adminapp/src/components/Tooltip.vue", "../webapp/src/components/ConfirmDialog.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

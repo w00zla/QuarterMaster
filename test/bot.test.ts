@@ -10,7 +10,7 @@ type Call = [method: string, arg?: unknown];
 
 /** Minimal stand-in for a discord.js interaction: records every response call. */
 function fakeInteraction(opts: {
-  kind?: 'command' | 'autocomplete' | 'component'; name: string; locale?: string; sub?: string; group?: string; customId?: string;
+  kind?: 'command' | 'autocomplete' | 'component' | 'modal'; name: string; locale?: string; sub?: string; group?: string; customId?: string;
 }) {
   const calls: Call[] = [];
   const i = {
@@ -22,8 +22,10 @@ function fakeInteraction(opts: {
     deferred: false,
     replied: false,
     responded: false,
+    ephemeral: null as boolean | null,
     isAutocomplete: () => opts.kind === 'autocomplete',
     isMessageComponent: () => opts.kind === 'component',
+    isModalSubmit: () => opts.kind === 'modal',
     isChatInputCommand: () => (opts.kind ?? 'command') === 'command',
     options: {
       getSubcommand: () => opts.sub ?? null,
@@ -36,6 +38,11 @@ function fakeInteraction(opts: {
     async deferReply(arg: unknown) {
       calls.push(['deferReply', arg]);
       i.deferred = true;
+      i.ephemeral = true;
+    },
+    async deferUpdate() {
+      calls.push(['deferUpdate']);
+      i.deferred = true;
     },
     async editReply(arg: unknown) {
       calls.push(['editReply', arg]);
@@ -45,6 +52,10 @@ function fakeInteraction(opts: {
     },
     async update(arg: unknown) {
       calls.push(['update', arg]);
+      i.replied = true;
+    },
+    async showModal(arg: unknown) {
+      calls.push(['showModal', arg]);
       i.replied = true;
     },
     async respond(arg: unknown) {
@@ -211,6 +222,93 @@ describe('bot router', () => {
     assert.deepEqual(e.calls, [['reply', { content: t('en', 'error.generic'), flags: MessageFlags.Ephemeral }]]);
     assert.deepEqual(gone.calls, [['reply', { content: t('en', 'error.unknownCommand'), flags: MessageFlags.Ephemeral }]]);
     assert.equal(logged.length, 1);
+  });
+
+  it('never defers a subcommand that may open a modal, and opens it', async () => {
+    const registry = createRegistry([
+      command('m', bySubcommand({
+        add: async (ctx) => {
+          await new Promise((r) => setTimeout(r, 30));
+          await ctx.showModal('modal' as never);
+        },
+      }), { modalSubcommands: ['add'] }),
+    ]);
+    const { interaction, calls } = fakeInteraction({ name: 'm', sub: 'add' });
+    await handleInteraction(interaction, registry, { deferAfterMs: 5 });
+    assert.deepEqual(calls, [['showModal', 'modal']]);
+  });
+
+  it('refuses a modal after the first reply as a bug', async () => {
+    const { logged, log } = quietLog();
+    const registry = createRegistry([command('m', async (ctx) => {
+      await ctx.reply('first');
+      await ctx.showModal('modal' as never);
+    }, { modalSubcommands: [''] })]);
+    const { interaction, calls } = fakeInteraction({ name: 'm' });
+    await handleInteraction(interaction, registry, { log });
+    assert.deepEqual(calls.map((c) => c[0]), ['reply', 'followUp']);
+    assert.equal(logged.length, 1);
+  });
+
+  it('adds IsComponentsV2 to the ephemeral flag of a panel', async () => {
+    const registry = createRegistry([command('p', async (ctx) => ctx.reply({ components: [], flags: MessageFlags.IsComponentsV2 }))]);
+    const { interaction, calls } = fakeInteraction({ name: 'p' });
+    await handleInteraction(interaction, registry);
+    assert.deepEqual(calls, [['reply', { components: [], flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2 }]]);
+  });
+
+  it('routes modal submits to the modal handler, errors like components', async () => {
+    const { log } = quietLog();
+    const seen: string[] = [];
+    const registry = createRegistry([
+      command('qm-x', async () => {}, { modal: async (ctx) => { seen.push(ctx.interaction.customId); await ctx.interaction.reply({ content: 'ok' }); } }),
+      command('qm-y', async () => {}),
+    ]);
+    const x = fakeInteraction({ kind: 'modal', name: '', customId: 'qm-x:add:1' });
+    const y = fakeInteraction({ kind: 'modal', name: '', customId: 'qm-y:add' });
+    for (const f of [x, y]) await handleInteraction(f.interaction, registry, { log });
+    assert.deepEqual(seen, ['qm-x:add:1']);
+    assert.deepEqual(x.calls, [['reply', { content: 'ok' }]]);
+    assert.deepEqual(y.calls, [['reply', { content: t('en', 'error.unknownCommand'), flags: MessageFlags.Ephemeral }]]);
+  });
+
+  it('answers an error after a deferred reply in that reply, after a deferred update as a follow-up', async () => {
+    const { log } = quietLog();
+    const registry = createRegistry([command('qm-d', async () => {}, {
+      modal: async (ctx) => {
+        await ctx.interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        throw new UserError('error.notMember');
+      },
+      component: async (ctx) => {
+        await ctx.interaction.deferUpdate();
+        throw new Error('boom');
+      },
+    })]);
+    const m = fakeInteraction({ kind: 'modal', name: '', customId: 'qm-d:x' });
+    const c = fakeInteraction({ kind: 'component', name: '', customId: 'qm-d:y' });
+    for (const f of [m, c]) await handleInteraction(f.interaction, registry, { log });
+    assert.deepEqual(m.calls.at(-1), ['editReply', { content: t('en', 'error.notMember'), components: [] }]);
+    assert.deepEqual(c.calls.at(-1), ['followUp', { content: t('en', 'error.generic'), flags: MessageFlags.Ephemeral }]);
+  });
+
+  it('offers the web app with errors that ask for it, when its origin is configured', async () => {
+    const saved = process.env.WEBAPP_ORIGIN;
+    try {
+      const registry = createRegistry([command('x', async () => { throw new UserError('error.notMember', {}, { webApp: true }); })]);
+      process.env.WEBAPP_ORIGIN = 'https://qm.example/';
+      const withLink = fakeInteraction({ name: 'x' });
+      await handleInteraction(withLink.interaction, registry);
+      const reply = withLink.calls[0]![1] as { content: string; components: { toJSON(): { components: { url: string; label: string }[] } }[] };
+      assert.equal(reply.content, t('en', 'error.notMember'));
+      assert.deepEqual(reply.components.map((r) => r.toJSON().components.map((c) => [c.label, c.url])), [[[t('en', 'ui.openWebApp'), 'https://qm.example']]]);
+      delete process.env.WEBAPP_ORIGIN;
+      const without = fakeInteraction({ name: 'x' });
+      await handleInteraction(without.interaction, registry);
+      assert.deepEqual(without.calls, [['reply', { content: t('en', 'error.notMember'), flags: MessageFlags.Ephemeral }]]);
+    } finally {
+      if (saved === undefined) delete process.env.WEBAPP_ORIGIN;
+      else process.env.WEBAPP_ORIGIN = saved;
+    }
   });
 
   it('rejects duplicate command names', () => {

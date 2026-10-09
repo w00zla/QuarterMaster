@@ -72,6 +72,8 @@ services:
       DATABASE_URL: *db-url
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env}
       DISCORD_APP_ID: ${DISCORD_APP_ID:?set DISCORD_APP_ID in .env}
+      # Link to the user web app in the bot's panels (empty: no link)
+      WEBAPP_ORIGIN: ${WEBAPP_ORIGIN:-}
 
   # Pulls the third-party data (UEX) into schema ext every hour; no port
   ext:

@@ -6,6 +6,7 @@
 // proves the job started and tells its end, but lacks the method and the ore quantities. So the last
 // quote is kept, and a PROCESSING screen whose rows (quality and yield) match it makes a draft. The
 // user registers a draft (or drops it); nothing is booked by itself.
+import { addOreName, findOre, norm, type OreCatalog } from "../../src/stock/ore-names.ts";
 import type { CatalogResponse, RefineryStartRequest } from "../../src/webapp/api-types.ts";
 
 export interface ScreenRow {
@@ -55,9 +56,6 @@ export interface Draft {
 const QUOTE_MAX_AGE_MS = 30 * 60_000;
 // Slack for reading the screens a moment apart and the game's rounding
 const SLACK_S = 120;
-
-/** Letters and digits only, upper case (as the Rust side compares texts). */
-export const norm = (text: string) => text.normalize("NFC").replace(/[^\p{L}\p{N}]/gu, "").toUpperCase();
 
 /** cSCU as exact SCU text: 389 -> "3.89", 20 -> "0.2", 0 -> "0". */
 export function cscuToScu(cscu: number): string {
@@ -117,45 +115,16 @@ export class RefineryTracker {
 
 // --- matching against the catalog (names in every language the game may use) ---------------------
 
-export interface RefineryCatalog {
-  // Normalized name -> UUID
-  ores: Map<string, string>;
-  // Every ore name split into stem and qualifier (findOre)
-  oreParts: { stem: string; qual: string; uuid: string }[];
+// Ore names (findOre, shared with the bot: src/stock/ore-names.ts) plus the refinery stations
+export interface RefineryCatalog extends OreCatalog {
   refineries: Map<string, string>;
-}
-
-/** A name's stem and qualifier, normalized: "Hephaestanite (Raw)" and "HEPH (RAW)" ->
- * HEPHAESTANITE/HEPH + RAW, "Raw Silicon" -> SILICON + RAW, "Hephaestanite (R)" -> … + R. */
-export function oreParts(name: string): { stem: string; qual: string } {
-  const paren = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(name);
-  if (paren) return { stem: norm(paren[1]!), qual: norm(paren[2]!) };
-  const raw = /^raw\s+(.+)$/i.exec(name.trim());
-  if (raw) return { stem: norm(raw[1]!), qual: "RAW" };
-  return { stem: norm(name), qual: "" };
-}
-
-/** The ore a terminal name means: the exact name, else the one ore whose stem starts with the
- * terminal's (it abbreviates: "HEPH (RAW)") and whose qualifier fits ("Raw" / "R"). */
-export function findOre(cat: RefineryCatalog, name: string): string | null {
-  const exact = cat.ores.get(norm(name));
-  if (exact) return exact;
-  const { stem, qual } = oreParts(name);
-  if (!stem) return null;
-  const fits = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
-  const uuids = new Set(cat.oreParts.filter((o) => o.stem.startsWith(stem) && fits(o.qual, qual)).map((o) => o.uuid));
-  return uuids.size === 1 ? [...uuids][0]! : null;
 }
 
 /** The lookups from the web app's catalog in each language (the game's language is unknown). */
 export function buildCatalog(responses: CatalogResponse[]): RefineryCatalog {
   const cat: RefineryCatalog = { ores: new Map(), oreParts: [], refineries: new Map() };
   for (const r of responses) {
-    for (const m of r.materials) {
-      if (!m.isOre) continue;
-      cat.ores.set(norm(m.name), m.uuid);
-      cat.oreParts.push({ ...oreParts(m.name), uuid: m.uuid });
-    }
+    for (const m of r.materials) if (m.isOre) addOreName(cat, m.name, m.uuid);
     // The location's own name: the label's first part ("Name · planet · system")
     for (const l of r.locations) if (l.refinery) cat.refineries.set(norm(l.label.split(" · ")[0]!), l.uuid);
   }

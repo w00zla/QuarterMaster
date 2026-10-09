@@ -1,7 +1,8 @@
-// /qm-bp: the blueprint registry (global per user, visible to the org).
+// /qm-bp: the blueprint registry (global per user, visible to the org). add/remove/who search the
+// blueprint as an option; list and who answer as panels.
 import {
-  ActionRowBuilder, ApplicationCommandOptionType, ApplicationIntegrationType, ButtonBuilder, ButtonStyle,
-  InteractionContextType, escapeMarkdown, type AutocompleteInteraction,
+  ActionRowBuilder, ApplicationCommandOptionType, ApplicationIntegrationType, ButtonBuilder, ButtonStyle, ContainerBuilder,
+  InteractionContextType, SeparatorBuilder, TextDisplayBuilder, escapeMarkdown, type AutocompleteInteraction,
 } from 'discord.js';
 import type { Db } from '../../db/client.ts';
 import { requireMember } from '../access.ts';
@@ -13,10 +14,47 @@ import { localizedDescription, t, type Lang, type MessageKey } from '../i18n.ts'
 import { bySubcommand, type BotCommand, type CommandContext } from '../registry.ts';
 import { accessOf, memberInfo, searchMembers } from '../roster.ts';
 import { findGuildSettings } from '../settings.ts';
+import { customId, panel, webAppButton, webAppRow } from '../ui.ts';
 
 const NAME = 'qm-bp';
 const PAGE_SIZE = 20;
-const MAX_WHO_NAMES = 60;
+// Names per page of /qm-bp who
+const WHO_PAGE_SIZE = 60;
+
+/**
+ * A panel: head, body lines, and (several pages) the page line plus ◀ ▶ buttons whose custom IDs
+ * `<action>:<key>:<page>` load that page; the web app link sits in the same row.
+ */
+function listPanel(lang: Lang, head: string, body: string[], paging: { action: string; key: string; current: number; pages: number } | null) {
+  const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(head));
+  if (body.length) {
+    container.addSeparatorComponents(new SeparatorBuilder())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(body.join('\n')));
+  }
+  const buttons: ButtonBuilder[] = [];
+  if (paging && paging.pages > 1) {
+    const { action, key, current, pages } = paging;
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${t(lang, 'bp.list.page', { page: current + 1, pages })}`));
+    buttons.push(
+      new ButtonBuilder().setCustomId(customId(NAME, action, key, current - 1)).setLabel('◀')
+        .setStyle(ButtonStyle.Secondary).setDisabled(current === 0),
+      new ButtonBuilder().setCustomId(customId(NAME, action, key, current + 1)).setLabel('▶')
+        .setStyle(ButtonStyle.Secondary).setDisabled(current === pages - 1),
+    );
+  }
+  const web = webAppButton(lang);
+  if (web) buttons.push(web);
+  if (buttons.length) {
+    container.addSeparatorComponents(new SeparatorBuilder())
+      .addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons));
+  }
+  return panel(container);
+}
+
+const pageOf = (count: number, size: number, page: number) => {
+  const pages = Math.max(Math.ceil(count / size), 1);
+  return { pages, current: Math.min(Math.max(page, 0), pages - 1) };
+};
 
 const blueprintOption = {
   name: 'blueprint', ...localizedDescription('opt.blueprint'),
@@ -31,18 +69,17 @@ async function pickedBlueprint(ctx: CommandContext): Promise<BlueprintEntry> {
   return entry;
 }
 
-/** One page of a member's blueprints, grouped by category; groups alphabetical, "other" last. */
+/** One page of a member's blueprints as a panel, grouped by category; groups alphabetical, "other" last. */
 export function listPage(entries: BlueprintEntry[], ownerName: string, ownerId: string, page: number, lang: Lang) {
   const tr = (key: MessageKey, vars?: Record<string, string | number>) => t(lang, key, vars);
   const name = escapeMarkdown(ownerName);
-  if (!entries.length) return { content: tr('bp.list.empty', { name }), components: [] };
+  if (!entries.length) return listPanel(lang, tr('bp.list.empty', { name }), [], null);
   const other = tr('bp.list.other');
   const group = (e: BlueprintEntry) => e.categoryLabel ?? other;
   const sorted = [...entries].sort((a, b) =>
     Number(group(a) === other) - Number(group(b) === other) || group(a).localeCompare(group(b)) || a.label.localeCompare(b.label));
-  const pages = Math.ceil(sorted.length / PAGE_SIZE);
-  const current = Math.min(Math.max(page, 0), pages - 1);
-  const lines = [tr('bp.list.title', { name, count: sorted.length })];
+  const { pages, current } = pageOf(sorted.length, PAGE_SIZE, page);
+  const lines: string[] = [];
   let lastGroup: string | null = null;
   for (const e of sorted.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE)) {
     // The group header repeats on every page, so each page reads on its own
@@ -50,14 +87,15 @@ export function listPage(entries: BlueprintEntry[], ownerName: string, ownerId: 
     lastGroup = group(e);
     lines.push(`- ${escapeMarkdown(e.label)}${e.retired ? ` ⚠️ *${tr('bp.list.retired')}*` : ''}`);
   }
-  if (pages > 1) lines.push(`-# ${tr('bp.list.page', { page: current + 1, pages })}`);
-  const components = pages > 1 ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`${NAME}:list:${ownerId}:${current - 1}`).setLabel('◀')
-      .setStyle(ButtonStyle.Secondary).setDisabled(current === 0),
-    new ButtonBuilder().setCustomId(`${NAME}:list:${ownerId}:${current + 1}`).setLabel('▶')
-      .setStyle(ButtonStyle.Secondary).setDisabled(current === pages - 1),
-  )] : [];
-  return { content: lines.join('\n'), components };
+  return listPanel(lang, tr('bp.list.title', { name, count: sorted.length }), lines, { action: 'list', key: ownerId, current, pages });
+}
+
+/** One page of the org members who registered a blueprint (names alphabetical), as a panel. */
+export function whoPage(names: string[], bp: Pick<BlueprintEntry, 'uuid' | 'label'>, page: number, lang: Lang) {
+  const { pages, current } = pageOf(names.length, WHO_PAGE_SIZE, page);
+  const shown = names.slice(current * WHO_PAGE_SIZE, (current + 1) * WHO_PAGE_SIZE).map((n) => escapeMarkdown(n)).join(', ');
+  return listPanel(lang, t(lang, 'bp.who.some', { name: escapeMarkdown(bp.label), count: names.length }), [shown],
+    { action: 'who', key: bp.uuid, current, pages });
 }
 
 /** The list for an org member; other people only while they are active members of this org. */
@@ -69,7 +107,7 @@ async function memberList(db: Db, guildId: string, callerId: string, ownerId: st
   const catalog = await blueprintCatalog(db, lang);
   const owned = await ownedBlueprints(db, ownerId);
   const entries = [...owned].map((uuid) => catalog.byUuid.get(uuid)).filter((e): e is BlueprintEntry => !!e);
-  return { ...listPage(entries, owner?.displayName ?? ownerId, ownerId, page, lang), allowedMentions: { parse: [] } };
+  return listPage(entries, owner?.displayName ?? ownerId, ownerId, page, lang);
 }
 
 async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db: Db) {
@@ -122,13 +160,13 @@ export const blueprintsCommand: BotCommand = {
       if (bp.isDefault) throw new UserError('bp.default', { name });
       if (bp.retired) throw new UserError('bp.retired', { name });
       const added = await addBlueprint(ctx.db, access.userId, bp.uuid, 'bot');
-      await ctx.reply(ctx.t(added ? 'bp.added' : 'bp.alreadyAdded', { name }));
+      await ctx.reply({ content: ctx.t(added ? 'bp.added' : 'bp.alreadyAdded', { name }), components: webAppRow(ctx.lang) });
     },
     async remove(ctx) {
       const access = await requireMember(ctx.db, ctx.interaction);
       const bp = await pickedBlueprint(ctx);
       const removed = await removeBlueprint(ctx.db, access.userId, bp.uuid, 'bot');
-      await ctx.reply(ctx.t(removed ? 'bp.removed' : 'bp.notRegistered', { name: escapeMarkdown(bp.label) }));
+      await ctx.reply({ content: ctx.t(removed ? 'bp.removed' : 'bp.notRegistered', { name: escapeMarkdown(bp.label) }), components: webAppRow(ctx.lang) });
     },
     async list(ctx) {
       const access = await requireMember(ctx.db, ctx.interaction);
@@ -144,16 +182,26 @@ export const blueprintsCommand: BotCommand = {
       if (bp.isDefault) return ctx.reply(ctx.t('bp.who.default', { name }));
       const names = await whoHas(ctx.db, access.guildId, bp.uuid);
       if (!names.length) return ctx.reply(ctx.t('bp.who.none', { name }));
-      const shown = names.slice(0, MAX_WHO_NAMES).map((n) => escapeMarkdown(n)).join(', ');
-      const more = names.length > MAX_WHO_NAMES ? `\n${ctx.t('bp.who.more', { count: names.length - MAX_WHO_NAMES })}` : '';
-      await ctx.reply(`${ctx.t('bp.who.some', { name, count: names.length })}\n${shown}${more}`);
+      await ctx.reply(whoPage(names, bp, 0, ctx.lang));
     },
   }),
   autocomplete,
   async component(ctx) {
-    const [, action, ownerId, page] = ctx.interaction.customId.split(':');
-    if (action !== 'list' || !ownerId) throw new Error(`Unexpected component ${ctx.interaction.customId}`);
+    const [, action, key, page] = ctx.interaction.customId.split(':');
+    if ((action !== 'list' && action !== 'who') || !key) throw new Error(`Unexpected component ${ctx.interaction.customId}`);
     const access = await requireMember(ctx.db, ctx.interaction);
-    await ctx.interaction.update(await memberList(ctx.db, access.guildId, access.userId, ownerId, Number(page) || 0, ctx.lang));
+    if (action === 'list') {
+      await ctx.interaction.update(await memberList(ctx.db, access.guildId, access.userId, key, Number(page) || 0, ctx.lang));
+      return;
+    }
+    const bp = (await blueprintCatalog(ctx.db, ctx.lang)).byUuid.get(key);
+    if (!bp) throw new UserError('bp.unknown');
+    const names = await whoHas(ctx.db, access.guildId, bp.uuid);
+    // Everyone may have removed it since the panel was shown
+    if (!names.length) {
+      await ctx.interaction.update(listPanel(ctx.lang, ctx.t('bp.who.none', { name: escapeMarkdown(bp.label) }), [], null));
+      return;
+    }
+    await ctx.interaction.update(whoPage(names, bp, Number(page) || 0, ctx.lang));
   },
 };
