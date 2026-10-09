@@ -2,15 +2,15 @@
 // Starts a refinery job (POST /api/refinery/start): a work order at one refinery with one time, and one
 // row per ore (and quality) as the terminal lists them. A refining method may be picked: it only prefills
 // duration and expected yields from its community values (and the station's UEX bonus per ore) until the
-// user types into them, e.g. the terminal's numbers; it is not sent. Books right away; the toast says
-// what was started.
+// user types into them, e.g. the terminal's numbers; it is not sent. The duration may stay empty (the
+// end stays open, set later in the list). Books right away; the toast says what was started.
 import { computed, reactive, ref, watch } from "vue";
 import { estimateJob } from "../../../src/ext/refining-estimate";
 import type { OkResponse, RefineryStartRequest } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { locations, materials, methods, oreOptions, refineryLocationOptions, yieldBonus, yieldValue } from "../catalog";
-import { amountOf, hm, qty, qualityOf, unitText } from "../format";
+import { amountOf, durationOfParts, hm, partsOf, qty, qualityOf, unitText } from "../format";
 import { t } from "../i18n";
 import { toast, toastError } from "../toasts";
 import Dropdown from "./Dropdown.vue";
@@ -72,10 +72,7 @@ const totalScu = computed(() => rows.reduce((sum, r) => sum + Number(amt(r) ?? 0
 watch([totalScu, method], () => {
   const m = methods.value.get(method.value);
   if (durationEdited.value || !m || !totalScu.value) return;
-  const total = estimateJob(totalScu.value, m).seconds;
-  hours.value = String(Math.floor(total / 3600));
-  minutes.value = String(Math.floor(total / 60) % 60);
-  seconds.value = String(total % 60);
+  ({ h: hours.value, m: minutes.value, s: seconds.value } = partsOf(estimateJob(totalScu.value, m).seconds));
 });
 watch(() => rows.map((r) => [r.ore, r.amount, method.value, location.value]), () => {
   for (const r of rows) {
@@ -84,16 +81,8 @@ watch(() => rows.map((r) => [r.ore, r.amount, method.value, location.value]), ()
   }
 }, { deep: true });
 
-const wholeOf = (text: string) => (/^\s*\d{0,6}\s*$/.test(text) ? Number(text.trim() || "0") : null);
-// h, m and s as the terminal shows the processing time ("4h 17m", "14m 5s"); null: invalid (not whole
-// numbers, minutes or seconds over 59, or no time at all)
-const durationSeconds = computed(() => {
-  const h = wholeOf(hours.value);
-  const m = wholeOf(minutes.value);
-  const s = wholeOf(seconds.value);
-  if (h === null || m === null || s === null || m > 59 || s > 59) return null;
-  return h * 3600 + m * 60 + s || null;
-});
+// The processing time; all fields empty = none (the end stays open, it can be set later in the list)
+const durationSeconds = computed(() => durationOfParts(hours.value, minutes.value, seconds.value));
 
 const rowValid = (r: OreRow) => !!r.ore && q(r) !== null && !!amt(r) && expectedAmt(r) !== null;
 const valid = computed(() => !!location.value && durationSeconds.value !== null && rows.length > 0 && rows.every(rowValid));
@@ -122,12 +111,13 @@ function clear() {
 async function submit() {
   if (!valid.value || busy.value) return;
   const ores = rows.map((r) => `${qty(amt(r)!, "SCU")} ${materials.value.get(r.ore!)?.name ?? ""}`).join(", ");
-  const what = `${ores} · ${locations.value.get(location.value!)?.short ?? ""} · ${hm(durationSeconds.value!)}`;
+  const time = durationSeconds.value === undefined ? t("refinery.durationOpen") : hm(durationSeconds.value!);
+  const what = `${ores} · ${locations.value.get(location.value!)?.short ?? ""} · ${time}`;
   busy.value = true;
   try {
     const body: RefineryStartRequest = {
       locationUuid: location.value!,
-      durationSeconds: durationSeconds.value!,
+      ...(durationSeconds.value === undefined ? {} : { durationSeconds: durationSeconds.value! }),
       rows: rows.map((r) => {
         const expected = expectedAmt(r);
         return { oreUuid: r.ore!, quality: q(r)!, amount: r.amount.trim(), ...(expected ? { expectedYield: expected } : {}) };

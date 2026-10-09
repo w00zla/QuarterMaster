@@ -68,6 +68,23 @@ export function compareBatches(a: StockBatch, b: StockBatch) {
   return b.quality - a.quality || Number(b.quantity) - Number(a.quantity) || a.location.localeCompare(b.location);
 }
 
+const wholeOf = (text: string) => (/^\s*\d{0,6}\s*$/.test(text) ? Number(text.trim() || "0") : null);
+
+/**
+ * h, m and s as the terminal shows a refinery time ("4h 17m", "14m 5s"): seconds; undefined when all
+ * three are empty (no time); null when invalid (not whole numbers, minutes or seconds over 59, or zero).
+ */
+export function durationOfParts(h: string, m: string, s: string): number | null | undefined {
+  if (![h, m, s].some((x) => x.trim())) return undefined;
+  const [hours, minutes, secs] = [wholeOf(h), wholeOf(m), wholeOf(s)];
+  if (hours === null || minutes === null || secs === null || minutes > 59 || secs > 59) return null;
+  return hours * 3600 + minutes * 60 + secs || null;
+}
+
+/** Seconds as the h, m and s fields of durationOfParts. */
+export const partsOf = (seconds: number) =>
+  ({ h: String(Math.floor(seconds / 3600)), m: String(Math.floor(seconds / 60) % 60), s: String(seconds % 60) });
+
 /** "1h 2m 5s" */
 export function duration(seconds: number | null): string {
   if (seconds === null) return "—";

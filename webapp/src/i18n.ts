@@ -153,6 +153,11 @@ const en = {
   "refinery.col.ready": "Ready",
   "refinery.readyNow": "ready",
   "refinery.in": "in {t}",
+  "refinery.durationOpen": "Duration open",
+  "refinery.setTime": "Set time left",
+  "refinery.timeLeft": "Time left",
+  "refinery.timeSet": "Time left set: {what}",
+  "refinery.timeCleared": "Time left cleared: {what}",
 
   "bp.none": "No blueprints registered yet.",
   "bp.add": "Add",
@@ -449,6 +454,11 @@ const de: Record<Key, string> = {
   "refinery.col.ready": "Fertig",
   "refinery.readyNow": "fertig",
   "refinery.in": "in {t}",
+  "refinery.durationOpen": "Dauer offen",
+  "refinery.setTime": "Restzeit setzen",
+  "refinery.timeLeft": "Restzeit",
+  "refinery.timeSet": "Restzeit gesetzt: {what}",
+  "refinery.timeCleared": "Restzeit entfernt: {what}",
 
   "bp.none": "Noch keine Blueprints eingetragen.",
   "bp.add": "Hinzufügen",

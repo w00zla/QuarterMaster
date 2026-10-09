@@ -402,6 +402,27 @@ export async function refineDone(db: Db, actor: Actor, input: { jobId: string; r
   });
 }
 
+/**
+ * Sets the time a running work order still needs, e.g. read off the terminal later: end = now + seconds
+ * for all its batches; null clears the end. An estimate of the job, no stock change: no journal, no history.
+ */
+export async function refineSetDuration(db: Db, actor: Actor, input: { jobId: string; durationSeconds: number | null }): Promise<{ endsAt: string | null }> {
+  if (!UUID.test(input.jobId)) throw new StockError('batchNotFound');
+  const seconds = input.durationSeconds;
+  if (seconds !== null && (!Number.isInteger(seconds) || seconds <= 0 || seconds > MAX_REFINE_SECONDS)) throw new StockError('invalidDuration');
+  return db.transaction(async (tx) => {
+    const batches = await rows<Batch>(tx, sql`SELECT ${BATCH_COLUMNS} FROM app.stock_batch WHERE refine_job = ${input.jobId} ORDER BY id FOR UPDATE`);
+    if (!batches.length) throw new StockError('batchNotFound');
+    for (const b of batches) checkMayChange(actor, b);
+    // The new end as ISO text (null: cleared), the same for every batch of the job
+    return (await one<{ endsAt: string | null }>(tx, sql`
+      WITH changed AS (
+        UPDATE app.stock_batch SET refine_ends_at = now() + ${seconds}::int * interval '1 second', updated_at = now()
+        WHERE refine_job = ${input.jobId} RETURNING refine_ends_at)
+      SELECT to_json(max(refine_ends_at))#>>'{}' AS "endsAt" FROM changed`))!;
+  });
+}
+
 /** Takes an amount (null: everything) off a batch. */
 export async function remove(db: Db, actor: Actor, input: { batchId: number; amount: string | null; expected?: string }) {
   return db.transaction(async (tx): Promise<StockResult> => {

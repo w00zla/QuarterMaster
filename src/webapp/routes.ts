@@ -61,6 +61,7 @@ const schemas = {
     locationUuid: uuid, durationSeconds: z.number().int().optional(),
     rows: z.array(z.object({ oreUuid: uuid, quality, amount, expectedYield: amount.optional() }).strict()).min(1).max(MAX_REFINE_ROWS),
   }).strict(),
+  refineDuration: z.object({ jobId: uuid, durationSeconds: z.number().int().nullable() }).strict(),
   refineDone: z.object({
     jobId: uuid,
     rows: z.array(z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict()).min(1).max(MAX_REFINE_ROWS),
@@ -280,6 +281,14 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const input = await body(c, schemas.refineStart);
     const actor = await actorFor(c, db, c.get('session').userId, undefined);
     return book(c, () => stock.refineStart(db, actor, input));
+  });
+
+  // The time a running job still needs (end = now + seconds, null clears it): typed later, or read off the
+  // terminal's PROCESSING screen by the companion app
+  api.post('/refinery/duration', async (c) => {
+    const input = await body(c, schemas.refineDuration);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
+    return book(c, () => stock.refineSetDuration(db, actor, input));
   });
 
   api.post('/refinery/done', async (c) => {

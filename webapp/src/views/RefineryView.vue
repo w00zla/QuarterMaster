@@ -14,6 +14,7 @@ import InfoTip from "../components/InfoTip.vue";
 import RangeSlider from "../components/RangeSlider.vue";
 import RefineryDoneDialog from "../components/RefineryDoneDialog.vue";
 import RefineryStartForm from "../components/RefineryStartForm.vue";
+import RefineryTimeDialog from "../components/RefineryTimeDialog.vue";
 import { signedBonus, yieldValue } from "../catalog";
 import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
@@ -35,6 +36,8 @@ function started() {
 }
 // The ore batches of the job being finished
 const finishing = ref<StockBatch[] | null>(null);
+// The job whose time left is being set
+const timing = ref<{ jobId: string; location: string; endsAt: string | null } | null>(null);
 
 let seq = 0;
 async function load() {
@@ -116,7 +119,7 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "expected", label: t("refinery.col.expected"), width: 110 },
   { key: "bonus", label: t("refinery.col.bonus"), width: 90 },
   { key: "ready", label: t("refinery.col.ready"), width: 130 },
-  { key: "actions", label: "", width: 56, sortable: false, fixed: true, sep: true },
+  { key: "actions", label: "", width: 80, sortable: false, fixed: true, sep: true },
 ]);
 const cols = useTableColumns("qm.webapp.columns.refinery", columns, { key: "ready", dir: "asc" });
 
@@ -222,9 +225,11 @@ const bonusText = (b: StockBatch) => {
             <span />
             <span :title="endsTitle(j)">
               <span v-if="left(j) === ''" class="tag ok">{{ t("refinery.readyNow") }}</span>
+              <span v-else-if="left(j) === null" class="dim">{{ t("refinery.durationOpen") }}</span>
               <template v-else>{{ left(j) }}</template>
             </span>
             <span class="sep actions">
+              <button type="button" class="icon-btn" :title="t('refinery.setTime')" @click="timing = { jobId: j.id, location: j.location, endsAt: j.endsAt }"><Icon name="clock" :size="15" /></button>
               <button type="button" class="icon-btn" :title="t('refinery.done')" @click="finishing = j.all"><Icon name="check" :size="15" /></button>
             </span>
           </div>
@@ -245,6 +250,7 @@ const bonusText = (b: StockBatch) => {
     </section>
 
     <RefineryDoneDialog v-if="finishing" :batches="finishing" @close="finishing = null" @done="load" />
+    <RefineryTimeDialog v-if="timing" v-bind="timing" @close="timing = null" />
   </div>
 </template>
 
@@ -289,7 +295,7 @@ const bonusText = (b: StockBatch) => {
   font-weight: 500;
 }
 
-/* The finish button must not make the row taller than the stock table's material rows */
+/* The action buttons must not make the row taller than the stock table's material rows */
 .group-row .icon-btn {
   margin-block: -4px;
 }

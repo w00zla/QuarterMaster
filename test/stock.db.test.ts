@@ -9,8 +9,8 @@ import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
-import { stockList } from '../src/stock/lookup.ts';
-import { add, adjust, merge, move, refineDone, refineStart, remove, share, split, StockError, type Actor, type StockErrorCode } from '../src/stock/service.ts';
+import { pickableBatches, stockList } from '../src/stock/lookup.ts';
+import { add, adjust, merge, move, refineDone, refineSetDuration, refineStart, remove, share, split, StockError, type Actor, type StockErrorCode } from '../src/stock/service.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -219,6 +219,23 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     assert.equal(done.journal[0]!.groupId, done.journal[1]!.groupId);
     assert.equal(await batchCount(), before);
     await refused(refineDone(db, mia, finish('1')), 'batchNotFound');
+  });
+
+  it('refinery: the time left of a job can be set later or cleared, by its owner only', async () => {
+    const started = await refineStart(db, mia, { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 612, amount: '2' }, { oreUuid: U.ore, quality: 613, amount: '1' }] });
+    const set = { jobId: started.jobId, durationSeconds: 3600 };
+    await refused(refineSetDuration(db, olga, set), 'notAllowed');
+    await refused(refineSetDuration(db, mia, { ...set, durationSeconds: 0 }), 'invalidDuration');
+    await refused(refineSetDuration(db, mia, { ...set, jobId: '00000000-0000-4000-8000-000000000000' }), 'batchNotFound');
+    const before = Date.now();
+    const { endsAt } = await refineSetDuration(db, mia, set);
+    const left = new Date(endsAt!).getTime() - before;
+    assert.ok(left > 3590_000 && left < 3610_000, String(left));
+    const ends = async () => (await pickableBatches(db, mia, 'refining', 'en')).filter((p) => p.refine?.jobId === started.jobId).map((p) => p.refine!.endsAt);
+    assert.equal(new Set(await ends()).size, 1);
+    assert.deepEqual(await refineSetDuration(db, mia, { ...set, durationSeconds: null }), { endsAt: null });
+    assert.deepEqual(await ends(), [null, null]);
+    await refineDone(db, mia, { jobId: started.jobId, rows: started.batches.map((b) => ({ batchId: b.id, amount: '0' })) });
   });
 
   it('refinery: a job is a work order of several ores with end and expected yields', async () => {

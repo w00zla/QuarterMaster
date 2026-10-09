@@ -203,10 +203,11 @@ export interface StockShareRequest {
 }
 
 // Refinery jobs are always personal and always work orders: one station and time, several ores
-// (POST /api/refinery/start, /api/refinery/done)
+// (POST /api/refinery/start, /api/refinery/duration, /api/refinery/done)
 export interface RefineryStartRequest {
   locationUuid: string;
-  // Estimate for the whole job (the SPA prefills it from a refining method the user may pick): processing time
+  // Estimate for the whole job (the SPA prefills it from a refining method the user may pick): processing time;
+  // left out: the end stays open until set with /api/refinery/duration
   durationSeconds?: number;
   // 1 to 30 ores
   rows: RefineryStartRow[];
@@ -218,6 +219,12 @@ export interface RefineryStartRow {
   amount: string;
   // Estimate, prefilled and editable: refined SCU of this ore ("0" allowed)
   expectedYield?: string;
+}
+
+// Sets the time a running job still needs: end = now + durationSeconds (the terminal's time left); null clears it
+export interface RefineryDurationRequest {
+  jobId: string;
+  durationSeconds: number | null;
 }
 
 // Finishes the whole job: one row per ore batch of the job (StockRefine.jobId), no more, no less

@@ -99,6 +99,11 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     list = await personal(SOLO);
     const job = list.batches.find((b) => b.state === 'refining')!;
     const jobId = job.refine!.jobId;
+    // Started without a time: set later (the terminal's time left), only by the owner
+    assert.equal(job.refine!.endsAt, null);
+    assert.equal((await post(SOLO, '/refinery/duration', { jobId, durationSeconds: 1.5 })).status, 400);
+    assert.equal((await post(SOLO, '/refinery/duration', { jobId, durationSeconds: 600 })).status, 200);
+    assert.ok((await personal(SOLO)).batches.find((b) => b.id === job.id)!.refine!.endsAt);
     // Quality is the ore's: the request has none
     assert.equal((await post(SOLO, '/refinery/done', { jobId, rows: [{ batchId: job.id, amount: '5', quality: 650, expected: '8' }] })).status, 400);
     assert.equal((await post(SOLO, '/refinery/done', { jobId, rows: [{ batchId: job.id, amount: '5', expected: '8' }] })).status, 200);
