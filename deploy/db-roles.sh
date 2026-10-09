@@ -2,8 +2,8 @@
 # Production database roles (compose.yaml mounts this into /docker-entrypoint-initdb.d/, so it runs
 # once on a fresh volume; scripts/deploy.sh runs it again after every migration). Idempotent.
 #   qm_owner: owns the database and everything the migrations create; used by "migrate" only
-#   qm_app:   DML for bot and admin; app.stock_journal and app.history are append-only (SELECT, INSERT); no access
-#             to schema web (bot and admin must not forge web sessions)
+#   qm_app:   DML for bot and admin; app.stock_journal and app.history are append-only (SELECT, INSERT); in schema
+#             web only SELECT on the session/token columns without hashes (bot and admin must not forge web sessions)
 #   qm_web:   user web app; reads catalog and app, writes users, stock and its shares, journal and history (INSERT only) and
 #             blueprints, but not org/member (role IDs, roster); no access to schema bot;
 #             full DML in web; reads ext
@@ -44,6 +44,13 @@ SELECT 'REVOKE ALL ON ALL TABLES IN SCHEMA drizzle FROM qm_app' WHERE to_regname
 -- Web sessions are the user web app's alone
 SELECT 'REVOKE ALL ON SCHEMA web FROM qm_app' WHERE to_regnamespace('web') IS NOT NULL \gexec
 SELECT 'REVOKE ALL ON ALL TABLES IN SCHEMA web FROM qm_app' WHERE to_regnamespace('web') IS NOT NULL \gexec
+-- ... except reading who logged in when and under which Discord name, and whether a companion token exists
+-- (the admin's user overview): single columns, never the token hashes
+SELECT 'GRANT USAGE ON SCHEMA web TO qm_app' WHERE to_regnamespace('web') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (user_id, discord_username, discord_global_name, created_at, last_seen_at, expires_at) ON web.session TO qm_app'
+  WHERE to_regclass('web.session') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (user_id, discord_username, discord_global_name, created_at, last_used_at) ON web.api_token TO qm_app'
+  WHERE to_regclass('web.api_token') IS NOT NULL \gexec
 
 -- qm_web, explicit (also exist only after the migrations). Schema-wide grants pick up new tables
 -- because this script runs after every migration. No grants on drizzle.

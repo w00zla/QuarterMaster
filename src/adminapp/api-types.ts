@@ -366,3 +366,145 @@ export interface UexResponse {
   ores: string[];
   methods: UexMethod[];
 }
+
+// --- users and orgs (read-only: app, bot and the columns of web.session/web.api_token qm_app may read) ---
+
+/** A user's name: the Discord profile of the newest web login (or of the companion token), else the org nickname. */
+export interface UserRef {
+  userId: string;
+  // null = never logged into the web app and in no org's roster
+  name: string | null;
+}
+
+export interface OrgRow {
+  guildId: string;
+  name: string;
+  createdAt: string;
+  // Bot presence (bot.guild); null = no bot row
+  joinedAt: string | null;
+  leftAt: string | null;
+  memberRoles: number;
+  baseLang: string | null;
+  logsChannelId: string | null;
+  logsLevel: string | null;
+  membersActive: number;
+  membersInactive: number;
+  // Batches shared there whose owner is an active member (what the org sees)
+  sharedBatches: number;
+  // Newest history row naming the org
+  lastActivity: string | null;
+}
+
+export interface OrgMemberRow extends UserRef {
+  // Nickname in this server (roster)
+  displayName: string;
+  active: boolean;
+  firstSeenAt: string;
+  inactiveSince: string | null;
+  rsiHandle: string | null;
+}
+
+/** Stored stock of one material, summed. */
+export interface MaterialTotal {
+  uuid: string;
+  name: string;
+  unit: 'SCU' | 'pcs';
+  // Exact decimal text without trailing zeros
+  total: string;
+  batches: number;
+  minQuality: number;
+  maxQuality: number;
+  // Org: owners sharing it; user: 1
+  owners: number;
+  // Batches of it shared in any org (org: all of them)
+  shared: number;
+}
+
+export interface OrgDetail extends OrgRow {
+  members: OrgMemberRow[];
+  stock: MaterialTotal[];
+}
+
+export interface UserRow extends UserRef {
+  discordUsername: string | null;
+  rsiHandle: string | null;
+  // app_user row; null = only web rows (the roster cleanup removed it, the next request recreates it)
+  createdAt: string | null;
+  // Orgs with an active membership
+  orgs: string[];
+  // Stored batches (refinery jobs apart)
+  batches: number;
+  resourceScu: string;
+  itemPcs: string;
+  refineryJobs: number;
+  blueprints: number;
+  // Newest history row with the user as actor
+  lastActivity: string | null;
+  // Newest web session activity
+  lastSeen: string | null;
+  companion: boolean;
+}
+
+export interface UserMembership {
+  guildId: string;
+  org: string;
+  displayName: string;
+  active: boolean;
+  firstSeenAt: string;
+  inactiveSince: string | null;
+}
+
+export interface UserRefineryJob {
+  jobId: string;
+  location: string;
+  ores: string[];
+  scu: string;
+  startedAt: string | null;
+  endsAt: string | null;
+}
+
+export interface UserHistoryRow {
+  id: number;
+  at: string;
+  source: string;
+  category: string;
+  action: string;
+  // Someone else did it (a give to this user)
+  byOther: boolean;
+  org: string | null;
+  target: string;
+  amount: string | null;
+  unit: 'SCU' | 'pcs' | null;
+  quality: number | null;
+}
+
+export interface UserDetail extends UserRow {
+  // Valid web sessions (neither idle nor expired)
+  sessions: number;
+  tokenCreatedAt: string | null;
+  tokenLastUsedAt: string | null;
+  memberships: UserMembership[];
+  stock: MaterialTotal[];
+  jobs: UserRefineryJob[];
+  blueprintList: { uuid: string; name: string }[];
+  // The newest 20 rows with the user as actor, owner or recipient
+  history: UserHistoryRow[];
+}
+
+// --- data checks: user data the catalog or the refinery data no longer backs ---
+
+export type DataCheckKey = 'retiredMaterial' | 'retiredLocation' | 'retiredBlueprint' | 'overdueJob' | 'jobNotAtRefinery';
+
+export interface DataCheckHit extends UserRef {
+  subject: string;
+  location: string | null;
+  amount: string | null;
+  unit: 'SCU' | 'pcs' | null;
+  // Refinery jobs: when it was ready
+  endsAt: string | null;
+}
+
+export interface DataCheck {
+  key: DataCheckKey;
+  hits: DataCheckHit[];
+}

@@ -1,4 +1,4 @@
-// Admin web UI: JSON API (catalog reads, catalog/localization imports) plus the built SPA (adminapp/dist),
+// Admin web UI: JSON API (catalog reads, catalog/localization imports, read-only user data) plus the built SPA (adminapp/dist),
 // behind HTTP basic auth. Binds to 127.0.0.1 unless ADMINAPP_HOST says otherwise; in production it sits
 // behind Caddy (TLS) and is published on the host's loopback only (compose.yaml).
 import { existsSync, readFileSync } from 'node:fs';
@@ -15,6 +15,7 @@ import { loadSnapshot } from '../catalog/import/load.ts';
 import { parseIniFile, runLocImport } from '../catalog/import/loc-import.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
 import * as q from './queries.ts';
+import * as u from './users.ts';
 
 const { ADMINAPP_USER, ADMINAPP_PASSWORD, ADMINAPP_HOST = '127.0.0.1', ADMINAPP_PORT = '3000' } = process.env;
 if (!ADMINAPP_USER || !ADMINAPP_PASSWORD) {
@@ -23,6 +24,8 @@ if (!ADMINAPP_USER || !ADMINAPP_PASSWORD) {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Discord IDs (the schema's format check)
+const SNOWFLAKE = /^[0-9]{17,20}$/;
 const DIST = fileURLToPath(new URL('../../adminapp/dist', import.meta.url));
 
 const { db, close } = connect(process.env.DATABASE_URL);
@@ -80,6 +83,22 @@ api.get('/localization/search', async (c) => {
   return c.json(query ? await q.searchLoc(db, lang(c), query, limit) : { total: 0, rows: [] });
 });
 api.get('/localization/keys/:key', async (c) => c.json(await q.getLocKey(db, c.req.param('key').toLowerCase())));
+// --- users and orgs (read-only) ---
+const snowflake = (c: Context, name: string) => {
+  const id = c.req.param(name) ?? '';
+  return SNOWFLAKE.test(id) ? id : null;
+};
+api.get('/orgs', async (c) => c.json(await u.getOrgs(db)));
+api.get('/orgs/:guildId', async (c) => {
+  const id = snowflake(c, 'guildId');
+  return found(c, id ? await u.getOrg(db, id, lang(c)) : null);
+});
+api.get('/users', async (c) => c.json(await u.getUsers(db)));
+api.get('/users/:userId', async (c) => {
+  const id = snowflake(c, 'userId');
+  return found(c, id ? await u.getUser(db, id, lang(c)) : null);
+});
+api.get('/checks', async (c) => c.json(await u.getDataChecks(db, lang(c))));
 // --- imports (write) ----------------------------------------------------------------
 // The file is the raw request body. Writing endpoints require a custom header: a form on
 // another site cannot set it, so the browser's stored basic auth cannot be abused (CSRF).

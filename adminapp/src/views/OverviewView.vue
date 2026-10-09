@@ -7,10 +7,20 @@ import Icon from "../components/Icon.vue";
 import { useFetch } from "../api";
 import { dateTime, duration, sourceTag } from "../format";
 import { HELP } from "../help";
-import type { Overview } from "../../../src/adminapp/api-types";
+import type { DataCheck, DataCheckKey, Overview } from "../../../src/adminapp/api-types";
 
 const router = useRouter();
 const overview = useFetch<Overview>(() => "/overview");
+const checks = useFetch<DataCheck[]>(() => "/checks");
+
+// User data the catalog or the UEX refinery data no longer backs
+const CHECKS: Record<DataCheckKey, string> = {
+  retiredMaterial: "Stock of retired materials",
+  retiredLocation: "Stock at retired locations",
+  retiredBlueprint: "Registered retired blueprints",
+  overdueJob: "Refinery jobs ready for over a week",
+  jobNotAtRefinery: "Refinery jobs outside the UEX refineries",
+};
 
 // The three catalog parts that matter, as tiles; everything else as a subtext line
 const MAIN: Record<string, { label: string; to: string; help: string }> = {
@@ -66,6 +76,36 @@ const priority = (min: number, max: number) => (min === max ? String(min) : `${m
             {{ c.active.toLocaleString() }} {{ MINOR[c.entity]!.label }} <HelpTip :text="MINOR[c.entity]!.help" />
           </span>
         </div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <Icon name="warning" :size="16" />
+          <span class="head-title">User data checks</span>
+        </div>
+        <div v-if="checks.error.value" class="empty-line">{{ checks.error.value }}</div>
+        <div v-else-if="checks.data.value" class="pad checks">
+          <div v-for="c in checks.data.value" :key="c.key" class="check">
+            <div class="check-row">
+              <span>{{ CHECKS[c.key] }}</span>
+              <span class="spacer" />
+              <span class="mono" :class="c.hits.length ? 'tag warn' : 'faint'">{{ c.hits.length }}</span>
+            </div>
+            <table v-if="c.hits.length" class="mini">
+              <thead><tr><th>User</th><th>Subject</th><th>Location</th><th class="num">Amount</th><th v-if="c.key === 'overdueJob'">Ready</th></tr></thead>
+              <tbody>
+                <tr v-for="(h, i) in c.hits" :key="i" class="link" @click="router.push(`/users/${h.userId}`)">
+                  <td><span v-if="h.name">{{ h.name }}</span><span v-else class="mono faint">{{ h.userId }}</span></td>
+                  <td>{{ h.subject }}</td>
+                  <td class="dim">{{ h.location ?? "" }}</td>
+                  <td class="num mono">{{ h.amount ? `${h.amount} ${h.unit}` : "" }}</td>
+                  <td v-if="c.key === 'overdueJob'">{{ dateTime(h.endsAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div v-else class="empty-line">Loading…</div>
       </section>
 
       <div class="columns">
@@ -226,6 +266,25 @@ const priority = (min: number, max: number) => (min === max ? String(min) : `${m
 <style scoped>
 .scroll {
   overflow: auto;
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.check {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
 }
 
 .tiles {

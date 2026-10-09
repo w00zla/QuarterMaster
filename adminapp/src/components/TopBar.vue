@@ -13,6 +13,8 @@ const props = defineProps<{ game: GameInfo | null; langs: string[] }>();
 
 const TABS: { to: string; label: string; icon: IconName }[] = [
   { to: "/", label: "Overview", icon: "overview" },
+  { to: "/orgs", label: "Orgs", icon: "users" },
+  { to: "/users", label: "Users", icon: "user" },
   { to: "/blueprints", label: "Blueprints", icon: "blueprint" },
   { to: "/resources", label: "Resources", icon: "resource" },
   { to: "/items", label: "Items", icon: "item" },
