@@ -1,6 +1,7 @@
 // Display helpers and input checks for stock (amounts are validated like the server does, as text).
 import type { StockBatch } from "../../src/webapp/api-types";
 import { parseAmount } from "../../src/stock/amount";
+import { qMark, qualityStars } from "../../src/stock/quality";
 import { t } from "./i18n";
 import { orgOf } from "./orgs";
 import { me } from "./session";
@@ -23,11 +24,8 @@ export function qualityOf(text: string): number | null {
   return n <= 1000 ? n : null;
 }
 
-/** Star level of a quality: one per 100 from 500 (500-599 = 1 ... 900-999 = 5). */
-const qualityStars = (q: number) => Math.min(5, Math.floor(q / 100) - 4);
-
-/** The level of a quality: "◌" (below 500, not usable), "★" to "★★★★★", "♛" (1000) */
-export const qMark = (q: number) => (q < 500 ? "◌" : q === 1000 ? "♛" : "★".repeat(qualityStars(q)));
+// The level of a quality ("◌", "★" to "★★★★★", "♛"), shared with the bot
+export { qMark };
 
 /** The tier of a quality for filters: 0 = ◌, 1-5 = ★ to ★★★★★, 6 = ♛ */
 export const qTier = (q: number) => (q < 500 ? 0 : q === 1000 ? 6 : qualityStars(q));

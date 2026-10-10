@@ -1,6 +1,7 @@
 // Discord bot process. Separate from the admin web UI; shares code and database with it.
 import { Client, Events, GatewayIntentBits, type Guild } from 'discord.js';
 import { connect } from '../db/client.ts';
+import { BoardPoster, listenForBoardChanges } from './board.ts';
 import { commands } from './commands.ts';
 import { handleInteraction } from './interactions.ts';
 import { LogsPoster } from './logs.ts';
@@ -16,7 +17,7 @@ if (!DISCORD_TOKEN) {
   process.exit(1);
 }
 
-const { db, close } = connect(process.env.DATABASE_URL);
+const { db, close, client: sql } = connect(process.env.DATABASE_URL);
 const registry = createRegistry(commands);
 // Guilds: guild/channel/role caches. GuildMembers (privileged, enable it in the developer portal):
 // member events and member lists for the roster sync
@@ -27,6 +28,7 @@ client.once(Events.ClientReady, (c) => {
   // Servers that removed the bot while it was offline (or added it again)
   reconcilePresence(db, [...c.guilds.cache.keys()]).catch((err: unknown) => console.error('Presence check failed', err));
   logs.start();
+  board.start();
 });
 
 // The roster: synced in full whenever member events may have been missed, kept current by the
@@ -36,6 +38,9 @@ const log = (message: string, err?: unknown) => (err === undefined ? console.log
 const keeper = new RosterKeeper(db, log);
 // The logs channels: new history rows of each org, polled
 const logs = new LogsPoster(client, db, log);
+// The boards: rendered again for the orgs the database announced changes for
+const board = new BoardPoster(client, db, log);
+await listenForBoardChanges(sql, board);
 const fullSync = (guild: Guild) =>
   keeper.fullSync(guild.id, guild.name, async () => [...(await guild.members.fetch()).values()].map(memberInfo));
 const guildsOf = (shardId: number) => [...client.guilds.cache.filter((g) => g.shardId === shardId).values()];
@@ -91,6 +96,7 @@ const shutdown = async () => {
   clearInterval(resyncTimer);
   keeper.stop();
   logs.stop();
+  board.stop();
   await client.destroy();
   await close();
   process.exit(0);

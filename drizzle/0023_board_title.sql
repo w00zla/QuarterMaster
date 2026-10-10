@@ -1,0 +1,2 @@
+ALTER TABLE "bot"."guild" ADD COLUMN "board_title" text;--> statement-breakpoint
+ALTER TABLE "bot"."guild" ADD CONSTRAINT "guild_board_title_length" CHECK ("bot"."guild"."board_title" IS NULL OR char_length("bot"."guild"."board_title") BETWEEN 1 AND 100);

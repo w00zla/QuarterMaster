@@ -7,13 +7,14 @@ import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
-import { REWARD_POOL_PATHS } from '../db/query.ts';
+import { rows } from '../db/query.ts';
 import { toMicros, formatMicros } from '../planner/plan.ts';
 import { blueprintCatalog, ownedBlueprints, addBlueprint, removeBlueprint } from '../bot/blueprints.ts';
 import { loadPlannerData } from '../planner/load.ts';
 import { getBlueprint, getBlueprints, getItem, getItems, getResource, getResources } from '../adminapp/queries.ts';
 import { formatAmount } from '../stock/amount.ts';
 import { locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
+import { obtainableBlueprints, orgMetrics, stockMetrics } from '../stock/org-summary.ts';
 import * as stock from '../stock/service.ts';
 import { MAX_REFINE_ROWS, StockError, type Actor } from '../stock/service.ts';
 import type { Source } from '../history/record.ts';
@@ -23,7 +24,7 @@ import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
   OrgBlueprintsResponse,
   OrgMember, StockBatch,
-  StockListResponse, StockMetrics, SummaryResponse,
+  StockListResponse, SummaryResponse,
 } from './api-types.ts';
 import type { Session } from './session.ts';
 
@@ -105,13 +106,6 @@ const blueprintTypes = importCache(async (db: Db, lang: string) =>
 const itemTypes = importCache(async (db: Db, lang: string) =>
   new Map((await getItems(db, lang)).map((r) => [r.uuid, { type: r.type, typeLabel: r.typeLabel }])));
 const noType = { type: null, typeLabel: null };
-
-// Blueprints a player can unlock: not retired, not default, in a reward pool (the admin overview's
-// "no source" count is the rest); language-independent, cached under one key
-const obtainableBlueprints = importCache(async (db: Db) =>
-  (await db.execute<{ n: number }>(sql`
-    SELECT count(*)::int AS n FROM catalog.blueprint b JOIN catalog.raw_record r ON r.uuid = b.uuid
-    WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path IN ${REWARD_POOL_PATHS}`))[0]?.n ?? 0);
 
 const langOf = (c: Context): Lang => (c.req.query('lang') === 'de' ? 'de' : 'en');
 const unitOf = (kind: 'resource' | 'item'): 'SCU' | 'pcs' => (kind === 'resource' ? 'SCU' : 'pcs');
@@ -355,26 +349,19 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
 
   api.get('/summary', async (c) => {
     const me = c.get('session').userId;
-    // Stored stock per scope: yours (shared or not, guild_id NULL here) and what active members shared
-    // in every org you are an active member of; shared stock of yours counts in both
-    const stock = await db.execute<{
-      guild_id: string | null; resources: number; scu: string; resource_locations: number;
-      items: number; pieces: string; item_locations: number;
-    }>(sql`
-      SELECT s.guild_id,
-        count(DISTINCT b.resource_uuid)::int AS resources,
+    // Your stored stock, shared or not; each org's figures (what its active members shared) come from
+    // orgMetrics, like the bot's board: your shared stock counts in both
+    const [stock] = await rows<{
+      resources: number; scu: string; resourceLocations: number; items: number; pieces: string; itemLocations: number;
+    }>(db, sql`
+      SELECT count(DISTINCT b.resource_uuid)::int AS resources,
         coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'resource'), 0)::text AS scu,
-        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'resource')::int AS resource_locations,
+        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'resource')::int AS "resourceLocations",
         count(DISTINCT b.item_uuid)::int AS items,
         coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'item'), 0)::text AS pieces,
-        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'item')::int AS item_locations
+        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'item')::int AS "itemLocations"
       FROM app.stock_batch b
-      CROSS JOIN LATERAL (SELECT NULL::text AS guild_id WHERE b.owner_user_id = ${me}
-        UNION ALL SELECT sh.guild_id FROM app.stock_share sh
-          JOIN app.member sm ON sm.guild_id = sh.guild_id AND sm.user_id = b.owner_user_id AND sm.active
-          WHERE sh.batch_id = b.id AND sh.guild_id IN (SELECT guild_id FROM app.member WHERE user_id = ${me} AND active)) s
-      WHERE b.state = 'stored'
-      GROUP BY s.guild_id`);
+      WHERE b.state = 'stored' AND b.owner_user_id = ${me}`);
     // Refinery jobs are personal only
     const [refining] = await db.execute<{ jobs: number; expected: string | null; locations: number; ends: string[] }>(sql`
       SELECT count(DISTINCT refine_job)::int AS jobs,
@@ -383,25 +370,15 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         coalesce(array_agg(DISTINCT to_json(refine_ends_at)#>>'{}') FILTER (WHERE refine_ends_at IS NOT NULL), '{}') AS ends
       FROM app.stock_batch
       WHERE state = 'refining' AND owner_user_id = ${me}`);
-    const orgs = await db.execute<{ guild_id: string; members: number; blueprints: number }>(sql`
-      SELECT o.guild_id,
-        (SELECT count(*) FROM app.member m WHERE m.guild_id = o.guild_id AND m.active)::int AS members,
-        (SELECT count(DISTINCT b.blueprint_uuid) FROM app.user_blueprint b
-          JOIN app.member m ON m.user_id = b.user_id AND m.guild_id = o.guild_id AND m.active)::int AS blueprints
-      FROM app.member mine JOIN app.org o ON o.guild_id = mine.guild_id
-      WHERE mine.user_id = ${me} AND mine.active ORDER BY lower(o.name)`);
+    const orgIds = (await rows<{ guildId: string }>(db, sql`
+      SELECT o.guild_id AS "guildId" FROM app.member mine JOIN app.org o ON o.guild_id = mine.guild_id
+      WHERE mine.user_id = ${me} AND mine.active ORDER BY lower(o.name)`)).map((o) => o.guildId);
+    const orgs = await orgMetrics(db, orgIds);
     const [own] = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM app.user_blueprint WHERE user_id = ${me}`);
-    const metrics = (guildId: string | null): StockMetrics => {
-      const s = stock.find((r) => r.guild_id === guildId);
-      return {
-        resources: { kinds: s?.resources ?? 0, scu: formatAmount(s?.scu ?? '0'), locations: s?.resource_locations ?? 0 },
-        items: { kinds: s?.items ?? 0, pieces: formatAmount(s?.pieces ?? '0'), locations: s?.item_locations ?? 0 },
-      };
-    };
     return c.json({
-      obtainableBlueprints: await obtainableBlueprints(db, ''),
+      obtainableBlueprints: await obtainableBlueprints(db),
       personal: {
-        ...metrics(null),
+        ...stockMetrics(stock),
         refining: {
           jobs: refining?.jobs ?? 0,
           expected: refining?.expected == null ? null : formatAmount(refining.expected),
@@ -410,7 +387,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         },
         blueprints: own?.n ?? 0,
       },
-      orgs: orgs.map((o) => ({ guildId: o.guild_id, ...metrics(o.guild_id), members: o.members, blueprints: o.blueprints })),
+      orgs: orgIds.map((guildId) => ({ guildId, ...orgs.get(guildId)! })),
     } satisfies SummaryResponse);
   });
 

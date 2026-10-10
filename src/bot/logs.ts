@@ -132,7 +132,7 @@ export class LogsPoster {
     this.log = log;
   }
 
-  start(intervalMs = 15_000) {
+  start(intervalMs = 30_000) {
     this.timer ??= setInterval(() => void this.round(), intervalMs);
     void this.round();
   }

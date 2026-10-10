@@ -17,6 +17,16 @@ export const guild = bot.table('guild', {
   // The last app.history row the logs channel has handled (posted or skipped); NULL = start at the newest
   // row, never post the past (set again whenever channel or level change)
   logsAfter: bigint('logs_after', { mode: 'number' }),
+  // The board: one message the bot keeps current with what the org offers; NULL = no board
+  boardChannelId: text('board_channel_id'),
+  // The board message in that channel; NULL = not posted yet (posted on the next round)
+  boardMessageId: text('board_message_id'),
+  // How the board shows the figures and materials: 'list' (text lines) or 'table' (code-block tables)
+  boardStyle: text('board_style').notNull().default('list'),
+  // The board's title; NULL = the org name
+  boardTitle: text('board_title'),
+  // A small line below the title; NULL = none
+  boardSubtitle: text('board_subtitle'),
   joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   // Bot removed from the server; the data is kept
   leftAt: timestamp('left_at', { withTimezone: true }),
@@ -24,6 +34,11 @@ export const guild = bot.table('guild', {
   updatedAt: updatedAt(),
 }, (t) => [
   check('guild_logs_channel_id_format', sql`${t.logsChannelId} IS NULL OR ${snowflake(t.logsChannelId)}`),
+  check('guild_board_channel_id_format', sql`${t.boardChannelId} IS NULL OR ${snowflake(t.boardChannelId)}`),
+  check('guild_board_message_id_format', sql`${t.boardMessageId} IS NULL OR ${snowflake(t.boardMessageId)}`),
+  check('guild_board_style', sql`${t.boardStyle} IN ('list', 'table')`),
+  check('guild_board_title_length', sql`${t.boardTitle} IS NULL OR char_length(${t.boardTitle}) BETWEEN 1 AND 100`),
+  check('guild_board_subtitle_length', sql`${t.boardSubtitle} IS NULL OR char_length(${t.boardSubtitle}) BETWEEN 1 AND 100`),
   check('guild_base_lang', sql`${t.baseLang} IN ('de', 'en')`),
   check('guild_logs_level', sql`${t.logsLevel} IN ('off', 'org')`),
 ]);

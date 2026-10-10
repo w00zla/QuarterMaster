@@ -576,9 +576,9 @@ export const stockCommand: BotCommand = {
   async component(ctx) {
     const [, action, ...rest] = ctx.interaction.customId.split(':');
     const access = await requireMember(ctx.db, ctx.interaction);
-    // "Your stock" under a booking opens a new panel; the list's own buttons redraw it
-    if (action === 'mine') {
-      const p = await listPanel(ctx.db, access, { scope: 'p', page: 0, material: null }, ctx.lang);
+    // "Your stock" under a booking and "Show all" on the board open a new panel; the list's own buttons redraw it
+    if (action === 'mine' || action === 'org') {
+      const p = await listPanel(ctx.db, access, { scope: action === 'mine' ? 'p' : 'o', page: 0, material: null }, ctx.lang);
       await ctx.interaction.reply({ ...p, flags: p.flags | MessageFlags.Ephemeral });
       return;
     }

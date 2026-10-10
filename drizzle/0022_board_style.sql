@@ -1,0 +1,2 @@
+ALTER TABLE "bot"."guild" ADD COLUMN "board_style" text DEFAULT 'list' NOT NULL;--> statement-breakpoint
+ALTER TABLE "bot"."guild" ADD CONSTRAINT "guild_board_style" CHECK ("bot"."guild"."board_style" IN ('list', 'table'));

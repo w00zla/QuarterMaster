@@ -36,9 +36,9 @@ export const webAppPath = {
 };
 
 /** Link button to the user web app (its root or a deep link path), or null when its origin is not configured. */
-export function webAppButton(lang: Lang, path = ''): ButtonBuilder | null {
+export function webAppButton(lang: Lang, path = '', label = t(lang, 'ui.openWebApp')): ButtonBuilder | null {
   const origin = webAppOrigin();
-  return origin ? new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(origin + path).setLabel(t(lang, 'ui.openWebApp')) : null;
+  return origin ? new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(origin + path).setLabel(label) : null;
 }
 
 /** The web app link as the components of a plain (not V2) message: one row, or none when not configured. */
