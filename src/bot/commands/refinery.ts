@@ -1,6 +1,7 @@
-// /qm-refinery: refinery work orders, always personal (like the web app: no org needed). start and done
-// search the station or job as options and take the ore rows as text lines in a modal; start shows a
-// preview first (the lines must be resolved), done books on submit. list answers as a panel.
+// /qm-refinery: refinery work orders, always personal (like the web app: no org needed). A job holds the
+// refined materials with their expected yields (ores are not booked). start and done search the station
+// or job as options and take the material rows as text lines in a modal; start shows a preview first (the
+// lines must be resolved), done books on submit; remove asks in a panel first. list answers as a panel.
 import {
   ActionRowBuilder, ApplicationCommandOptionType, ApplicationIntegrationType, ButtonBuilder, ButtonStyle, ContainerBuilder,
   InteractionContextType, MessageFlags, ModalBuilder, SeparatorBuilder, TextDisplayBuilder, escapeMarkdown,
@@ -11,12 +12,12 @@ import { refineryLocations } from '../../ext/refineries.ts';
 import { formatMicros, toMicros } from '../../planner/plan.ts';
 import { formatAmount } from '../../stock/amount.ts';
 import { locationCatalog, materialCatalog, pickableBatches, searchWords, type PickableBatch } from '../../stock/lookup.ts';
-import { addOreName, type OreCatalog } from '../../stock/ore-names.ts';
+import { addName, emptyNames, type MaterialNames } from '../../stock/material-names.ts';
 import * as stock from '../../stock/service.ts';
 import { UserError } from '../errors.ts';
 import { localizedDescription, t, type Lang, type MessageKey } from '../i18n.ts';
 import {
-  doneText, formatDuration, parseDoneText, parseDuration, parseOreLines, type DoneRow, type LineError,
+  doneText, formatDuration, parseDoneText, parseDuration, parseMaterialLines, type DoneRow, type LineError,
 } from '../refinery-lines.ts';
 import { bySubcommand, type BotCommand, type CommandContext } from '../registry.ts';
 import { CONFIRM_TTL_MS, getState, putState } from '../state.ts';
@@ -24,7 +25,7 @@ import { customId, panel, textField, textValue, webAppButton, webAppPath } from 
 
 const NAME = 'qm-refinery';
 const S = ApplicationCommandOptionType.String;
-// Text inputs hold up to 4000 characters: 30 ore lines fit easily
+// Text inputs hold up to 4000 characters: 30 material lines fit easily
 const MAX_TEXT = 4000;
 // Panel text stays well below Discord's 4000 characters per message
 const MAX_PANEL_TEXT = 3500;
@@ -49,14 +50,14 @@ const unixOf = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
 // User text inside inline code: no backticks, short
 const codeText = (text: string) => (text.length > 40 ? `${text.slice(0, 39)}…` : text).replace(/`/g, "'");
 
-/** Ore names in both languages (the user may type either), rebuilt when a catalog cache reloads. */
-let oreCache: { de: unknown; en: unknown; value: OreCatalog } | null = null;
-async function oreCatalog(db: Db): Promise<OreCatalog> {
+/** Resource names in both languages (the user may type either), rebuilt when a catalog cache reloads. */
+let namesCache: { de: unknown; en: unknown; value: MaterialNames } | null = null;
+async function resourceNames(db: Db): Promise<MaterialNames> {
   const [de, en] = [await materialCatalog(db, 'de'), await materialCatalog(db, 'en')];
-  if (oreCache?.de === de && oreCache.en === en) return oreCache.value;
-  const value: OreCatalog = { ores: new Map(), oreParts: [] };
-  for (const m of [...de.values(), ...en.values()]) if (m.isOre) addOreName(value, m.name, m.uuid);
-  oreCache = { de, en, value };
+  if (namesCache?.de === de && namesCache.en === en) return namesCache.value;
+  const value = emptyNames();
+  for (const m of [...de.values(), ...en.values()]) if (m.kind === 'resource') addName(value, m.name, m.uuid);
+  namesCache = { de, en, value };
   return value;
 }
 
@@ -67,7 +68,7 @@ export interface StartDraft {
   station: string;
   // As typed (kept for Edit)
   duration: string;
-  ores: string;
+  materials: string;
   // What the preview showed, set while it is complete: Start books exactly this
   ready: stock.RefineStartInput | null;
   // A Start click is booking (a second click must not book again)
@@ -81,8 +82,8 @@ function startModal(lang: Lang, token: string, d: StartDraft): ModalBuilder {
     .addLabelComponents(
       // Optional: in a hurry the job is booked without an end (no countdown then)
       textField('duration', t(lang, 'refinery.field.duration'), { description: t(lang, 'refinery.field.durationHint'), value: d.duration, required: false, maxLength: 40 }),
-      textField('ores', t(lang, 'refinery.field.ores'), {
-        description: t(lang, 'refinery.field.oresHint'), value: d.ores, placeholder: 'Quantanium 820 12.5\nLaranite 610 40',
+      textField('materials', t(lang, 'refinery.field.materials'), {
+        description: t(lang, 'refinery.field.materialsHint'), value: d.materials, placeholder: 'Quantainium 820 5.69\nLaranite 610 12.4',
         paragraph: true, maxLength: MAX_TEXT,
       }),
     );
@@ -93,19 +94,16 @@ const lineErrorKey = (e: LineError): MessageKey => `refinery.lineErr.${e}`;
 /** Resolves the draft's text into the work order it would book and the preview panel showing it. */
 export async function previewPanel(db: Db, lang: Lang, token: string, d: StartDraft) {
   const tr = (key: MessageKey, vars?: Record<string, string | number>) => t(lang, key, vars);
-  const parsed = parseOreLines(d.ores, await oreCatalog(db), stock.MAX_REFINE_ROWS);
+  const parsed = parseMaterialLines(d.materials, await resourceNames(db), stock.MAX_REFINE_ROWS);
   // undefined: left empty (allowed), null: not understood
   const seconds = d.duration.trim() ? parseDuration(d.duration) : undefined;
   const materials = await materialCatalog(db, lang);
   const lines: string[] = [];
   const rows: stock.RefineStartRow[] = [];
   for (const r of parsed.rows) {
-    // Only the user's own expectation (the terminal shows it): no estimates here
-    const { expectedYield } = r;
-    rows.push({ oreUuid: r.oreUuid, quality: r.quality, amount: r.amount, ...(expectedYield === undefined ? {} : { expectedYield }) });
-    const name = escapeMarkdown(materials.get(r.oreUuid)?.name ?? '?');
-    const result = expectedYield === undefined ? '' : ` → ${expectedYield} ${tr('unit.scu')}`;
-    lines.push(`- **${name}** · Q${r.quality} · ${r.amount} ${tr('unit.scu')}${result}`);
+    rows.push({ resourceUuid: r.resourceUuid, quality: r.quality, amount: r.amount });
+    const name = escapeMarkdown(materials.get(r.resourceUuid)?.name ?? '?');
+    lines.push(`- **${name}** · Q${r.quality} · ${r.amount} ${tr('unit.scu')}`);
   }
   const problems = parsed.errors.map((e) => `- ⚠️ ${tr('refinery.line', { line: e.line, text: codeText(e.text), error: tr(lineErrorKey(e.error)) })}`);
   if (seconds === null) problems.unshift(`- ⚠️ ${tr('refinery.preview.badDuration', { text: codeText(d.duration) })}`);
@@ -150,11 +148,11 @@ async function onStartSubmit(interaction: ModalSubmitInteraction, db: Db, lang: 
   if (!state.ok) return answerModal(interaction, textPanel(lang, t(lang, 'ui.panelExpired')));
   const d = state.value;
   d.duration = textValue(interaction, 'duration');
-  d.ores = interaction.fields.getTextInputValue('ores');
+  d.materials = interaction.fields.getTextInputValue('materials');
   await answerModal(interaction, await previewPanel(db, lang, token, d));
 }
 
-// --- done: modal with one line per ore ------------------------------------------------------------
+// --- done: modal with one line per material -------------------------------------------------------
 
 interface DoneDraft {
   jobId: string;
@@ -188,7 +186,7 @@ async function onDoneSubmit(interaction: ModalSubmitInteraction, db: Db, lang: L
   }
   await book(() => stock.refineDone(db, actorOf(interaction.user.id), {
     jobId: d.jobId,
-    // `expected`: the ore quantity shown when the modal opened (a changed job is refused)
+    // `expected`: the yield shown when the modal opened (a changed job is refused)
     rows: d.rows.map((r, i) => ({ batchId: r.batchId, amount: parsed.amounts[i]!, expected: r.quantity })),
   }));
   getState(token, interaction.user.id, true);
@@ -241,12 +239,16 @@ async function ownJobs(db: Db, userId: string, lang: Lang): Promise<Job[]> {
 
 const isReady = (j: Job, now = Date.now()) => j.endsAt !== null && new Date(j.endsAt).getTime() <= now;
 
-/** "CRU-L1 · Quantanium, Laranite · ready in 2h 10m" for the job option. */
+/** "- Quantainium · Q820 · 5.69 SCU" per batch of a job (the quantity is the expected yield). */
+const materialLines = (lang: Lang, j: Job) =>
+  j.batches.map((p) => `- ${escapeMarkdown(p.material)} · Q${p.batch.quality} · ${formatAmount(p.batch.quantity)} ${t(lang, 'unit.scu')}`);
+
+/** "CRU-L1 · Quantainium, Laranite · ready in 2h 10m" for the job option. */
 function jobLabel(j: Job, lang: Lang): string {
   const left = j.endsAt === null ? null : Math.ceil((new Date(j.endsAt).getTime() - Date.now()) / 1000);
   const when = left === null ? null : left <= 0 ? t(lang, 'refinery.ready') : t(lang, 'refinery.preview.readyIn', { duration: formatDuration(left) });
-  const ores = [...new Set(j.batches.map((b) => b.material))].join(', ');
-  const label = [j.station, ores, when].filter(Boolean).join(' · ');
+  const names = [...new Set(j.batches.map((b) => b.material))].join(', ');
+  const label = [j.station, names, when].filter(Boolean).join(' · ');
   return label.length > 100 ? `${label.slice(0, 99)}…` : label;
 }
 
@@ -254,11 +256,7 @@ function listPanel(lang: Lang, jobs: Job[]) {
   const tr = (key: MessageKey, vars?: Record<string, string | number>) => t(lang, key, vars);
   const blocks = jobs.map((j) => {
     const when = j.endsAt === null ? ` · ${tr('refinery.durationOpen')}` : isReady(j) ? ` · ${tr('refinery.ready')}` : ` · ${tr('refinery.list.readyAt', { ready: `<t:${unixOf(j.endsAt)}:R>` })}`;
-    const ores = j.batches.map((p) => {
-      const expected = p.refine?.expected == null ? '' : ` → ${formatAmount(p.refine.expected)} ${tr('unit.scu')}`;
-      return `- ${escapeMarkdown(p.material)} · Q${p.batch.quality} · ${formatAmount(p.batch.quantity)} ${tr('unit.scu')}${expected}`;
-    });
-    return [`**${escapeMarkdown(j.station)}**${when}`, ...ores].join('\n');
+    return [`**${escapeMarkdown(j.station)}**${when}`, ...materialLines(lang, j)].join('\n');
   });
   let body = '';
   let shown = 0;
@@ -304,7 +302,7 @@ async function start(ctx: CommandContext) {
   if (!location) throw new UserError('stock.err.unknownLocation');
   const refineries = await refineryLocations(ctx.db);
   if (refineries && !refineries.has(locationUuid)) throw new UserError('stock.err.notRefinery');
-  const draft: StartDraft = { locationUuid, station: location.short, duration: '', ores: '', ready: null, booking: false };
+  const draft: StartDraft = { locationUuid, station: location.short, duration: '', materials: '', ready: null, booking: false };
   const token = putState(ctx.interaction.user.id, draft, CONFIRM_TTL_MS);
   await ctx.showModal(startModal(ctx.lang, token, draft));
 }
@@ -314,12 +312,39 @@ async function done(ctx: CommandContext) {
   const job = (await ownJobs(ctx.db, ctx.interaction.user.id, ctx.lang)).find((j) => j.jobId === jobId);
   if (!job) throw new UserError('refinery.err.unknownJob');
   const rows = job.batches.map((p) => ({
-    batchId: p.batch.id, quantity: p.batch.quantity, name: p.material, quality: p.batch.quality,
-    expected: p.refine?.expected == null ? null : formatAmount(p.refine.expected),
+    batchId: p.batch.id, quantity: p.batch.quantity, name: p.material, quality: p.batch.quality, expected: formatAmount(p.batch.quantity),
   }));
   const draft: DoneDraft = { jobId, station: job.station, rows, text: doneText(rows) };
   const token = putState(ctx.interaction.user.id, draft, CONFIRM_TTL_MS);
   await ctx.showModal(doneModal(ctx.lang, token, draft));
+}
+
+// --- remove: a job that will not come out, asked in a panel first ---------------------------------
+
+interface RemoveDraft {
+  kind: 'remove';
+  jobId: string;
+  station: string;
+  // Exactly the batches shown, with the quantity shown (a changed job is refused)
+  rows: { batchId: number; quantity: string }[];
+}
+
+async function remove(ctx: CommandContext) {
+  const jobId = ctx.interaction.options.getString('job', true);
+  const job = (await ownJobs(ctx.db, ctx.interaction.user.id, ctx.lang)).find((j) => j.jobId === jobId);
+  if (!job) throw new UserError('refinery.err.unknownJob');
+  const draft: RemoveDraft = { kind: 'remove', jobId, station: job.station, rows: job.batches.map((p) => ({ batchId: p.batch.id, quantity: p.batch.quantity })) };
+  const token = putState(ctx.interaction.user.id, draft, CONFIRM_TTL_MS);
+  const tr = (key: MessageKey, vars?: Record<string, string | number>) => t(ctx.lang, key, vars);
+  const container = new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${tr('refinery.remove.title', { station: escapeMarkdown(job.station) })}`))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([...materialLines(ctx.lang, job), '', tr('refinery.remove.ask')].join('\n')))
+    .addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(customId(NAME, 'drop', token)).setLabel(tr('refinery.btn.remove')).setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(customId(NAME, 'cancel', token)).setLabel(tr('btn.cancel')).setStyle(ButtonStyle.Secondary),
+    ));
+  await ctx.reply(panel(container));
 }
 
 async function time(ctx: CommandContext) {
@@ -347,6 +372,9 @@ export const refineryCommand: BotCommand = {
       opt('done', 'cmd.refinery.done', ApplicationCommandOptionType.Subcommand, {
         options: [opt('job', 'refinery.opt.job', S, { required: true, autocomplete: true })],
       }),
+      opt('remove', 'cmd.refinery.remove', ApplicationCommandOptionType.Subcommand, {
+        options: [opt('job', 'refinery.opt.job', S, { required: true, autocomplete: true })],
+      }),
       opt('list', 'cmd.refinery.list', ApplicationCommandOptionType.Subcommand),
     ],
   },
@@ -355,6 +383,7 @@ export const refineryCommand: BotCommand = {
     start,
     time,
     done,
+    remove,
     async list(ctx) {
       await ctx.reply(listPanel(ctx.lang, await ownJobs(ctx.db, ctx.interaction.user.id, ctx.lang)));
     },
@@ -373,7 +402,7 @@ export const refineryCommand: BotCommand = {
     const [, action, token] = interaction.customId.split(':');
     if (!token) throw new Error(`Unexpected component ${interaction.customId}`);
     // Panels are ephemeral, so a foreign click is unlikely; refused anyway
-    const state = getState<StartDraft & DoneDraft>(token, interaction.user.id);
+    const state = getState<StartDraft & DoneDraft & RemoveDraft>(token, interaction.user.id);
     if (!state.ok && state.reason === 'foreign') throw new UserError('refinery.err.foreign');
     if (!state.ok) return void await interaction.update(textPanel(lang, t(lang, 'ui.panelExpired')));
     if (action === 'redo') return interaction.showModal(doneModal(lang, token, state.value));
@@ -382,6 +411,14 @@ export const refineryCommand: BotCommand = {
     if (action === 'cancel') {
       getState(token, interaction.user.id, true);
       return void await interaction.update(textPanel(lang, t(lang, 'refinery.cancelled')));
+    }
+    if (action === 'drop') {
+      if (d.kind !== 'remove') throw new Error(`Unexpected component ${interaction.customId}`);
+      await book(() => stock.refineRemove(db, actorOf(interaction.user.id), {
+        jobId: d.jobId, rows: d.rows.map((r) => ({ batchId: r.batchId, expected: r.quantity })),
+      }));
+      getState(token, interaction.user.id, true);
+      return void await interaction.update(textPanel(lang, t(lang, 'refinery.removed', { station: escapeMarkdown(d.station) }), true));
     }
     if (action !== 'go') throw new Error(`Unexpected component ${interaction.customId}`);
     if (!d.ready) throw new UserError('refinery.err.notReady');

@@ -70,12 +70,16 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   });
   after(async () => { await closeDb?.(); await closeWeb?.(); });
 
-  it('catalog: materials with unit and ore flag, locations, blueprints', async () => {
+  it('catalog: materials with unit (never ores), locations, blueprints', async () => {
     const { status, body } = await get<CatalogResponse>(SOLO, '/catalog?lang=en');
     assert.equal(status, 200);
     const byUuid = new Map(body.materials.map((m) => [m.uuid, m]));
-    assert.deepEqual([byUuid.get(U.metal)?.unit, byUuid.get(U.metal)?.isOre], ['SCU', false]);
-    assert.equal(byUuid.get(U.ore)?.isOre, true);
+    assert.equal(byUuid.get(U.metal)?.unit, 'SCU');
+    assert.ok(!byUuid.has(U.ore));
+    assert.ok(!('isOre' in byUuid.get(U.metal)!) && !('methods' in body));
+    // The game's loc key (for the companion's language pack lookup)
+    assert.equal(byUuid.get(U.metal)?.nameKey, 'items_commodities_testmetal');
+    assert.ok(body.locations.every((l) => 'nameKey' in l));
     assert.equal(byUuid.get(U.gem)?.unit, 'pcs');
     // Item types for the icons: items have one (or null), resources never
     assert.ok('type' in byUuid.get(U.gem)! && byUuid.get(U.metal)!.type === null);
@@ -95,23 +99,39 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.equal((await post(SOLO, '/stock/adjust', { batchId: batch.id, amount: '20', expected: '10' })).status, 200);
     assert.equal((await personal(SOLO)).totals[U.metal], '20');
 
-    // Refinery: start with ore, done consumes the job and stores the refined resource
+    // Refinery: start with the refined material and its expected yield, done stores it
     assert.equal((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [] })).status, 400);
-    assert.equal((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 400, amount: '8' }] })).status, 200);
+    assert.equal((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 400, amount: '8' }] })).status, 400);
+    assert.deepEqual((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [{ resourceUuid: U.ore, quality: 400, amount: '8' }] })).body,
+      { error: 'notBookable' });
+    assert.equal((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 400, amount: '8' }] })).status, 200);
     list = await personal(SOLO);
     const job = list.batches.find((b) => b.state === 'refining')!;
+    // Not stock yet: the material's total leaves the job out
+    assert.deepEqual([job.subjectUuid, job.quantity, list.totals[U.metal]], [U.metal, '8', '20']);
     const jobId = job.refine!.jobId;
     // Started without a time: set later (the terminal's time left), only by the owner
     assert.equal(job.refine!.endsAt, null);
     assert.equal((await post(SOLO, '/refinery/duration', { jobId, durationSeconds: 1.5 })).status, 400);
     assert.equal((await post(SOLO, '/refinery/duration', { jobId, durationSeconds: 600 })).status, 200);
     assert.ok((await personal(SOLO)).batches.find((b) => b.id === job.id)!.refine!.endsAt);
-    // Quality is the ore's: the request has none
+    // The quality stays: the request has none
     assert.equal((await post(SOLO, '/refinery/done', { jobId, rows: [{ batchId: job.id, amount: '5', quality: 650, expected: '8' }] })).status, 400);
     assert.equal((await post(SOLO, '/refinery/done', { jobId, rows: [{ batchId: job.id, amount: '5', expected: '8' }] })).status, 200);
     list = await personal(SOLO);
     assert.ok(!list.batches.some((b) => b.state === 'refining'));
-    assert.ok(list.batches.some((b) => b.subjectUuid === U.metal && b.quality === 400 && b.quantity === '5'));
+    assert.ok(list.batches.some((b) => b.subjectUuid === U.metal && b.quality === 400 && b.quantity === '5' && b.state === 'stored'));
+    assert.equal(list.totals[U.metal], '25');
+
+    // A job that will not come out is removed as a whole
+    assert.equal((await post(SOLO, '/refinery/start', { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 401, amount: '3' }] })).status, 200);
+    const lost = (await personal(SOLO)).batches.find((b) => b.state === 'refining')!;
+    const lostJob = { jobId: lost.refine!.jobId, rows: [{ batchId: lost.id, expected: lost.quantity }] };
+    assert.deepEqual((await post(MIA, '/refinery/remove', lostJob)).body, { error: 'notAllowed' });
+    assert.equal((await post(SOLO, '/refinery/remove', { ...lostJob, rows: [{ batchId: lost.id }] })).status, 400);
+    assert.deepEqual((await post(SOLO, '/refinery/remove', { ...lostJob, rows: [{ batchId: lost.id, expected: '4' }] })).body, { error: 'batchChanged' });
+    assert.equal((await post(SOLO, '/refinery/remove', lostJob)).status, 200);
+    assert.ok(!(await personal(SOLO)).batches.some((b) => b.state === 'refining'));
 
     // No org stock without an org
     assert.deepEqual((await post(SOLO, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'notMember' });
@@ -244,7 +264,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   it('summary: personal and per org, consistent with the lists', async () => {
     await post(MIA, '/refinery/start', {
       locationUuid: U.station, durationSeconds: 3600,
-      rows: [{ oreUuid: U.ore, quality: 100, amount: '2', expectedYield: '0.75' }, { oreUuid: U.ore, quality: 200, amount: '1' }],
+      rows: [{ resourceUuid: U.metal, quality: 100, amount: '0.75' }, { resourceUuid: U.metal, quality: 200, amount: '1' }],
     });
     const sum = (await get<SummaryResponse>(MIA, '/summary')).body;
     const mine = await personal(MIA);
@@ -257,7 +277,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     });
     assert.deepEqual(sum.personal.items, { kinds: 0, pieces: '0', locations: 0 });
     const job = mine.batches.find((b) => b.state === 'refining')!;
-    assert.deepEqual(sum.personal.refining, { jobs: 1, expected: '0.75', locations: 1, endsAt: [job.refine!.endsAt] });
+    assert.deepEqual(sum.personal.refining, { jobs: 1, expected: '1.75', locations: 1, endsAt: [job.refine!.endsAt] });
     assert.equal(sum.personal.blueprints, 0);
     // The fixture's one pool rewards one blueprint
     assert.equal(sum.obtainableBlueprints, 1);

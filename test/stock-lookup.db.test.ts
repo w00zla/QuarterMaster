@@ -43,7 +43,7 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     await add(db, mia, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 100, amount: '7' });
     await add(db, mia, { ...metal, quality: 700, amount: '4', org: true });
     await add(db, olga, { ...metal, quality: 800, amount: '3' });
-    await refineStart(db, mia, { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 600, amount: '8' }] });
+    await refineStart(db, mia, { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 600, amount: '8' }] });
   });
   after(async () => close?.());
 
@@ -54,16 +54,15 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     assert.deepEqual(await locationChoices(db, 'en', 'test'), [{ name: 'Test Station', value: U.station }]);
   });
 
-  it('offers recipe materials with their unit, ores only for the refinery', async () => {
+  it('offers recipe materials with their unit, never ores', async () => {
     const materials = await materialCatalog(db, 'en');
-    assert.deepEqual([...materials.values()].map((m) => [m.uuid, m.kind, m.isOre]).sort(), [
-      [U.metal, 'resource', false], [U.ore, 'resource', true], [U.gem, 'item', false],
+    assert.deepEqual([...materials.values()].map((m) => [m.uuid, m.kind]).sort(), [
+      [U.metal, 'resource'], [U.gem, 'item'],
     ].sort());
-    const regular = await materialChoices(db, 'de', '', false);
+    const regular = await materialChoices(db, 'de', '');
     assert.deepEqual(regular.map((c) => c.value).sort(), [`item:${U.gem}`, `resource:${U.metal}`].sort());
     assert.ok(regular.some((c) => c.name === 'Testmetall (SCU)'));
     assert.ok(regular.some((c) => c.name.endsWith('(Stk.)')));
-    assert.deepEqual((await materialChoices(db, 'en', '', true)).map((c) => c.value), [U.ore]);
   });
 
   it('everyone picks their own batches, shared or not; material, then best quality first', async () => {
@@ -73,7 +72,7 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     assert.deepEqual(own.map((p) => [p.material, p.batch.quality]), expected);
     assert.equal(own.length, 5);
     assert.ok(own.every((p) => p.batch.ownerUserId === MIA));
-    assert.deepEqual(own.filter((p) => p.batch.resourceUuid === U.metal).map((p) => [p.batch.quality, p.sharedIn]),
+    assert.deepEqual(own.filter((p) => p.batch.resourceUuid === U.metal && p.batch.state === 'stored').map((p) => [p.batch.quality, p.sharedIn]),
       [[900, []], [700, [G]], [500, []]]);
     // Mia's shared batch is hers alone to change
     assert.deepEqual((await pickableBatches(db, olga, 'change', 'en')).map((p) => [p.sharedIn, p.batch.quality]), [[[], 800]]);
@@ -85,7 +84,7 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     const [org] = (await pickableBatches(db, mia, 'change', 'en')).filter((p) => p.sharedIn.length);
     assert.equal(batchLabel(org!, 'en'), 'Test Metal · Q700 · 4 SCU · Test Station · Org (Mia)');
     const [job] = await pickableBatches(db, mia, 'refining', 'de');
-    assert.equal(batchLabel(job!, 'de'), '⚗️ Test Metal (Ore) · Q600 · 8 SCU · Test Station · Pers.');
+    assert.equal(batchLabel(job!, 'de'), '⚗️ Testmetall · Q600 · 8 SCU · Test Station · Pers.');
     const found = await batchChoices(db, mia, 'change', 'en', 'q900');
     assert.deepEqual(found.map((c) => c.name), ['Test Metal · Q900 · 1.5 SCU · Test Station · Pers.']);
   });

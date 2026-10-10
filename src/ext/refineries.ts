@@ -1,10 +1,12 @@
 // Refinery locations and yield bonuses from the latest UEX yields snapshot. UEX has its own IDs and
 // names: a terminal is matched to a selectable catalog location by English name within the same
-// system, an ore to a bookable catalog ore by its normalized English name.
+// system, an ore to a catalog ore by its normalized English name; the bonus is kept for the ore's refined
+// material (refinery jobs book only those).
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { locText, one, rows } from '../db/query.ts';
-import { locationCatalog, materialCatalog, type LocationEntry, type MaterialEntry } from '../stock/lookup.ts';
+import { importCache } from '../db/import-cache.ts';
+import { locationCatalog, type LocationEntry } from '../stock/lookup.ts';
 
 export interface UexTerminal {
   id: number;
@@ -18,7 +20,7 @@ export interface RefineryMatch {
   // Catalog location UUID -> its UEX terminal
   matched: Map<string, UexTerminal>;
   unmatched: UexTerminal[];
-  // Catalog location UUID -> ore UUID -> yield bonus in %
+  // Catalog location UUID -> refined material UUID -> yield bonus in % (UEX reports it per ore)
   yields: Map<string, Map<string, number>>;
 }
 
@@ -55,10 +57,16 @@ export function matchRefineries(terminals: UexTerminal[], locations: Iterable<Lo
 /** "Hephaestanite (R)", "Raw Ice", "Construction Material Rubble" -> "hephaestanite", "ice", "constructionrubble" */
 export const oreKey = (name: string) => name.toLowerCase().replace(/\((ore|raw|r)\)/g, '').replace(/\b(raw|material)\b/g, '').replace(/[^a-z0-9]/g, '');
 
-/** Pure: fills `match.yields` from the yields rows; ores by `oreKey` of their English name. */
-export function matchYields(data: YieldRow[], match: RefineryMatch, materials: Iterable<MaterialEntry>): void {
+/** A catalog ore: its English name and the material it refines to. */
+export interface OreEntry {
+  nameEn: string;
+  refinedUuid: string;
+}
+
+/** Pure: fills `match.yields` from the yields rows; ores by `oreKey` of their English name, kept for their refined material. */
+export function matchYields(data: YieldRow[], match: RefineryMatch, catalogOres: Iterable<OreEntry>): void {
   const ores = new Map<string, string>();
-  for (const m of materials) if (m.isOre) ores.set(oreKey(m.nameEn), m.uuid);
+  for (const o of catalogOres) ores.set(oreKey(o.nameEn), o.refinedUuid);
   const location = new Map([...match.matched].map(([uuid, t]) => [t.id, uuid]));
   for (const r of data) {
     const uuid = location.get(r.id_terminal as number);
@@ -69,7 +77,12 @@ export function matchYields(data: YieldRow[], match: RefineryMatch, materials: I
   }
 }
 
-let cached: { snapshotId: number; locations: Map<string, LocationEntry>; materials: Map<string, MaterialEntry>; value: RefineryMatch } | null = null;
+/** Ores with a refined material, by English name (not retired), reloaded with the catalog. */
+const oreCatalog = importCache(async (db): Promise<OreEntry[]> => rows<OreEntry>(db, sql`
+  SELECT coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", r.refined_uuid AS "refinedUuid"
+  FROM catalog.resource r WHERE r.is_ore AND r.refined_uuid IS NOT NULL AND r.retired_at IS NULL`));
+
+let cached: { snapshotId: number; locations: Map<string, LocationEntry>; ores: OreEntry[]; value: RefineryMatch } | null = null;
 
 /** Matched refinery terminals of the latest yields snapshot; null while there is none. */
 export async function refineryMatch(db: Db): Promise<RefineryMatch | null> {
@@ -77,12 +90,12 @@ export async function refineryMatch(db: Db): Promise<RefineryMatch | null> {
     SELECT id::int AS id FROM ext.snapshot WHERE source = 'uex' AND endpoint = 'refineries_yields' ORDER BY id DESC LIMIT 1`);
   if (!latest) return null;
   // English names and systems: what UEX uses
-  const [locations, materials] = [await locationCatalog(db, 'en'), await materialCatalog(db, 'en')];
-  if (cached?.snapshotId === latest.id && cached.locations === locations && cached.materials === materials) return cached.value;
+  const [locations, ores] = [await locationCatalog(db, 'en'), await oreCatalog(db, 'en')];
+  if (cached?.snapshotId === latest.id && cached.locations === locations && cached.ores === ores) return cached.value;
   const snap = await one<{ data: YieldRow[] }>(db, sql`SELECT data FROM ext.snapshot WHERE id = ${latest.id}`);
   const value = matchRefineries(uexTerminals(snap?.data ?? []), locations.values());
-  matchYields(snap?.data ?? [], value, materials.values());
-  cached = { snapshotId: latest.id, locations, materials, value };
+  matchYields(snap?.data ?? [], value, ores);
+  cached = { snapshotId: latest.id, locations, ores, value };
   return value;
 }
 

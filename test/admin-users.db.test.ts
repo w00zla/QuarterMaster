@@ -54,7 +54,7 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     await add(db, actor(OLGA), { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 500, amount: '3' });
     await add(db, actor(MIA, G), { kind: 'resource', uuid: U.metal, locationUuid: U.station, quality: 800, amount: '2', org: true });
     await addBlueprint(db, OLGA, U.blueprint2, 'webapp');
-    await refineStart(db, actor(SOLO), { locationUuid: U.station, durationSeconds: 3600, rows: [{ oreUuid: U.ore, quality: 400, amount: '8' }] });
+    await refineStart(db, actor(SOLO), { locationUuid: U.station, durationSeconds: 3600, rows: [{ resourceUuid: U.metal, quality: 400, amount: '8' }] });
   });
   after(async () => close?.());
 

@@ -23,12 +23,13 @@ export interface HistoryDetails {
   batchAmount?: string;
   // Stock: the orgs the batch was shared in when it changed (an org's logs channel shows these rows)
   sharedIn?: string[];
-  // Refinery start
+  // Refinery start: the duration entered
   durationSeconds?: number | null;
+  // Refinery done: the yield expected (rows before migration 0025: start's estimate, the amount was the ore's)
   expectedYield?: string | null;
-  // Refinery start and done: the work order
+  // Refinery start, done and remove: the work order
   jobId?: string;
-  // Refinery done: the ore that went in
+  // Refinery done before migration 0025: the ore that went in
   oreUuid?: string;
   oreAmount?: string;
   oreQuality?: number;

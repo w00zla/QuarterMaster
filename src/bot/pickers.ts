@@ -23,12 +23,11 @@ export async function locationChoices(db: Db, lang: Lang, query: string): Promis
     .map((l) => ({ name: fit(l.label), value: l.uuid }));
 }
 
-/** ores = false: what /qm-stock add takes (with its unit); ores = true: ores for the refinery. */
-export async function materialChoices(db: Db, lang: Lang, query: string, ores: boolean): Promise<Choice[]> {
-  const materials = [...(await materialCatalog(db, lang)).values()].filter((m) => m.isOre === ores);
-  return searchWords(materials, query, (m) => `${m.name} ${m.nameEn}`, (m) => m.name).map((m) => ores
-    ? { name: fit(m.name), value: m.uuid }
-    : { name: fit(`${m.name} (${t(lang, m.kind === 'item' ? 'unit.pcs' : 'unit.scu')})`), value: `${m.kind}:${m.uuid}` });
+/** What /qm-stock add takes, with its unit. */
+export async function materialChoices(db: Db, lang: Lang, query: string): Promise<Choice[]> {
+  const materials = (await materialCatalog(db, lang)).values();
+  return searchWords(materials, query, (m) => `${m.name} ${m.nameEn}`, (m) => m.name)
+    .map((m) => ({ name: fit(`${m.name} (${t(lang, m.kind === 'item' ? 'unit.pcs' : 'unit.scu')})`), value: `${m.kind}:${m.uuid}` }));
 }
 
 /** "⚗️ Quantanium · Q820 · 12.5 SCU · Area18 · Org (Hans)" or "… · Personal"; `shares: false` leaves the last part out. */

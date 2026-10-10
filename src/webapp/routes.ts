@@ -19,7 +19,7 @@ import * as stock from '../stock/service.ts';
 import { MAX_REFINE_ROWS, StockError, type Actor } from '../stock/service.ts';
 import type { Source } from '../history/record.ts';
 import { listHistory } from './history.ts';
-import { refineryMatch, refiningMethods } from '../ext/refineries.ts';
+import { refineryMatch } from '../ext/refineries.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
   OrgBlueprintsResponse,
@@ -60,12 +60,16 @@ const schemas = {
   share: z.object({ batchId: z.number().int().positive(), guildIds: z.array(snowflake).max(25) }).strict(),
   refineStart: z.object({
     locationUuid: uuid, durationSeconds: z.number().int().optional(),
-    rows: z.array(z.object({ oreUuid: uuid, quality, amount, expectedYield: amount.optional() }).strict()).min(1).max(MAX_REFINE_ROWS),
+    rows: z.array(z.object({ resourceUuid: uuid, quality, amount }).strict()).min(1).max(MAX_REFINE_ROWS),
   }).strict(),
   refineDuration: z.object({ jobId: uuid, durationSeconds: z.number().int().nullable() }).strict(),
   refineDone: z.object({
     jobId: uuid,
     rows: z.array(z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict()).min(1).max(MAX_REFINE_ROWS),
+  }).strict(),
+  refineRemove: z.object({
+    jobId: uuid,
+    rows: z.array(z.object({ batchId: z.number().int().positive(), expected: amount }).strict()).min(1).max(MAX_REFINE_ROWS),
   }).strict(),
   blueprint: z.object({ uuid }).strict(),
   history: z.object({
@@ -165,7 +169,6 @@ function toBatch(p: PickableBatch, viewer: string, viewerOrgs: Set<string>): Sto
       jobId: p.refine.jobId,
       startedAt: p.refine.startedAt && new Date(p.refine.startedAt).toISOString(),
       endsAt: p.refine.endsAt && new Date(p.refine.endsAt).toISOString(),
-      expectedYield: p.refine.expected && formatAmount(p.refine.expected),
     },
   };
 }
@@ -173,7 +176,8 @@ function toBatch(p: PickableBatch, viewer: string, viewerOrgs: Set<string>): Sto
 function listResponse(found: PickableBatch[], viewer: string, viewerOrgs: Set<string>): StockListResponse {
   const sums = new Map<string, bigint>();
   const batches = found.map((p) => toBatch(p, viewer, viewerOrgs));
-  for (const b of batches) sums.set(b.subjectUuid, (sums.get(b.subjectUuid) ?? 0n) + toMicros(b.quantity));
+  // Stock only: a refinery job is not there yet
+  for (const b of batches) if (b.state === 'stored') sums.set(b.subjectUuid, (sums.get(b.subjectUuid) ?? 0n) + toMicros(b.quantity));
   return { batches, totals: Object.fromEntries([...sums].map(([k, v]) => [k, formatMicros(v)])) };
 }
 
@@ -184,14 +188,13 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
     const [bpTypes, types] = [await blueprintTypes(db, lang), await itemTypes(db, lang)];
     const refineries = await refineryMatch(db);
-    const methods = await refiningMethods(db, lang);
     return c.json({
       materials: [...materials.values()].map((m) => ({
-        uuid: m.uuid, kind: m.kind, name: m.name, isOre: m.isOre, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
+        uuid: m.uuid, kind: m.kind, name: m.name, nameKey: m.nameKey, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
-        uuid: l.uuid, label: l.label, short: l.short, refinery: refineries?.matched.has(l.uuid) ?? true,
+        uuid: l.uuid, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
         yields: Object.fromEntries(refineries?.yields.get(l.uuid) ?? []),
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
@@ -200,7 +203,6 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         manufacturerCode: e.manufacturerCode, category: e.categoryLabel, isDefault: e.isDefault, retired: e.retired,
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
-      methods: methods.map(({ code, name, yieldPct, secondsPerScu }) => ({ code, name, yieldPct, secondsPerScu })),
     } satisfies CatalogResponse);
   });
 
@@ -291,6 +293,13 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     return book(c, () => stock.refineDone(db, actor, input));
   });
 
+  // A job that will not come out (cancelled, lost to a game patch)
+  api.post('/refinery/remove', async (c) => {
+    const input = await body(c, schemas.refineRemove);
+    const actor = await actorFor(c, db, c.get('session').userId, undefined);
+    return book(c, () => stock.refineRemove(db, actor, input));
+  });
+
   // --- blueprints -------------------------------------------------------------------------------
   api.get('/blueprints', async (c) => c.json({ uuids: [...await ownedBlueprints(db, c.get('session').userId)] } satisfies BlueprintListResponse));
 
@@ -365,7 +374,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     // Refinery jobs are personal only
     const [refining] = await db.execute<{ jobs: number; expected: string | null; locations: number; ends: string[] }>(sql`
       SELECT count(DISTINCT refine_job)::int AS jobs,
-        sum(refine_expected)::text AS expected,
+        sum(quantity)::text AS expected,
         count(DISTINCT location_uuid)::int AS locations,
         coalesce(array_agg(DISTINCT to_json(refine_ends_at)#>>'{}') FILTER (WHERE refine_ends_at IS NOT NULL), '{}') AS ends
       FROM app.stock_batch

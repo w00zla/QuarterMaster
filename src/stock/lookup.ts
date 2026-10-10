@@ -19,12 +19,14 @@ export interface LocationEntry {
   label: string;
   // The name, plus the system where the name alone is ambiguous (gateways exist in two systems)
   short: string;
+  // The game's localization key of the name (lower case), e.g. for a language pack's text
+  nameKey: string | null;
 }
 
 export const locationCatalog = importCache(async (db, lang): Promise<Map<string, LocationEntry>> => {
   // The whole star map is small (~2k rows): walk the parents in memory
-  const all = await rows<{ uuid: string; parent: string | null; nav: string | null; name: string | null; nameEn: string | null; selectable: boolean }>(db, sql`
-    SELECT l.uuid, l.parent_uuid AS parent, l.nav_icon AS nav, ${locText(lang, sql`l.name_key`)} AS name,
+  const all = await rows<{ uuid: string; parent: string | null; nav: string | null; name: string | null; nameEn: string | null; nameKey: string | null; selectable: boolean }>(db, sql`
+    SELECT l.uuid, l.parent_uuid AS parent, l.nav_icon AS nav, lower(l.name_key) AS "nameKey", ${locText(lang, sql`l.name_key`)} AS name,
       ${locText('en', sql`l.name_key`)} AS "nameEn", (${selectableLocationSql()} AND l.retired_at IS NULL) AS selectable
     FROM catalog.location l`);
   const byUuid = new Map(all.map((l) => [l.uuid, l]));
@@ -41,7 +43,7 @@ export const locationCatalog = importCache(async (db, lang): Promise<Map<string,
     const body = chain.find((a) => a.nav === 'Planet' || a.nav === 'Moon')?.name ?? null;
     const system = chain.find((a) => a.nav === 'Star')?.name ?? null;
     const name = l.name ?? l.nameEn!;
-    return { uuid: l.uuid, name, nameEn: l.nameEn!, body, system, label: [name, body, system].filter(Boolean).join(' · '), short: name };
+    return { uuid: l.uuid, name, nameEn: l.nameEn!, body, system, label: [name, body, system].filter(Boolean).join(' · '), short: name, nameKey: l.nameKey };
   });
   const counts = new Map<string, number>();
   for (const e of entries) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);
@@ -54,20 +56,20 @@ export interface MaterialEntry {
   uuid: string;
   name: string;
   nameEn: string;
-  isOre: boolean;
+  // The game's localization key of the name (lower case)
+  nameKey: string | null;
 }
 
-/** What can be booked: recipe resources, their ores, recipe items (same rules as the stock service). */
+/** What can be booked: recipe resources and items (same rules as the stock service; never ores). */
 export const materialCatalog = importCache(async (db, lang): Promise<Map<string, MaterialEntry>> => {
   const found = await rows<MaterialEntry>(db, sql`
     SELECT 'resource' AS kind, r.uuid, coalesce(${locText(lang, sql`r.name_key`)}, r.key) AS name,
-      coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", r.is_ore AS "isOre"
+      coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", lower(r.name_key) AS "nameKey"
     FROM catalog.resource r
-    WHERE r.retired_at IS NULL AND EXISTS (SELECT 1 FROM catalog.blueprint_input bi
-      WHERE bi.resource_uuid = CASE WHEN r.is_ore THEN r.refined_uuid ELSE r.uuid END)
+    WHERE r.retired_at IS NULL AND EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.resource_uuid = r.uuid)
     UNION ALL
     SELECT 'item', i.uuid, coalesce(${locText(lang, sql`i.name_key`)}, i.class_name),
-      coalesce(${locText('en', sql`i.name_key`)}, i.class_name), false
+      coalesce(${locText('en', sql`i.name_key`)}, i.class_name), lower(i.name_key)
     FROM catalog.item i
     WHERE i.retired_at IS NULL AND EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid)`);
   return new Map(found.map((m) => [m.uuid, m]));
@@ -88,14 +90,12 @@ export function searchWords<T>(entries: Iterable<T>, query: string, text: (e: T)
 /** remove/adjust: any batch the actor may change; move: not refinery jobs; refining: the actor's own refinery jobs. */
 export type BatchPick = 'change' | 'move' | 'refining';
 
-/** A refinery job's work order and estimates (NULLs on jobs from before they were recorded). */
+/** A refinery job's work order (NULLs on jobs from before they were recorded); the batch's quantity is its expected yield. */
 export interface RefineInfo {
-  // The work order: every ore batch of one job shares it
+  // The work order: every batch of one job shares it
   jobId: string;
   startedAt: string | null;
   endsAt: string | null;
-  // NUMERIC text
-  expected: string | null;
 }
 
 export interface PickableBatch {
@@ -167,8 +167,7 @@ async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBa
       coalesce((SELECT array_agg(s.guild_id ORDER BY s.guild_id) FROM app.stock_share s WHERE s.batch_id = b.id), '{}') AS "sharedIn",
       (SELECT m.display_name FROM app.stock_share s JOIN app.member m ON m.guild_id = s.guild_id AND m.user_id = b.owner_user_id
         WHERE s.batch_id = b.id ORDER BY m.active DESC, s.guild_id LIMIT 1) AS "holderName",
-      json_build_object('jobId', b.refine_job, 'startedAt', b.refine_started_at, 'endsAt', b.refine_ends_at,
-        'expected', b.refine_expected::text) AS refine
+      json_build_object('jobId', b.refine_job, 'startedAt', b.refine_started_at, 'endsAt', b.refine_ends_at) AS refine
     FROM app.stock_batch b
     WHERE ${where}`);
   const [materials, locations] = [await materialCatalog(db, lang), await locationCatalog(db, lang)];
@@ -201,14 +200,14 @@ export async function missingNames(db: Db, lang: string, subjects: string[], loc
   return new Map(found.map((f) => [f.uuid, f.name]));
 }
 
-/** Sum of a material in one stock (everything a user owns, or what is shared in an org), as NUMERIC text ("0" if none). */
+/** Sum of a material in one stock (everything a user has stored, or what is shared in an org; never refinery jobs), as NUMERIC text ("0" if none). */
 export async function materialTotal(db: Db, scope: { personalOf: string } | { guildId: string }, subjectUuid: string): Promise<string> {
   const where = 'personalOf' in scope
     ? sql`b.owner_user_id = ${scope.personalOf}`
     : sharedIn(sql`${scope.guildId}`);
   const found = await rows<{ total: string }>(db, sql`
     SELECT coalesce(sum(b.quantity), 0)::text AS total FROM app.stock_batch b
-    WHERE ${where} AND coalesce(b.resource_uuid, b.item_uuid) = ${subjectUuid}`);
+    WHERE ${where} AND b.state = 'stored' AND coalesce(b.resource_uuid, b.item_uuid) = ${subjectUuid}`);
   return found[0]!.total;
 }
 

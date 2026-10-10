@@ -431,7 +431,7 @@ async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db
   const query = String(focused.value);
   const sub = interaction.options.getSubcommand();
   let choices: Choice[] = [];
-  if (focused.name === 'material') choices = await materialChoices(db, lang, query, false);
+  if (focused.name === 'material') choices = await materialChoices(db, lang, query);
   else if (focused.name === 'location' || focused.name === 'to') choices = await locationChoices(db, lang, query);
   // Refinery jobs stay where they are and are not shared: only stored batches for move, give and share
   // A give lands unshared with the recipient: whether the batch is shared does not matter there
@@ -487,7 +487,6 @@ export const stockCommand: BotCommand = {
     async add(ctx) {
       const access = await requireMember(ctx.db, ctx.interaction);
       const material = (await pickedMaterial(ctx, true))!;
-      if (material.entry.isOre) throw new UserError('stock.err.oreViaRefinery');
       const location = await pickedLocation(ctx, 'location');
       const orgs = await activeOrgs(ctx.db, access.userId);
       const m = modal(customId(NAME, 'add', `${material.kind === 'item' ? 'i' : 'r'}${material.uuid}`, location.uuid), ctx.t('stock.modal.add'))

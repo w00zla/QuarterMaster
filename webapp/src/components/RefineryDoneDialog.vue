@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Finishes a refinery job (POST /api/refinery/done): the whole work order at once, as the game hands it
-// out. One line per ore batch: the refined amount (starting from the expected yield, an estimate the
-// user corrects to what the game shows; "0" when nothing came out); the quality stays the ore's.
+// out, stored at the station. One line per material: the amount received (starting from the expected
+// yield, which the user corrects to what the game shows; "0" when nothing came out); the quality stays.
 // Two steps like every change of existing stock: the inputs, then a summary to confirm.
 import { computed, reactive, ref } from "vue";
 import type { OkResponse, RefineryDoneRequest, StockBatch } from "../../../src/webapp/api-types";
@@ -17,9 +17,9 @@ const emit = defineEmits<{ close: []; done: [] }>();
 const first = props.batches[0]!;
 const step = ref<"input" | "confirm">("input");
 const busy = ref(false);
-const lines = reactive(props.batches.map((b) => ({ batch: b, amount: b.refine?.expectedYield ?? "" })));
+const lines = reactive(props.batches.map((b) => ({ batch: b, amount: b.quantity })));
 
-// "0" is allowed here: a tiny ore row may yield nothing
+// "0" is allowed here: a tiny row may yield nothing
 const amt = (text: string) => (/^\s*0+([.,]0*)?\s*$/.test(text) ? "0" : amountOf(text, "SCU"));
 const valid = computed(() => lines.every((l) => amt(l.amount) !== null));
 
@@ -31,7 +31,7 @@ const buttons = computed<ConfirmButton[]>(() => step.value === "input"
   : [
       { label: t("common.cancel"), kind: "outline", value: "cancel" },
       { label: t("common.back"), kind: "outline", value: "back", side: "left" },
-      { label: t("common.confirm"), kind: "primary", value: "confirm", disabled: busy.value },
+      { label: t("refinery.store"), kind: "primary", value: "confirm", disabled: busy.value },
     ]);
 
 function choose(value: string) {
@@ -79,10 +79,10 @@ async function book() {
     @choose="choose"
   >
     <div v-if="step === 'input'" class="done-lines" @keydown.enter="onEnter">
-      <span class="field">{{ t("field.ore") }}</span>
-      <span class="field">{{ t("refinery.col.refined") }}</span>
+      <span class="field">{{ t("field.material") }}</span>
+      <span class="field">{{ t("refinery.col.received") }}</span>
       <template v-for="l in lines" :key="l.batch.id">
-        <span class="ore">{{ l.batch.material }} · {{ qText(l.batch.quality) }} · {{ qty(l.batch.quantity, l.batch.unit) }}</span>
+        <span class="material">{{ l.batch.material }} · {{ qText(l.batch.quality) }} · {{ qty(l.batch.quantity, l.batch.unit) }}</span>
         <span class="with-unit">
           <input v-model="l.amount" class="input" :class="{ invalid: l.amount.trim() !== '' && amt(l.amount) === null }" type="text" inputmode="decimal" />
           <span class="unit">{{ unitText("SCU") }}</span>
@@ -95,7 +95,7 @@ async function book() {
         <span class="dim">{{ l.batch.material }} · {{ qty(l.batch.quantity, l.batch.unit) }} →</span>
         {{ qty(amt(l.amount) ?? "", "SCU") }} · {{ qText(l.batch.quality) }}
       </span>
-      <span><span class="dim">{{ t("refinery.result") }}:</span> {{ first.location }} · {{ t("stock.pers") }}</span>
+      <span><span class="dim">{{ t("refinery.storedAt") }}:</span> {{ first.location }} · {{ t("stock.pers") }}</span>
     </div>
   </ConfirmDialog>
 </template>
@@ -108,7 +108,7 @@ async function book() {
   align-items: center;
 }
 
-.ore {
+.material {
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -176,6 +176,13 @@
       "when": 1791624534754,
       "tag": "0024_board_subtitle",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791627494727,
+      "tag": "0025_refined_jobs",
+      "breakpoints": true
     }
   ]
 }

@@ -54,8 +54,8 @@ export const member = app.table('member', {
  * One row = one batch. Every batch belongs to one user (who has it in game; one character, one
  * inventory) and only that user changes it. Visible to its owner only, usable without any org,
  * unless shared: app.stock_share offers it in any number of the owner's orgs. Booking the same merge key again adds to
- * the quantity; a batch that reaches 0 is deleted. Rules a CHECK cannot express (refining only for ores, only crafting
- * inputs, selectable and non-retired locations/subjects) are enforced by the stock service.
+ * the quantity; a batch that reaches 0 is deleted. Rules a CHECK cannot express (only crafting inputs, never ores,
+ * selectable and non-retired locations/subjects) are enforced by the stock service.
  */
 export const stockBatch = app.table('stock_batch', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
@@ -70,13 +70,12 @@ export const stockBatch = app.table('stock_batch', {
   // SCU for resources, pieces for items
   quantity: quantity('quantity').notNull(),
   // Refinery jobs only (all NULL for stored stock; NULL on jobs from before migration 0009). A job is a work order:
-  // its ore batches share `refine_job` and carry the same start and end. Ends at and expected yield (per ore batch)
-  // are estimates the user may overwrite with the terminal's values (the refining method only prefills them and is
-  // not stored).
+  // its batches share `refine_job` and carry the same start and end. Each batch is a refined material with the expected
+  // yield as its quantity (ores are not booked since migration 0025); yield and end are estimates the terminal may
+  // correct later.
   refineJob: uuid('refine_job'),
   refineStartedAt: timestamp('refine_started_at', { withTimezone: true }),
   refineEndsAt: timestamp('refine_ends_at', { withTimezone: true }),
-  refineExpected: quantity('refine_expected'),
   // A part split off by its owner (a random UUID): kept apart from the batch it came from, so it can be
   // shared on its own; NULL for everything booked normally
   lot: uuid('lot'),
@@ -91,11 +90,10 @@ export const stockBatch = app.table('stock_batch', {
   check('stock_batch_quantity', sql`${t.quantity} > 0`),
   check('stock_batch_item_pieces', sql`${t.kind} = 'resource' OR ${t.quantity} = trunc(${t.quantity})`),
   check('stock_batch_refine_job', sql`${t.state} = 'refining' OR (${t.refineStartedAt} IS NULL
-    AND ${t.refineEndsAt} IS NULL AND ${t.refineExpected} IS NULL)`),
+    AND ${t.refineEndsAt} IS NULL)`),
   check('stock_batch_refine_ends', sql`${t.refineEndsAt} IS NULL OR ${t.refineEndsAt} >= ${t.refineStartedAt}`),
-  check('stock_batch_refine_expected', sql`${t.refineExpected} IS NULL OR ${t.refineExpected} >= 0`),
   check('stock_batch_refine_job_id', sql`(${t.state} = 'refining') = (${t.refineJob} IS NOT NULL)`),
-  // The job keeps two refinery jobs with the same ore, place and quality apart, the lot a split-off part
+  // The job keeps two refinery jobs with the same material, place and quality apart, the lot a split-off part
   // (stored stock: both NULL, merges)
   unique('stock_batch_merge_key').on(
     t.ownerUserId, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineJob, t.lot,

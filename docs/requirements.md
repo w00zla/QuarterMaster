@@ -32,8 +32,8 @@ Only the structure is fixed for now; individual settings are added when a featur
 
 ## Bot interaction
 
-- **Options search, modals ask, panels show** (decided 2026-10-09, replaces "everything as options"): a command's options are only what has to be searched (material, batch, blueprint, location, member, job), at most two, all with autocomplete; never booleans, amounts or qualities. Everything typed or decided (amount, quality, sharing, duration, ore rows) comes in a **modal** opened right after the command, with defaults from the context (amount "all", the server's org ticked under "Share in"). Lists and results are ephemeral **panels** (Components V2) with scope buttons, paging and a link to the user web app. Lookups that only show something (`find`, `who`) stay plain options.
-- **Submitting a modal is the confirmation** (like the web app's dialogs): no Confirm button afterwards. The modal shows what it acts on ("**Metal** Q500", then "1 SCU · Station · shared in Org"); the amount it showed is sent along as `expected`, so a batch that changed meanwhile is refused. Exception: the refinery start goes through a preview (its ore lines are resolved first).
+- **Options search, modals ask, panels show** (decided 2026-10-09, replaces "everything as options"): a command's options are only what has to be searched (material, batch, blueprint, location, member, job), at most two, all with autocomplete; never booleans, amounts or qualities. Everything typed or decided (amount, quality, sharing, duration, material rows) comes in a **modal** opened right after the command, with defaults from the context (amount "all", the server's org ticked under "Share in"). Lists and results are ephemeral **panels** (Components V2) with scope buttons, paging and a link to the user web app. Lookups that only show something (`find`, `who`) stay plain options.
+- **Submitting a modal is the confirmation** (like the web app's dialogs): no Confirm button afterwards. The modal shows what it acts on ("**Metal** Q500", then "1 SCU · Station · shared in Org"); the amount it showed is sent along as `expected`, so a batch that changed meanwhile is refused. Exception: the refinery start goes through a preview (its material lines are resolved first).
 - **Results** take two or three lines and say nothing twice: what happened (amount bold, material, quality), the batch as it is now (place · shares; its amount only where it differs from what was booked, e.g. added to an existing batch or what is left; or "empty"), and in small print the material in your stock, only where that is more than this batch.
 - Modals hold at most five inputs and cannot be opened in answer to a modal; anything with more steps runs through a button on the panel. A modal must be the first answer within 3 s: before it only cached lookups and single-row reads.
 - Everything is ephemeral; the user web app does what needs a table (split, merge, crafting check, history). Later: the web app as a Discord Activity (after its go-live).
@@ -53,12 +53,13 @@ Only the structure is fixed for now; individual settings are added when a featur
 
 ## Refinery in the bot
 
-- `/qm-refinery start station` opens a modal: duration (optional, as on the terminal: "2h 30m", "45m", minutes; empty = open) and the ores as text, **one line per ore**: `<name> <quality> <SCU> [expected yield]` (numbers read from the right, names may be abbreviated: "heph raw", "HEPH (RAW)", both languages; up to 30 lines). No refining method in the bot: no estimates there (decided 2026-10-09). The yield stays optional (in a hurry in game).
+- `/qm-refinery start station` opens a modal: duration (optional, as on the terminal: "2h 30m", "45m", minutes; empty = open) and the refined materials as text, **one line per material**: `<name> <quality> <expected yield SCU>` (numbers read from the right, names may be abbreviated as long as they are unique, both languages; up to 30 lines). No ores, no refining method, no estimates: the yield is what the terminal shows (decided 2026-10-10).
 - Submitting shows a **preview** (recognized rows, faulty lines with the reason); **Register** books the work order exactly as previewed, **Edit** reopens the modal with the text, **Cancel** drops it. The draft lives in memory (`state.ts`, 10 min).
-- `/qm-refinery time job` sets or clears the time left of a running job (end = now + time left; no journal, no history: no stock changes). The web app and the companion's API (`POST /api/refinery/duration`) do the same; the companion is meant to set it from the terminal's PROCESSING screen (not built).
-- `/qm-refinery done job` opens a modal prefilled with one line per ore ("Quantanium 820: 5.69"); only the numbers are the user's, the lines are checked in order; submitting books.
-- `/qm-refinery list` shows your running jobs (station, countdown, "ready" or "duration open", ores).
-- The companion app's OCR fills the same work order (station, rows, end) as a draft the user registers.
+- `/qm-refinery time job` sets or clears the time left of a running job (end = now + time left; no journal, no history: no stock changes). The web app and the companion's API (`POST /api/refinery/duration`) do the same; the companion sets it from the terminal's work order overview.
+- `/qm-refinery done job` opens a modal prefilled with one line per material and its expected yield ("Quantainium 820: 5.69"); only the numbers are the user's, the lines are checked in order; submitting stores them.
+- `/qm-refinery remove job` drops a job that will not come out (cancelled, lost to a game patch): a panel names it, **Remove** confirms.
+- `/qm-refinery list` shows your running jobs (station, countdown, "ready" or "duration open", materials with their yields).
+- The companion app syncs the jobs of a station from the terminal's work order overview: yield and time left of known jobs are updated by themselves; new jobs, finished ones (to store) and jobs missing at the terminal (to remove) are proposals the user confirms.
 
 ## Stock
 
@@ -69,7 +70,7 @@ Only the structure is fixed for now; individual settings are added when a featur
 - **Giving** hands a batch (or part of it) to another user: only an active member of the org the action happens in; no acceptance step; the recipient gets it unshared and learns of it through the history notices.
 - **Unshared stock is private:** only its owner sees it (not the logs channel). Shared stock is visible to the org's members; `find`/`list` for other people show what they share only.
 - **Views:** your own stock = everything you own, shared batches marked with their org; an org = what its active members shared there; "All" (web app) = both. The overview counts your shared stock in your own tiles and in the org's.
-- **Bookable:** resources used in any recipe, their ores (via the refinery only), and items used in recipes (harvestables). No crafted products.
+- **Bookable:** resources used in any recipe and items used in recipes (harvestables). No ores (decided 2026-10-10: not usable for crafting, hardly ever stored; the refinery books the refined materials). No crafted products.
 - **Amounts** are entered and shown in SCU for resources (decimal point or comma), pieces for items. Smaller units (cSCU/µSCU) may follow.
 - **Corrections:** `adjust` sets a batch to a counted amount (journal action `adjust` with the signed difference); owner only, like everything.
 - **Removing:** without an amount the whole batch is removed.
@@ -80,11 +81,12 @@ Only the structure is fixed for now; individual settings are added when a featur
 - **Locations are mandatory** and come from the game data (`StarMapObject` records: stations and landing zones with a name; not jump points, not unfinished "WIP" objects). No ships as locations. Shown as "Name · planet/moon · system".
 - A batch has a **state**: `stored` or `refining`.
   - **Refinery jobs are always personal and unshared** (each player manages their own jobs); the refined result can be shared afterwards.
-  - Ores exist in stock **only** as `refining` (stored ore would only sit temporarily in ships or bags, which are not tracked); refined resources only as `stored`. Ores come in via `/qm-refinery start` only, never via `/qm-stock add`.
+  - A `refining` batch is a refined material with its **expected yield** as quantity. It is **not stock yet** (a game patch may still take it): totals, the crafting check and the org board count `stored` batches only.
   - `refining` only at **refineries**: the locations of the UEX refinery terminals (community data, see "Third-party data"), matched to catalog locations by name; while there is no UEX data yet, every station counts. The game data has no refinery flag.
-  - A refinery job is a **work order** as in the game: one refinery, one duration, and several ores (rarely just one; each ore and quality is a row, i.e. a batch of its own). Bot and web app always enter jobs this way.
-  - Completing a refinery job: always the whole work order (the game hands it out at once). Per row the user enters the refined quantity as shown in the game ("0" when nothing came out); the quality stays the ore's (input = output, kept simple). Every ore batch of the job is consumed and a `stored` batch of the refined resource is created at the same location (journal rows with one group ID for the job). The refined quantity is prefilled with the row's expected yield, an estimate the user corrects to what the game shows.
-  - Basis for a later ore management (ETA, yield statistics). The refining method is not stored (decided 2026-10-08).
+  - A refinery job is a **work order** as in the game: one refinery, one duration, and several materials as the terminal's overview lists them (each material and quality is a row, i.e. a batch of its own). Bot, web app and companion always enter jobs this way.
+  - Completing a refinery job: always the whole work order (the game hands it out at once). Per row the user enters the quantity handed out ("0" when nothing came out), prefilled with the expected yield; the quality stays. Each batch becomes `stored` at the same location (journal rows with one group ID for the job).
+  - **Removing** a job (it will not come out): always the whole work order, its batches go (journal `remove`, history refinery remove).
+  - The refining method is not stored (decided 2026-10-08), and there are no estimates (decided 2026-10-10).
 
 ## Discord setup
 
@@ -139,16 +141,15 @@ Two web apps, **separate processes** (and separate from the bot) sharing one cod
 ### Display in the user web app
 
 - **Quality levels:** below 500 "⊘" (not usable), one "★" per 100 from 500 to 999, "♛" at 1000, shown before the value without "Q" ("★★★ 720"). Table columns keep the values aligned (the level right before a fixed four-digit field). The quality filter (stock, refinery) works in these tiers: a range slider "Quality" from ⊘ to ♛, the value range in parentheses ("★★–★★★★ (600–899)"). The bot still shows "Q820".
-- Refinery jobs: a table with one group per work order (station, totals, time left; the ores below), with the stock table's filters; the refinery picker and every ore row show the refinery's **UEX yield bonus** for the ore ("Bonus +5 %").
-- **Refinery job estimates:** starting a job offers an optional **method** (decided 2026-10-08: only to prefill, never stored); picking one prefills the duration (from the job's total SCU) and each ore row's expected yield from the method's community values (yield %, time per SCU) and the station bonus, and the user may overwrite them (e.g. with the terminal's quote). Duration and expected yields are stored with the job: the table shows expected yields and the time left ("ready" once over); finishing a job starts from the expected yields (the quality stays the ore's). Two jobs never merge (the same ore, place and quality within one job add up). Estimates only: the real numbers are computed by the game server.
+- Refinery jobs: a table with one group per work order (station, total yield, time left; the materials below with their expected yields), with the stock table's filters; the refinery picker and every row show the refinery's **UEX yield bonus** for the material ("Bonus +5 %", reported by UEX per ore). Starting a job takes station, an optional duration and the materials with quality and expected yield as the terminal shows them (no method, no estimates, decided 2026-10-10). Two jobs never merge (the same material, place and quality within one job add up). Actions per job: time left, done (stores it), remove.
 - **Adding** (stock, refinery job, blueprint) happens in a toggle panel below the view's head, without a confirmation (the toast says what was booked), with Clear; a successful add closes the panel. Remove, move, adjust, finishing a job and removing a blueprint keep their confirmation dialog; remove and move start with "everything" checked.
 - Dialog buttons always in one row in the footer; table actions are icon buttons; table filters have a neutral placeholder ("Filter…").
 
 ## Third-party data
 
-- **UEX** (community reports, not game data; bearer token): refinery yield bonuses per terminal × ore and the refining methods, pulled every hour. Raw responses are kept as history (a new row only when the content changed).
+- **UEX** (community reports, not game data; bearer token): refinery yield bonuses per terminal × ore (shown for the ore's refined material) and the refining methods, pulled every hour. Raw responses are kept as history (a new row only when the content changed).
 - Used for: which locations have a refinery, and the yield bonus shown in the web app.
-- **Refining method values** (yield %, time per SCU) exist neither in the game data nor at UEX: measured from in-game quotes (since migration `0015`; the scminer.rocks seed of `0009` was far off) and stored statically (`ext.refining_method`, seeded by a migration, corrected by later ones). Costs are not kept.
+- **Refining method values** (yield %, time per SCU) exist neither in the game data nor at UEX: measured from in-game quotes (since migration `0015`; the scminer.rocks seed of `0009` was far off) and stored statically (`ext.refining_method`, seeded by a migration, corrected by later ones). Costs are not kept. Shown in the admin UI only: the web app no longer estimates jobs (decided 2026-10-10).
 
 ## Crafting check
 

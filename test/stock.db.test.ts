@@ -8,8 +8,8 @@ import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
-import { pickableBatches, stockList } from '../src/stock/lookup.ts';
-import { add, adjust, merge, move, refineDone, refineSetDuration, refineStart, remove, share, split, StockError, type Actor, type StockErrorCode } from '../src/stock/service.ts';
+import { materialTotal, pickableBatches, stockList } from '../src/stock/lookup.ts';
+import { add, adjust, merge, move, refineDone, refineRemove, refineSetDuration, refineStart, remove, share, split, StockError, type Actor, type StockErrorCode } from '../src/stock/service.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -74,14 +74,14 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await refused(add(db, zed, { ...metal, quality: 500, amount: '3', org: true }), 'notAllowed');
   });
 
-  it('refuses bad input: subject, location, amount, quality, ores', async () => {
+  it('refuses bad input: subject, location, amount, quality, ores (never booked)', async () => {
     await refused(add(db, mia, { ...metal, uuid: '10000000-0000-0000-0000-0000000000ee', quality: 1, amount: '1' }), 'unknownSubject');
     await refused(add(db, mia, { ...metal, uuid: 'nope', quality: 1, amount: '1' }), 'unknownSubject');
     await refused(add(db, mia, { ...metal, locationUuid: U.star, quality: 1, amount: '1' }), 'unknownLocation');
     await refused(add(db, mia, { ...metal, quality: 1001, amount: '1' }), 'invalidQuality');
     await refused(add(db, mia, { ...metal, quality: 1, amount: '0' }), 'invalidAmount');
     await refused(add(db, mia, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 1, amount: '1.5' }), 'invalidAmount');
-    await refused(add(db, mia, { ...metal, uuid: U.ore, quality: 1, amount: '1' }), 'oreViaRefinery');
+    await refused(add(db, mia, { ...metal, uuid: U.ore, quality: 1, amount: '1' }), 'notBookable');
     const gem = await add(db, mia, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 300, amount: '7' });
     assert.deepEqual([gem.batch!.kind, gem.batch!.itemUuid, gem.batch!.quantity], ['item', U.gem, '7.000000']);
   });
@@ -98,7 +98,7 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
       await refused(remove(db, mia, { batchId: b.id, amount: '1', expected }), 'notAllowed');
       await refused(adjust(db, mia, { batchId: b.id, amount: '1', expected }), 'notAllowed');
     }
-    const job = await refineStart(db, max, { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 300, amount: '4' }] });
+    const job = await refineStart(db, max, { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 300, amount: '4' }] });
     const jobBatch = job.batches[0]!;
     await refused(move(db, mia, { batchId: jobBatch.id, amount: '1', toLocationUuid: STATION2 }), 'notAllowed');
     await refused(share(db, mia, { batchId: jobBatch.id, guildIds: [G] }), 'notAllowed');
@@ -207,32 +207,44 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     assert.deepEqual([alone.batch!.lot, alone.batch!.locationUuid, await sharesOf(alone.batch!.id)], [null, STATION2, [G]]);
   });
 
-  it('refinery: personal jobs, completion replaces ore with the refined resource', async () => {
+  it('refinery: personal jobs of refined materials, completion stores them', async () => {
     const at = { locationUuid: U.station };
-    await refused(refineStart(db, mia, { ...at, rows: [{ oreUuid: U.metal, quality: 600, amount: '8' }] }), 'notOre');
+    await refused(refineStart(db, mia, { ...at, rows: [{ resourceUuid: U.ore, quality: 600, amount: '8' }] }), 'notBookable');
     await refused(refineStart(db, mia, { ...at, rows: [] }), 'invalidAmount');
+    await refused(refineStart(db, mia, { ...at, rows: [{ resourceUuid: U.metal, quality: 600, amount: '0' }] }), 'invalidAmount');
     // A quality no other test books, so the result makes a new batch
-    const started = await refineStart(db, mia, { ...at, rows: [{ oreUuid: U.ore, quality: 611, amount: '8' }] });
+    const totalBefore = await materialTotal(db, { personalOf: MIA }, U.metal);
+    const started = await refineStart(db, mia, { ...at, rows: [{ resourceUuid: U.metal, quality: 611, amount: '8' }] });
     const job = started.batches[0]!;
-    assert.deepEqual([job.state, job.resourceUuid], ['refining', U.ore]);
+    assert.deepEqual([job.state, job.resourceUuid, job.quantity], ['refining', U.metal, '8.000000']);
+    assert.deepEqual(started.journal.map((j) => [j.action, j.state, j.delta]), [['add', 'refining', '8.000000']]);
     await refused(share(db, mia, { batchId: job.id, guildIds: [G] }), 'refiningFixed');
+    // Not stock yet: the material's total leaves the job out
+    assert.equal(await materialTotal(db, { personalOf: MIA }, U.metal), totalBefore);
     const finish = (amount: string) => ({ jobId: started.jobId, rows: [{ batchId: job.id, amount }] });
     await refused(refineDone(db, olga, finish('5')), 'notAllowed');
     const before = await batchCount();
     const done = await refineDone(db, mia, finish('5,6'));
     const result = done.batches[0]!;
-    // The refinery keeps the ore's quality
-    assert.deepEqual([result.resourceUuid, result.state, result.quality, result.locationUuid], [U.metal, 'stored', 611, U.station]);
+    // Stored at the station in its quality, with what came out
+    assert.deepEqual([result.resourceUuid, result.state, result.quality, result.locationUuid, result.quantity], [U.metal, 'stored', 611, U.station, '5.600000']);
     assert.deepEqual(done.journal.map((j) => [j.action, j.resourceUuid, j.state, j.delta]), [
-      ['refine_out', U.ore, 'refining', '-8.000000'], ['refine_in', U.metal, 'stored', '5.600000'],
+      ['refine_out', U.metal, 'refining', '-8.000000'], ['refine_in', U.metal, 'stored', '5.600000'],
     ]);
     assert.equal(done.journal[0]!.groupId, done.journal[1]!.groupId);
     assert.equal(await batchCount(), before);
     await refused(refineDone(db, mia, finish('1')), 'batchNotFound');
   });
 
+  it('refinery: completion merges into a stored batch of the same material, quality and place', async () => {
+    const stored = (await add(db, mia, { ...metal, quality: 614, amount: '1' })).batch!;
+    const started = await refineStart(db, mia, { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 614, amount: '3' }] });
+    const done = await refineDone(db, mia, { jobId: started.jobId, rows: [{ batchId: started.batches[0]!.id, amount: '2.5', expected: '3' }] });
+    assert.deepEqual([done.batches[0]!.id, done.batches[0]!.quantity], [stored.id, '3.500000']);
+  });
+
   it('refinery: the time left of a job can be set later or cleared, by its owner only', async () => {
-    const started = await refineStart(db, mia, { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 612, amount: '2' }, { oreUuid: U.ore, quality: 613, amount: '1' }] });
+    const started = await refineStart(db, mia, { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 612, amount: '2' }, { resourceUuid: U.metal, quality: 613, amount: '1' }] });
     const set = { jobId: started.jobId, durationSeconds: 3600 };
     await refused(refineSetDuration(db, olga, set), 'notAllowed');
     await refused(refineSetDuration(db, mia, { ...set, durationSeconds: 0 }), 'invalidDuration');
@@ -248,31 +260,29 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await refineDone(db, mia, { jobId: started.jobId, rows: started.batches.map((b) => ({ batchId: b.id, amount: '0' })) });
   });
 
-  it('refinery: a job is a work order of several ores with end and expected yields', async () => {
+  it('refinery: a job is a work order of several materials with an end and their expected yields', async () => {
     const at = { locationUuid: U.station };
-    const row = { oreUuid: U.ore, quality: 610, amount: '4' };
+    const row = { resourceUuid: U.metal, quality: 610, amount: '4' };
     await refused(refineStart(db, mia, { ...at, durationSeconds: 0, rows: [row] }), 'invalidDuration');
     await refused(refineStart(db, mia, { ...at, durationSeconds: 1.5, rows: [row] }), 'invalidDuration');
-    await refused(refineStart(db, mia, { ...at, rows: [{ ...row, expectedYield: 'x' }] }), 'invalidAmount');
-    // Two qualities of the ore, the first one twice (adds up within the job), one row yields nothing
+    await refused(refineStart(db, mia, { ...at, rows: [{ ...row, amount: 'x' }] }), 'invalidAmount');
+    // Two qualities, the first one twice (adds up within the job)
     const a = await refineStart(db, mia, { ...at, durationSeconds: 3600, rows: [
-      { ...row, expectedYield: '1,7' }, { ...row, amount: '1', expectedYield: '0,3' }, { ...row, quality: 500, amount: '0.02', expectedYield: '0' },
+      { ...row, amount: '1,7' }, { ...row, amount: '0,3' }, { ...row, quality: 500, amount: '0.02' },
     ] });
     assert.equal(a.batches.length, 2);
     assert.equal(a.journal.length, 3);
-    // Same ore, place and quality in another job: not merged into the first
+    // Same material, place and quality in another job: not merged into the first
     const b = await refineStart(db, mia, { ...at, rows: [row] });
     assert.notEqual(b.jobId, a.jobId);
     const listed = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).filter((p) => p.refine);
     const ofA = listed.filter((p) => p.refine!.jobId === a.jobId);
-    assert.deepEqual(ofA.map((p) => [p.batch.quality, p.batch.quantity, p.refine!.expected]).sort(), [
-      [500, '0.020000', '0.000000'], [610, '5.000000', '2.000000'],
-    ]);
+    assert.deepEqual(ofA.map((p) => [p.batch.quality, p.batch.quantity]).sort(), [[500, '0.020000'], [610, '2.000000']]);
     const first = ofA[0]!.refine!;
     assert.equal(new Date(first.endsAt!).getTime() - new Date(first.startedAt!).getTime(), 3600_000);
     assert.ok(ofA.every((p) => p.refine!.startedAt === first.startedAt && p.refine!.endsAt === first.endsAt));
     const second = listed.find((p) => p.refine!.jobId === b.jobId)!.refine!;
-    assert.deepEqual([second.endsAt, second.expected], [null, null]);
+    assert.equal(second.endsAt, null);
     assert.ok(second.startedAt);
 
     // Finishing takes exactly the job's batches
@@ -281,25 +291,58 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await refused(refineDone(db, mia, { jobId: a.jobId, rows: [
       { batchId: big.id, amount: '2' }, { batchId: tiny.id, amount: '0', expected: '1' },
     ] }), 'batchChanged');
+    const last = Number((await db.execute<{ n: string }>(sql`SELECT coalesce(max(id), 0)::text AS n FROM app.history`))[0]!.n);
     const done = await refineDone(db, mia, { jobId: a.jobId, rows: [
-      { batchId: big.id, amount: '2', expected: '5' }, { batchId: tiny.id, amount: '0' },
+      { batchId: big.id, amount: '2.1', expected: '2' }, { batchId: tiny.id, amount: '0' },
     ] });
-    // The tiny row only consumed its ore; one journal group for the whole job
+    // Nothing came out of the tiny row: only taken off; one journal group for the whole job
     assert.deepEqual(done.journal.map((j) => j.action), ['refine_out', 'refine_in', 'refine_out']);
     assert.equal(new Set(done.journal.map((j) => j.groupId)).size, 1);
     assert.equal(done.batches.length, 1);
-    // Stored stock has no job fields, and the refined result is stored stock
+    const history = await db.execute<{ action: string; details: Record<string, unknown> }>(sql`
+      SELECT action, details FROM app.history WHERE id > ${last} ORDER BY id`);
+    assert.deepEqual(history.map((h) => [h.action, h.details.amount, h.details.expectedYield, h.details.jobId]), [
+      ['done', '2.1', '2.000000', a.jobId], ['done', '0', '0.020000', a.jobId],
+    ]);
+    // Stored stock has no job fields
     const stored = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).find((p) => p.batch.id === done.batches[0]!.id)!;
     assert.equal(stored.refine, null);
     const left = listed.find((p) => p.refine!.jobId === b.jobId)!.batch;
     await refineDone(db, mia, { jobId: b.jobId, rows: [{ batchId: left.id, amount: '3' }] });
   });
 
+  it('refinery: a job that will not come out is removed as a whole, by its owner only', async () => {
+    const started = await refineStart(db, mia, { locationUuid: U.station, rows: [
+      { resourceUuid: U.metal, quality: 615, amount: '2' }, { resourceUuid: U.metal, quality: 616, amount: '1' },
+    ] });
+    const rows = started.batches.map((b) => ({ batchId: b.id, expected: b.quantity }));
+    const job = { jobId: started.jobId, rows };
+    await refused(refineRemove(db, olga, job), 'notAllowed');
+    await refused(refineRemove(db, mia, { ...job, rows: rows.slice(0, 1) }), 'batchChanged');
+    await refused(refineRemove(db, mia, { ...job, rows: [rows[0]!, { ...rows[1]!, expected: '5' }] }), 'batchChanged');
+    await refused(refineRemove(db, mia, { ...job, jobId: '00000000-0000-4000-8000-000000000000' }), 'batchNotFound');
+    // A stored batch is no part of the job
+    const plain = (await add(db, mia, { ...metal, quality: 617, amount: '1' })).batch!;
+    await refused(refineRemove(db, mia, { jobId: started.jobId, rows: [...rows, { batchId: plain.id }] }), 'batchChanged');
+    const last = Number((await db.execute<{ n: string }>(sql`SELECT coalesce(max(id), 0)::text AS n FROM app.history`))[0]!.n);
+    const before = await batchCount();
+    const removed = await refineRemove(db, mia, job);
+    assert.equal(await batchCount(), before - 2);
+    assert.deepEqual(removed.batches, []);
+    assert.deepEqual(removed.journal.map((j) => [j.action, j.state, j.delta]), [['remove', 'refining', '-2.000000'], ['remove', 'refining', '-1.000000']]);
+    const history = await db.execute<{ category: string; action: string; details: Record<string, unknown> }>(sql`
+      SELECT category, action, details FROM app.history WHERE id > ${last} ORDER BY id`);
+    assert.deepEqual(history.map((h) => [h.category, h.action, h.details.amount, h.details.jobId]), [
+      ['refinery', 'remove', '2.000000', started.jobId], ['refinery', 'remove', '1.000000', started.jobId],
+    ]);
+    await refused(refineRemove(db, mia, job), 'batchNotFound');
+  });
+
   it('refinery: only at UEX refineries once there is UEX data', async () => {
     const yields = [{ id_terminal: 1, terminal_name: 'Refinement Center - Elsewhere', star_system_name: 'Nyx', space_station_name: 'Elsewhere' }];
     await db.execute(sql`INSERT INTO ext.snapshot (source, endpoint, content_hash, data)
       VALUES ('uex', 'refineries_yields', ${'a'.repeat(64)}, ${JSON.stringify(yields)}::jsonb)`);
-    const job = { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 600, amount: '1' }] };
+    const job = { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 600, amount: '1' }] };
     await refused(refineStart(db, mia, job), 'notRefinery');
     await db.execute(sql`DELETE FROM ext.snapshot`);
     assert.ok((await refineStart(db, mia, job)).batches.length);
@@ -325,7 +368,7 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await move(db, app, { batchId: b.id, amount: '1', toOwnerUserId: MIA });
     await remove(db, web, { batchId: b.id, amount: '1' });
     await refused(remove(db, web, { batchId: b.id, amount: '99' }), 'insufficient');
-    const job = await refineStart(db, web, { locationUuid: U.station, durationSeconds: 60, rows: [{ oreUuid: U.ore, quality: 602, amount: '3' }] });
+    const job = await refineStart(db, web, { locationUuid: U.station, durationSeconds: 60, rows: [{ resourceUuid: U.metal, quality: 602, amount: '3' }] });
     await refineDone(db, web, { jobId: job.jobId, rows: [{ batchId: job.batches[0]!.id, amount: '2' }] });
 
     const found = await db.execute<{ source: string; category: string; action: string; actor: string; owner: string; to: string | null;
@@ -338,12 +381,12 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
       ['webapp', 'stock', 'share', MAX, MAX, null, G, U.metal],
       ['companion', 'stock', 'give', MAX, MAX, MIA, G, U.metal],
       ['webapp', 'stock', 'remove', MAX, MAX, null, null, U.metal],
-      ['webapp', 'refinery', 'start', MAX, MAX, null, null, U.ore],
+      ['webapp', 'refinery', 'start', MAX, MAX, null, null, U.metal],
       ['webapp', 'refinery', 'done', MAX, MAX, null, null, U.metal],
     ]);
     assert.deepEqual([found[1]!.details.from, found[1]!.details.quality], ['5.000000', 301]);
-    assert.deepEqual([found[5]!.details.durationSeconds, found[6]!.details.oreUuid, found[6]!.details.oreAmount, found[6]!.details.quality],
-      [60, U.ore, '3.000000', 602]);
+    assert.deepEqual([found[5]!.details.durationSeconds, found[5]!.details.amount, found[6]!.details.amount, found[6]!.details.expectedYield, found[6]!.details.quality],
+      [60, '3', '2', '3.000000', 602]);
     assert.deepEqual([found[5]!.details.jobId, found[6]!.details.jobId], [job.jobId, job.jobId]);
   });
 });

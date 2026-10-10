@@ -1,14 +1,15 @@
 <script setup lang="ts">
-// Refinery: your running jobs, one group per work order (station, time left, the ores below it),
-// with the stock table's filters; start one, finish one (always the whole work order). Jobs are always
-// personal, so this works the same without any org.
+// Refinery: your running jobs, one group per work order (station, time left, the refined materials with
+// their expected yields below it), with the stock table's filters; start one, finish one or remove one
+// (always the whole work order). Jobs are always personal, so this works the same without any org.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
+import type { OkResponse, RefineryRemoveRequest, StockBatch, StockListResponse } from "../../../src/webapp/api-types";
 import { formatMicros, toMicros } from "../../../src/planner/plan";
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
+import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import RangeSlider from "../components/RangeSlider.vue";
@@ -16,10 +17,10 @@ import RefineryDoneDialog from "../components/RefineryDoneDialog.vue";
 import RefineryStartForm from "../components/RefineryStartForm.vue";
 import RefineryTimeDialog from "../components/RefineryTimeDialog.vue";
 import { signedBonus, yieldValue } from "../catalog";
-import { compareBatches, hm, Q_TIER_MAX, qMark, qTier, qty, tierMark, tierQualities } from "../format";
+import { compareBatches, hm, Q_TIER_MAX, qMark, qText, qTier, qty, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
 import { coalesced, onServerMessage } from "../realtime";
-import { toastError } from "../toasts";
+import { toast, toastError } from "../toasts";
 
 const data = ref<StockListResponse | null>(null);
 const materialText = ref("");
@@ -34,8 +35,11 @@ function started() {
   showStart.value = false;
   void load();
 }
-// The ore batches of the job being finished
+// The batches of the job being finished
 const finishing = ref<StockBatch[] | null>(null);
+// The job waiting for the remove confirmation
+const removing = ref<Job | null>(null);
+const busy = ref(false);
 // The job whose time left is being set
 const timing = ref<{ jobId: string; location: string; endsAt: string | null } | null>(null);
 
@@ -78,11 +82,11 @@ interface Job {
   location: string;
   locationUuid: string;
   endsAt: string | null;
-  // Every ore batch of the job (finishing takes them all), and those the filters let through
+  // Every batch of the job (finishing and removing take them all), and those the filters let through
   all: StockBatch[];
   rows: StockBatch[];
+  // Sum of the expected yields
   total: string;
-  expected: string | null;
 }
 
 const jobs = computed(() => {
@@ -90,11 +94,9 @@ const jobs = computed(() => {
   for (const b of batches.value) by.set(b.refine!.jobId, [...(by.get(b.refine!.jobId) ?? []), b]);
   return [...by].map(([id, all]): Job => {
     const b = all[0]!;
-    const sum = (values: (string | null)[]) => formatMicros(values.reduce((s, v) => s + toMicros(v ?? "0"), 0n));
     return {
       id, location: b.location, locationUuid: b.locationUuid, endsAt: b.refine!.endsAt, all, rows: all,
-      total: sum(all.map((x) => x.quantity)),
-      expected: all.some((x) => x.refine!.expectedYield !== null) ? sum(all.map((x) => x.refine!.expectedYield)) : null,
+      total: formatMicros(all.reduce((sum, x) => sum + toMicros(x.quantity), 0n)),
     };
   });
 });
@@ -111,15 +113,14 @@ const filtered = computed(() => {
     .filter((j) => j.rows.length);
 });
 
-// --- the table: one group per job (station, totals, time left), its ores below ---------------------
+// --- the table: one group per job (station, total yield, time left), its materials below -----------
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: t("refinery.col.job"), width: 240 },
   { key: "quality", label: t("stock.col.quality"), width: 130 },
-  { key: "amount", label: t("stock.col.amount"), width: 120 },
-  { key: "expected", label: t("refinery.col.expected"), width: 110 },
+  { key: "amount", label: t("refinery.col.expected"), width: 120 },
   { key: "bonus", label: t("refinery.col.bonus"), width: 90 },
   { key: "ready", label: t("refinery.col.ready"), width: 130 },
-  { key: "actions", label: "", width: 80, sortable: false, fixed: true, sep: true },
+  { key: "actions", label: "", width: 110, sortable: false, fixed: true, sep: true },
 ]);
 const cols = useTableColumns("qm.webapp.columns.refinery", columns, { key: "ready", dir: "asc" });
 
@@ -128,7 +129,6 @@ function rowValue(b: StockBatch, key: string): string | number {
     case "material": return b.material;
     case "quality": return b.quality;
     case "amount": return Number(b.quantity);
-    case "expected": return Number(b.refine?.expectedYield ?? -1);
     // No UEX value sorts below every reported one
     case "bonus": return yieldValue(b.locationUuid, b.subjectUuid) ?? -Infinity;
     default: return "";
@@ -139,7 +139,6 @@ function jobValue(j: Job, key: string): string | number {
   switch (key) {
     case "material": return j.location;
     case "amount": return Number(j.total);
-    case "expected": return Number(j.expected ?? -1);
     // Jobs without an end sort after every timed one
     default: return j.endsAt ? Date.parse(j.endsAt) : Infinity;
   }
@@ -148,8 +147,8 @@ function jobValue(j: Job, key: string): string | number {
 const groups = computed(() => {
   const { key, dir } = cols.sort.value;
   const sign = dir === "asc" ? 1 : -1;
-  // Job columns order the jobs; ore columns order the ores within each job (jobs then by time left)
-  const jobKey = ["material", "amount", "expected", "ready"].includes(key) ? key : "ready";
+  // Job columns order the jobs; material columns order the materials within each job (jobs then by time left)
+  const jobKey = ["material", "amount", "ready"].includes(key) ? key : "ready";
   const jobSign = jobKey === key ? sign : 1;
   const cmp = (a: string | number, b: string | number) => (typeof a === "string" ? a.localeCompare(String(b), lang.value) : a - Number(b));
   return filtered.value
@@ -174,6 +173,32 @@ function left(j: Job): string | null {
 }
 
 const endsTitle = (j: Job) => (j.endsAt ? new Date(j.endsAt).toLocaleString(lang.value) : "");
+
+const removeButtons = computed<ConfirmButton[]>(() => [
+  { label: t("common.cancel"), kind: "outline", value: "cancel" },
+  { label: t("common.confirm"), kind: "danger", value: "confirm", disabled: busy.value },
+]);
+
+async function chooseRemove(value: string) {
+  const j = removing.value;
+  if (value !== "confirm" || !j) {
+    removing.value = null;
+    return;
+  }
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const body: RefineryRemoveRequest = { jobId: j.id, rows: j.all.map((b) => ({ batchId: b.id, expected: b.quantity })) };
+    await api<OkResponse>("/refinery/remove", { method: "POST", body });
+    toast(t("refinery.removed", { what: `${j.all.map((b) => b.material).join(", ")} · ${j.location}` }));
+    void load();
+  } catch (e) {
+    toastError(e);
+  } finally {
+    busy.value = false;
+    removing.value = null;
+  }
+}
 
 const bonusText = (b: StockBatch) => {
   const v = yieldValue(b.locationUuid, b.subjectUuid);
@@ -213,7 +238,7 @@ const bonusText = (b: StockBatch) => {
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
         <template v-for="j in groups" :key="j.id">
-          <!-- The job's row: station, totals, time left, finishing it -->
+          <!-- The job's row: station, total yield, time left, finishing or removing it -->
           <div class="row data-row group-row">
             <span class="group-name">
               <Icon name="drop" :size="15" class="type-icon" />
@@ -221,7 +246,6 @@ const bonusText = (b: StockBatch) => {
             </span>
             <span />
             <span class="num group-total">{{ qty(j.total, "SCU") }}</span>
-            <span class="num group-total">{{ j.expected ? qty(j.expected, "SCU") : "" }}</span>
             <span />
             <span :title="endsTitle(j)">
               <span v-if="left(j) === ''" class="tag ok">{{ t("refinery.readyNow") }}</span>
@@ -231,16 +255,16 @@ const bonusText = (b: StockBatch) => {
             <span class="sep actions">
               <button type="button" class="icon-btn" :title="t('refinery.setTime')" @click="timing = { jobId: j.id, location: j.location, endsAt: j.endsAt }"><Icon name="clock" :size="15" /></button>
               <button type="button" class="icon-btn" :title="t('refinery.done')" @click="finishing = j.all"><Icon name="check" :size="15" /></button>
+              <button type="button" class="icon-btn" :title="t('refinery.remove')" @click="removing = j"><Icon name="trash" :size="15" /></button>
             </span>
           </div>
           <div v-for="b in j.rows" :key="b.id" class="row data-row batch-row">
-            <span class="ore-name">
+            <span class="material-name">
               <Icon name="resource" :size="14" class="type-icon" />
               <InfoTip kind="material" :uuid="b.subjectUuid">{{ b.material }}</InfoTip>
             </span>
             <span class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
-            <span class="num">{{ b.refine?.expectedYield ? qty(b.refine.expectedYield, "SCU") : "" }}</span>
             <span class="num">{{ bonusText(b) }}</span>
             <span />
             <span class="sep" />
@@ -251,6 +275,11 @@ const bonusText = (b: StockBatch) => {
 
     <RefineryDoneDialog v-if="finishing" :batches="finishing" @close="finishing = null" @done="load" />
     <RefineryTimeDialog v-if="timing" v-bind="timing" @close="timing = null" />
+    <ConfirmDialog v-if="removing" :title="t('refinery.removeTitle')" :subtitle="removing.location" icon="trash" :buttons="removeButtons" @choose="chooseRemove">
+      <div class="summary">
+        <span v-for="b in removing.all" :key="b.id">{{ b.material }} · {{ qty(b.quantity, b.unit) }} · {{ qText(b.quality) }}</span>
+      </div>
+    </ConfirmDialog>
   </div>
 </template>
 
@@ -268,8 +297,8 @@ const bonusText = (b: StockBatch) => {
   min-width: 0;
 }
 
-/* An ore of the job, indented below it */
-.ore-name {
+/* A material of the job, indented below it */
+.material-name {
   display: flex;
   align-items: center;
   gap: 8px;

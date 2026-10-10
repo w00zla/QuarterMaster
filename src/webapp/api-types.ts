@@ -39,8 +39,8 @@ export interface CatalogMaterial {
   uuid: string;
   kind: 'resource' | 'item';
   name: string;
-  // Ores go through the refinery only (never "add")
-  isOre: boolean;
+  // The game's localization key of the name (lower case): the companion app looks it up in the player's language pack
+  nameKey: string | null;
   // SCU for resources, pieces for items
   unit: 'SCU' | 'pcs';
   // Items: the item type (for its icon) and its display name; null for resources
@@ -54,9 +54,11 @@ export interface CatalogLocation {
   label: string;
   // "Area18", plus the system where the name alone is ambiguous
   short: string;
+  // The game's localization key of the name (lower case), as for materials
+  nameKey: string | null;
   // Has a refinery (per UEX; every location while there is no UEX data yet)
   refinery: boolean;
-  // Refinery yield bonus in % per ore UUID (per UEX; only ores UEX reports for this refinery)
+  // Refinery yield bonus in % per refined material UUID (per UEX, reported per ore; only those UEX reports for this refinery)
   yields: Record<string, number>;
 }
 
@@ -79,25 +81,15 @@ export interface CatalogBlueprint {
   retired: boolean;
 }
 
-/** A refining method with its community values (estimates, see ext.refining_method). */
-export interface CatalogRefiningMethod {
-  code: string;
-  name: string;
-  yieldPct: number;
-  secondsPerScu: number;
-}
-
 export interface CatalogResponse {
   materials: CatalogMaterial[];
   locations: CatalogLocation[];
   blueprints: CatalogBlueprint[];
-  // Best yield first
-  methods: CatalogRefiningMethod[];
 }
 
 // --- stock -------------------------------------------------------------------------------------
 // All take &lang=de|en for material and location names and answer StockListResponse.
-// GET /api/stock?scope=personal                       your personal stock (incl. refinery jobs)
+// GET /api/stock?scope=personal                       your personal stock (incl. refinery jobs: state 'refining', not stock yet)
 // GET /api/stock?scope=org&guildId=G[&holder=U]       the org's stock (active members only)
 // GET /api/stock?scope=all                            both: your personal stock and every org's you are
 //                                                     an active member of
@@ -125,23 +117,21 @@ export interface StockBatch {
   holderName: string | null;
   // Whether you may change it: yours only
   canChange: boolean;
-  // Refinery jobs only; the fields are NULL on jobs started without them
+  // Refinery jobs only (the quantity is the expected yield); the fields are NULL on jobs started without them
   refine: StockRefine | null;
 }
 
 export interface StockRefine {
-  // The work order: the ore batches of one job share it (start and end are the job's)
+  // The work order: the batches of one job share it (start and end are the job's)
   jobId: string;
   // ISO timestamps
   startedAt: string | null;
   endsAt: string | null;
-  // Expected refined SCU of this ore batch (an estimate), exact decimal text
-  expectedYield: string | null;
 }
 
 export interface StockListResponse {
   batches: StockBatch[];
-  // Sum per material (subjectUuid -> exact decimal text) over the listed batches
+  // Sum per material (subjectUuid -> exact decimal text) over the listed stored batches (refinery jobs left out)
   totals: Record<string, string>;
 }
 
@@ -202,23 +192,23 @@ export interface StockShareRequest {
   guildIds: string[];
 }
 
-// Refinery jobs are always personal and always work orders: one station and time, several ores
-// (POST /api/refinery/start, /api/refinery/duration, /api/refinery/done)
+// Refinery jobs are always personal and always work orders: one station and time, several refined materials
+// with their expected yields (ores are not booked) (POST /api/refinery/start, /duration, /done, /remove)
 export interface RefineryStartRequest {
   locationUuid: string;
-  // Estimate for the whole job (the SPA prefills it from a refining method the user may pick): processing time;
-  // left out: the end stays open until set with /api/refinery/duration
+  // Estimate for the whole job (the terminal's time left); left out: the end stays open until set with
+  // /api/refinery/duration
   durationSeconds?: number;
-  // 1 to 30 ores
+  // 1 to 30 materials
   rows: RefineryStartRow[];
 }
 
 export interface RefineryStartRow {
-  oreUuid: string;
+  // A refined, bookable resource
+  resourceUuid: string;
   quality: number;
+  // The expected yield in SCU
   amount: string;
-  // Estimate, prefilled and editable: refined SCU of this ore ("0" allowed)
-  expectedYield?: string;
 }
 
 // Sets the time a running job still needs: end = now + durationSeconds (the terminal's time left); null clears it
@@ -227,7 +217,7 @@ export interface RefineryDurationRequest {
   durationSeconds: number | null;
 }
 
-// Finishes the whole job: one row per ore batch of the job (StockRefine.jobId), no more, no less
+// Finishes the whole job: one row per batch of the job (StockRefine.jobId), no more, no less; each is stored
 export interface RefineryDoneRequest {
   jobId: string;
   rows: RefineryDoneRow[];
@@ -235,10 +225,16 @@ export interface RefineryDoneRequest {
 
 export interface RefineryDoneRow {
   batchId: number;
-  // The refined quantity as the game shows it ("0": nothing came out); the quality is the ore's
+  // The quantity the game hands out ("0": nothing came out); the quality stays
   amount: string;
-  // The ore quantity shown
+  // The expected yield shown (the batch's quantity)
   expected: string;
+}
+
+// Removes the whole job (it will not come out): every batch of the job, no more, no less
+export interface RefineryRemoveRequest {
+  jobId: string;
+  rows: { batchId: number; expected: string }[];
 }
 
 // Every successful write answers { ok: true }; lists update through the realtime channel
@@ -292,7 +288,7 @@ export interface StockMetrics {
 
 export interface RefiningMetrics {
   jobs: number;
-  // Sum of the ore rows' expected yields in SCU; null when no row has one
+  // Sum of the jobs' expected yields in SCU; null without any job
   expected: string | null;
   // Distinct stations of the running jobs
   locations: number;
@@ -456,10 +452,10 @@ export interface HistoryEntry {
   toHolder: HistoryPerson | null;
   // Adjust: the quantity before
   from: string | null;
-  // Refinery start (estimates as entered)
+  // Refinery start: the duration entered; done: the yield expected (older rows: start's estimate)
   durationSeconds: number | null;
   expectedYield: string | null;
-  // Refinery done: the ore that went in
+  // Refinery done before ores were dropped (migration 0025): the ore that went in
   ore: string | null;
   oreAmount: string | null;
   oreQuality: number | null;

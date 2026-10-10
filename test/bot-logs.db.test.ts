@@ -70,7 +70,7 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     // Private: unshared stock, a refinery job, a blueprint
     const own = (await add(db, mia, { ...metal, quality: 700, amount: '5' })).batch!;
     await remove(db, mia, { batchId: own.id, amount: '1' });
-    await refineStart(db, mia, { locationUuid: U.station, rows: [{ oreUuid: U.ore, quality: 600, amount: '8' }] });
+    await refineStart(db, mia, { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 600, amount: '8' }] });
     await addBlueprint(db, MIA, U.blueprint, 'bot');
     // The org's offer: shared in G (with the booking), then also in H, used up partly, given in G
     const shared = (await add(db, mia, { ...metal, quality: 900, amount: '10', org: true })).batch!;

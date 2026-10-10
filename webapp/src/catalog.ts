@@ -45,30 +45,29 @@ const byUuid = <T extends { uuid: string }>(list: T[] | undefined) => new Map((l
 export const materials = computed(() => byUuid<CatalogMaterial>(catalog.value?.materials));
 export const locations = computed(() => byUuid<CatalogLocation>(catalog.value?.locations));
 export const blueprints = computed(() => byUuid<CatalogBlueprint>(catalog.value?.blueprints));
-// Refining methods by code, best yield first
-export const methods = computed(() => new Map((catalog.value?.methods ?? []).map((m) => [m.code, m])));
 
 const byName = (a: string, b: string) => a.localeCompare(b, lang.value);
 
 // Picker options, alphabetical
-export const materialOptions = computed(() => (catalog.value?.materials ?? []).filter((m) => !m.isOre)
+export const materialOptions = computed(() => (catalog.value?.materials ?? [])
   .map((m) => ({ value: m.uuid, label: m.name })).sort((a, b) => byName(a.label, b.label)));
-export const oreOptions = computed(() => (catalog.value?.materials ?? []).filter((m) => m.isOre)
+// Resources only (refinery jobs: refined materials)
+export const resourceOptions = computed(() => (catalog.value?.materials ?? []).filter((m) => m.kind === "resource")
   .map((m) => ({ value: m.uuid, label: m.name })).sort((a, b) => byName(a.label, b.label)));
 export const locationOptions = computed(() => (catalog.value?.locations ?? [])
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
 export const refineryLocationOptions = computed(() => (catalog.value?.locations ?? []).filter((l) => l.refinery)
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
 
-/** UEX yield bonus of a refinery for an ore in %; undefined when UEX reports none. */
-export const yieldValue = (locationUuid: string, oreUuid: string | null): number | undefined =>
-  oreUuid ? locations.value.get(locationUuid)?.yields[oreUuid] : undefined;
+/** UEX yield bonus of a refinery for a refined material in %; undefined when UEX reports none. */
+export const yieldValue = (locationUuid: string, materialUuid: string | null): number | undefined =>
+  materialUuid ? locations.value.get(locationUuid)?.yields[materialUuid] : undefined;
 
 /** "+5" */
 export const signedBonus = (v: number) => (v > 0 ? `+${v}` : String(v));
 
-/** UEX yield bonus of a refinery for an ore, e.g. "Bonus +5 %"; null when UEX reports none. */
-export function yieldBonus(locationUuid: string, oreUuid: string | null): string | null {
-  const v = yieldValue(locationUuid, oreUuid);
+/** UEX yield bonus of a refinery for a refined material, e.g. "Bonus +5 %"; null when UEX reports none. */
+export function yieldBonus(locationUuid: string, materialUuid: string | null): string | null {
+  const v = yieldValue(locationUuid, materialUuid);
   return v === undefined ? null : t("refinery.bonus", { v: signedBonus(v) });
 }
