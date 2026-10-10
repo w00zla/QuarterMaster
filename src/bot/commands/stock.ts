@@ -24,7 +24,7 @@ import { bySubcommand, type BotCommand, type CommandContext } from '../registry.
 import { accessOf, memberInfo, searchMembers } from '../roster.ts';
 import { findGuildSettings } from '../settings.ts';
 import { escapeMarkdown } from '../markdown.ts';
-import { customId, panel, textField, textValue, webAppButton } from '../ui.ts';
+import { customId, panel, textField, textValue, webAppButton, webAppPath } from '../ui.ts';
 
 const NAME = 'qm-stock';
 const PAGE_SIZE = 20;
@@ -269,8 +269,9 @@ export function listLines(entries: PickableBatch[], scope: ListScope, userId: st
   return { lines, page: current, pages };
 }
 
-const linkRow = (lang: Lang, ...buttons: ButtonBuilder[]) => {
-  const link = webAppButton(lang);
+// The web app's stock view in a scope: personal, all or a guild ID
+const linkRow = (lang: Lang, scope: string, ...buttons: ButtonBuilder[]) => {
+  const link = webAppButton(lang, webAppPath.stock(scope));
   const all = link ? [...buttons, link] : buttons;
   return all.length ? new ActionRowBuilder<ButtonBuilder>().addComponents(all) : null;
 };
@@ -300,7 +301,7 @@ async function listPanel(db: Db, actor: { userId: string; guildId: string }, vie
     new ButtonBuilder().setCustomId(listId({ ...view, page: page + 1 })).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page === pages - 1),
   ] : [];
   if (pages > 1) container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${tr('list.page', { page: page + 1, pages })}`));
-  const row = linkRow(lang, ...paging);
+  const row = linkRow(lang, view.scope === 'p' ? 'personal' : view.scope === 'o' ? actor.guildId : 'all', ...paging);
   if (row) container.addActionRowComponents(row);
   return panel(container);
 }
@@ -308,7 +309,7 @@ async function listPanel(db: Db, actor: { userId: string; guildId: string }, vie
 /** The reply after a booking: what happened, a button to the list and the web app link. */
 function bookedReply(text: string, lang: Lang) {
   const mine = new ButtonBuilder().setCustomId(customId(NAME, 'mine')).setLabel(t(lang, 'stock.btn.yourStock')).setStyle(ButtonStyle.Secondary);
-  return { content: text, components: [linkRow(lang, mine)!], allowedMentions: { parse: [] } };
+  return { content: text, components: [linkRow(lang, 'personal', mine)!], allowedMentions: { parse: [] } };
 }
 
 // --- input -----------------------------------------------------------------------------------
@@ -564,7 +565,8 @@ export const stockCommand: BotCommand = {
       const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(found.length
         ? [ctx.t('stock.find.title', { material: name, min: minText, count: found.length }), ...lines].join('\n')
         : ctx.t('stock.find.none', { material: name, min: minText })));
-      const row = linkRow(ctx.lang);
+      // Your own batches and this org's: the web app's "All" holds both
+      const row = linkRow(ctx.lang, 'all');
       if (row) container.addActionRowComponents(row);
       await ctx.reply(panel(container));
     },

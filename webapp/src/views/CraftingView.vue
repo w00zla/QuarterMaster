@@ -13,9 +13,14 @@ import CraftingPicker from "../components/CraftingPicker.vue";
 import PlanEntryCard from "../components/PlanEntryCard.vue";
 import { addToCrafting, checks, useCrafting } from "../crafting";
 import { clampCount, withQualityFloor } from "../craftingStock";
+import { takeQuery } from "../deepLink";
 import { lang, t } from "../i18n";
 import { coalesced, onServerMessage } from "../realtime";
 import { toastError } from "../toasts";
+
+// A deep link puts its blueprint on top of the list
+const linked = takeQuery("add");
+if (linked && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(linked)) addToCrafting(linked);
 
 const uuids = computed(() => [...new Set(checks.value.map((e) => e.blueprintUuid))].sort().join(","));
 const recipes = useCrafting<PlannerData>(() => (uuids.value ? `/crafting/recipes?uuids=${uuids.value}` : null));

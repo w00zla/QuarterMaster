@@ -61,6 +61,8 @@ const nodes = (p: { components: { toJSON(): unknown }[] }) => {
 const text = (p: Parameters<typeof nodes>[0]) => nodes(p).filter((n) => n.type === 10).map((n) => n.content).join('\n');
 const buttons = (p: Parameters<typeof nodes>[0]) => nodes(p).filter((n) => n.type === 2).map((n) => [n.custom_id ?? n.url, n.disabled ?? false]);
 
+const LINK = '/blueprints?scope=personal';
+
 describe('/qm-bp list page', () => {
   const many = buildLabels([
     ...Array.from({ length: 25 }, (_, i) => entry({ name: `Armor ${String(i).padStart(2, '0')}`, categoryLabel: 'Armor' })),
@@ -69,30 +71,30 @@ describe('/qm-bp list page', () => {
   ]);
 
   it('is a panel without pings', () => {
-    const p = listPage(many, 'Hans', '1', 0, 'en');
+    const p = listPage(many, 'Hans', '1', 0, 'en', LINK);
     assert.equal(p.flags, MessageFlags.IsComponentsV2);
     assert.deepEqual(p.allowedMentions, { parse: [] });
   });
 
   it('groups by category with "other" last and repeats the group header on each page', () => {
-    const p1 = text(listPage(many, 'Hans', '1', 0, 'en'));
+    const p1 = text(listPage(many, 'Hans', '1', 0, 'en', LINK));
     assert.match(p1, /^\*\*Blueprints of Hans\*\* \(27\)\n__Armor__\n- Armor 00/);
     assert.match(p1, /Page 1 of 2/);
-    const p2 = text(listPage(many, 'Hans', '1', 1, 'en'));
+    const p2 = text(listPage(many, 'Hans', '1', 1, 'en', LINK));
     assert.match(p2, /__Armor__\n- Armor 20/);
     assert.ok(p2.indexOf('__Weapons__') < p2.indexOf('__Other__'));
     assert.match(p2, /- Cannon ⚠️ \*no longer in the game\*/);
   });
 
-  it('pages with buttons that know the owner and the target page, plus the web app link', () => {
+  it('pages with buttons that know the owner and the target page, plus the web app deep link', () => {
     const before = process.env.WEBAPP_ORIGIN;
     try {
       process.env.WEBAPP_ORIGIN = 'https://qm.example/';
-      assert.deepEqual(buttons(listPage(many, 'Hans', '42', 1, 'de')),
-        [['qm-bp:list:42:0', false], ['qm-bp:list:42:2', true], ['https://qm.example', false]]);
-      assert.deepEqual(buttons(listPage(many.slice(0, 3), 'Hans', '42', 0, 'en')), [['https://qm.example', false]]);
+      assert.deepEqual(buttons(listPage(many, 'Hans', '42', 1, 'de', LINK)),
+        [['qm-bp:list:42:0', false], ['qm-bp:list:42:2', true], ['https://qm.example/blueprints?scope=personal', false]]);
+      assert.deepEqual(buttons(listPage(many.slice(0, 3), 'Hans', '42', 0, 'en', LINK)), [['https://qm.example/blueprints?scope=personal', false]]);
       delete process.env.WEBAPP_ORIGIN;
-      assert.deepEqual(buttons(listPage(many.slice(0, 3), 'Hans', '42', 0, 'en')), []);
+      assert.deepEqual(buttons(listPage(many.slice(0, 3), 'Hans', '42', 0, 'en', LINK)), []);
     } finally {
       if (before === undefined) delete process.env.WEBAPP_ORIGIN;
       else process.env.WEBAPP_ORIGIN = before;
@@ -100,7 +102,7 @@ describe('/qm-bp list page', () => {
   });
 
   it('says so when nothing is registered and escapes names', () => {
-    assert.equal(text(listPage([], 'Ha_ns', '1', 0, 'de')), 'Ha\\_ns hat noch keine Blueprints registriert.');
+    assert.equal(text(listPage([], 'Ha_ns', '1', 0, 'de', LINK)), 'Ha\\_ns hat noch keine Blueprints registriert.');
   });
 });
 
@@ -120,6 +122,17 @@ describe('/qm-bp who page', () => {
       assert.deepEqual(buttons(whoPage(names.slice(0, 2), bp, 0, 'en')), []);
     } finally {
       if (before !== undefined) process.env.WEBAPP_ORIGIN = before;
+    }
+  });
+
+  it('links to the blueprint\'s crafting check in the web app', () => {
+    const before = process.env.WEBAPP_ORIGIN;
+    try {
+      process.env.WEBAPP_ORIGIN = 'https://qm.example';
+      assert.deepEqual(buttons(whoPage(names.slice(0, 2), bp, 0, 'en')), [[`https://qm.example/crafting?add=${bp.uuid}`, false]]);
+    } finally {
+      if (before === undefined) delete process.env.WEBAPP_ORIGIN;
+      else process.env.WEBAPP_ORIGIN = before;
     }
   });
 });

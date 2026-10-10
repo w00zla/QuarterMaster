@@ -21,6 +21,7 @@ import Picker from "../components/Picker.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import { lang, t } from "../i18n";
 import { memberLabel, orgOf } from "../orgs";
+import { takeQuery } from "../deepLink";
 import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toast, toastError } from "../toasts";
@@ -41,6 +42,9 @@ function craft(row: Row) {
 
 // "personal" or a guildId
 const scope = ref("personal");
+// A deep link picks the scope: personal or one of your orgs
+const linked = takeQuery("scope");
+if (linked && orgOf(linked)) scope.value = linked;
 const org = computed(() => (scope.value === "personal" ? undefined : orgOf(scope.value)));
 // Back to personal when the org is gone (left, role lost)
 watch(() => me.value?.orgs, () => {

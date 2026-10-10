@@ -46,6 +46,11 @@ const DEFAULT_LIMITS = { windowMs: 15 * 60_000, auth: 30, apiIp: 3000, apiUser: 
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 const API_TOKEN = /^Bearer (qmt_[A-Za-z0-9_-]{43})$/;
 
+// Where a login returns to (a deep link from the bot): a path of this app only, never `//host` or a
+// backslash (no open redirect)
+const RETURN_TO = /^\/(?![/\\])[A-Za-z0-9\-._~/?=&%]{0,500}$/;
+const returnTarget = (value: string | undefined) => (value && RETURN_TO.test(value) ? value : '/');
+
 const cookieOptions = (maxAge: number) =>
   ({ prefix: 'host', path: '/', secure: true, httpOnly: true, sameSite: 'Lax', maxAge }) as const;
 
@@ -114,7 +119,8 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
   // --- login ------------------------------------------------------------------------------
   app.get('/auth/login', async (c) => {
     const { url, state, verifier } = await login.start();
-    setCookie(c, OAUTH_COOKIE, `${state}.${verifier}`, cookieOptions(OAUTH_MAX_AGE));
+    const returnTo = Buffer.from(returnTarget(c.req.query('returnTo'))).toString('base64url');
+    setCookie(c, OAUTH_COOKIE, `${state}.${verifier}.${returnTo}`, cookieOptions(OAUTH_MAX_AGE));
     return c.redirect(url.toString(), 302);
   });
 
@@ -122,7 +128,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     const pending = getCookie(c, OAUTH_COOKIE, 'host');
     deleteCookie(c, OAUTH_COOKIE, { prefix: 'host', path: '/', secure: true });
     if (c.req.query('error')) return c.redirect('/?login=denied', 302);
-    const [state, verifier] = pending?.split('.') ?? [];
+    const [state, verifier, returnTo] = pending?.split('.') ?? [];
     if (!state || !verifier) return c.redirect('/?login=failed', 302);
     let user;
     try {
@@ -138,7 +144,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     const token = await createSession(db, user);
     setCookie(c, SESSION_COOKIE, token, cookieOptions(ABSOLUTE_MS / 1000));
     console.log(`Login ${user.id} (ip ${clientIp(c)})`);
-    return c.redirect('/', 302);
+    return c.redirect(returnTarget(returnTo && Buffer.from(returnTo, 'base64url').toString()), 302);
   });
 
   app.post('/auth/logout', async (c) => {

@@ -25,11 +25,15 @@ import StockAddForm from "../components/StockAddForm.vue";
 import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, sharedText, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
+import { takeQuery } from "../deepLink";
 import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toastError } from "../toasts";
 
 const scope = lastScope;
+// A deep link picks the scope: personal, all or one of your orgs
+const linked = takeQuery("scope");
+if (linked && (linked === "personal" || linked === "all" || orgOf(linked))) scope.value = linked;
 const data = ref<StockListResponse | null>(null);
 const holder = ref("");
 const materialText = ref("");

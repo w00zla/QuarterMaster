@@ -20,7 +20,7 @@ import {
 } from '../refinery-lines.ts';
 import { bySubcommand, type BotCommand, type CommandContext } from '../registry.ts';
 import { CONFIRM_TTL_MS, getState, putState } from '../state.ts';
-import { customId, panel, textField, textValue, webAppButton } from '../ui.ts';
+import { customId, panel, textField, textValue, webAppButton, webAppPath } from '../ui.ts';
 
 const NAME = 'qm-refinery';
 const S = ApplicationCommandOptionType.String;
@@ -134,7 +134,7 @@ export async function previewPanel(db: Db, lang: Lang, token: string, d: StartDr
 /** A panel of text only (results, cancelled, expired), with the web app link where it helps. */
 function textPanel(lang: Lang, text: string, link = false) {
   const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(text));
-  const web = link ? webAppButton(lang) : null;
+  const web = link ? webAppButton(lang, webAppPath.refinery()) : null;
   if (web) container.addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(web));
   return panel(container);
 }
@@ -271,7 +271,7 @@ function listPanel(lang: Lang, jobs: Job[]) {
   const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${tr('refinery.list.title')}`))
     .addSeparatorComponents(new SeparatorBuilder())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(jobs.length ? body : tr('refinery.list.empty')));
-  const web = webAppButton(lang);
+  const web = webAppButton(lang, webAppPath.refinery());
   if (web) container.addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(web));
   return panel(container);
 }

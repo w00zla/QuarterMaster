@@ -177,6 +177,24 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.ok(cookiesOf(res).some((c) => c.startsWith('__Host-qm_oauth=;')), 'OAuth cookie is cleared');
   });
 
+  it('login returns to the deep link it started from, never to another host', async () => {
+    const cases: Array<[string, string]> = [
+      ['/stock?scope=123456789012345678', '/stock?scope=123456789012345678'],
+      ['/crafting?add=00000000-0000-0000-0000-000000000001', '/crafting?add=00000000-0000-0000-0000-000000000001'],
+      ['//evil.example', '/'],
+      ['/\\evil.example', '/'],
+      ['https://evil.example/', '/'],
+      ['stock', '/'],
+    ];
+    for (const [returnTo, location] of cases) {
+      const start = await app.request(`/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
+      const authorize = new URL(start.headers.get('location')!);
+      discord.fake.challenge = authorize.searchParams.get('code_challenge')!;
+      const res = await callback(`code=good&state=${authorize.searchParams.get('state')}`, `__Host-qm_oauth=${cookieValue(start, '__Host-qm_oauth')}`);
+      assert.equal(res.headers.get('location'), location, returnTo);
+    }
+  });
+
   it('callback refuses a wrong state, a missing OAuth cookie, a wrong verifier, a bad code and a denial', async () => {
     const { authorize, oauth } = await startLogin();
     const state = authorize.searchParams.get('state')!;

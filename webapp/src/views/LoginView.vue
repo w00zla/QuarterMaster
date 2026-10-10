@@ -1,8 +1,11 @@
 <script setup lang="ts">
-// Not logged in: the Discord login (a plain link: the server redirects to Discord and back).
+// Not logged in: the Discord login (a plain link: the server redirects to Discord and back, then to
+// the page opened, e.g. a deep link from the bot).
 import logo from "../assets/logo-256.png";
 import { t } from "../i18n";
 import { loginNotice } from "../session";
+
+const loginUrl = `/auth/login?returnTo=${encodeURIComponent(location.pathname + location.search)}`;
 </script>
 
 <template>
@@ -15,7 +18,7 @@ import { loginNotice } from "../session";
         <div class="slogan">{{ t("app.slogan") }}</div>
       </div>
       <div v-if="loginNotice" class="warning">{{ t(loginNotice === "failed" ? "login.failed" : "login.denied") }}</div>
-      <a class="btn primary" href="/auth/login">{{ t("login.button") }}</a>
+      <a class="btn primary" :href="loginUrl">{{ t("login.button") }}</a>
       <div class="faint hint">{{ t("login.hint") }}</div>
     </div>
   </div>

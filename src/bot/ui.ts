@@ -24,15 +24,26 @@ export function panel(container: ContainerBuilder) {
 /** Where the user web app is (unset: panels show no link). Read per call: tests may change the env. */
 export const webAppOrigin = () => process.env.WEBAPP_ORIGIN?.replace(/\/+$/, '') || null;
 
-/** Link button to the user web app, or null when its origin is not configured. */
-export function webAppButton(lang: Lang): ButtonBuilder | null {
+/**
+ * Deep link paths into the web app's views; `scope` is `personal`, `all` or a guild ID. The SPA reads the
+ * query once and drops it (an org the user is not in falls back to personal).
+ */
+export const webAppPath = {
+  stock: (scope: string) => `/stock?scope=${encodeURIComponent(scope)}`,
+  refinery: () => '/refinery',
+  blueprints: (scope: string) => `/blueprints?scope=${encodeURIComponent(scope)}`,
+  crafting: (blueprintUuid: string) => `/crafting?add=${encodeURIComponent(blueprintUuid)}`,
+};
+
+/** Link button to the user web app (its root or a deep link path), or null when its origin is not configured. */
+export function webAppButton(lang: Lang, path = ''): ButtonBuilder | null {
   const origin = webAppOrigin();
-  return origin ? new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(origin).setLabel(t(lang, 'ui.openWebApp')) : null;
+  return origin ? new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(origin + path).setLabel(t(lang, 'ui.openWebApp')) : null;
 }
 
 /** The web app link as the components of a plain (not V2) message: one row, or none when not configured. */
-export function webAppRow(lang: Lang): ActionRowBuilder<ButtonBuilder>[] {
-  const web = webAppButton(lang);
+export function webAppRow(lang: Lang, path = ''): ActionRowBuilder<ButtonBuilder>[] {
+  const web = webAppButton(lang, path);
   return web ? [new ActionRowBuilder<ButtonBuilder>().addComponents(web)] : [];
 }
 
