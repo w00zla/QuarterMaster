@@ -1,6 +1,6 @@
 // The user web app's HTTP layer (Hono): security headers, same-origin check for writes, rate limits,
 // Discord login, sessions and the JSON API. Built by createApp so tests can drive it without a server.
-// Plan and rationale: .claude/user-webapp-plan.md.
+// Plan and rationale: docs/user-webapp-plan.md.
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';

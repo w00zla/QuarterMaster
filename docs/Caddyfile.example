@@ -1,0 +1,40 @@
+# Example site blocks for the Caddy on the VM host (not part of compose.yaml). Replace qm.example.com
+# (production: quartermaster.w00z.net, the companion app's fixed server).
+# The user web app listens on 127.0.0.1:3000, the admin UI on 127.0.0.1:3001 (compose.yaml); Caddy serves
+# the web app with TLS on 443 and the admin UI on port 8443. Open 80, 443 and 8443 in the VM firewall and
+# forward them on the router, never 3000/3001. The ACME challenge runs over port 80/443.
+
+# User web app. Its security headers (CSP, frame-ancestors, Referrer-Policy, nosniff) come from the app
+# itself; only HSTS is set here. WebSockets (/api/ws) pass through reverse_proxy as they are.
+qm.example.com {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Caddy drops a client's own X-Forwarded-For and sets the real address (the app reads the last
+	# entry, WEBAPP_TRUST_PROXY=1)
+	reverse_proxy 127.0.0.1:3000
+}
+
+qm.example.com:8443 {
+	# Recommended: known addresses only. Basic auth has no rate limit or lockout.
+	# @blocked not remote_ip 203.0.113.10 198.51.100.0/24
+	# respond @blocked 403
+
+	header {
+		# HSTS applies to the whole host name, every port
+		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	# For fail2ban: ban client IPs with repeated 401 responses
+	log {
+		output file /var/log/caddy/qm-admin.log
+	}
+
+	reverse_proxy 127.0.0.1:3001
+}

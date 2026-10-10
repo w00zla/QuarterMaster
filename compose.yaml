@@ -1,5 +1,5 @@
 # Production stack: Postgres, the Discord bot, the user web app and the admin web UI. Caddy runs on the host and
-# terminates TLS (example: .claude/Caddyfile.example). Values come from .env next to this file
+# terminates TLS (example: docs/Caddyfile.example). Values come from .env next to this file
 # (see .env.example, section "Deployment").
 #
 #   scripts/deploy.sh                                        # first start and every update

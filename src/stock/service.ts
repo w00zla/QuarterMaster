@@ -4,7 +4,7 @@
 // (SELECT … FOR UPDATE) and overdraw is checked in SQL, so concurrent bookings cannot
 // take the same units twice.
 //
-// Who may do what (see .claude/requirements.md "Stock"): every batch belongs to one user, and only
+// Who may do what (see docs/requirements.md "Stock"): every batch belongs to one user, and only
 // that user changes it: add, remove, adjust, move, split, merge, share, give, from anywhere (also without any
 // org). Sharing offers the whole batch in any number of the owner's orgs (app.stock_share); a split-off
 // part (its own `lot`) can be shared apart. Giving hands it to an active member of the actor's org, who
