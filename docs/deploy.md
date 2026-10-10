@@ -64,8 +64,9 @@ openssl rand -hex 32     # one per password
 ## 3. Discord developer portal (production application)
 
 - Bot → Privileged Gateway Intents: **Server Members** on. Nothing else.
+- Bot → **Requires OAuth2 Code Grant: off.** When on, the bot only joins once the invite's code is exchanged, and the invite redirects to the web app's `/auth/callback`, which refuses it (no login state): the authorize page goes through, the web app opens, but no bot on the server. The URL generator asking for a redirect URI with only `bot` + `applications.commands` ticked is the sign that this switch is on.
 - OAuth2 → Redirects: `https://quartermaster.w00z.net/auth/callback` (= `WEBAPP_ORIGIN` + `/auth/callback`, exactly). Client secret from the same page into `.env`.
-- Invite: `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot+applications.commands&permissions=52224`
+- Invite: `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot+applications.commands&permissions=52224` (no `redirect_uri`, no `response_type`). From the URL generator: scopes `bot` and `applications.commands` only (any other scope turns the invite into a code grant with the same redirect problem), permissions View Channels, Send Messages, Embed Links, Attach Files (= `52224`; nothing ticked = `permissions=0`).
 
 ## 4. First deploy
 
