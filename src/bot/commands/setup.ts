@@ -11,7 +11,6 @@ import type { BotCommand } from '../registry.ts';
 import { BOARD_STYLES, requestBoardUpdate, type BoardStyle } from '../board.ts';
 import { requestFullSync } from '../roster-keeper.ts';
 import { ensureGuild, LOGS_LEVELS, updateGuildSettings, type GuildSettings } from '../settings.ts';
-import { escapeMarkdown } from '../markdown.ts';
 import { panel, textField, textValue } from '../ui.ts';
 
 const NAME = 'qm-setup';
@@ -55,55 +54,58 @@ const checks = (guild: Guild | null, s: GuildSettings) => ({
   board: checkChannel(guild, s.boardChannelId, missingBoardPermissions),
 });
 
-/** The panel: current values as text, one select per setting (a V2 container: more than the 5 rows of a plain message). */
+/**
+ * The panel: one section per area (heading, current value, its selects), separated by lines (a V2 container:
+ * more than the 5 rows of a plain message).
+ */
 export function setupPanel(s: GuildSettings, lang: Lang, check: { logs: ChannelCheck; board: ChannelCheck }) {
   const tr = (key: MessageKey, vars?: Record<string, string>) => t(lang, key, vars);
-  const roles = (ids: string[]) => (ids.length ? ids.map((id) => `<@&${id}>`).join(', ') : tr('setup.none'));
   const status = (c: ChannelCheck) => (c === 'unknown' || c === null
     ? `⚠️ ${tr('setup.perms.unknown')}`
     : c.missing.length
       ? `⚠️ ${tr('setup.perms.missing', { perms: c.missing.map((k) => tr(k)).join(', ') })}`
       : `✅ ${tr('setup.perms.ok')}`);
-  const logsLine = s.logsChannelId ? `<#${s.logsChannelId}> · ${tr(`setup.level.${s.logsLevel}`)} · ${status(check.logs)}` : tr('setup.none');
-  const boardLine = s.boardChannelId
-    ? [`<#${s.boardChannelId}>`, ...[s.boardTitle, s.boardSubtitle].map((v) => v && `"${escapeMarkdown(v)}"`), tr(`setup.style.${s.boardStyle}`), status(check.board)]
-      .filter(Boolean).join(' · ')
-    : tr('setup.none');
-  const content = [
-    tr('setup.title'),
-    `${tr('setup.memberRoles')}: ${roles(s.memberRoleIds)}`,
-    `${tr('setup.baseLang')}: ${tr(`setup.lang.${s.baseLang}`)}`,
-    `${tr('setup.logs')}: ${logsLine}`,
-    `${tr('setup.board')}: ${boardLine}`,
-  ].join('\n');
+  // The selects show the settings; the text adds only what they cannot: what an area is for, the channel checks
+  const section = (heading: MessageKey, ...lines: (string | false)[]) => [tr(heading), ...lines].filter(Boolean).join('\n');
 
   const row = (component: MessageActionRowComponentBuilder) =>
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(component);
   const roleSelect = (id: string, placeholder: MessageKey, selected: string[]) =>
     new RoleSelectMenuBuilder().setCustomId(`${NAME}:${id}`).setPlaceholder(tr(placeholder))
       .setMinValues(0).setMaxValues(25).setDefaultRoles(...selected);
-  const selects = [
-    row(roleSelect('memberRoles', 'setup.pick.memberRoles', s.memberRoleIds)),
-    row(new StringSelectMenuBuilder().setCustomId(`${NAME}:baseLang`).setPlaceholder(tr('setup.pick.baseLang'))
-      .addOptions(LANGS.map((l) => ({ label: tr(`setup.lang.${l}`), value: l, default: l === s.baseLang })))),
-    row(new ChannelSelectMenuBuilder().setCustomId(`${NAME}:logsChannel`).setPlaceholder(tr('setup.pick.logsChannel'))
-      .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-      .setMinValues(0).setMaxValues(1).setDefaultChannels(...(s.logsChannelId ? [s.logsChannelId] : []))),
-    row(new StringSelectMenuBuilder().setCustomId(`${NAME}:logsLevel`).setPlaceholder(tr('setup.pick.logsLevel'))
-      // The select shows only the chosen label, so it names what it is about
-      .addOptions(LOGS_LEVELS.map((l) => ({ label: `${tr('setup.logs')}: ${tr(`setup.level.${l}`)}`, value: l, default: l === s.logsLevel })))),
-    row(new ChannelSelectMenuBuilder().setCustomId(`${NAME}:boardChannel`).setPlaceholder(tr('setup.pick.boardChannel'))
-      .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-      .setMinValues(0).setMaxValues(1).setDefaultChannels(...(s.boardChannelId ? [s.boardChannelId] : []))),
-    row(new StringSelectMenuBuilder().setCustomId(`${NAME}:boardStyle`).setPlaceholder(tr('setup.pick.boardStyle'))
-      .addOptions(BOARD_STYLES.map((v) => ({ label: `${tr('setup.board')}: ${tr(`setup.style.${v}`)}`, value: v, default: v === s.boardStyle })))),
-    // The title is typed: a modal
-    row(new ButtonBuilder().setCustomId(`${NAME}:boardTitle`).setLabel(tr('setup.btn.boardTitle')).setStyle(ButtonStyle.Secondary)),
+  const sections: [string, ActionRowBuilder<MessageActionRowComponentBuilder>[]][] = [
+    [section('setup.section.members'), [
+      row(roleSelect('memberRoles', 'setup.pick.memberRoles', s.memberRoleIds)),
+    ]],
+    [section('setup.section.lang', `-# ${tr('setup.baseLang')}`), [
+      row(new StringSelectMenuBuilder().setCustomId(`${NAME}:baseLang`).setPlaceholder(tr('setup.pick.baseLang'))
+        .addOptions(LANGS.map((l) => ({ label: tr(`setup.lang.${l}`), value: l, default: l === s.baseLang })))),
+    ]],
+    [section('setup.section.logs', `-# ${tr('setup.logsInfo')}`, !!s.logsChannelId && status(check.logs)), [
+      row(new ChannelSelectMenuBuilder().setCustomId(`${NAME}:logsChannel`).setPlaceholder(tr('setup.pick.logsChannel'))
+        .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setMinValues(0).setMaxValues(1).setDefaultChannels(...(s.logsChannelId ? [s.logsChannelId] : []))),
+      row(new StringSelectMenuBuilder().setCustomId(`${NAME}:logsLevel`).setPlaceholder(tr('setup.pick.logsLevel'))
+        // The select shows only the chosen label, so it names what it is about
+        .addOptions(LOGS_LEVELS.map((l) => ({ label: `${tr('setup.logs')}: ${tr(`setup.level.${l}`)}`, value: l, default: l === s.logsLevel })))),
+    ]],
+    [section('setup.section.board', `-# ${tr('setup.boardInfo')}`, !!s.boardChannelId && status(check.board)), [
+      row(new ChannelSelectMenuBuilder().setCustomId(`${NAME}:boardChannel`).setPlaceholder(tr('setup.pick.boardChannel'))
+        .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setMinValues(0).setMaxValues(1).setDefaultChannels(...(s.boardChannelId ? [s.boardChannelId] : []))),
+      row(new StringSelectMenuBuilder().setCustomId(`${NAME}:boardStyle`).setPlaceholder(tr('setup.pick.boardStyle'))
+        .addOptions(BOARD_STYLES.map((v) => ({ label: `${tr('setup.board')}: ${tr(`setup.style.${v}`)}`, value: v, default: v === s.boardStyle })))),
+      // The title is typed: a modal
+      row(new ButtonBuilder().setCustomId(`${NAME}:boardTitle`).setLabel(tr('setup.btn.boardTitle')).setEmoji('✏️').setStyle(ButtonStyle.Secondary)),
+    ]],
   ];
-  const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(content))
-    .addSeparatorComponents(new SeparatorBuilder())
-    .addActionRowComponents(selects)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${tr('setup.saved')}`));
+  const container = new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`${tr('setup.title')}\n-# ${tr('setup.saved')}`));
+  for (const [text, rows] of sections) {
+    container.addSeparatorComponents(new SeparatorBuilder())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(text))
+      .addActionRowComponents(rows);
+  }
   // Role and channel mentions render but must never ping (panel sets allowedMentions)
   return panel(container);
 }

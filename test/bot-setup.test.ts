@@ -37,11 +37,15 @@ describe('/qm-setup', () => {
     const panel = setupPanel(settings, 'en', { logs: { missing: [] }, board: { missing: [] } });
     assert.equal(panel.flags, MessageFlags.IsComponentsV2);
     const text = textOf(panel);
-    assert.match(text, /Member roles: <@&100000000000000001>, <@&100000000000000002>/);
-    assert.match(text, /Base language \(public output\): Deutsch/);
-    assert.match(text, /Logs: <#200000000000000001> · Shared stock: shares, gives, bookings · ✅/);
-    assert.match(text, /Board: <#200000000000000002> · "Red \\\*Hollow\\\*" · "Fleet stock" · Table · ✅/);
-    assert.match(textOf(setupPanel({ ...settings, boardTitle: null, boardSubtitle: null }, 'en', { logs: null, board: { missing: [] } })), /Board: <#200000000000000002> · Table · ✅/);
+    // One section per area; the text only adds what the selects cannot show (what an area is for, channel checks)
+    assert.equal(text, [
+      '## ⚙️ Quartermaster setup\n-# Changes are saved immediately.',
+      '### 👥 Members',
+      '### 🌐 Language\n-# Base language (public output)',
+      '### 📜 Logs\n-# Posts every change to the stock shared in this org into a channel\n✅ the bot can post there',
+      '### 📋 Board\n-# One message in a channel showing what the org shares, always up to date\n✅ the bot can post there',
+    ].join('\n'));
+    assert.match(textOf(setupPanel({ ...settings, boardTitle: null, boardSubtitle: null }, 'en', { logs: null, board: { missing: [] } })), /### 📋 Board\n-# .*\n✅/);
     assert.deepEqual(panel.allowedMentions, { parse: [] });
   });
 
@@ -69,8 +73,8 @@ describe('/qm-setup', () => {
     assert.deepEqual(missingLogsPermissions(perms), ['perm.embedLinks', 'perm.attachFiles']);
     const panel = setupPanel(settings, 'de', { logs: { missing: missingLogsPermissions(perms) }, board: { missing: [] } });
     assert.match(textOf(panel), /⚠️ dem Bot fehlen Rechte: Links einbetten, Dateien anhängen/);
-    assert.match(textOf(setupPanel(settings, 'en', { logs: 'unknown', board: null })), /Logs: .* channel not found/);
-    assert.match(textOf(setupPanel({ ...settings, logsChannelId: null, boardChannelId: null }, 'en', { logs: null, board: null })), /Logs: none\nBoard: none/);
+    assert.match(textOf(setupPanel(settings, 'en', { logs: 'unknown', board: null })), /### 📜 Logs\n-# .*\n⚠️ channel not found/);
+    assert.match(textOf(setupPanel({ ...settings, logsChannelId: null, boardChannelId: null }, 'en', { logs: null, board: null })), /### 📜 Logs\n-# [^\n]*\n### 📋 Board\n-# [^\n]*$/);
     // The board only posts and edits its own message
     assert.deepEqual(missingBoardPermissions(perms), []);
     assert.deepEqual(missingBoardPermissions(new PermissionsBitField([PermissionFlagsBits.ViewChannel])), ['perm.sendMessages']);
