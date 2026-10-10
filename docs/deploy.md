@@ -1,6 +1,6 @@
 # Deployment
 
-Production runs on a VM with Docker Compose: `db` (Postgres 18), `bot`, `ext` (UEX pull), `webapp` (user web app), `admin` (admin web UI). Caddy on the VM host terminates TLS. Files: `Dockerfile`, `compose.yaml`, `scripts/push-deploy.sh` (local), `scripts/deploy.sh` (VM), `scripts/backup.sh`, `deploy/db-roles.sh`, `deploy/quartermaster-backup.{service,timer}`, `docs/Caddyfile.example`. Background and design decisions: `CLAUDE.md`, section "Deployment".
+Production runs on a VM with Docker Compose: `db` (Postgres 18), `bot`, `ext` (UEX pull), `webapp` (user web app), `admin` (admin web UI). Caddy on the VM host terminates TLS. Files: `Dockerfile`, `compose.yaml`, `scripts/push-deploy.sh` (local), `scripts/push-companion.sh` (local), `scripts/deploy.sh` (VM), `scripts/backup.sh`, `deploy/db-roles.sh`, `deploy/quartermaster-backup.{service,timer}`, `docs/Caddyfile.example`. Background and design decisions: `CLAUDE.md`, section "Deployment".
 
 Paths below assume the checkout in `/opt/sc-quartermaster` and the user `w00zla` on the VM (sudo, member of the `docker` group); adjust as needed.
 
@@ -39,7 +39,7 @@ On the VM:
 ```sh
 cd /opt/sc-quartermaster
 cp .env.example .env && chmod 600 .env
-mkdir -p local/companion     # the companion release (§ 7); created by Docker as root otherwise
+mkdir -p local/companion     # the companion release (§ 8); created by Docker as root otherwise
 ```
 
 Set in `.env`:
@@ -154,11 +154,27 @@ ssh w00zla@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node sr
 
 `deploy.sh`: dump → tag the running image `:previous` → `build --pull`, `pull db` → stop bot/admin/ext/webapp → `migrate` → DB roles → start. If the migration fails, the DB is unchanged (one transaction) and the previous image is started again.
 
-- Companion app release: copy the standalone builds (`…_x64-standalone.zip`, the AppImage) and `companion.json` (`{"version":"x.y.z","windows":"<zip>","linux":"<AppImage>"}`) into `local/companion/` of the VM's checkout (e.g. `scp`); the web app picks a new manifest up within seconds, no restart. Its version is the one it requires: older apps get the update panel. No manifest = no downloads and no version check.
 - **Migrations applied in production are frozen**: never edit or regenerate them, only add new ones (`CLAUDE.md`).
 - Never run migrations as `postgres`: only `migrate` (role `qm_owner`). Otherwise new tables have no grants and the app gets "permission denied".
 
-## 8. Rollback
+## 8. Companion app release
+
+Copy the standalone builds (`…_x64-standalone.zip`, the AppImage) and `companion.json` (`{"version":"x.y.z","windows":"<zip>","linux":"<AppImage>"}`) into `local/companion/` of the VM's checkout; the web app picks a new manifest up within seconds, no restart. Its version is the one it requires: older apps get the update panel. No manifest = no downloads and no version check.
+
+From the local checkout, with the release files and `companion.json` in `local/companion/`:
+
+```sh
+scripts/push-companion.sh w00zla@<vm>
+```
+
+It copies the files the manifest names, then the manifest (`DEPLOY_PATH` for another checkout path). The manifest goes last: copied first, it would already send outdated apps to downloads that are not there yet. By hand:
+
+```sh
+scp local/companion/<zip> local/companion/<AppImage> w00zla@<vm>:/opt/sc-quartermaster/local/companion/
+scp local/companion/companion.json w00zla@<vm>:/opt/sc-quartermaster/local/companion/
+```
+
+## 9. Rollback
 
 Code only (no migration in between):
 
@@ -167,9 +183,9 @@ docker tag sc-quartermaster:previous sc-quartermaster:latest
 docker compose up -d
 ```
 
-`:previous` is only the image before the **last** deploy. After a deploy that ran migrations, the old code may not match the new schema: restore the dump from before the deploy (§ 9) and then roll back the image.
+`:previous` is only the image before the **last** deploy. After a deploy that ran migrations, the old code may not match the new schema: restore the dump from before the deploy (§ 10) and then roll back the image.
 
-## 9. Restore
+## 10. Restore
 
 Into a fresh volume (tested; the init creates the roles first, the dump carries owners and grants):
 
@@ -186,11 +202,11 @@ docker compose up -d
 
 Make the restore **at least once on purpose**, e.g. into a test VM, before you need it.
 
-## 10. Operations
+## 11. Operations
 
 - Logs: `docker compose logs -f bot` (or `webapp`, …; rotated, 5 × 10 MB per container).
 - Admin outside Caddy: none needed; for debugging `curl -u … http://127.0.0.1:3001/api/meta` on the VM.
 - Old images: every build leaves untagged layers behind. Clean up now and then with `docker image prune`.
 - **`docker compose down -v` deletes the database volume.** `down` without `-v` is harmless.
 - Passwords: `QM_OWNER_PASSWORD`/`QM_APP_PASSWORD`/`QM_WEB_PASSWORD` change in `.env` and apply with the next `scripts/deploy.sh`. `POSTGRES_PASSWORD` only applies to a new volume; for an existing one: `docker compose exec db psql -U postgres -c "ALTER ROLE postgres PASSWORD '…'"`.
-- Postgres major upgrade (18 → 19): not via the image tag. Dump, new volume with the new major, restore (§ 9).
+- Postgres major upgrade (18 → 19): not via the image tag. Dump, new volume with the new major, restore (§ 10).
