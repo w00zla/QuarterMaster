@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Whether the stock covers a crafting need: "covered", "missing 2.5 SCU", or a dash while the stock loads.
-import type { Coverage } from "../craftingStock";
+import type { Coverage } from "../../../src/planner/stock";
 import { qty } from "../format";
 import { t } from "../i18n";
 

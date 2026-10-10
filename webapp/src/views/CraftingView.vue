@@ -12,7 +12,7 @@ import { api } from "../api";
 import CraftingPicker from "../components/CraftingPicker.vue";
 import PlanEntryCard from "../components/PlanEntryCard.vue";
 import { addToCrafting, checks, useCrafting } from "../crafting";
-import { clampCount, withQualityFloor } from "../craftingStock";
+import { clampCount, withQualityFloor } from "../../../src/planner/stock";
 import { takeQuery } from "../deepLink";
 import { lang, t } from "../i18n";
 import { coalesced, onServerMessage } from "../realtime";

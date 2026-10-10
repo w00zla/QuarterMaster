@@ -3,7 +3,7 @@
 import { reactive, ref, watch, type Ref } from "vue";
 import type { PlanEntry, PlanWarning } from "../../src/planner/types";
 import { ApiError, api } from "./api";
-import { clampCount } from "./craftingStock";
+import { clampCount } from "../../src/planner/stock";
 import { lang, t } from "./i18n";
 import { loadMe } from "./session";
 import { errorText } from "./toasts";

@@ -20,6 +20,14 @@ describe('command definitions', () => {
       check(c.data as unknown as Json, `/${c.data.name}`);
     }
   });
+
+  it('answer every autocomplete option (else Discord shows no suggestions)', () => {
+    type Opt = { autocomplete?: boolean; options?: Opt[] };
+    const hasAutocomplete = (o: Opt): boolean => !!o.autocomplete || (o.options ?? []).some(hasAutocomplete);
+    for (const c of commands) {
+      if (hasAutocomplete(c.data as Opt)) assert.equal(typeof c.autocomplete, 'function', `/${c.data.name}: autocomplete handler`);
+    }
+  });
 });
 
 describe('button state', () => {

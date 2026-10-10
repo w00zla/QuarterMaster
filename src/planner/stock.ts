@@ -1,9 +1,8 @@
 // Crafting against stock: what a checked blueprint needs, matched against the stock you can see
-// (yours and what others share in your orgs). Pure (also run by the root's node tests): no Vue, no
+// (yours and what others share in your orgs). Pure, shared by the web app and the bot: no Vue, no
 // server code. Amounts stay exact (the planner's micro units).
-import { formatMicros, MAX_QUALITY, MIN_QUALITY, toMicros } from "../../src/planner/plan.ts";
-import type { EntryResult, PlanEntry, PlannerData, PlannerSlot } from "../../src/planner/types.ts";
-import type { StockBatch } from "../../src/webapp/api-types.ts";
+import { formatMicros, MAX_QUALITY, MIN_QUALITY, toMicros } from "./plan.ts";
+import type { EntryResult, PlanEntry, PlannerData, PlannerSlot } from "./types.ts";
 
 export const MIN_COUNT = 1;
 export const MAX_COUNT = 99;
@@ -56,7 +55,19 @@ export function needsOf(entry: EntryResult): Need[] {
   return [...by.values()].map(({ need, micros }) => ({ ...need, total: formatMicros(micros) }));
 }
 
-export interface Coverage {
+/** What the check reads of a batch (the web app's `StockBatch` has these fields). */
+export interface CoverBatch {
+  kind: "resource" | "item";
+  subjectUuid: string;
+  location: string;
+  state: "stored" | "refining";
+  quality: number;
+  // Exact decimal text
+  quantity: string;
+  holderUserId: string;
+}
+
+export interface Coverage<B extends CoverBatch = CoverBatch> {
   need: Need;
   unit: "SCU" | "pcs";
   // What is missing ("0" when covered)
@@ -64,14 +75,14 @@ export interface Coverage {
   covered: boolean;
   // The material's stored batches at or above the target quality (refining never): your own first,
   // then best quality first
-  batches: StockBatch[];
+  batches: B[];
 }
 
 const compareMicros = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** A need against the stock: the stored batches of the material at or above the target quality. */
-export function coverageOf(need: Need, stock: readonly StockBatch[], meId: string | null): Coverage {
-  const own = (b: StockBatch) => b.holderUserId === meId;
+export function coverageOf<B extends CoverBatch>(need: Need, stock: readonly B[], meId: string | null): Coverage<B> {
+  const own = (b: B) => b.holderUserId === meId;
   const batches = stock
     .filter((b) => b.subjectUuid === need.uuid && b.kind === need.kind && b.state === "stored" && b.quality >= need.quality)
     .sort((a, b) => Number(own(b)) - Number(own(a)) || b.quality - a.quality

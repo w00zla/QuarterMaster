@@ -11,7 +11,7 @@ import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
 import type { StockBatch } from "../../../src/webapp/api-types";
 import { craftingUi, toggleIn, warningText } from "../crafting";
-import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../craftingStock";
+import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../../../src/planner/stock";
 import { duration, qty, unitText } from "../format";
 import { t } from "../i18n";
 import { me } from "../session";

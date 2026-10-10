@@ -1,10 +1,10 @@
-// The web app's crafting check against stock (webapp/src/craftingStock.ts).
+// The crafting check against stock (src/planner/stock.ts), shared by the web app and the bot.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { computePlan } from '../src/planner/plan.ts';
 import type { PlannerData, PlannerRecipe } from '../src/planner/types.ts';
 import type { StockBatch } from '../src/webapp/api-types.ts';
-import { clampCount, coverageOf, needsOf, withQualityFloor, type Need } from '../webapp/src/craftingStock.ts';
+import { clampCount, coverageOf, needsOf, withQualityFloor, type Need } from '../src/planner/stock.ts';
 
 const recipe = (uuid: string, metal: string, minQuality = 0): PlannerRecipe => ({
   uuid, key: uuid, name: uuid, outputType: null, outputTypeLabel: null, outputSubTypeLabel: null, size: null, grade: null,
