@@ -1,61 +1,50 @@
-// What the refinery OCR read (Rust: refinery.rs), turned into work order drafts. Pure (tested from
-// test/companion-refinery.test.ts): no Vue, no Tauri.
+// The refinery sync: what the OCR read off a terminal's work order overview (Rust: refinery.rs) held
+// against the user's running jobs at that station. Pure (tested from test/companion-refinery.test.ts):
+// no Vue, no Tauri.
 //
-// The terminal's quote (SETUP after GET QUOTE) holds everything a job needs (station, method, ores
-// with quality and quantity, yields, processing time) but may be cancelled; the PROCESSING screen
-// proves the job started and tells its end, but lacks the method and the ore quantities. So the last
-// quote is kept, and a PROCESSING screen whose rows (quality and yield) match it makes a draft. The
-// user registers a draft (or drops it); nothing is booked by itself.
-import { addOreName, findOre, norm, type OreCatalog } from "../../src/stock/ore-names.ts";
-import type { CatalogResponse, RefineryStartRequest } from "../../src/webapp/api-types.ts";
+// A terminal order and a job are the same when their rows match: the same refined materials in the
+// same qualities (rows of one material and quality add up). A running order that matches updates its
+// job by itself (the yields, the time left: estimates, no stock yet); everything else is a proposal the
+// user confirms: a running order without a job (register it), a finished order of a job (store it), a
+// job of this station not seen during the whole visit (remove it; the terminal scrolls its orders
+// sideways, so only the visit as a whole tells). An order is acted on only once two reads in a row
+// showed it the same (OCR misreads do not book anything).
+import { addName, emptyNames, findMaterial, norm, type MaterialNames } from "../../src/stock/material-names.ts";
+import type { CatalogResponse, StockBatch } from "../../src/webapp/api-types.ts";
 
-export interface ScreenRow {
+// --- what the OCR sends ------------------------------------------------------------------------------
+
+export interface OverviewRow {
+  // As the terminal shows it ("HEPHAESTANITE")
   name: string;
-  inert: boolean;
   quality: number | null;
-  qty: number | null;
   yieldCscu: number | null;
-  todo: number | null;
-  done: number | null;
 }
 
-export interface Screen {
-  kind: "quote" | "processing";
-  station: string | null;
-  method: string | null;
-  // Quote: processing time; processing: time remaining
+export interface OverviewOrder {
+  status: "processing" | "completed";
+  // Processing: the time remaining
   seconds: number | null;
-  rows: ScreenRow[];
+  rows: OverviewRow[];
 }
 
-export interface ScreenEvent {
+export interface Overview {
+  // The terminal's title ("CRU-L1 AMBITIOUS DREAM STATION")
+  station: string | null;
+  orders: OverviewOrder[];
+}
+
+export interface OverviewEvent {
   // When the frame was taken (Unix ms)
   atMs: number;
-  screen: Screen;
+  overview: Overview;
 }
 
-export interface DraftRow {
-  // As the terminal shows it ("AGRICIUM (ORE)")
-  name: string;
-  quality: number;
-  qtyCscu: number;
-  yieldCscu: number;
+export interface VisitEvent {
+  atMs: number;
+  // Arrived at a terminal (true) or left it (false)
+  active: boolean;
 }
-
-export interface Draft {
-  id: string;
-  station: string | null;
-  method: string | null;
-  // The quoted processing time and the end as the PROCESSING screen tells it
-  seconds: number;
-  endsAtMs: number;
-  rows: DraftRow[];
-}
-
-// A quote older than this is not the job's (the PROCESSING screen follows the confirmation at once)
-const QUOTE_MAX_AGE_MS = 30 * 60_000;
-// Slack for reading the screens a moment apart and the game's rounding
-const SLACK_S = 120;
 
 /** cSCU as exact SCU text: 389 -> "3.89", 20 -> "0.2", 0 -> "0". */
 export function cscuToScu(cscu: number): string {
@@ -64,95 +53,280 @@ export function cscuToScu(cscu: number): string {
   return frac ? `${whole}.${frac}` : String(whole);
 }
 
-const key = (quality: number, yieldCscu: number) => `${quality}:${yieldCscu}`;
-const signature = (rows: { quality: number | null; yieldCscu: number | null }[]) =>
-  rows.map((r) => key(r.quality ?? -1, r.yieldCscu ?? -1)).sort().join(",");
+// --- names ---------------------------------------------------------------------------------------
 
-/** The quote's rows that are refined: not inert, every number read (a "--" yield is not selected). */
-function quoteRows(s: Screen): DraftRow[] | null {
-  const rows = s.rows.filter((r) => !r.inert && r.yieldCscu !== null);
-  if (!rows.length || rows.some((r) => r.quality === null || r.qty === null)) return null;
-  return rows.map((r) => ({ name: r.name, quality: r.quality!, qtyCscu: r.qty!, yieldCscu: r.yieldCscu! }));
+export interface SyncCatalog {
+  materials: MaterialNames;
+  // Normalized station name -> location UUID (refineries only)
+  stations: Map<string, string>;
+  // Location UUID -> display name
+  stationNames: Map<string, string>;
+  // Resource UUID -> display name
+  materialNames: Map<string, string>;
 }
 
-/** Follows the screens read and makes a draft when a started job matches the last quote. */
-export class RefineryTracker {
-  private quote: { atMs: number; screen: Screen; rows: DraftRow[] } | null = null;
-  readonly drafts: Draft[] = [];
-
-  /** The new draft, if this screen completed one. */
-  feed(e: ScreenEvent): Draft | null {
-    const s = e.screen;
-    if (s.kind === "quote") {
-      const rows = quoteRows(s);
-      if (rows && s.seconds !== null) this.quote = { atMs: e.atMs, screen: s, rows };
-      return null;
-    }
-    const q = this.quote;
-    if (!q || s.seconds === null || e.atMs - q.atMs > QUOTE_MAX_AGE_MS || e.atMs < q.atMs) return null;
-    const running = s.rows.filter((r) => !r.inert);
-    if (signature(running) !== signature(q.rows)) return null;
-    // The time left fits the quote (counted down since then)
-    const elapsed = (e.atMs - q.atMs) / 1000;
-    const quoted = q.screen.seconds!;
-    if (s.seconds > quoted + SLACK_S || s.seconds < quoted - elapsed - SLACK_S) return null;
-    const endsAtMs = e.atMs + s.seconds * 1000;
-    const id = `${endsAtMs}:${signature(q.rows)}`;
-    this.quote = null;
-    // The same job seen again (another PROCESSING frame): no second draft
-    const sig = signature(q.rows);
-    if (this.drafts.some((d) => signature(d.rows) === sig && Math.abs(d.endsAtMs - endsAtMs) < SLACK_S * 1000)) return null;
-    const draft: Draft = { id, station: q.screen.station, method: q.screen.method, seconds: quoted, endsAtMs, rows: q.rows };
-    this.drafts.push(draft);
-    return draft;
-  }
-
-  remove(id: string) {
-    const i = this.drafts.findIndex((d) => d.id === id);
-    if (i >= 0) this.drafts.splice(i, 1);
-  }
-}
-
-// --- matching against the catalog (names in every language the game may use) ---------------------
-
-// Ore names (findOre, shared with the bot: src/stock/ore-names.ts) plus the refinery stations
-export interface RefineryCatalog extends OreCatalog {
-  refineries: Map<string, string>;
-}
-
-/** The lookups from the web app's catalog in each language (the game's language is unknown). */
-export function buildCatalog(responses: CatalogResponse[]): RefineryCatalog {
-  const cat: RefineryCatalog = { ores: new Map(), oreParts: [], refineries: new Map() };
+/** The loc keys whose texts the player's language pack may change (materials, refinery stations). */
+export function gameNameKeys(responses: CatalogResponse[]): string[] {
+  const keys = new Set<string>();
   for (const r of responses) {
-    for (const m of r.materials) if (m.isOre) addOreName(cat, m.name, m.uuid);
-    // The location's own name: the label's first part ("Name · planet · system")
-    for (const l of r.locations) if (l.refinery) cat.refineries.set(norm(l.label.split(" · ")[0]!), l.uuid);
+    for (const m of r.materials) if (m.kind === "resource" && m.nameKey) keys.add(m.nameKey);
+    for (const l of r.locations) if (l.refinery && l.nameKey) keys.add(l.nameKey);
+  }
+  return [...keys];
+}
+
+/** The lookups from the web app's catalog (each language) and the player's own texts (`gameNames`: loc key -> text). */
+export function buildCatalog(responses: CatalogResponse[], gameNames: Record<string, string>): SyncCatalog {
+  const cat: SyncCatalog = { materials: emptyNames(), stations: new Map(), stationNames: new Map(), materialNames: new Map() };
+  for (const r of responses) {
+    for (const m of r.materials) {
+      if (m.kind !== "resource") continue;
+      addName(cat.materials, m.name, m.uuid);
+      const own = m.nameKey ? gameNames[m.nameKey] : undefined;
+      if (own) addName(cat.materials, own, m.uuid);
+      if (!cat.materialNames.has(m.uuid)) cat.materialNames.set(m.uuid, m.name);
+    }
+    for (const l of r.locations) {
+      if (!l.refinery) continue;
+      // The location's own name: the label's first part ("Name · planet · system")
+      cat.stations.set(norm(l.label.split(" · ")[0]!), l.uuid);
+      const own = l.nameKey ? gameNames[l.nameKey] : undefined;
+      if (own) cat.stations.set(norm(own), l.uuid);
+      if (!cat.stationNames.has(l.uuid)) cat.stationNames.set(l.uuid, l.short);
+    }
   }
   return cat;
 }
 
-export interface ResolvedDraft {
+export const findStation = (cat: SyncCatalog, title: string | null): string | null => (title ? cat.stations.get(norm(title)) ?? null : null);
+
+// --- orders and jobs -----------------------------------------------------------------------------
+
+export interface OrderRow {
+  resourceUuid: string;
+  quality: number;
+  yieldCscu: number;
+}
+
+export interface Order {
+  status: "processing" | "completed";
+  seconds: number | null;
+  // Merged per material and quality, sorted
+  rows: OrderRow[];
+}
+
+const rowKey = (resourceUuid: string, quality: number) => `${resourceUuid}:${quality}`;
+
+/** Rows of one material and quality summed, sorted by key. */
+function merged(rows: OrderRow[]): OrderRow[] {
+  const by = new Map<string, OrderRow>();
+  for (const r of rows) {
+    const k = rowKey(r.resourceUuid, r.quality);
+    const had = by.get(k);
+    by.set(k, had ? { ...had, yieldCscu: had.yieldCscu + r.yieldCscu } : { ...r });
+  }
+  return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, r]) => r);
+}
+
+/** An order with its names resolved; rows that cannot be (unknown name, a number missing, nothing out) are left out; null when none is left. */
+export function resolveOrder(o: OverviewOrder, cat: SyncCatalog): Order | null {
+  const rows: OrderRow[] = [];
+  for (const r of o.rows) {
+    if (r.quality === null || r.yieldCscu === null || r.yieldCscu <= 0) continue;
+    const uuid = findMaterial(cat.materials, r.name);
+    if (uuid) rows.push({ resourceUuid: uuid, quality: r.quality, yieldCscu: r.yieldCscu });
+  }
+  return rows.length ? { status: o.status, seconds: o.seconds, rows: merged(rows) } : null;
+}
+
+/** Which job an order may be: its materials and qualities. */
+export const signature = (rows: { resourceUuid: string; quality: number }[]) =>
+  [...new Set(rows.map((r) => rowKey(r.resourceUuid, r.quality)))].sort().join(",");
+
+// What two reads must agree on (the time left counts down: not part of it)
+const content = (o: Order) => `${o.status}|${o.rows.map((r) => `${rowKey(r.resourceUuid, r.quality)}=${r.yieldCscu}`).join(",")}`;
+
+export interface JobBatch {
+  id: number;
+  resourceUuid: string;
+  quality: number;
+  // Exact SCU text: the expected yield
+  quantity: string;
+}
+
+export interface Job {
+  jobId: string;
+  locationUuid: string;
+  // ISO, null: open
+  endsAt: string | null;
+  batches: JobBatch[];
+}
+
+/** The running jobs in a personal stock list. */
+export function jobsOf(batches: StockBatch[]): Job[] {
+  const jobs = new Map<string, Job>();
+  for (const b of batches) {
+    if (b.state !== "refining" || !b.refine || b.kind !== "resource") continue;
+    const id = b.refine.jobId;
+    if (!jobs.has(id)) jobs.set(id, { jobId: id, locationUuid: b.locationUuid, endsAt: b.refine.endsAt, batches: [] });
+    jobs.get(id)!.batches.push({ id: b.id, resourceUuid: b.subjectUuid, quality: b.quality, quantity: b.quantity });
+  }
+  return [...jobs.values()];
+}
+
+// --- the sync -----------------------------------------------------------------------------------
+
+/** A change made right away (estimates of a matched running job). */
+export type Update =
+  | { kind: "yield"; jobId: string; batchId: number; amount: string; expected: string }
+  | { kind: "duration"; jobId: string; durationSeconds: number };
+
+export type Proposal =
+  | { kind: "new"; id: string; locationUuid: string; endsAtMs: number | null; rows: OrderRow[] }
+  | { kind: "store"; id: string; locationUuid: string; job: Job; rows: OrderRow[] }
+  | { kind: "missing"; id: string; locationUuid: string; job: Job };
+
+export interface FeedResult {
+  // The station read (null: not recognized; then nothing happens)
   locationUuid: string | null;
-  rows: { name: string; oreUuid: string | null; quality: number; amount: string; expectedYield: string }[];
+  updates: Update[];
 }
 
-export function resolveDraft(d: Draft, cat: RefineryCatalog): ResolvedDraft {
+// The end may differ this much (the terminal shows minutes only above an hour, reads come a moment apart)
+const END_SLACK_MS = 120_000;
+
+export class RefinerySync {
+  readonly proposals: Proposal[] = [];
+  // Dismissed in this session: never proposed again
+  private readonly dismissed = new Set<string>();
+  // Per station the order contents of the last read (stability)
+  private readonly lastRead = new Map<string, Set<string>>();
+  // The visit: stations read and the jobs seen there
+  private visitStations = new Set<string>();
+  private seenJobs = new Set<string>();
+
+  startVisit() {
+    this.visitStations = new Set();
+    this.seenJobs = new Set();
+    this.lastRead.clear();
+  }
+
+  /** One read of an overview against the jobs as the server has them now. */
+  feed(e: OverviewEvent, cat: SyncCatalog, jobs: Job[], nowMs: number): FeedResult {
+    const locationUuid = findStation(cat, e.overview.station);
+    if (!locationUuid) return { locationUuid: null, updates: [] };
+    this.visitStations.add(locationUuid);
+    const here = jobs.filter((j) => j.locationUuid === locationUuid);
+    const orders = e.overview.orders.map((o) => resolveOrder(o, cat)).filter((o): o is Order => o !== null);
+    const before = this.lastRead.get(locationUuid) ?? new Set<string>();
+    this.lastRead.set(locationUuid, new Set(orders.map(content)));
+
+    const updates: Update[] = [];
+    const used = new Set<string>();
+    for (const o of orders) {
+      const endsAtMs = o.seconds === null ? null : e.atMs + o.seconds * 1000;
+      const job = match(o, here, used, endsAtMs);
+      if (job) {
+        used.add(job.jobId);
+        this.seenJobs.add(job.jobId);
+        this.drop(`missing:${job.jobId}`);
+      }
+      // Only what two reads in a row showed the same
+      if (!before.has(content(o))) continue;
+      if (o.status === "processing" && job) updates.push(...jobUpdates(job, o, endsAtMs, nowMs));
+      else if (o.status === "processing") this.propose({ kind: "new", id: `new:${locationUuid}:${signature(o.rows)}`, locationUuid, endsAtMs, rows: o.rows });
+      else if (job) this.propose({ kind: "store", id: `store:${job.jobId}`, locationUuid, job, rows: o.rows });
+    }
+    return { locationUuid, updates };
+  }
+
+  /** The visit is over: jobs of its stations no read matched are proposed for removal. */
+  endVisit(jobs: Job[]) {
+    for (const job of jobs) {
+      if (this.visitStations.has(job.locationUuid) && !this.seenJobs.has(job.jobId)) {
+        this.propose({ kind: "missing", id: `missing:${job.jobId}`, locationUuid: job.locationUuid, job });
+      }
+    }
+    this.visitStations = new Set();
+    this.seenJobs = new Set();
+    this.lastRead.clear();
+  }
+
+  /** Drops proposals the jobs no longer call for (a new job registered elsewhere, a job gone). */
+  prune(jobs: Job[]) {
+    const byId = new Map(jobs.map((j) => [j.jobId, j]));
+    const signatures = new Set(jobs.map((j) => `${j.locationUuid}:${signature(j.batches)}`));
+    for (const p of [...this.proposals]) {
+      if (p.kind === "new" ? signatures.has(`${p.locationUuid}:${signature(p.rows)}`) : !byId.has(p.job.jobId)) this.drop(p.id);
+    }
+  }
+
+  /** The user said no: not proposed again in this session. */
+  dismiss(id: string) {
+    this.dismissed.add(id);
+    this.drop(id);
+  }
+
+  /** Done (registered, stored, removed). */
+  drop(id: string) {
+    const i = this.proposals.findIndex((p) => p.id === id);
+    if (i >= 0) this.proposals.splice(i, 1);
+  }
+
+  private propose(p: Proposal) {
+    if (this.dismissed.has(p.id)) return;
+    const i = this.proposals.findIndex((x) => x.id === p.id);
+    // The newest read replaces the older (the time left, the job's batches)
+    if (i >= 0) this.proposals[i] = p;
+    else this.proposals.push(p);
+  }
+}
+
+/** The job an order is: the same rows; of several the one whose end is closest. */
+function match(o: Order, jobs: Job[], used: Set<string>, endsAtMs: number | null): Job | null {
+  const sig = signature(o.rows);
+  const fits = jobs.filter((j) => !used.has(j.jobId) && signature(j.batches) === sig);
+  const distance = (j: Job) => (endsAtMs === null || !j.endsAt ? Number.MAX_SAFE_INTEGER : Math.abs(Date.parse(j.endsAt) - endsAtMs));
+  return fits.sort((a, b) => distance(a) - distance(b))[0] ?? null;
+}
+
+/** What differs between a running job and the terminal: each row's yield, the end. */
+function jobUpdates(job: Job, o: Order, endsAtMs: number | null, nowMs: number): Update[] {
+  const out: Update[] = [];
+  for (const b of job.batches) {
+    const row = o.rows.find((r) => r.resourceUuid === b.resourceUuid && r.quality === b.quality);
+    const amount = row && cscuToScu(row.yieldCscu);
+    if (amount && amount !== b.quantity) out.push({ kind: "yield", jobId: job.jobId, batchId: b.id, amount, expected: b.quantity });
+  }
+  if (endsAtMs !== null && (!job.endsAt || Math.abs(Date.parse(job.endsAt) - endsAtMs) > END_SLACK_MS)) {
+    out.push({ kind: "duration", jobId: job.jobId, durationSeconds: Math.max(1, Math.round((endsAtMs - nowMs) / 1000)) });
+  }
+  return out;
+}
+
+// --- requests -------------------------------------------------------------------------------------
+
+/** POST /api/refinery/start for a new job; the duration is what is left now (the end stays the game's). */
+export function startRequest(p: Extract<Proposal, { kind: "new" }>, nowMs: number) {
   return {
-    locationUuid: d.station ? cat.refineries.get(norm(d.station)) ?? null : null,
-    rows: d.rows.map((r) => ({
-      name: r.name, oreUuid: findOre(cat, r.name), quality: r.quality,
-      amount: cscuToScu(r.qtyCscu), expectedYield: cscuToScu(r.yieldCscu),
-    })),
+    locationUuid: p.locationUuid,
+    ...(p.endsAtMs === null ? {} : { durationSeconds: Math.max(1, Math.round((p.endsAtMs - nowMs) / 1000)) }),
+    rows: p.rows.map((r) => ({ resourceUuid: r.resourceUuid, quality: r.quality, amount: cscuToScu(r.yieldCscu) })),
   };
 }
 
-/** The web app request for a resolved draft (null while a station or ore is unknown); the duration
- * is what is left of the job now, so its end stays the game's. */
-export function startRequest(r: ResolvedDraft, endsAtMs: number, nowMs: number): RefineryStartRequest | null {
-  if (!r.locationUuid || r.rows.some((x) => !x.oreUuid)) return null;
+/** POST /api/refinery/done: every batch of the job with the terminal's yield. */
+export function doneRequest(p: Extract<Proposal, { kind: "store" }>) {
   return {
-    locationUuid: r.locationUuid,
-    durationSeconds: Math.max(1, Math.round((endsAtMs - nowMs) / 1000)),
-    rows: r.rows.map((x) => ({ oreUuid: x.oreUuid!, quality: x.quality, amount: x.amount, expectedYield: x.expectedYield })),
+    jobId: p.job.jobId,
+    rows: p.job.batches.map((b) => {
+      const row = p.rows.find((r) => r.resourceUuid === b.resourceUuid && r.quality === b.quality);
+      return { batchId: b.id, amount: row ? cscuToScu(row.yieldCscu) : b.quantity, expected: b.quantity };
+    }),
   };
+}
+
+/** POST /api/refinery/remove: every batch of the job. */
+export function removeRequest(job: Job) {
+  return { jobId: job.jobId, rows: job.batches.map((b) => ({ batchId: b.id, expected: b.quantity })) };
 }

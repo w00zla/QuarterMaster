@@ -1,6 +1,6 @@
 //! Windows screen capture for the refinery OCR: while detection is on and Star Citizen is the
-//! foreground window, one frame per second of its client area, sent to the OCR worker (`ocrwatch`),
-//! which gates and reads it; while detection is on it also tells whether the game runs at all
+//! foreground window, one frame per second of its client area (BGRA, converted only if it is read),
+//! sent to the OCR worker (`ocrwatch`), which gates and reads it; while detection is on it also tells whether the game runs at all
 //! (`game-seen`, for the state row). DXGI Desktop Duplication: the image of the game's monitor, cut to the
 //! window (no capture border, unlike Windows.Graphics.Capture on Windows 10). Window and monitor
 //! coordinates are physical pixels: Tauri makes the process per-monitor DPI aware.
@@ -9,7 +9,6 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use image::RgbImage;
 use tauri::{AppHandle, Emitter};
 use windows::core::{Interface, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HMODULE, HWND, POINT, RECT};
@@ -33,7 +32,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetForegroundWindow, GetWindowThreadProcessId, IsIconic};
 
-use crate::ocrwatch::{Detect, Frame, GameSeen, GAME_SEEN};
+use crate::ocrwatch::{Detect, Frame, GameSeen, Pixels, GAME_SEEN};
 
 const GAME_EXE: &str = "StarCitizen.exe";
 const INTERVAL: Duration = Duration::from_secs(1);
@@ -59,9 +58,9 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen) 
                 continue;
             };
             match grab(&mut dup, hwnd) {
-                Ok(Some(image)) => {
+                Ok(Some(pixels)) => {
                     last_error.clear();
-                    if tx.send(Frame { at_ms: now_ms(), image, live: true }).is_err() {
+                    if tx.send(Frame { at_ms: now_ms(), pixels, live: true }).is_err() {
                         return;
                     }
                 }
@@ -141,6 +140,8 @@ struct Duplication {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     dup: IDXGIOutputDuplication,
+    /// The CPU-readable copy target, kept while the crop's size stays
+    staging: Option<(ID3D11Texture2D, u32, u32)>,
 }
 
 /// A part of the monitor's image, in its pixels.
@@ -167,7 +168,7 @@ fn crop(client: RECT, desktop: RECT) -> Option<Crop> {
 }
 
 /// One frame of the game window's client area; None when the desktop did not change.
-fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<RgbImage>, String> {
+fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<Pixels>, String> {
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
     if slot.as_ref().is_none_or(|d| d.monitor != monitor) {
         *slot = None;
@@ -176,7 +177,7 @@ fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<RgbImage>, 
         log::debug!("screen capture on the monitor at ({}, {}), {}×{}", r.left, r.top, r.right - r.left, r.bottom - r.top);
         *slot = Some(d);
     }
-    let d = slot.as_ref().expect("opened above");
+    let d = slot.as_mut().expect("opened above");
     let Some(crop) = crop(client_rect(hwnd)?, d.desktop) else {
         return Ok(None);
     };
@@ -225,7 +226,7 @@ fn open(monitor: HMONITOR) -> Result<Duplication, String> {
                 let device = device.ok_or("no D3D11 device")?;
                 let context = context.ok_or("no D3D11 context")?;
                 let dup = output.cast::<IDXGIOutput1>().ctx("IDXGIOutput1")?.DuplicateOutput(&device).ctx("DuplicateOutput")?;
-                return Ok(Duplication { monitor, desktop: desc.DesktopCoordinates, device, context, dup });
+                return Ok(Duplication { monitor, desktop: desc.DesktopCoordinates, device, context, dup, staging: None });
             }
         }
         Err("no DXGI output shows the game's monitor".into())
@@ -233,7 +234,7 @@ fn open(monitor: HMONITOR) -> Result<Duplication, String> {
 }
 
 impl Duplication {
-    fn frame(&self, crop: &Crop) -> Result<Option<RgbImage>, String> {
+    fn frame(&mut self, crop: &Crop) -> Result<Option<Pixels>, String> {
         unsafe {
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource = None;
@@ -253,8 +254,8 @@ impl Duplication {
         }
     }
 
-    /// Copies the cropped part of the desktop image to the CPU as RGB.
-    unsafe fn copy(&self, resource: Option<IDXGIResource>, c: &Crop) -> Result<RgbImage, String> {
+    /// Copies the cropped part of the desktop image to the CPU (BGRA rows without padding).
+    unsafe fn copy(&mut self, resource: Option<IDXGIResource>, c: &Crop) -> Result<Pixels, String> {
         let texture: ID3D11Texture2D = resource.ok_or("no desktop image")?.cast().ctx("ID3D11Texture2D")?;
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         texture.GetDesc(&mut desc);
@@ -273,30 +274,32 @@ impl Duplication {
             CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
             MiscFlags: 0,
         };
-        let mut staging = None;
-        self.device.CreateTexture2D(&staging_desc, None, Some(&mut staging)).ctx("CreateTexture2D")?;
-        let staging: ID3D11Texture2D = staging.ok_or("no staging texture")?;
+        if self.staging.as_ref().is_none_or(|(_, w, h)| (*w, *h) != (c.width, c.height)) {
+            let mut staging = None;
+            self.device.CreateTexture2D(&staging_desc, None, Some(&mut staging)).ctx("CreateTexture2D")?;
+            self.staging = Some((staging.ok_or("no staging texture")?, c.width, c.height));
+        }
+        let staging = self.staging.as_ref().expect("created above").0.clone();
         let source = D3D11_BOX { left: c.x, top: c.y, front: 0, right: c.x + c.width, bottom: c.y + c.height, back: 1 };
         self.context.CopySubresourceRegion(&staging, 0, 0, 0, 0, &texture, 0, Some(&source));
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         self.context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).ctx("Map")?;
         let pitch = mapped.RowPitch as usize;
         let data = std::slice::from_raw_parts(mapped.pData as *const u8, pitch * c.height as usize);
-        let image = bgra_to_rgb(data, pitch, c.width, c.height);
+        let pixels = Pixels::Bgra { data: unpad(data, pitch, c.width, c.height), width: c.width, height: c.height };
         self.context.Unmap(&staging, 0);
-        Ok(image)
+        Ok(pixels)
     }
 }
 
-/// BGRA rows of `pitch` bytes (padded) to an RGB image.
-fn bgra_to_rgb(data: &[u8], pitch: usize, width: u32, height: u32) -> RgbImage {
-    let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
-    for row in data.chunks(pitch).take(height as usize) {
-        for px in row[..width as usize * 4].as_chunks::<4>().0 {
-            rgb.extend_from_slice(&[px[2], px[1], px[0]]);
-        }
+/// BGRA rows of `pitch` bytes (padded) packed tightly.
+fn unpad(data: &[u8], pitch: usize, width: u32, height: u32) -> Vec<u8> {
+    let row = width as usize * 4;
+    let mut out = Vec::with_capacity(row * height as usize);
+    for line in data.chunks(pitch).take(height as usize) {
+        out.extend_from_slice(&line[..row]);
     }
-    RgbImage::from_raw(width, height, rgb).expect("width × height × 3 bytes")
+    out
 }
 
 #[cfg(test)]
@@ -335,7 +338,6 @@ mod tests {
             1, 2, 3, 255, 4, 5, 6, 255, 0, 0, 0, 0, //
             7, 8, 9, 255, 10, 11, 12, 255, 0, 0, 0, 0,
         ];
-        let img = bgra_to_rgb(&data, 12, 2, 2);
-        assert_eq!(img.as_raw(), &vec![3, 2, 1, 6, 5, 4, 9, 8, 7, 12, 11, 10]);
+        assert_eq!(unpad(&data, 12, 2, 2), vec![1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255]);
     }
 }

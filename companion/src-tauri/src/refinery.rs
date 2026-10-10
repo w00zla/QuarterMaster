@@ -1,15 +1,15 @@
-//! Reads the refinery terminal's work order panel from a frame: the quote ("SETUP" after "GET
-//! QUOTE": method, ores with quality, quantity and yield in cSCU, processing time) or a running job
-//! ("PROCESSING": refined materials with quality, yield, to do, done, time remaining), plus the
-//! station's name from the terminal's title.
+//! Reads the refinery terminal's work order overview from a frame: the station's name from the
+//! terminal's title and every work order shown side by side (each a panel with its own table, the
+//! newest not necessarily first), running ("PROCESSING": refined materials with quality and yield in
+//! cSCU, time remaining) or finished ("COMPLETED": quality and yield). With more work orders than fit,
+//! the terminal scrolls them sideways: a frame shows only some, a panel cut by the edge is left out.
 //!
-//! Resolution independent: the panel is found by its texts (header, table head, time label), the
-//! columns by the table head's words, the rows by the material names below it. A cell the full-frame
+//! Resolution independent: frames are scaled by their height (the game's UI scales with it, on 16:9
+//! as on ultrawide). A panel is found by its texts (table head, header, time label) in English or the
+//! player's language pack (`locale.rs`), the columns by the table head's words, the rows by the
+//! material names below it. A cell the full-frame
 //! pass missed (single digits are small) is read again on its own. Names stay as the game shows them
 //! (its language); matching them to the catalog happens in the frontend (`refinery.ts`).
-//!
-//! The overview shows the work orders side by side (each a panel with its own table, the newest not
-//! necessarily first): every running one is read, finished ones are left out.
 //!
 //! Layout as of SC 4.x (screenshots 2026-10-07/08); anything unexpected yields no panel or empty
 //! fields, never a panic.
@@ -17,51 +17,50 @@
 use image::RgbImage;
 use serde::Serialize;
 
+use crate::locale::{norm, Labels};
 use crate::ocr::{Ocr, Rect, TextBox};
 
-/// Longer side the frame is scaled to for the full pass (3840 px wide frames: half).
-const READ_SIDE: u32 = 1920;
+/// Height the frame is scaled to for the full pass (3840×1600: half)
+const READ_HEIGHT: u32 = 800;
+/// Height for the cheap check whether a refinery terminal is in view: only its big titles are read
+const CHECK_HEIGHT: u32 = 320;
+/// Width / height of a box that may hold the table head "MATERIALS YIELDED (CSCU)" (about 12 as
+/// one box, about 7 when split before the parenthesis)
+const HEAD_RATIO: f32 = 5.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ScreenKind {
-    Quote,
+pub enum Status {
     Processing,
+    Completed,
+}
+
+/// The work orders of one terminal as one frame shows them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Overview {
+    /// The terminal's title, e.g. "CRU-L1 AMBITIOUS DREAM STATION"
+    pub station: Option<String>,
+    /// Left to right
+    pub orders: Vec<Order>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Screen {
-    pub kind: ScreenKind,
-    /// The terminal's title, e.g. "CRU-L1 AMBITIOUS DREAM STATION"
-    pub station: Option<String>,
-    /// Quote only: the picked method as shown ("Dinyx Solventation")
-    pub method: Option<String>,
-    /// Quote: processing time; processing: time remaining
+pub struct Order {
+    pub status: Status,
+    /// Processing: the time remaining
     pub seconds: Option<u32>,
     pub rows: Vec<Row>,
 }
 
-/// One table row. Numbers in cSCU (quality 0–1000); `None` where the game shows "--" or nothing
-/// could be read.
+/// One table row. Quality 0–1000, yield in cSCU; `None` where nothing could be read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Row {
     pub name: String,
-    /// The "INERT MATERIALS" line (never refined)
-    pub inert: bool,
     pub quality: Option<u32>,
-    /// Quote only: the ore quantity
-    pub qty: Option<u32>,
     pub yield_cscu: Option<u32>,
-    /// Processing only
-    pub todo: Option<u32>,
-    pub done: Option<u32>,
-}
-
-/// Letters and digits only, upper case: "// PROCESSING TIME" -> "PROCESSINGTIME".
-fn norm(text: &str) -> String {
-    text.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_uppercase).collect()
 }
 
 /// "57m 54s", "1h 2m 3s", "0m 36s" -> seconds.
@@ -128,83 +127,85 @@ fn head_words(boxes: &[&TextBox]) -> Vec<Column> {
 
 /// Where a parse found things, before the cells are read.
 struct Layout {
-    kind: ScreenKind,
+    status: Status,
     station: Option<String>,
-    method: Option<String>,
     seconds: Option<u32>,
     /// Name boxes of the rows, top to bottom
     rows: Vec<Rect>,
     names: Vec<String>,
-    /// The value columns in table order (quote: QUALITY QTY YIELD; processing: QUALITY YIELD TODO DONE)
+    /// The value columns in table order (processing: QUALITY YIELD TODO DONE; completed: QUALITY YIELD)
     columns: Vec<Column>,
 }
 
-/// The panels in a frame: the quote (it fills the panel alone), or every running work order. The
-/// overview shows the work orders side by side, each with its own table; finished ones (header
-/// "COMPLETED") are left out.
-fn layouts(boxes: &[TextBox]) -> Vec<Layout> {
-    let find = |prefix: &str| boxes.iter().filter(|b| norm(&b.text).starts_with(prefix)).collect::<Vec<_>>();
-    if let Some(head) = find("MATERIALSSELECTED").first() {
-        return layout_at(boxes, ScreenKind::Quote, head, f32::MAX).into_iter().collect();
+/// The columns `wanted` (each: its label in every language) among the head's words, left to right;
+/// a label may span up to three words ("TO DO"), its center then lies between them.
+fn find_columns(words: &[Column], wanted: &[&Vec<String>]) -> Option<Vec<Column>> {
+    let mut out: Vec<Column> = Vec::new();
+    for labels in wanted {
+        let found = (0..words.len()).find_map(|i| {
+            (1..=3).filter(|n| i + n <= words.len()).find_map(|n| {
+                let joined: String = words[i..i + n].iter().map(|w| w.key.as_str()).collect();
+                labels.contains(&joined).then(|| Column { key: joined, cx: (words[i].cx + words[i + n - 1].cx) / 2.0 })
+            })
+        })?;
+        out.push(found);
     }
-    let mut heads = find("MATERIALSYIELDED");
+    out.sort_by(|a, b| a.cx.total_cmp(&b.cx));
+    Some(out)
+}
+
+/// The work order panels in a frame, left to right.
+fn layouts(boxes: &[TextBox], labels: &Labels) -> Vec<Layout> {
+    let mut heads: Vec<&TextBox> = boxes.iter().filter(|b| is_head(&b.text, labels)).collect();
     heads.sort_by(|a, b| a.rect.x0.total_cmp(&b.rect.x0));
     // Each table ends where the next one to its right starts
     (0..heads.len())
-        .filter_map(|i| layout_at(boxes, ScreenKind::Processing, heads[i], heads.get(i + 1).map_or(f32::MAX, |n| n.rect.x0)))
+        .filter_map(|i| layout_at(boxes, heads[i], heads.get(i + 1).map_or(f32::MAX, |n| n.rect.x0), labels))
         .collect()
 }
 
+fn is_head(text: &str, labels: &Labels) -> bool {
+    let t = norm(text);
+    labels.head.iter().any(|h| t.starts_with(h.as_str()))
+}
+
 /// The panel whose table head is `head`, left of `right_limit`.
-fn layout_at(boxes: &[TextBox], kind: ScreenKind, head: &TextBox, right_limit: f32) -> Option<Layout> {
+fn layout_at(boxes: &[TextBox], head: &TextBox, right_limit: f32, labels: &Labels) -> Option<Layout> {
     let find = |pred: &dyn Fn(&str) -> bool| boxes.iter().filter(|b| pred(&norm(&b.text))).collect::<Vec<_>>();
     let unit = head.rect.h();
-    // The panel header above the table (the biggest "SETUP"/"PROCESSING" there, within this panel)
-    let title = if kind == ScreenKind::Quote { "SETUP" } else { "PROCESSING" };
-    let header = find(&|t| t == title)
+    // The panel header above the table (the biggest "PROCESSING"/"COMPLETED" there, within this panel)
+    let header = find(&|t| labels.processing.iter().chain(&labels.completed).any(|l| l == t))
         .into_iter()
         .filter(|b| b.rect.cy() < head.rect.y0 && b.rect.x0 > head.rect.x0 - unit * 2.0 && b.rect.x1 < right_limit)
         .max_by(|a, b| a.rect.h().total_cmp(&b.rect.h()))?;
+    let status = if labels.completed.contains(&norm(&header.text)) { Status::Completed } else { Status::Processing };
     let panel_left = head.rect.x0 - unit;
     let panel_right = (header.rect.x1 + unit).min(right_limit);
     let in_panel = |b: &TextBox| b.rect.cx() > panel_left && b.rect.cx() < panel_right;
-    let time_label = if kind == ScreenKind::Quote { "PROCESSINGTIME" } else { "TIMEREMAINING" };
-    let time = find(&|t| t == time_label).into_iter().find(|b| b.rect.cy() > head.rect.cy() && in_panel(b));
+    let time = find(&|t| labels.time_remaining.iter().any(|l| l == t)).into_iter().find(|b| b.rect.cy() > head.rect.cy() && in_panel(b));
 
     // Columns: the head's words right of "MATERIALS …"
     let line: Vec<&TextBox> = boxes
         .iter()
         .filter(|b| (b.rect.cy() - head.rect.cy()).abs() < unit * 0.6 && b.rect.x0 > head.rect.x1 - 1.0 && b.rect.cx() < panel_right)
         .collect();
-    let wanted: &[&str] = if kind == ScreenKind::Quote { &["QUALITY", "QTY", "YIELD"] } else { &["QUALITY", "YIELD", "TO", "DONE"] };
-    let mut columns: Vec<Column> = Vec::new();
-    let words = head_words(&line);
-    for (i, w) in words.iter().enumerate() {
-        // "TO DO" is two words: its center lies between them
-        if w.key == "TO" {
-            if let Some(next) = words.get(i + 1).filter(|n| n.key == "DO") {
-                columns.push(Column { key: "TODO".into(), cx: (w.cx + next.cx) / 2.0 });
-                continue;
-            }
-        }
-        if wanted.contains(&w.key.as_str()) && w.key != "TO" {
-            columns.push(w.clone());
-        }
-    }
-    let expected = if kind == ScreenKind::Quote { 3 } else { 4 };
-    if columns.len() != expected {
-        return None;
-    }
+    let wanted: Vec<&Vec<String>> = if status == Status::Processing {
+        vec![&labels.quality, &labels.yield_, &labels.todo, &labels.done]
+    } else {
+        vec![&labels.quality, &labels.yield_]
+    };
+    let columns = find_columns(&head_words(&line), &wanted)?;
 
     // Rows: the names below the head, left of the first column, above the summary lines
     let end = boxes
         .iter()
-        .filter(|b| b.rect.cy() > head.rect.y1 && in_panel(b))
+        .filter(|b| b.rect.y1 > head.rect.y1 && in_panel(b))
         .filter(|b| {
             let t = norm(&b.text);
-            // A section label ("// PROCESSING") too: a message over the panel may hide the summary lines
-            t == "TOTALCOST" || t == time_label || (t == "YIELD" && b.rect.x0 < columns[0].cx - unit) || b.text.trim_start().starts_with("//")
+            // A section label ("// PROCESSING", "// RESULTS") too: a message over the panel may hide the summary lines
+            labels.time_remaining.contains(&t) || (labels.yield_.contains(&t) && b.rect.x0 < columns[0].cx - unit) || b.text.trim_start().starts_with("//")
         })
+        .filter(|b| b.rect.cy() > head.rect.y1)
         .map(|b| b.rect.y0)
         .fold(time.map_or(f32::MAX, |t| t.rect.y0), f32::min);
     // Names start at the table's left edge and end before the first column's center
@@ -226,29 +227,17 @@ fn layout_at(boxes: &[TextBox], kind: ScreenKind, head: &TextBox, right_limit: f
             .find_map(|b| parse_duration(&b.text))
     });
 
-    // Quote: the method below "// PROCESSING SELECTION, …" (not the "… SPEED // … COST // … YIELD" line)
-    let method = (kind == ScreenKind::Quote)
-        .then(|| {
-            let anchor = find(&|t| t.starts_with("PROCESSINGSELECTION")).into_iter().next()?;
-            boxes
-                .iter()
-                .filter(|b| b.rect.y0 > anchor.rect.y1 - 1.0 && b.rect.y1 < head.rect.y0 && in_panel(b) && !b.text.contains("//"))
-                .min_by(|a, b| a.rect.y0.total_cmp(&b.rect.y0))
-                .map(|b| b.text.trim().to_string())
-        })
-        .flatten();
-
-    // The station: the biggest text above the panel header (wholly: not another panel's header), left of it
+    // The station: the biggest text wholly above the panel header (not another panel's header) that starts left of it (the
+    // title may reach over the first panel)
     let station = boxes
         .iter()
-        .filter(|b| b.rect.y1 < header.rect.y0 && b.rect.x1 < header.rect.x0 && norm(&b.text).len() >= 3)
+        .filter(|b| b.rect.y1 < header.rect.y0 && b.rect.x0 < header.rect.x0 && norm(&b.text).len() >= 3)
         .max_by(|a, b| a.rect.h().total_cmp(&b.rect.h()))
         .map(|b| b.text.trim().to_string());
 
     Some(Layout {
-        kind,
+        status,
         station,
-        method,
         seconds,
         names: rows.iter().map(|b| b.text.trim().to_string()).collect(),
         rows: rows.iter().map(|b| b.rect).collect(),
@@ -265,18 +254,60 @@ fn cell(row: Rect, columns: &[Column], i: usize) -> Rect {
     Rect { x0: left, y0: row.y0 - pad, x1: right, y1: row.y1 + pad }
 }
 
-/// Reads the refinery panels in a frame: the quote, or every running work order; empty when there is
-/// none (or it cannot be made out).
-pub fn read_screens(ocr: &mut Ocr, frame: &RgbImage) -> Result<Vec<Screen>, String> {
-    let boxes = ocr.read(frame, READ_SIDE)?;
-    layouts(&boxes).into_iter().map(|l| read_panel(ocr, frame, &boxes, l)).collect()
+/// What a full read of a frame found.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Read {
+    Overview(Overview),
+    /// A refinery terminal, but no work order panel (its start page, a quote, a message over it)
+    Terminal,
+    Nothing,
 }
 
-fn read_panel(ocr: &mut Ocr, frame: &RgbImage, boxes: &[TextBox], l: Layout) -> Result<Screen, String> {
+/// Whether a refinery terminal is likely in view: its big titles ("Refinement Center", a work
+/// order's "Processing"/"Completed") read at a low resolution. Cheap (~30–110 ms at two threads on
+/// 3840×1600); a false hit only costs a full read.
+pub fn terminal_in_view(ocr: &mut Ocr, frame: &RgbImage, labels: &Labels) -> Result<bool, String> {
+    let boxes = ocr.read(frame, CHECK_HEIGHT)?;
+    Ok(boxes.iter().any(|b| is_title(&b.text, labels)))
+}
+
+fn is_title(text: &str, labels: &Labels) -> bool {
+    let t = norm(text);
+    labels.center.iter().any(|c| t.contains(c.as_str())) || labels.processing.contains(&t) || labels.completed.contains(&t)
+}
+
+/// Reads the work order overview in a frame. Only the wide boxes are read first: without a table head
+/// among them (most frames) the rest is not read at all.
+pub fn read_overview(ocr: &mut Ocr, frame: &RgbImage, labels: &Labels) -> Result<Read, String> {
+    let rects = ocr.detect(frame, READ_HEIGHT)?;
+    let (wide, rest): (Vec<Rect>, Vec<Rect>) = rects.into_iter().partition(|r| r.w() >= r.h() * HEAD_RATIO);
+    let mut boxes = text_boxes(wide.clone(), ocr.recognize_all(frame, &wide)?);
+    let terminal = boxes.iter().any(|b| is_title(&b.text, labels) || is_head(&b.text, labels));
+    if !boxes.iter().any(|b| is_head(&b.text, labels)) {
+        return Ok(if terminal { Read::Terminal } else { Read::Nothing });
+    }
+    boxes.extend(text_boxes(rest.clone(), ocr.recognize_all(frame, &rest)?));
+    boxes.sort_by(|a, b| a.rect.y0.total_cmp(&b.rect.y0).then(a.rect.x0.total_cmp(&b.rect.x0)));
+    let found = layouts(&boxes, labels);
+    if found.is_empty() {
+        return Ok(Read::Terminal);
+    }
+    // The title is the same for every panel: the leftmost's
+    let station = found[0].station.clone();
+    let orders = found.into_iter().map(|l| read_order(ocr, frame, &boxes, l)).collect::<Result<_, _>>()?;
+    Ok(Read::Overview(Overview { station, orders }))
+}
+
+fn text_boxes(rects: Vec<Rect>, texts: Vec<(String, f32)>) -> Vec<TextBox> {
+    rects.into_iter().zip(texts).filter(|(_, (t, _))| !t.trim().is_empty()).map(|(rect, (text, score))| TextBox { rect, text, score }).collect()
+}
+
+fn read_order(ocr: &mut Ocr, frame: &RgbImage, boxes: &[TextBox], l: Layout) -> Result<Order, String> {
     let mut rows = Vec::new();
+    // Quality and yield are the first two columns of both tables
     for (rect, name) in l.rows.iter().zip(&l.names) {
         let mut values = Vec::new();
-        for i in 0..l.columns.len() {
+        for i in 0..2 {
             let c = cell(*rect, &l.columns, i);
             // The full pass's box in this cell, else the cell read on its own
             let found = boxes.iter().find(|b| b.rect.cx() > c.x0 && b.rect.cx() < c.x1 && b.rect.cy() > c.y0 && b.rect.cy() < c.y1);
@@ -286,18 +317,14 @@ fn read_panel(ocr: &mut Ocr, frame: &RgbImage, boxes: &[TextBox], l: Layout) -> 
             };
             values.push(parse_number(&text));
         }
-        let inert = norm(name).ends_with("MATERIALS");
-        // A running job's row always shows its quality: without one it is a stray text (a message over
-        // the panel, "YIELD" half hidden)
-        if l.kind == ScreenKind::Processing && values[0].is_none() {
+        // A row always shows its quality: without one it is a stray text (a message over the panel,
+        // "YIELD" half hidden)
+        if values[0].is_none() {
             continue;
         }
-        rows.push(match l.kind {
-            ScreenKind::Quote => Row { name: name.clone(), inert, quality: values[0], qty: values[1], yield_cscu: values[2], todo: None, done: None },
-            ScreenKind::Processing => Row { name: name.clone(), inert, quality: values[0], qty: None, yield_cscu: values[1], todo: values[2], done: values[3] },
-        });
+        rows.push(Row { name: name.clone(), quality: values[0], yield_cscu: values[1] });
     }
-    Ok(Screen { kind: l.kind, station: l.station, method: l.method, seconds: l.seconds, rows })
+    Ok(Order { status: l.status, seconds: l.seconds, rows })
 }
 
 #[cfg(test)]
@@ -329,11 +356,31 @@ mod tests {
         assert!((w[0].cx - 35.0).abs() < 1.0 && (w[1].cx - 105.0).abs() < 1.0);
     }
 
+    #[test]
+    fn columns_of_one_or_more_words_in_any_language() {
+        let words = |keys: &[(&str, f32)]| keys.iter().map(|(k, cx)| Column { key: k.to_string(), cx: *cx }).collect::<Vec<_>>();
+        let l = Labels::english();
+        let found = find_columns(&words(&[("QUALITY", 10.0), ("YIELD", 20.0), ("TO", 29.0), ("DO", 31.0), ("DONE", 40.0)]), &[&l.quality, &l.yield_, &l.todo, &l.done]).unwrap();
+        assert_eq!(found.iter().map(|c| (c.key.as_str(), c.cx)).collect::<Vec<_>>(), [("QUALITY", 10.0), ("YIELD", 20.0), ("TODO", 30.0), ("DONE", 40.0)]);
+        let de: std::collections::HashMap<String, String> =
+            [("refinery_ui_jobcard_table_yield", "Ertrag"), ("refinery_ui_jobcard_table_todo", "To-Do"), ("refinery_ui_jobcard_table_done", "Fertig")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+        let l = Labels::with(&de);
+        let found = find_columns(&words(&[("QUALITY", 10.0), ("ERTRAG", 20.0), ("TODO", 30.0), ("FERTIG", 40.0)]), &[&l.quality, &l.yield_, &l.todo, &l.done]);
+        assert_eq!(found.map(|f| f.len()), Some(4));
+        // A column missing: no table
+        assert!(find_columns(&words(&[("QUALITY", 10.0), ("YIELD", 20.0)]), &[&l.quality, &l.yield_, &l.todo]).is_none());
+    }
+
     // The user's screenshots (local/, not in git) against what the terminal shows; skipped without
     // them. Slow in debug builds: cargo test --release.
     mod screenshots {
         use super::super::*;
         use std::path::Path;
+
+        const STATION: &str = "CRU-L1 AMBITIOUS DREAM STATION";
 
         fn setup(folder: &str) -> Option<(Ocr, std::path::PathBuf)> {
             let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/screenshots").join(folder);
@@ -344,99 +391,89 @@ mod tests {
             Some((Ocr::new(4).unwrap(), shots))
         }
 
-        fn read_all(ocr: &mut Ocr, dir: &Path, suffix: &str) -> Vec<Screen> {
+        fn frame(dir: &Path, suffix: &str) -> RgbImage {
             let file = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).find(|p| p.to_string_lossy().ends_with(&format!("{suffix}.jpg"))).unwrap();
-            read_screens(ocr, &image::open(file).unwrap().to_rgb8()).unwrap()
+            image::open(file).unwrap().to_rgb8()
         }
 
-        /// The one panel in the frame, if any.
-        fn read(ocr: &mut Ocr, dir: &Path, suffix: &str) -> Option<Screen> {
-            let mut screens = read_all(ocr, dir, suffix);
-            assert!(screens.len() <= 1, "{suffix}: {} panels", screens.len());
-            screens.pop()
-        }
-
-        #[test]
-        fn quotes_and_the_running_job() {
-            let Some((mut ocr, dir)) = setup("refinery flow") else { return };
-            let quotes = [
-                ("05E", "Cormack Method", [6, 5, 122, 13, 14], 72),
-                ("0F4", "Dinyx Solventation", [9, 8, 175, 19, 20], 3474),
-                ("7E7", "Thermonatic Deposition", [8, 7, 148, 16, 17], 868),
-                ("FF2", "XCR Reaction", [6, 5, 122, 13, 14], 36),
-                ("607", "Gaskin Process", [8, 7, 148, 16, 17], 144),
-                ("493", "Kazen Winnowing", [6, 5, 122, 13, 14], 217),
-                ("989", "Pyrometric Chromalysis", [9, 8, 175, 19, 20], 579),
-                ("F3B", "Ferron Exchange", [9, 8, 175, 19, 20], 1158),
-                ("55D", "Electrostarolysis", [8, 7, 148, 16, 17], 289),
-            ];
-            let ores = [("TITANIUM (ORE)", 516, 21), ("ASLARITE (RAW)", 575, 18), ("AGRICIUM (ORE)", 346, 389), ("AGRICIUM (ORE)", 588, 43), ("AGRICIUM (ORE)", 667, 46)];
-            for (suffix, method, yields, seconds) in quotes {
-                let s = read(&mut ocr, &dir, suffix).unwrap_or_else(|| panic!("{suffix}: no panel"));
-                assert_eq!(s.kind, ScreenKind::Quote, "{suffix}");
-                assert_eq!(s.station.as_deref(), Some("CRU-L1 AMBITIOUS DREAM STATION"), "{suffix}");
-                assert_eq!(s.method.as_deref(), Some(method), "{suffix}");
-                assert_eq!(s.seconds, Some(seconds), "{suffix}");
-                let refined: Vec<_> = s.rows.iter().filter(|r| !r.inert).collect();
-                let got: Vec<_> = refined.iter().map(|r| (r.name.as_str(), r.quality, r.qty, r.yield_cscu)).collect();
-                let want: Vec<_> = ores.iter().zip(yields).map(|(&(n, q, a), y)| (n, Some(q), Some(a), Some(y))).collect();
-                assert_eq!(got, want, "{suffix}");
+        fn read(ocr: &mut Ocr, dir: &Path, suffix: &str) -> Option<Overview> {
+            match read_overview(ocr, &frame(dir, suffix), &Labels::english()).unwrap() {
+                Read::Overview(o) => Some(o),
+                _ => None,
             }
+        }
 
-            let p = read(&mut ocr, &dir, "E87").expect("processing panel");
-            assert_eq!(p.kind, ScreenKind::Processing);
-            assert_eq!(p.seconds, Some(57 * 60 + 45));
-            let got: Vec<_> = p.rows.iter().map(|r| (r.name.as_str(), r.quality, r.yield_cscu, r.todo, r.done)).collect();
-            assert_eq!(got, vec![
-                ("TITANIUM", Some(516), Some(9), Some(10), Some(0)),
-                ("ASLARITE", Some(575), Some(8), Some(9), Some(0)),
-                ("AGRICIUM", Some(346), Some(175), Some(175), Some(0)),
-                ("AGRICIUM", Some(588), Some(19), Some(20), Some(0)),
-                ("AGRICIUM", Some(667), Some(20), Some(21), Some(0)),
-            ]);
+        type Rows<'a> = Vec<(&'a str, Option<u32>, Option<u32>)>;
+
+        fn rows(o: &Order) -> Rows<'_> {
+            o.rows.iter().map(|r| (r.name.as_str(), r.quality, r.yield_cscu)).collect()
         }
 
         #[test]
-        fn no_panel_on_other_screens() {
+        fn the_running_job_and_no_overview_elsewhere() {
             let Some((mut ocr, dir)) = setup("refinery flow") else { return };
-            // The welcome screen, and the terminal from the side
-            for suffix in ["20D", "130"] {
+            let v = read(&mut ocr, &dir, "E87").expect("overview");
+            assert_eq!(v.station.as_deref(), Some(STATION));
+            assert_eq!(v.orders.len(), 1);
+            assert_eq!(v.orders[0].status, Status::Processing);
+            assert_eq!(v.orders[0].seconds, Some(57 * 60 + 45));
+            assert_eq!(rows(&v.orders[0]), vec![
+                ("TITANIUM", Some(516), Some(9)),
+                ("ASLARITE", Some(575), Some(8)),
+                ("AGRICIUM", Some(346), Some(175)),
+                ("AGRICIUM", Some(588), Some(19)),
+                ("AGRICIUM", Some(667), Some(20)),
+            ]);
+            // The welcome screen, the terminal from the side and the quotes
+            for suffix in ["20D", "130", "05E", "0F4", "55D"] {
                 assert_eq!(read(&mut ocr, &dir, suffix), None, "{suffix}");
             }
+        }
+
+        #[test]
+        fn the_cheap_check_finds_the_terminal() {
+            let l = Labels::english();
+            for (folder, suffixes) in [("refinery flow", &["20D", "E87", "0F4"][..]), ("refinery flow 2", &["DC5", "2E4"]), ("refinery flow 3", &["BB4", "575"])] {
+                let Some((mut ocr, dir)) = setup(folder) else { return };
+                for suffix in suffixes {
+                    assert!(terminal_in_view(&mut ocr, &frame(&dir, suffix), &l).unwrap(), "{suffix}");
+                }
+            }
+            let Some((mut ocr, dir)) = setup("refinery flow") else { return };
+            // The terminal from the side: nothing readable
+            assert!(!terminal_in_view(&mut ocr, &frame(&dir, "130"), &l).unwrap());
         }
 
         // 2026-10-08: work order 2 started next to the finished work order 1 (right of it)
         #[test]
         fn running_work_order_next_to_a_finished_one() {
             let Some((mut ocr, dir)) = setup("refinery flow 2") else { return };
-            let q = read(&mut ocr, &dir, "775").expect("quote");
-            assert_eq!(q.kind, ScreenKind::Quote);
-            assert_eq!(q.method.as_deref(), Some("Dinyx Solventation"));
-            assert_eq!(q.seconds, Some(4 * 3600 + 17 * 60));
-            let got: Vec<_> = q.rows.iter().filter(|r| !r.inert).map(|r| (r.name.as_str(), r.quality, r.qty, r.yield_cscu)).collect();
-            assert_eq!(got, vec![
-                ("HEPH (RAW)", Some(572), Some(207), Some(91)),
-                ("SILICON (RAW)", Some(310), Some(1201), Some(540)),
-                ("SILICON (RAW)", Some(510), Some(234), Some(105)),
-            ]);
-
-            // Just accepted (a message over the panel), then the overview
-            for suffix in ["2E4", "7A5", "578"] {
-                let p = read(&mut ocr, &dir, suffix).unwrap_or_else(|| panic!("{suffix}: no running work order"));
-                assert_eq!(p.kind, ScreenKind::Processing, "{suffix}");
-                assert_eq!(p.station.as_deref(), Some("CRU-L1 AMBITIOUS DREAM STATION"), "{suffix}");
-                assert_eq!(p.seconds, Some(4 * 3600 + 17 * 60), "{suffix}");
-                let got: Vec<_> = p.rows.iter().map(|r| (r.name.as_str(), r.quality, r.yield_cscu, r.todo, r.done)).collect();
-                assert_eq!(got, vec![
-                    ("HEPHAESTANITE", Some(572), Some(91), Some(92), Some(0)),
-                    ("SILICON", Some(310), Some(540), Some(541), Some(0)),
-                    ("SILICON", Some(510), Some(105), Some(106), Some(0)),
-                ], "{suffix}");
-            }
-
+            let finished = vec![
+                ("TITANIUM", Some(516), Some(9)),
+                ("ASLARITE", Some(575), Some(8)),
+                ("AGRICIUM", Some(346), Some(175)),
+                ("AGRICIUM", Some(588), Some(19)),
+                ("AGRICIUM", Some(667), Some(20)),
+            ];
             // Only the finished work order
             for suffix in ["DC5", "DF8"] {
-                assert_eq!(read(&mut ocr, &dir, suffix), None, "{suffix}");
+                let v = read(&mut ocr, &dir, suffix).unwrap_or_else(|| panic!("{suffix}: no overview"));
+                assert_eq!(v.orders.len(), 1, "{suffix}");
+                assert_eq!(v.orders[0].status, Status::Completed, "{suffix}");
+                assert_eq!(rows(&v.orders[0]), finished, "{suffix}");
+            }
+            // Just accepted (a message over the panel), then the overview
+            for suffix in ["2E4", "7A5", "578"] {
+                let v = read(&mut ocr, &dir, suffix).unwrap_or_else(|| panic!("{suffix}: no overview"));
+                assert_eq!(v.station.as_deref(), Some(STATION), "{suffix}");
+                let running: Vec<_> = v.orders.iter().filter(|o| o.status == Status::Processing).collect();
+                assert_eq!(running.len(), 1, "{suffix}");
+                assert_eq!(running[0].seconds, Some(4 * 3600 + 17 * 60), "{suffix}");
+                assert_eq!(rows(running[0]), vec![
+                    ("HEPHAESTANITE", Some(572), Some(91)),
+                    ("SILICON", Some(310), Some(540)),
+                    ("SILICON", Some(510), Some(105)),
+                ], "{suffix}");
             }
         }
 
@@ -444,24 +481,21 @@ mod tests {
         #[test]
         fn two_running_work_orders() {
             let Some((mut ocr, dir)) = setup("refinery flow 3") else { return };
-            let q = read(&mut ocr, &dir, "BB4").expect("quote");
-            assert_eq!(q.seconds, Some(14 * 60 + 5));
-            let got: Vec<_> = q.rows.iter().filter(|r| !r.inert).map(|r| (r.quality, r.yield_cscu)).collect();
-            assert_eq!(got, vec![(Some(516), Some(3)), (Some(575), Some(3)), (Some(346), Some(28)), (Some(588), Some(16))]);
-
             // Just accepted (a message over the panel), then the overview
             for suffix in ["84C", "F76", "575"] {
-                let screens = read_all(&mut ocr, &dir, suffix);
-                let got: Vec<Vec<_>> = screens
-                    .iter()
-                    .map(|s| s.rows.iter().map(|r| (r.name.as_str(), r.quality, r.yield_cscu)).collect())
-                    .collect();
-                assert_eq!(got, vec![
+                let v = read(&mut ocr, &dir, suffix).unwrap_or_else(|| panic!("{suffix}: no overview"));
+                let running: Vec<_> = v.orders.iter().filter(|o| o.status == Status::Processing).collect();
+                assert_eq!(running.iter().map(|o| rows(o)).collect::<Vec<_>>(), vec![
                     vec![("HEPHAESTANITE", Some(572), Some(91)), ("SILICON", Some(310), Some(540)), ("SILICON", Some(510), Some(105))],
                     vec![("TITANIUM", Some(516), Some(3)), ("ASLARITE", Some(575), Some(3)), ("AGRICIUM", Some(346), Some(28)), ("AGRICIUM", Some(588), Some(16))],
                 ], "{suffix}");
-                assert!(screens.iter().all(|s| s.kind == ScreenKind::Processing && s.seconds.is_some()), "{suffix}");
+                assert!(running.iter().all(|o| o.seconds.is_some()), "{suffix}");
             }
+            // The whole overview: the finished work order 1 left of both
+            let v = read(&mut ocr, &dir, "575").unwrap();
+            assert_eq!(v.orders.iter().map(|o| o.status).collect::<Vec<_>>(), [Status::Completed, Status::Processing, Status::Processing]);
+            assert_eq!(v.orders[1].seconds, Some(2 * 3600 + 54 * 60));
+            assert_eq!(v.orders[2].seconds, Some(13 * 60 + 55));
         }
     }
 }

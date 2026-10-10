@@ -1,63 +1,90 @@
 <script setup lang="ts">
-// Refinery jobs the OCR recognized (refineryDrafts.ts; the detection is switched in the state row):
-// one card per work order with station, method, end and its ores; Register books it in the web app (POST /api/refinery/start, the duration being
-// what is left of the job, so the end stays the game's), Discard drops it; "Register all" in the head
-// books every complete draft after a confirmation. Nothing is booked by itself.
-import { computed, ref, watch } from "vue";
-import type { OkResponse } from "../../../src/webapp/api-types";
+// The refinery sync's proposals (refinerySync.ts; the detection is switched in the state row): one card
+// each with station and state, the time left as the terminal shows it next to the end, and the materials. A new running job: Register (the time left as its
+// duration, so the end stays the game's) or Discard; "Register all" in the head after a confirmation.
+// A finished job: Store (the terminal's yields). A job no read of the station showed: Remove (after a
+// confirmation) or Keep. Matched running jobs are updated without asking.
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { lang, t } from "../i18n";
-import { resolveDraft, startRequest, type Draft } from "../refinery";
-import { drafts, dropDraft, loadRefineryCatalog, refineryCatalog } from "../refineryDrafts";
-import { api, connected } from "../state";
-import { toast, toastError } from "../toasts";
+import { cscuToScu, type Proposal } from "../refinery";
+import { accept, dismiss, materialName, proposals, stationName } from "../refinerySync";
+import { connected } from "../state";
+import { toast } from "../toasts";
 
 const busy = ref(new Set<string>());
-
-const cards = computed(() => drafts.value.map((d) => ({ d, r: refineryCatalog.value ? resolveDraft(d, refineryCatalog.value) : null })));
-
-// The catalog follows the connection (a newer server catalog after a reconnect)
-watch(connected, (c) => {
-  if (c) void loadRefineryCatalog();
-}, { immediate: true });
+const setBusy = (id: string, on: boolean) => {
+  const next = new Set(busy.value);
+  if (on) next.add(id);
+  else next.delete(id);
+  busy.value = next;
+};
 
 const time = (ms: number) => new Date(ms).toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
 
-function problems(card: (typeof cards.value)[number]): string[] {
-  if (!card.r) return [];
-  const out: string[] = [];
-  if (!card.r.locationUuid) out.push(t("refinery.unknownStation", { name: card.d.station ?? "?" }));
-  for (const x of card.r.rows) if (!x.oreUuid) out.push(t("refinery.unknownOre", { name: x.name }));
-  return out;
+// The time left counts down like on the terminal
+const now = ref(Date.now());
+let tick: ReturnType<typeof setInterval> | undefined;
+onMounted(() => (tick = setInterval(() => (now.value = Date.now()), 1000)));
+onUnmounted(() => clearInterval(tick));
+
+/** "2h 54m", "13m 55s": the terminal's format. */
+function left(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const [h, m, sec] = [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60];
+  return h ? `${h}h ${m}m` : `${m}m ${sec}s`;
 }
 
-/** The start request of a draft, null while something is not recognized. */
-function request(d: Draft) {
-  const r = refineryCatalog.value && resolveDraft(d, refineryCatalog.value);
-  return r && startRequest(r, d.endsAtMs, Date.now());
+/** The end of a running job (new: the terminal's; missing: the registered one), else null. */
+function endOf(p: Proposal): number | null {
+  if (p.kind === "new") return p.endsAtMs;
+  if (p.kind === "missing" && p.job.endsAt) return Date.parse(p.job.endsAt);
+  return null;
 }
 
-async function register(d: Draft) {
-  const body = request(d);
-  if (!body || busy.value.has(d.id)) return;
-  busy.value = new Set(busy.value).add(d.id);
+/** The card's rows: the terminal's (new, store) or the job's (missing), as material · quality · SCU. */
+function rows(p: Proposal) {
+  if (p.kind === "missing") return p.job.batches.map((b) => ({ uuid: b.resourceUuid, quality: b.quality, scu: b.quantity }));
+  return p.rows.map((r) => ({ uuid: r.resourceUuid, quality: r.quality, scu: cscuToScu(r.yieldCscu) }));
+}
+
+const KIND = {
+  new: { tag: "refinery.kind.new", cls: "ok", action: "refinery.register", icon: "check", done: "refinery.registered" },
+  store: { tag: "refinery.kind.store", cls: "ok", action: "refinery.store", icon: "check", done: "refinery.stored" },
+  missing: { tag: "refinery.kind.missing", cls: "warn", action: "refinery.remove", icon: "trash", done: "refinery.removed" },
+} as const;
+
+async function run(p: Proposal) {
+  if (busy.value.has(p.id)) return;
+  setBusy(p.id, true);
   try {
-    await api<OkResponse>("POST", "/refinery/start", body);
-    toast(t("refinery.registered", { what: `${d.station ?? ""} · ${d.method ?? ""} · ${t("refinery.readyAt", { time: time(d.endsAtMs) })}` }));
-    dropDraft(d.id);
-  } catch (e) {
-    toastError(e);
+    if (await accept(p)) toast(t(KIND[p.kind].done, { what: stationName(p.locationUuid) }));
   } finally {
-    const next = new Set(busy.value);
-    next.delete(d.id);
-    busy.value = next;
+    setBusy(p.id, false);
   }
 }
 
-// "Register all": every draft that can be registered, after a confirmation
-const ready = computed(() => drafts.value.filter((d) => request(d) && !busy.value.has(d.id)));
+// Removing asks first
+const removing = ref<Proposal | null>(null);
+const removeButtons = computed<ConfirmButton[]>(() => [
+  { label: t("common.cancel"), kind: "outline", value: "cancel" },
+  { label: t("refinery.remove"), kind: "danger", value: "remove", icon: "trash" },
+]);
+function onRemove(value: string) {
+  const p = removing.value;
+  removing.value = null;
+  if (value === "remove" && p) void run(p);
+}
+
+function primary(p: Proposal) {
+  if (p.kind === "missing") removing.value = p;
+  else void run(p);
+}
+
+// "Register all": every new job, after a confirmation
+const newOnes = computed(() => proposals.value.filter((p) => p.kind === "new" && !busy.value.has(p.id)));
 const confirming = ref(false);
 const busyAll = ref(false);
 const confirmButtons = computed<ConfirmButton[]>(() => [
@@ -72,15 +99,10 @@ async function registerAll(value: string) {
   busyAll.value = true;
   let done = 0;
   try {
-    for (const d of ready.value) {
-      const body = request(d);
-      if (!body) continue;
-      await api<OkResponse>("POST", "/refinery/start", body);
-      dropDraft(d.id);
+    for (const p of newOnes.value) {
+      if (!(await accept(p))) break;
       done++;
     }
-  } catch (e) {
-    toastError(e);
   } finally {
     if (done) toast(t("refinery.added", { n: done }));
     busyAll.value = false;
@@ -95,42 +117,53 @@ async function registerAll(value: string) {
       <Icon name="drop" :size="16" />
       <span class="head-title">{{ t("refinery.title") }}</span>
       <Tooltip :text="lockTip">
-        <button type="button" class="btn small primary" :disabled="!connected || !ready.length || busyAll" @click="confirming = true">
+        <button type="button" class="btn small primary" :disabled="!connected || !newOnes.length || busyAll" @click="confirming = true">
           <Icon name="check" :size="14" /> {{ t("refinery.addAll") }}
         </button>
       </Tooltip>
     </div>
-    <div v-if="!cards.length" class="empty-line">{{ t("refinery.empty") }}</div>
-    <div v-for="card in cards" :key="card.d.id" class="job">
+    <div v-if="!proposals.length" class="empty-line">{{ t("refinery.empty") }}</div>
+    <div v-for="p in proposals" :key="p.id" class="job">
       <div class="job-head">
-        <span class="job-title">{{ card.d.station ?? "?" }} · {{ card.d.method ?? "?" }} · {{ t("refinery.readyAt", { time: time(card.d.endsAtMs) }) }}</span>
+        <span class="tag" :class="KIND[p.kind].cls">{{ t(KIND[p.kind].tag) }}</span>
+        <span class="job-title">{{ stationName(p.locationUuid) }}</span>
         <button
           type="button"
-          class="btn small primary"
-          :disabled="!connected || !card.r || problems(card).length > 0 || busy.has(card.d.id)"
-          @click="register(card.d)"
+          class="btn small"
+          :class="p.kind === 'missing' ? 'outline' : 'primary'"
+          :disabled="!connected || busy.has(p.id)"
+          @click="primary(p)"
         >
-          <Icon name="check" :size="14" /> {{ t("refinery.register") }}
+          <Icon :name="KIND[p.kind].icon" :size="14" /> {{ t(KIND[p.kind].action) }}
         </button>
-        <Tooltip :text="t('refinery.drop')">
-          <button type="button" class="icon-btn" @click="dropDraft(card.d.id)"><Icon name="close" :size="14" /></button>
+        <Tooltip :text="t(p.kind === 'missing' ? 'refinery.keep' : 'refinery.drop')">
+          <button type="button" class="icon-btn" @click="dismiss(p)"><Icon name="close" :size="14" /></button>
         </Tooltip>
       </div>
-      <div v-for="(x, i) in card.d.rows" :key="i" class="ore">
-        <span class="ore-name">{{ x.name }}</span>
-        <span class="num">{{ x.quality }}</span>
-        <span class="num">{{ x.qtyCscu }} cSCU → {{ x.yieldCscu }} cSCU</span>
+      <div v-if="endOf(p) !== null" class="job-time">
+        <Icon name="clock" :size="12" />
+        <span v-if="endOf(p)! > now" class="num">{{ left(endOf(p)! - now) }}</span>
+        <span>{{ t("refinery.readyAt", { time: time(endOf(p)!) }) }}</span>
       </div>
-      <div v-for="p in problems(card)" :key="p" class="problem">
-        <Icon name="warning" :size="12" /> {{ p }}
+      <div v-for="(x, i) in rows(p)" :key="i" class="row">
+        <span class="row-name">{{ materialName(x.uuid) }}</span>
+        <span class="num">{{ x.quality }}</span>
+        <span class="num">{{ x.scu }} SCU</span>
       </div>
     </div>
     <ConfirmDialog
       v-if="confirming"
-      :title="t('refinery.confirmAdd', { n: ready.length })"
+      :title="t('refinery.confirmAdd', { n: newOnes.length })"
       icon="plus"
       :buttons="confirmButtons"
       @choose="registerAll"
+    />
+    <ConfirmDialog
+      v-if="removing"
+      :title="t('refinery.confirmRemove', { station: stationName(removing.locationUuid) })"
+      icon="trash"
+      :buttons="removeButtons"
+      @choose="onRemove"
     />
   </section>
 </template>
@@ -144,8 +177,8 @@ async function registerAll(value: string) {
 .job {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 16px;
+  gap: 2px;
+  padding: 8px 16px;
   border-top: 1px solid var(--border-dim);
 }
 
@@ -166,15 +199,25 @@ async function registerAll(value: string) {
   white-space: nowrap;
 }
 
-.ore {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 60px 170px;
+/* The time left and the end, below the head */
+.job-time {
+  display: flex;
+  align-items: center;
   gap: 8px;
   font-size: 12px;
   color: var(--text-2);
 }
 
-.ore-name {
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px 80px;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-2);
+}
+
+.row-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -183,13 +226,5 @@ async function registerAll(value: string) {
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-
-.problem {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--err);
 }
 </style>

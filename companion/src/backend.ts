@@ -48,6 +48,8 @@ export const openWebapp = () => call<void>("open_webapp");
 export const getDetect = () => call<boolean>("get_detect");
 export const setDetect = (on: boolean) => call<void>("set_detect", { on });
 export const getGameSeen = () => call<boolean>("get_game_seen");
+// Texts of these loc keys (lower case) in the player's active language pack (global.ini); missing keys are left out
+export const gameNames = (keys: string[]) => call<Record<string, string>>("game_names", { keys });
 
 // Set when the server refused this version (426): the app does no work until updated
 export const outdated = ref<CompanionOutdated | null>(null);

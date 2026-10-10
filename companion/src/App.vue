@@ -17,7 +17,7 @@ import WindowEdges from "./components/WindowEdges.vue";
 import { AppError, appInfo, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
 import { config, connectError, connected, connectionText, loadConfig, log, meAvatar, meName, refreshConnection, watchConnection, watchLog } from "./state";
-import { detecting, gameSeen, toggleDetect, watchRefinery } from "./refineryDrafts";
+import { detecting, gameSeen, preparing, toggleDetect, watchRefinery } from "./refinerySync";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
 
@@ -33,11 +33,14 @@ const serverLabel = computed(() => {
 });
 const serverTip = computed(() => [connectionText.value, config.value?.server].filter(Boolean).join(" · "));
 // Found: just the path; missing: where it was looked for
-// Refinery detection: off (red), on without the game (yellow), on with the game running (green)
+// Refinery detection: off (red), getting ready (catalog, game language), on without the game (yellow), on with
+// the game running (green)
 const detectState = computed(() =>
   !detecting.value
     ? ({ cls: "err", icon: "close", label: "refinery.detectOff" } as const)
-    : gameSeen.value
+    : preparing.value
+      ? ({ cls: "", icon: "clock", label: "refinery.preparing" } as const)
+      : gameSeen.value
       ? ({ cls: "ok", icon: "check", label: "refinery.gameSeen" } as const)
       : ({ cls: "warn", icon: "warning", label: "refinery.noGame" } as const),
 );

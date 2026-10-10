@@ -1,13 +1,15 @@
 //! Quartermaster Companion: follows SC's `Game.log` for blueprint unlocks and
 //! books them, once the user confirms, through the Quartermaster web app's API
 //! with the user's API token. Structure after BindSight (`config.rs`, `logwatch.rs`).
-//! Reads the refinery terminal from frames (`ocr.rs`, `refinery.rs`, `ocrwatch.rs`);
-//! the frames come from the screen capture (`capture.rs`, Windows only so far).
+//! Reads the refinery terminal from frames (`ocr.rs`, `refinery.rs`, `ocrwatch.rs`) in the
+//! player's game language (`locale.rs`); the frames come from the screen capture (`capture.rs`,
+//! Windows only so far).
 
 #[cfg(windows)]
 mod capture;
 mod config;
 mod gamelog;
+mod locale;
 mod logwatch;
 pub mod ocr;
 mod ocrwatch;
@@ -219,6 +221,15 @@ async fn download_update(app: AppHandle, http: tauri::State<'_, reqwest::Client>
     .await
 }
 
+/// The texts of these loc keys (lower case) in the player's language pack (`global.ini` picked by
+/// `user.cfg`); keys it lacks, or all without a pack, are left out.
+#[tauri::command]
+fn game_names(app: AppHandle, keys: Vec<String>) -> std::collections::HashMap<String, String> {
+    let game_dir = app.state::<Mutex<AppData>>().lock().unwrap().config.game_dir.clone();
+    let keys = keys.into_iter().map(|k| k.to_ascii_lowercase()).collect();
+    locale::read_values(&locale::ini_path(std::path::Path::new(&game_dir)), &keys)
+}
+
 /// Whether the refinery detection is on.
 #[tauri::command]
 fn get_detect(detect: tauri::State<ocrwatch::Detect>) -> bool {
@@ -304,6 +315,7 @@ pub fn run() {
             get_detect,
             set_detect,
             get_game_seen,
+            game_names,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

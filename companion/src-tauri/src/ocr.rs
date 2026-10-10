@@ -22,6 +22,8 @@ const DET_MIN_SIZE: f32 = 3.0;
 const REC_HEIGHT: u32 = 48;
 // The recognizer's nominal input width (RapidOCR's rec_img_shape); wider lines widen the input
 const REC_WIDTH: u32 = 320;
+// Text lines per recognizer run (RapidOCR's rec_batch_num): lines of similar shape go together
+const REC_BATCH: usize = 6;
 
 /// An axis-aligned box in image pixels (x1, y1 exclusive).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,7 +70,8 @@ const REC_DICT: &str = include_str!("../resources/ocr/rec_dict.txt");
 
 impl Ocr {
     /// The compiled-in models. `threads`: ONNX Runtime's intra-op threads (the game runs at the same
-    /// time, so few).
+    /// time, so few). ONNX Runtime's memory arena keeps the largest run's memory (without it the reads
+    /// took 30 % longer): `ocrwatch` drops the whole `Ocr` when no panel was seen for a while.
     pub fn new(threads: usize) -> Result<Self, String> {
         let session = |name: &str, model: &[u8]| -> Result<Session, String> {
             Session::builder()
@@ -86,11 +89,11 @@ impl Ocr {
         Ok(Self { det: session("det", DET_MODEL)?, rec: session("rec", REC_MODEL)?, chars })
     }
 
-    /// Text boxes in `img`, detected on a copy scaled down to at most `max_side` pixels on its longer
-    /// side (never up), in `img`'s pixels, top to bottom.
-    pub fn detect(&mut self, img: &RgbImage, max_side: u32) -> Result<Vec<Rect>, String> {
+    /// Text boxes in `img`, detected on a copy scaled down to at most `max_height` pixels high (never
+    /// up), in `img`'s pixels, top to bottom.
+    pub fn detect(&mut self, img: &RgbImage, max_height: u32) -> Result<Vec<Rect>, String> {
         let (w, h) = img.dimensions();
-        let ratio = (max_side as f32 / w.max(h) as f32).min(1.0);
+        let ratio = (max_height as f32 / h as f32).min(1.0);
         let round32 = |v: f32| (((v / 32.0).round() as u32) * 32).max(32);
         let (rw, rh) = (round32(w as f32 * ratio), round32(h as f32 * ratio));
         let resized = imageops::resize(img, rw, rh, FilterType::Triangle);
@@ -113,45 +116,62 @@ impl Ocr {
 
     /// The text in `rect` of `img` as one line, with its mean character confidence.
     pub fn recognize(&mut self, img: &RgbImage, rect: Rect) -> Result<(String, f32), String> {
-        let (w, h) = img.dimensions();
-        let x0 = (rect.x0.floor().max(0.0) as u32).min(w.saturating_sub(1));
-        let y0 = (rect.y0.floor().max(0.0) as u32).min(h.saturating_sub(1));
-        let cw = ((rect.x1.ceil() as u32).min(w)).saturating_sub(x0).max(1);
-        let ch = ((rect.y1.ceil() as u32).min(h)).saturating_sub(y0).max(1);
-        let crop = imageops::crop_imm(img, x0, y0, cw, ch).to_image();
-        let ratio = cw as f32 / ch as f32;
-        let max_ratio = (REC_WIDTH as f32 / REC_HEIGHT as f32).max(ratio);
-        let padded = (REC_HEIGHT as f32 * max_ratio) as u32;
-        let resized_w = ((REC_HEIGHT as f32 * ratio).ceil() as u32).clamp(1, padded);
-        let resized = imageops::resize(&crop, resized_w, REC_HEIGHT, FilterType::Triangle);
-        // Zero padding on the right, as RapidOCR does
-        let mut data = vec![0f32; 3 * (REC_HEIGHT * padded) as usize];
-        let plane = (REC_HEIGHT * padded) as usize;
-        for (x, y, p) in resized.enumerate_pixels() {
-            let i = (y * padded + x) as usize;
-            for (c, v) in [p[2], p[1], p[0]].into_iter().enumerate() {
-                data[c * plane + i] = v as f32 / 127.5 - 1.0;
-            }
-        }
-        let input = Tensor::from_array(([1usize, 3, REC_HEIGHT as usize, padded as usize], data)).map_err(|e| e.to_string())?;
-        let outputs = self.rec.run(ort::inputs![input]).map_err(|e| e.to_string())?;
-        let (shape, probs) = outputs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
-        let (steps, classes) = (shape[1] as usize, shape[2] as usize);
-        Ok(ctc_decode(probs, steps, classes, &self.chars))
+        Ok(self.recognize_all(img, &[rect])?.pop().expect("one line"))
     }
 
-    /// Detects and recognizes every text line (see `detect`).
-    pub fn read(&mut self, img: &RgbImage, max_side: u32) -> Result<Vec<TextBox>, String> {
-        let rects = self.detect(img, max_side)?;
-        let mut out = Vec::with_capacity(rects.len());
-        for rect in rects {
-            let (text, score) = self.recognize(img, rect)?;
-            if !text.trim().is_empty() {
-                out.push(TextBox { rect, text, score });
+    /// The text of every rect (in their order), read in batches of lines of similar shape.
+    pub fn recognize_all(&mut self, img: &RgbImage, rects: &[Rect]) -> Result<Vec<(String, f32)>, String> {
+        let crops: Vec<RgbImage> = rects.iter().map(|r| crop(img, *r)).collect();
+        let ratio = |c: &RgbImage| c.width() as f32 / c.height() as f32;
+        // Similar widths in one batch: the narrow lines are padded less
+        let mut order: Vec<usize> = (0..crops.len()).collect();
+        order.sort_by(|&a, &b| ratio(&crops[a]).total_cmp(&ratio(&crops[b])));
+        let mut out = vec![(String::new(), 0f32); crops.len()];
+        for batch in order.chunks(REC_BATCH) {
+            let max_ratio = batch.iter().map(|&i| ratio(&crops[i])).fold(REC_WIDTH as f32 / REC_HEIGHT as f32, f32::max);
+            let padded = (REC_HEIGHT as f32 * max_ratio) as u32;
+            let plane = (REC_HEIGHT * padded) as usize;
+            // Zero padding on the right, as RapidOCR does
+            let mut data = vec![0f32; batch.len() * 3 * plane];
+            for (n, &i) in batch.iter().enumerate() {
+                let c = &crops[i];
+                let resized_w = ((REC_HEIGHT as f32 * ratio(c)).ceil() as u32).clamp(1, padded);
+                let resized = imageops::resize(c, resized_w, REC_HEIGHT, FilterType::Triangle);
+                let base = n * 3 * plane;
+                for (x, y, p) in resized.enumerate_pixels() {
+                    let j = (y * padded + x) as usize;
+                    for (ch, v) in [p[2], p[1], p[0]].into_iter().enumerate() {
+                        data[base + ch * plane + j] = v as f32 / 127.5 - 1.0;
+                    }
+                }
+            }
+            let input = Tensor::from_array(([batch.len(), 3, REC_HEIGHT as usize, padded as usize], data)).map_err(|e| e.to_string())?;
+            let outputs = self.rec.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+            let (shape, probs) = outputs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
+            let (steps, classes) = (shape[1] as usize, shape[2] as usize);
+            for (n, &i) in batch.iter().enumerate() {
+                out[i] = ctc_decode(&probs[n * steps * classes..(n + 1) * steps * classes], steps, classes, &self.chars);
             }
         }
         Ok(out)
     }
+
+    /// Detects and recognizes every text line (see `detect`).
+    pub fn read(&mut self, img: &RgbImage, max_height: u32) -> Result<Vec<TextBox>, String> {
+        let rects = self.detect(img, max_height)?;
+        let texts = self.recognize_all(img, &rects)?;
+        Ok(rects.into_iter().zip(texts).filter(|(_, (t, _))| !t.trim().is_empty()).map(|(rect, (text, score))| TextBox { rect, text, score }).collect())
+    }
+}
+
+/// The part of `img` in `rect` (at least one pixel).
+fn crop(img: &RgbImage, rect: Rect) -> RgbImage {
+    let (w, h) = img.dimensions();
+    let x0 = (rect.x0.floor().max(0.0) as u32).min(w.saturating_sub(1));
+    let y0 = (rect.y0.floor().max(0.0) as u32).min(h.saturating_sub(1));
+    let cw = ((rect.x1.ceil() as u32).min(w)).saturating_sub(x0).max(1);
+    let ch = ((rect.y1.ceil() as u32).min(h)).saturating_sub(y0).max(1);
+    imageops::crop_imm(img, x0, y0, cw, ch).to_image()
 }
 
 /// CHW planes in BGR order, scaled to [-1, 1].

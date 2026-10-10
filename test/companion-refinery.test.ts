@@ -1,126 +1,183 @@
-// The companion app's refinery drafts from OCR screens (companion/src/refinery.ts); the screens are
-// what the OCR read from the user's screenshots of 2026-10-07 (Dinyx job at CRU-L1).
+// The companion app's refinery sync (companion/src/refinery.ts): terminal overviews as the OCR reads
+// them (rows as in the user's screenshots of 2026-10-08 at CRU-L1) against the user's running jobs.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CatalogResponse } from '../src/webapp/api-types.ts';
-import { buildCatalog, cscuToScu, RefineryTracker, resolveDraft, startRequest, type Screen, type ScreenRow } from '../companion/src/refinery.ts';
+import type { CatalogResponse, StockBatch } from '../src/webapp/api-types.ts';
+import {
+  buildCatalog, cscuToScu, doneRequest, findStation, gameNameKeys, jobsOf, RefinerySync, removeRequest, resolveOrder, startRequest,
+  type Job, type OverviewEvent, type OverviewOrder, type Proposal,
+} from '../companion/src/refinery.ts';
 
-const row = (name: string, quality: number, qty: number | null, yieldCscu: number | null, extra: Partial<ScreenRow> = {}): ScreenRow =>
-  ({ name, inert: false, quality, qty, yieldCscu, todo: null, done: null, ...extra });
+const HEPH = '00000000-0000-4000-8000-000000000001';
+const SILICON = '00000000-0000-4000-8000-000000000002';
+const TITANIUM = '00000000-0000-4000-8000-000000000003';
+const CRU = '00000000-0000-4000-8000-0000000000c1';
+const ARC = '00000000-0000-4000-8000-0000000000c2';
 
-const quote = (method: string, seconds: number, yields: (number | null)[]): Screen => ({
-  kind: 'quote', station: 'CRU-L1 AMBITIOUS DREAM STATION', method, seconds,
-  rows: [
-    row('TITANIUM (ORE)', 516, 21, yields[0]!),
-    row('INERT MATERIALS', 0, 79, 0, { inert: true }),
-    row('ASLARITE (RAW)', 575, 18, yields[1]!),
-    row('AGRICIUM (ORE)', 346, 389, yields[2]!),
-    row('AGRICIUM (ORE)', 588, 43, yields[3]!),
-    row('AGRICIUM (ORE)', 667, 46, yields[4]!),
+const material = (uuid: string, name: string, nameKey: string) =>
+  ({ uuid, kind: 'resource' as const, name, nameKey, unit: 'SCU' as const, type: null, typeLabel: null });
+const location = (uuid: string, label: string, nameKey: string, refinery = true) =>
+  ({ uuid, label, short: label.split(' · ')[0]!, nameKey, refinery, yields: {} });
+
+const catalog = (names: [string, string, string]): CatalogResponse => ({
+  materials: [
+    material(HEPH, names[0], 'items_commodities_hephaestanite'),
+    material(SILICON, names[1], 'items_commodities_silicon'),
+    material(TITANIUM, names[2], 'items_commodities_titanium'),
   ],
+  locations: [
+    location(CRU, 'CRU-L1 Ambitious Dream Station · Crusader · Stanton', 'rr_cru_l1'),
+    location(ARC, 'ARC-L1 Wide Forest Station · ArcCorp · Stanton', 'rr_arc_l1'),
+  ],
+  blueprints: [],
 });
 
-const processing = (seconds: number): Screen => ({
-  kind: 'processing', station: 'CRU-L1 AMBITIOUS DREAM STATION', method: null, seconds,
-  rows: [
-    row('TITANIUM', 516, null, 9, { todo: 10, done: 0 }),
-    row('ASLARITE', 575, null, 8, { todo: 9, done: 0 }),
-    row('AGRICIUM', 346, null, 175, { todo: 175, done: 0 }),
-    row('AGRICIUM', 588, null, 19, { todo: 20, done: 0 }),
-    row('AGRICIUM', 667, null, 20, { todo: 21, done: 0 }),
-  ],
-});
+const CAT = buildCatalog([catalog(['Hephaestanite', 'Silicon', 'Titanium']), catalog(['Hephaestanit', 'Silizium', 'Titan'])], {});
 
-const T0 = Date.UTC(2026, 9, 7, 20, 41, 52);
+const processing = (seconds: number, rows: [string, number, number][]): OverviewOrder =>
+  ({ status: 'processing', seconds, rows: rows.map(([name, quality, yieldCscu]) => ({ name, quality, yieldCscu })) });
+const completed = (rows: [string, number, number][]): OverviewOrder =>
+  ({ status: 'completed', seconds: null, rows: rows.map(([name, quality, yieldCscu]) => ({ name, quality, yieldCscu })) });
+const read = (atMs: number, ...orders: OverviewOrder[]): OverviewEvent =>
+  ({ atMs, overview: { station: 'CRU-L1 AMBITIOUS DREAM STATION', orders } });
 
-describe('companion refinery drafts', () => {
+const ORDER2: [string, number, number][] = [['HEPHAESTANITE', 572, 91], ['SILICON', 310, 540], ['SILICON', 510, 105]];
+const T0 = Date.parse('2026-10-08T20:31:18Z');
+
+const job = (jobId: string, endsAt: string | null, batches: [number, string, number, string][], locationUuid = CRU): Job =>
+  ({ jobId, locationUuid, endsAt, batches: batches.map(([id, resourceUuid, quality, quantity]) => ({ id, resourceUuid, quality, quantity })) });
+const JOB2 = (endsAt: string | null, heph = '0.91') =>
+  job('job-2', endsAt, [[11, HEPH, 572, heph], [12, SILICON, 310, '5.4'], [13, SILICON, 510, '1.05']]);
+
+/** Feeds the same read twice (the second makes it stable). */
+function twice(sync: RefinerySync, e: OverviewEvent, jobs: Job[]) {
+  const first = sync.feed(e, CAT, jobs, e.atMs);
+  return { first, second: sync.feed({ ...e, atMs: e.atMs + 2000 }, CAT, jobs, e.atMs + 2000) };
+}
+
+describe('companion refinery sync', () => {
   it('cSCU to exact SCU text', () => {
-    assert.deepEqual([389, 21, 20, 100, 0, 1234].map(cscuToScu), ['3.89', '0.21', '0.2', '1', '0', '12.34']);
+    assert.deepEqual([389, 20, 0, 100, 105].map(cscuToScu), ['3.89', '0.2', '0', '1', '1.05']);
   });
 
-  it('a started job matching the last quote becomes one draft', () => {
-    const t = new RefineryTracker();
-    // Not selected yet ("--" yields), then two quotes: the last one counts
-    assert.equal(t.feed({ atMs: T0, screen: quote('Select an option', 0, [null, null, null, null, null]) }), null);
-    t.feed({ atMs: T0 + 7_000, screen: quote('Cormack Method', 72, [6, 5, 122, 13, 14]) });
-    t.feed({ atMs: T0 + 15_000, screen: quote('Dinyx Solventation', 3474, [9, 8, 175, 19, 20]) });
-    const at = T0 + 109_000;
-    const d = t.feed({ atMs: at, screen: processing(57 * 60 + 45) })!;
-    assert.ok(d);
-    assert.deepEqual([d.method, d.seconds, d.endsAtMs, d.rows.length], ['Dinyx Solventation', 3474, at + 3465_000, 5]);
-    // The same job seen again: no second draft
-    t.feed({ atMs: at + 30_000, screen: quote('Dinyx Solventation', 3474, [9, 8, 175, 19, 20]) });
-    assert.equal(t.feed({ atMs: at + 40_000, screen: processing(57 * 60 + 5) }), null);
-    assert.equal(t.drafts.length, 1);
+  it('names: the catalog in both languages and the player\'s language pack', () => {
+    assert.deepEqual(gameNameKeys([catalog(['a', 'b', 'c'])]).sort(),
+      ['items_commodities_hephaestanite', 'items_commodities_silicon', 'items_commodities_titanium', 'rr_arc_l1', 'rr_cru_l1']);
+    const own = buildCatalog([catalog(['Hephaestanite', 'Silicon', 'Titanium'])], { items_commodities_silicon: 'Siliziumdioxid', rr_cru_l1: 'Ambitionierter Traum' });
+    const o = resolveOrder(processing(60, [['SILIZIUMDIOXID', 310, 540], ['HEPHAESTANIUM', 572, 91]]), own)!;
+    // A name neither the catalog nor the pack has: that row is left out
+    assert.deepEqual(o.rows, [{ resourceUuid: SILICON, quality: 310, yieldCscu: 540 }]);
+    assert.equal(findStation(own, 'AMBITIONIERTER TRAUM'), CRU);
+    assert.equal(findStation(CAT, 'CRU-L1 AMBITIOUS DREAM STATION'), CRU);
+    assert.equal(findStation(CAT, 'SOMEWHERE ELSE'), null);
   });
 
-  it('no draft without a matching quote', () => {
-    const t = new RefineryTracker();
-    assert.equal(t.feed({ atMs: T0, screen: processing(3465) }), null);
-    // Other yields (another method's quote) or a time that does not fit
-    t.feed({ atMs: T0, screen: quote('Cormack Method', 72, [6, 5, 122, 13, 14]) });
-    assert.equal(t.feed({ atMs: T0 + 10_000, screen: processing(60) }), null);
-    t.feed({ atMs: T0, screen: quote('Dinyx Solventation', 3474, [9, 8, 175, 19, 20]) });
-    assert.equal(t.feed({ atMs: T0 + 10_000, screen: processing(9000) }), null);
-    // Too old a quote
-    t.feed({ atMs: T0, screen: quote('Dinyx Solventation', 3474, [9, 8, 175, 19, 20]) });
-    assert.equal(t.feed({ atMs: T0 + 31 * 60_000, screen: processing(1600) }), null);
+  it('resolving merges a material\'s rows of one quality and drops what cannot be read', () => {
+    const o = resolveOrder(processing(60, [['SILIZIUM', 310, 100], ['SILICON', 310, 40], ['UNOBTAINIUM', 500, 5], ['TITANIUM', 516, 0]]), CAT)!;
+    assert.deepEqual(o.rows, [{ resourceUuid: SILICON, quality: 310, yieldCscu: 140 }]);
+    assert.equal(resolveOrder(processing(60, [['UNOBTAINIUM', 500, 5]]), CAT), null);
   });
 
-  it('resolves names against the catalog and builds the start request', () => {
-    const catalog = {
-      materials: [
-        { uuid: 'ti', name: 'Titanium (Ore)', isOre: true }, { uuid: 'as', name: 'Aslarite (Raw)', isOre: true },
-        { uuid: 'ag', name: 'Agricium (Ore)', isOre: true }, { uuid: 'agr', name: 'Agricium', isOre: false },
-      ],
-      locations: [{ uuid: 'cru', label: 'CRU-L1 Ambitious Dream Station · Crusader · Stanton', refinery: true }],
-    } as unknown as CatalogResponse;
-    const t = new RefineryTracker();
-    t.feed({ atMs: T0, screen: quote('Dinyx Solventation', 3474, [9, 8, 175, 19, 20]) });
-    const d = t.feed({ atMs: T0 + 9_000, screen: processing(3465) })!;
-    const r = resolveDraft(d, buildCatalog([catalog]));
-    assert.equal(r.locationUuid, 'cru');
-    assert.deepEqual(r.rows.map((x) => [x.oreUuid, x.quality, x.amount, x.expectedYield]), [
-      ['ti', 516, '0.21', '0.09'], ['as', 575, '0.18', '0.08'], ['ag', 346, '3.89', '1.75'], ['ag', 588, '0.43', '0.19'], ['ag', 667, '0.46', '0.2'],
+  it('a running order without a job becomes a proposal once two reads agree', () => {
+    const sync = new RefinerySync();
+    const { first, second } = twice(sync, read(T0, processing(3600, ORDER2)), []);
+    assert.equal(first.locationUuid, CRU);
+    assert.equal(sync.proposals.length, 1);
+    assert.deepEqual(second.updates, []);
+    const p = sync.proposals[0]!;
+    assert.equal(p.kind, 'new');
+    const req = startRequest(p as Extract<Proposal, { kind: 'new' }>, T0 + 2000 + 60_000);
+    assert.equal(req.locationUuid, CRU);
+    // The end stays the game's: the time left at the moment of registering
+    assert.equal(req.durationSeconds, 3600 - 60);
+    assert.deepEqual(req.rows, [
+      { resourceUuid: HEPH, quality: 572, amount: '0.91' },
+      { resourceUuid: SILICON, quality: 310, amount: '5.4' },
+      { resourceUuid: SILICON, quality: 510, amount: '1.05' },
+    ].sort((a, b) => `${a.resourceUuid}:${a.quality}`.localeCompare(`${b.resourceUuid}:${b.quality}`)));
+  });
+
+  it('one read alone or two different reads do nothing', () => {
+    const sync = new RefinerySync();
+    sync.feed(read(T0, processing(3600, ORDER2)), CAT, [], T0);
+    sync.feed(read(T0 + 2000, processing(3598, [['HEPHAESTANITE', 572, 9], ['SILICON', 310, 540], ['SILICON', 510, 105]])), CAT, [], T0 + 2000);
+    assert.equal(sync.proposals.length, 0);
+  });
+
+  it('a matched running job gets the terminal\'s yields and end by itself', () => {
+    const sync = new RefinerySync();
+    const end = new Date(T0 + 3600_000).toISOString();
+    // Yields as the terminal shows them, the end within the slack: nothing to do
+    assert.deepEqual(twice(sync, read(T0, processing(3600, ORDER2)), [JOB2(end)]).second.updates, []);
+    // Another yield and an open end
+    const { second } = twice(new RefinerySync(), read(T0, processing(3600, ORDER2)), [JOB2(null, '0.8')]);
+    assert.deepEqual(second.updates, [
+      { kind: 'yield', jobId: 'job-2', batchId: 11, amount: '0.91', expected: '0.8' },
+      // The second read (2 s later) still says 3600 s left
+      { kind: 'duration', jobId: 'job-2', durationSeconds: 3600 },
     ]);
-    const body = startRequest(r, d.endsAtMs, T0 + 60_000)!;
-    assert.deepEqual([body.locationUuid, body.durationSeconds, body.rows.length], ['cru', 3414, 5]);
-    // An unknown station: nothing to register yet
-    assert.equal(startRequest({ ...r, locationUuid: null }, d.endsAtMs, T0), null);
   });
 
-  // 2026-10-08: the overview shows every running work order, one screen each; the quote abbreviates
-  it('the matching one of several running work orders, abbreviated ore names', () => {
-    const t = new RefineryTracker();
-    const q: Screen = {
-      kind: 'quote', station: 'CRU-L1 AMBITIOUS DREAM STATION', method: 'Dinyx Solventation', seconds: 15420,
-      rows: [
-        row('INERT MATERIALS', 0, 258, 0, { inert: true }),
-        row('HEPH (RAW)', 572, 207, 91), row('SILICON (RAW)', 310, 1201, 540), row('SILICON (RAW)', 510, 234, 105),
-      ],
-    };
-    t.feed({ atMs: T0, screen: q });
-    const at = T0 + 3_000;
-    // Another running job read from the same frame first: no draft, the quote stays
-    assert.equal(t.feed({ atMs: at, screen: processing(3000) }), null);
-    const d = t.feed({ atMs: at, screen: {
-      kind: 'processing', station: q.station, method: null, seconds: 15420,
-      rows: [
-        row('HEPHAESTANITE', 572, null, 91, { todo: 92, done: 0 }),
-        row('SILICON', 310, null, 540, { todo: 541, done: 0 }), row('SILICON', 510, null, 105, { todo: 106, done: 0 }),
-      ],
-    } })!;
-    assert.ok(d);
-    // The names as the catalog has them: en (game) and de (community translation)
-    const names = (pairs: [string, string][]) => ({ materials: pairs.map(([uuid, name]) => ({ uuid, name, isOre: true })), locations: [], methods: [] }) as unknown as CatalogResponse;
-    for (const cat of [
-      buildCatalog([names([['heph', 'Hephaestanite (R)'], ['si', 'Raw Silicon'], ['ice', 'Raw Ice']])]),
-      buildCatalog([names([['heph', 'Hephaestanite (Raw)'], ['si', 'Silicon (Raw)'], ['ice', 'Ice (Raw)']])]),
-    ]) {
-      assert.deepEqual(resolveDraft(d, cat).rows.map((x) => x.oreUuid), ['heph', 'si', 'si']);
-    }
-    // Ambiguous or unknown: no guess
-    const two = buildCatalog([names([['a', 'Hephaestanite (Raw)'], ['b', 'Hephalite (Raw)']])]);
-    assert.equal(resolveDraft(d, two).rows[0]!.oreUuid, null);
+  it('of several matching jobs the one with the closest end', () => {
+    const near = { ...JOB2(new Date(T0 + 3500_000).toISOString(), '0.8'), jobId: 'near' };
+    const far = { ...JOB2(new Date(T0 + 9000_000).toISOString(), '0.8'), jobId: 'far' };
+    const { second } = twice(new RefinerySync(), read(T0, processing(3600, ORDER2)), [far, near]);
+    assert.ok(second.updates.every((u) => u.jobId === 'near'));
+  });
+
+  it('a finished order of a job: a proposal to store it with the terminal\'s yields', () => {
+    const sync = new RefinerySync();
+    twice(sync, read(T0, completed(ORDER2)), [JOB2(null, '0.8')]);
+    const p = sync.proposals[0] as Extract<Proposal, { kind: 'store' }>;
+    assert.equal(p.kind, 'store');
+    assert.deepEqual(doneRequest(p), { jobId: 'job-2', rows: [
+      { batchId: 11, amount: '0.91', expected: '0.8' }, { batchId: 12, amount: '5.4', expected: '5.4' }, { batchId: 13, amount: '1.05', expected: '1.05' },
+    ] });
+    // A finished order without a job: nothing
+    const other = new RefinerySync();
+    twice(other, read(T0, completed(ORDER2)), []);
+    assert.equal(other.proposals.length, 0);
+  });
+
+  it('after the visit: jobs of the station no read showed are proposed for removal', () => {
+    const sync = new RefinerySync();
+    const gone = job('gone', null, [[21, TITANIUM, 516, '0.03']]);
+    const elsewhere = job('elsewhere', null, [[31, TITANIUM, 516, '0.03']], ARC);
+    const jobs = [JOB2(null), gone, elsewhere];
+    sync.startVisit();
+    // Seen once is enough (scrolled past it)
+    sync.feed(read(T0, processing(3600, ORDER2)), CAT, jobs, T0);
+    sync.endVisit(jobs);
+    assert.deepEqual(sync.proposals.map((p) => p.id), ['missing:gone']);
+    assert.deepEqual(removeRequest(gone), { jobId: 'gone', rows: [{ batchId: 21, expected: '0.03' }] });
+    // A visit that read nothing of a station proposes nothing for it
+    const quiet = new RefinerySync();
+    quiet.startVisit();
+    quiet.endVisit(jobs);
+    assert.equal(quiet.proposals.length, 0);
+  });
+
+  it('dismissed proposals do not come back; done ones go with the jobs', () => {
+    const sync = new RefinerySync();
+    twice(sync, read(T0, processing(3600, ORDER2)), []);
+    sync.dismiss(sync.proposals[0]!.id);
+    twice(sync, read(T0 + 10_000, processing(3590, ORDER2)), []);
+    assert.equal(sync.proposals.length, 0);
+
+    const other = new RefinerySync();
+    twice(other, read(T0, processing(3600, ORDER2)), []);
+    // Registered elsewhere (web app): the proposal goes
+    other.prune([JOB2(null)]);
+    assert.equal(other.proposals.length, 0);
+  });
+
+  it('jobs from a personal stock list', () => {
+    const batch = (id: number, state: 'stored' | 'refining', jobId: string | null): StockBatch => ({
+      id, sharedIn: [], part: false, kind: 'resource', subjectUuid: HEPH, material: 'Hephaestanite', locationUuid: CRU, location: 'CRU-L1',
+      state, quality: 572, quantity: '0.91', unit: 'SCU', holderUserId: '1', holderName: null, canChange: true,
+      refine: jobId ? { jobId, startedAt: null, endsAt: null } : null,
+    });
+    const jobs = jobsOf([batch(1, 'refining', 'a'), batch(2, 'stored', null), batch(3, 'refining', 'a')]);
+    assert.deepEqual(jobs.map((j) => [j.jobId, j.batches.map((b) => b.id)]), [['a', [1, 3]]]);
   });
 });

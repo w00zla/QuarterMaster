@@ -1,8 +1,8 @@
-//! Prints what the OCR reads in an image: `cargo run --release --example ocr_dump -- <image> [max_side] [threads]`.
+//! Prints what the OCR reads in an image: `cargo run --release --example ocr_dump -- <image> [max_height] [threads]`.
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let img = image::open(&args[1]).expect("image").to_rgb8();
-    let side: u32 = args.get(2).map_or(1920, |s| s.parse().unwrap());
+    let side: u32 = args.get(2).map_or(800, |s| s.parse().unwrap());
     let threads: usize = args.get(3).map_or(4, |s| s.parse().unwrap());
     let mut ocr = companion_lib::ocr::Ocr::new(threads).expect("models");
     let t = std::time::Instant::now();
