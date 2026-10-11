@@ -93,14 +93,16 @@ async function submit() {
         <span class="unit">{{ unitText(unit) }}</span>
       </span>
     </label>
-    <div v-if="orgs.length" class="field">
-      {{ t("field.sharing") }}
-      <label v-for="o in orgs" :key="o.guildId" class="share-row">
-        <input v-model="shareIn[o.guildId]" class="switch" type="checkbox" />
-        <span class="share-org">{{ o.name }}</span>
-      </label>
-    </div>
     <div class="form-actions">
+      <div v-if="orgs.length" class="field share-field">
+        {{ t("field.sharing") }}
+        <div class="share-list">
+          <label v-for="o in orgs" :key="o.guildId" class="share-row">
+            <input v-model="shareIn[o.guildId]" class="switch" type="checkbox" />
+            <span class="share-org">{{ o.name }}</span>
+          </label>
+        </div>
+      </div>
       <button type="button" class="btn outline" @click="clear"><Icon name="close" :size="14" /> {{ t("common.clear") }}</button>
       <button type="submit" class="btn primary" :disabled="!valid || busy">
         <Icon name="plus" :size="14" /> {{ t("stock.add") }}
@@ -108,3 +110,22 @@ async function submit() {
     </div>
   </form>
 </template>
+
+<style scoped>
+/* Sharing on the left of the buttons' row, the switches side by side */
+.form-actions {
+  align-items: flex-end;
+}
+
+.share-field {
+  margin-right: auto;
+}
+
+.share-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  min-height: 32px;
+}
+</style>

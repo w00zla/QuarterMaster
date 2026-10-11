@@ -28,7 +28,7 @@ const TYPE_ICONS: Record<string, IconName> = {
   DockingCollar: "type-docking",
   Container: "type-crate",
   Cargo: "type-crate",
-  Misc: "type-misc",
+  Misc: "item",
 };
 
 export const typeIcon = (type: string | null | undefined): IconName => (type && TYPE_ICONS[type]) || "item";
