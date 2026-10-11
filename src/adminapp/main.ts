@@ -120,6 +120,8 @@ api.post('/import/catalog', requireWriteHeader, bodyLimit({ maxSize: 300 * MB })
     return c.json({ error: message(err) }, 400);
   }
   const { snapshot, sha256 } = loaded;
+  const label = c.req.query('label')?.trim();
+  if (label) snapshot.game.label = label;
   const result = await runImport(db, snapshot, sha256, {
     dryRun: c.req.query('dryRun') !== '0',
     force: flag(c, 'force'),

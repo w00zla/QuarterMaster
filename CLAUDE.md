@@ -24,8 +24,8 @@ scripts/test-roles.sh [files]       # the same DB tests under the production rol
 node --env-file-if-exists=.env --test test/plan.test.ts                                   # single file
 node --env-file-if-exists=.env --test --test-name-pattern="diffTexts" "test/**/*.test.ts"   # single test
 
-pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k" --label 4.10.1   # -> local/snapshots/catalog-<channel>-<build>.json.gz
-pnpm catalog:import <snapshot.json.gz> [--dry-run] [--force] [--allow-downgrade] [--json]
+pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k"                  # -> local/snapshots/catalog-<channel>-<build>.json.gz
+pnpm catalog:import <snapshot.json.gz> [--label 4.10.2] [--dry-run] [--force] [--allow-downgrade] [--json]
 pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry-run] [--force]
 pnpm loc:import --remove --source <name> --lang <code>
 

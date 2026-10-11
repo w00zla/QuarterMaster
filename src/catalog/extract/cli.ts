@@ -1,5 +1,5 @@
 // Extracts the game catalog from a local Data.p4k into a snapshot file.
-// Usage: pnpm catalog:extract [--p4k <Data.p4k>] [--label 4.10.1] [--out <file>] [--starbreaker <bin>] [--work <dir>]
+// Usage: pnpm catalog:extract [--p4k <Data.p4k>] [--out <file>] [--starbreaker <bin>] [--work <dir>]
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -25,7 +25,6 @@ const DCB_FILTERS = [
 const HELP = `Usage: pnpm catalog:extract [options]
 
   --p4k <path>          Data.p4k of the game install (default: $SC_DATA_P4K)
-  --label <text>        Human readable version, e.g. 4.10.1 (not in the build manifest)
   --out <file>          Snapshot file (default: local/snapshots/catalog-<channel>-<build>.json.gz)
   --starbreaker <bin>   StarBreaker CLI (default: local/starbreaker)
   --work <dir>          Working directory for extracted files (default: local/work/<channel>-<build>)
@@ -36,7 +35,6 @@ async function main() {
   const { values: args } = parseArgs({
     options: {
       'p4k': { type: 'string' },
-      'label': { type: 'string' },
       'out': { type: 'string' },
       'starbreaker': { type: 'string', default: 'local/starbreaker' },
       'work': { type: 'string' },
@@ -76,11 +74,12 @@ async function main() {
     build,
     branch: data.Branch ?? '',
     version: data.Version ?? '',
-    label: args.label ?? null,
+    // Set by the import (--label): the readable version is not in the build manifest
+    label: null,
     manifest,
   };
   const sbVersion = await starbreakerVersion(bin);
-  console.log(`Game: ${channel} build ${build} (${game.branch}, ${game.version})${game.label ? ` "${game.label}"` : ''} | StarBreaker ${sbVersion}`);
+  console.log(`Game: ${channel} build ${build} (${game.branch}, ${game.version}) | StarBreaker ${sbVersion}`);
 
   const work = resolve(args.work ?? join('local/work', `${channel.toLowerCase()}-${build}`));
   rmSync(work, { recursive: true, force: true });

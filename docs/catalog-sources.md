@@ -114,8 +114,8 @@ StarMapObject (_RecordId_ = location UUID)
 
 ```sh
 pnpm db:up && pnpm db:migrate                     # local Postgres 18 (Podman), see scripts/dev-db.sh
-pnpm catalog:extract --p4k ".../LIVE/Data.p4k" --label 4.10.1    # ~6 s -> local/snapshots/catalog-live-<build>.json.gz
-pnpm catalog:import local/snapshots/catalog-live-<build>.json.gz [--dry-run]
+pnpm catalog:extract --p4k ".../LIVE/Data.p4k"                  # ~6 s -> local/snapshots/catalog-live-<build>.json.gz
+pnpm catalog:import local/snapshots/catalog-live-<build>.json.gz [--label 4.10.2] [--dry-run]
 pnpm loc:import local/localization/sc-deutsch/global.ini --source sc-deutsch --lang de [--priority 100] [--dry-run]
 pnpm loc:import --remove --source sc-deutsch --lang de
 pnpm test                                                # DB tests only with TEST_DATABASE_URL

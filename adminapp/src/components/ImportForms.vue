@@ -20,12 +20,14 @@ const TEXT_COLS = ["total", "added", "changed", "unchanged", "removed"] as const
 const catalogFile = ref<File | null>(null);
 const force = ref(false);
 const allowDowngrade = ref(false);
+// Replaces the snapshot's label (the readable version, e.g. 4.10.2) when set
+const label = ref("");
 const catalogBusy = ref(false);
 const catalogError = ref("");
 const catalogResult = ref<CatalogImportResponse | null>(null);
 // A passed dry run is only valid for the file and options it ran with
 const catalogReady = ref(false);
-watch([catalogFile, force, allowDowngrade], () => {
+watch([catalogFile, force, allowDowngrade, label], () => {
   catalogReady.value = false;
 });
 
@@ -36,6 +38,7 @@ async function runCatalog(dryRun: boolean) {
   try {
     const r = await postFile<CatalogImportResponse>("/import/catalog", {
       dryRun: dryRun ? 1 : 0, force: force.value ? 1 : 0, allowDowngrade: allowDowngrade.value ? 1 : 0,
+      label: label.value.trim(),
     }, catalogFile.value);
     catalogResult.value = r;
     catalogReady.value = dryRun && r.status === "dry-run";
@@ -115,6 +118,7 @@ const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
           <span class="mono dim name">{{ catalogFile?.name ?? "" }}</span>
         </div>
         <div class="row">
+          <label class="field">Label <input v-model="label" class="input mono short" placeholder="4.10.2" /></label>
           <label class="check"><input v-model="force" type="checkbox" /> Force <HelpTip :text="HELP.forceImport" /></label>
           <label class="check"><input v-model="allowDowngrade" type="checkbox" /> Allow downgrade <HelpTip :text="HELP.allowDowngrade" /></label>
         </div>

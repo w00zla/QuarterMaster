@@ -13,6 +13,7 @@ const HELP = `Usage: pnpm catalog:import <snapshot.json[.gz]> [options]
   --dry-run                 Run the full import in a transaction and roll it back
   --force                   Override mass-retire/mass-change safeguards, re-import an identical snapshot
   --allow-downgrade         Allow a snapshot older than the last import
+  --label <text>            Human readable version, e.g. 4.10.2 (replaces the snapshot's label)
   --max-retire-ratio <r>    Max share of active rows per entity that may be retired (default 0.1)
   --max-change-ratio <r>    Max share of active rows per entity that may change (default 0.5)
   --json                    Print the result as JSON instead of a report
@@ -27,6 +28,7 @@ async function main(): Promise<number> {
       'dry-run': { type: 'boolean', default: false },
       'force': { type: 'boolean', default: false },
       'allow-downgrade': { type: 'boolean', default: false },
+      'label': { type: 'string' },
       'max-retire-ratio': { type: 'string', default: '0.1' },
       'max-change-ratio': { type: 'string', default: '0.5' },
       'json': { type: 'boolean', default: false },
@@ -56,6 +58,7 @@ async function main(): Promise<number> {
   const file = positionals[0]!;
   const { snapshot, sha256: hash, timings: loadTimings } = loadSnapshot(readFileSync(file));
   Object.assign(timings, loadTimings);
+  if (args.label?.trim()) snapshot.game.label = args.label.trim();
 
   const g = snapshot.game;
   log(`Snapshot: ${g.channel} build ${g.build}${g.label ? ` "${g.label}"` : ''} (${g.branch}) extracted ${snapshot.extractedAt}`);
@@ -77,7 +80,7 @@ async function main(): Promise<number> {
 
     if (args.json) {
       console.log(JSON.stringify({
-        status: result.status, importId: result.importId, snapshotSha256: hash, game: { ...g, manifest: undefined },
+        status: result.status, importId: result.status === 'imported' ? result.importId : null, snapshotSha256: hash, game: { ...g, manifest: undefined },
         ...summarize({ ...result, timings: allTimings }),
         violations: result.safeguards.violations, catalogBytes,
       }, null, 2));
