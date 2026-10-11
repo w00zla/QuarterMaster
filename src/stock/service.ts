@@ -252,6 +252,8 @@ export interface AddInput {
   amount: string;
   // Shared in actor.guildId right away (the batch it lands in; one shared already stays shared)
   org?: boolean;
+  // Also shared in these orgs right away (the owner an active member in each; same rule as `org`)
+  shareIn?: string[];
 }
 
 /** Books new stock. */
@@ -272,10 +274,17 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
     };
     const { created: _c, ...batch } = await upsert(tx, key, amount);
     // Added to a batch that is shared already: the orgs see their offer grow
-    await history(tx, actor, 'stock', 'add', key, { amount, batchAmount: batch.quantity, ...offered(await sharesOf(tx, batch.id)) });
+    const shared = await sharesOf(tx, batch.id);
+    await history(tx, actor, 'stock', 'add', key, { amount, batchAmount: batch.quantity, ...offered(shared) });
     if (input.org) {
       await addShares(tx, batch.id, [actor.guildId!]);
       await history(tx, actor, 'stock', 'share', key, { amount: batch.quantity }, undefined, actor.guildId);
+    }
+    for (const g of new Set(input.shareIn ?? [])) {
+      if (shared.includes(g) || (input.org && g === actor.guildId)) continue;
+      await checkHolder(tx, g, actor.userId);
+      await addShares(tx, batch.id, [g]);
+      await history(tx, actor, 'stock', 'share', key, { amount: batch.quantity }, undefined, g);
     }
     return { journal: [await journal(tx, actor, 'add', key, amount)], batch };
   });

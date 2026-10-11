@@ -134,7 +134,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.ok(!(await personal(SOLO)).batches.some((b) => b.state === 'refining'));
 
     // No org stock without an org
-    assert.deepEqual((await post(SOLO, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'notMember' });
+    assert.deepEqual((await post(SOLO, '/stock/add', { ...metal, quality: 1, amount: '1', guildIds: [G] })).body, { error: 'notMember' });
     assert.deepEqual((await get(SOLO, `/stock?scope=org&guildId=${G}`)).body, { error: 'notMember' });
 
     // Blueprints: default ones are never registered
@@ -160,8 +160,8 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   });
 
   it('shared stock: everyone shares and changes their own, gives to members; others see it but cannot change it', async () => {
-    assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 800, amount: '3', guildId: G })).status, 200);
-    assert.equal((await post(OLGA, '/stock/add', { ...metal, quality: 810, amount: '2', guildId: G })).status, 200);
+    assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 800, amount: '3', guildIds: [G] })).status, 200);
+    assert.equal((await post(OLGA, '/stock/add', { ...metal, quality: 810, amount: '2', guildIds: [G] })).status, 200);
 
     const asMax = await org(MAX);
     assert.equal(asMax.totals[U.metal], '5');
@@ -200,11 +200,11 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   });
 
   it('org writes need an active membership; a server the bot left has none', async () => {
-    assert.deepEqual((await post(SOLO, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'notMember' });
+    assert.deepEqual((await post(SOLO, '/stock/add', { ...metal, quality: 1, amount: '1', guildIds: [G] })).body, { error: 'notMember' });
     // The bot left: it deactivates the org's members, the org is gone for them
     await markGuildLeft(db, G);
     try {
-      assert.deepEqual((await post(MIA, '/stock/add', { ...metal, quality: 1, amount: '1', guildId: G })).body, { error: 'notMember' });
+      assert.deepEqual((await post(MIA, '/stock/add', { ...metal, quality: 1, amount: '1', guildIds: [G] })).body, { error: 'notMember' });
       assert.equal((await get(MIA, `/stock?scope=org&guildId=${G}`)).status, 403);
       assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 1, amount: '1' })).status, 200);
     } finally {
@@ -328,7 +328,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
   it('history: own actions and what others did to your data, with source (web app or companion), names, pages', async () => {
     const last = Number((await db.execute<{ n: string }>(sql`SELECT coalesce(max(id), 0)::text AS n FROM app.history`))[0]!.n);
     const since = (r: HistoryResponse) => r.entries.filter((e) => e.id > last);
-    assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 333, amount: '3', guildId: G })).status, 200);
+    assert.equal((await post(MIA, '/stock/add', { ...metal, quality: 333, amount: '3', guildIds: [G] })).status, 200);
     const batch = (await org(MIA)).batches.find((b) => b.quality === 333)!;
     // The owner gives some to another member from the companion app (API token)
     const token = ((await (await app.request('/api/token', { method: 'POST', body: '{}', headers: { ...headers(MIA), 'content-type': 'application/json' } })).json()) as { token: string }).token;

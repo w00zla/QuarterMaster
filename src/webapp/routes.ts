@@ -48,7 +48,7 @@ const quality = z.number().int();
 const amount = z.string().max(32);
 
 const schemas = {
-  add: z.object({ subjectUuid: uuid, locationUuid: uuid, quality, amount, guildId: snowflake.optional() }).strict(),
+  add: z.object({ subjectUuid: uuid, locationUuid: uuid, quality, amount, guildIds: z.array(snowflake).max(25).optional() }).strict(),
   remove: z.object({ batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount }).strict(),
   adjust: z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict(),
   move: z.object({
@@ -229,10 +229,11 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const me = c.get('session').userId;
     const material = (await materialCatalog(db, 'en')).get(input.subjectUuid);
     if (!material) throw new HttpError(422, 'unknownSubject');
-    const actor = await actorFor(c, db, me, input.guildId);
+    for (const g of input.guildIds ?? []) await membership(db, me, g);
+    const actor = await actorFor(c, db, me, undefined);
     return book(c, () => stock.add(db, actor, {
       kind: material.kind, uuid: input.subjectUuid, locationUuid: input.locationUuid, quality: input.quality, amount: input.amount,
-      org: !!input.guildId,
+      shareIn: input.guildIds,
     }));
   });
 

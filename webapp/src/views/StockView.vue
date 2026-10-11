@@ -6,8 +6,8 @@ const lastScope = ref("personal");
 
 <script setup lang="ts">
 // Stock: personal, one org's or all of them, grouped by material (alphabetical), best quality first
-// within. Changes go through BatchDialog (confirmed); adding through StockAddForm, into the scope shown
-// (in "all" the form asks where).
+// within. Changes go through BatchDialog (confirmed); adding through StockAddForm (an org scope
+// starts with that org's share switched on; the form stays open for the next batch).
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
 import Dropdown from "../components/Dropdown.vue";
@@ -45,7 +45,6 @@ const qualityHigh = ref(Q_TIER_MAX);
 const showAdd = ref(false);
 
 function added() {
-  showAdd.value = false;
   void load();
 }
 const dialog = ref<{ batch: StockBatch; action: BatchAction } | null>(null);

@@ -137,8 +137,8 @@ export interface StockListResponse {
 
 // Writes: POST, JSON. Only the owner changes a batch. Sharing: POST /api/stock/share sets the orgs a
 // batch is shared in (the whole batch; a part is split off first: /api/stock/split, unshared batches
-// only). `guildId` = the org the action happens in: to add shared stock and to give to one of its
-// members; you must be an active member there (403 notMember).
+// only). `guildId` = the org the action happens in: to give to one of its members; you must be an
+// active member there (403 notMember), as in every org you add shared stock to (`guildIds`).
 // `expected` = the quantity the user saw: the server refuses with batchChanged if it changed meanwhile.
 // Amounts are text as typed ("12,5" or "12.5"); null = the whole batch.
 
@@ -147,8 +147,8 @@ export interface StockAddRequest {
   locationUuid: string;
   quality: number;
   amount: string;
-  // Shared in this org right away (else unshared)
-  guildId?: string;
+  // Shared in these orgs right away (else unshared; the batch it lands in keeps its shares)
+  guildIds?: string[];
 }
 
 export interface StockRemoveRequest {
