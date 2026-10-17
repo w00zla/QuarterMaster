@@ -23,7 +23,7 @@ describe('bot guild settings (database)', { skip: url ? false : 'TEST_DATABASE_U
 
   it('creates org and bot settings with defaults on first use, idempotently', async () => {
     const first = await ensureGuild(db, G, 'Test Org');
-    assert.deepEqual(first, { memberRoleIds: [], baseLang: 'en', logsChannelId: null, logsLevel: 'org', boardChannelId: null, boardStyle: 'list', boardTitle: null, boardSubtitle: null });
+    assert.deepEqual(first, { memberRoleIds: [], baseLang: 'en', logsChannelId: null, logsLevel: 'stock', boardChannelId: null, boardStyle: 'list', boardTitle: null, boardSubtitle: null });
     await ensureGuild(db, G, 'Renamed Org');
     const [row] = await db.execute<{ name: string }>(sql`SELECT name FROM app.org WHERE guild_id = ${G}`);
     assert.equal(row!.name, 'Renamed Org');
@@ -64,7 +64,7 @@ describe('bot guild settings (database)', { skip: url ? false : 'TEST_DATABASE_U
   });
 
   it('rejects values the schema does not allow', async () => {
-    await assert.rejects(updateGuildSettings(db, G, { logsLevel: 'all' as never }));
+    await assert.rejects(updateGuildSettings(db, G, { logsLevel: 'org' as never }));
     await assert.rejects(updateGuildSettings(db, G, { logsChannelId: 'not-a-snowflake' }));
     assert.equal((await getGuildSettings(db, G)).logsLevel, 'off');
   });

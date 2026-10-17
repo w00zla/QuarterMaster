@@ -13,7 +13,8 @@ export const guild = bot.table('guild', {
   baseLang: text('base_lang').notNull().default('en'),
   // NULL = no #logs, whatever the level
   logsChannelId: text('logs_channel_id'),
-  logsLevel: text('logs_level').notNull().default('org'),
+  // What the logs channel posts: 'stock' (the org's shared stock), 'blueprints' (its members' blueprints), 'all' or 'off'
+  logsLevel: text('logs_level').notNull().default('stock'),
   // The last app.history row the logs channel has handled (posted or skipped); NULL = start at the newest
   // row, never post the past (set again whenever channel or level change)
   logsAfter: bigint('logs_after', { mode: 'number' }),
@@ -40,7 +41,7 @@ export const guild = bot.table('guild', {
   check('guild_board_title_length', sql`${t.boardTitle} IS NULL OR char_length(${t.boardTitle}) BETWEEN 1 AND 100`),
   check('guild_board_subtitle_length', sql`${t.boardSubtitle} IS NULL OR char_length(${t.boardSubtitle}) BETWEEN 1 AND 100`),
   check('guild_base_lang', sql`${t.baseLang} IN ('de', 'en')`),
-  check('guild_logs_level', sql`${t.logsLevel} IN ('off', 'org')`),
+  check('guild_logs_level', sql`${t.logsLevel} IN ('off', 'stock', 'blueprints', 'all')`),
 ]);
 
 /** Bot settings per user, global. */

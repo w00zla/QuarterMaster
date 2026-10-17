@@ -98,8 +98,9 @@ Only the structure is fixed for now; individual settings are added when a featur
 
 - Any text channel the admin picks (stored by ID); there is no fixed channel name. UI texts say "Logs", never `#logs`.
 
-- Per server: channel (stored by ID, chosen via channel select) and level: `off` | `org`. There is no level for personal bookings: unshared stock is private.
-- Level `org` (decided 2026-10-09, after the ownership model): what happens to the org's offer: sharing and taking back in this org, gives among its members (the recipient is named only in the org the give happened in; other orgs the batch was shared in read "gave away"), and add/remove/adjust/move/merge on batches shared in this org at that moment. Never: unshared stock, refinery jobs (personal), blueprints (the companion registers dozens at once). No source tag (the web app's history has it).
+- Per server: channel (stored by ID, chosen via channel select) and level: `off` | `stock` | `blueprints` | `all` (stock and blueprints). There is no level for personal bookings: unshared stock is private.
+- Level `stock` (decided 2026-10-09, after the ownership model; called `org` until migration `0026`): what happens to the org's offer: sharing and taking back in this org, gives among its members (the recipient is named only in the org the give happened in; other orgs the batch was shared in read "gave away"), and add/remove/adjust/move/merge on batches shared in this org at that moment. Never: unshared stock, refinery jobs (personal). No source tag (the web app's history has it).
+- Level `blueprints` (2026-10-17): blueprints added or removed by the org's active members (from every source; a companion full scan can post dozens at once, which is why it is a level of its own).
 - One line per change in the server's base language, people as mentions (rendered as names, never pinging), several lines per message. The source is `app.history`; a new channel or level starts at the newest row (the past is never posted). A channel the bot cannot use loses its lines (no backlog flood later).
 
 ## Localization

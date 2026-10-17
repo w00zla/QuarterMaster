@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { logLine, messagesOf, type LogNames, type LogRow } from '../src/bot/logs.ts';
 
-const names: LogNames = { material: () => 'Quantanium', location: (u) => (u === 'L2' ? 'Baijini Point' : 'Area18') };
+const names: LogNames = { material: () => 'Quantanium', location: (u) => (u === 'L2' ? 'Baijini Point' : 'Area18'), blueprint: () => 'Arclight' };
 const row = (r: Partial<LogRow>): LogRow => ({
   id: 1, action: 'add', actorUserId: '100000000000000001', toOwnerUserId: null, guildId: null, targetKind: 'resource',
   targetUuid: 'M', details: { amount: '12.500000', quality: 820, locationUuid: 'L1' }, ...r,

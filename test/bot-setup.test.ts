@@ -8,7 +8,7 @@ const settings: GuildSettings = {
   memberRoleIds: ['100000000000000001', '100000000000000002'],
   baseLang: 'de',
   logsChannelId: '200000000000000001',
-  logsLevel: 'org',
+  logsLevel: 'stock',
   boardChannelId: '200000000000000002',
   boardStyle: 'table',
   boardTitle: 'Red *Hollow*',
@@ -42,7 +42,7 @@ describe('/qm-setup', () => {
       '## ⚙️ Quartermaster setup\n-# Changes are saved immediately.',
       '### 👥 Members',
       '### 🌐 Language\n-# Base language (public output)',
-      '### 📜 Logs\n-# Posts every change to the stock shared in this org into a channel\n✅ the bot can post there',
+      '### 📜 Logs\n-# Posts changes to the stock shared in this org and to its members\' blueprints into a channel\n✅ the bot can post there',
       '### 📋 Board\n-# One message in a channel showing what the org shares, always up to date\n✅ the bot can post there',
     ].join('\n'));
     assert.match(textOf(setupPanel({ ...settings, boardTitle: null, boardSubtitle: null }, 'en', { logs: null, board: { missing: [] } })), /### 📋 Board\n-# .*\n✅/);
@@ -64,7 +64,8 @@ describe('/qm-setup', () => {
     assert.deepEqual((channel!.default_values as { id: string }[]).map((v) => v.id), [settings.logsChannelId]);
     assert.deepEqual((lang!.options as { value: string; default: boolean }[]).filter((o) => o.default).map((o) => o.value), ['de']);
     assert.deepEqual((level!.options as { label: string; value: string }[]).map((o) => [o.value, o.label]), [
-      ['off', 'Logs: Aus'], ['org', 'Logs: Geteilter Bestand: Freigaben, Übergaben, Buchungen'],
+      ['off', 'Logs: Aus'], ['stock', 'Logs: Geteilter Bestand: Freigaben, Übergaben, Buchungen'],
+      ['blueprints', 'Logs: Blueprints: eingetragen, ausgetragen'], ['all', 'Logs: Geteilter Bestand und Blueprints'],
     ]);
   });
 
@@ -95,7 +96,8 @@ describe('/qm-setup', () => {
     assert.equal(patchFor('boardStyle', ['grid']), null);
     assert.deepEqual(patchFor('baseLang', ['de']), { baseLang: 'de' });
     assert.equal(patchFor('baseLang', ['fr']), null);
-    assert.equal(patchFor('logsLevel', ['all']), null);
+    assert.deepEqual(patchFor('logsLevel', ['blueprints']), { logsLevel: 'blueprints' });
+    assert.equal(patchFor('logsLevel', ['org']), null);
     assert.equal(patchFor('nope', ['x']), null);
   });
 });

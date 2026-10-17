@@ -6,8 +6,9 @@ import { type Db } from '../src/db/client.ts';
 import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
-import { addBlueprint } from '../src/bot/blueprints.ts';
+import { addBlueprint, blueprintCatalog, removeBlueprint } from '../src/bot/blueprints.ts';
 import { LogsPoster } from '../src/bot/logs.ts';
+import { escapeMarkdown } from '../src/bot/markdown.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { add, move, refineStart, remove, share, type Actor } from '../src/stock/service.ts';
@@ -152,8 +153,34 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     await updateGuildSettings(db, G, { logsLevel: 'off' });
     await remove(db, mia, { batchId: b.id, amount: '1' });
     await poster.round();
-    await updateGuildSettings(db, G, { logsLevel: 'org' });
+    await updateGuildSettings(db, G, { logsLevel: 'stock' });
     await poster.round();
     assert.equal(sent.get(CHANNEL_G)!.length, 1);
+  });
+
+  it('posts the blueprints of active members with the levels blueprints and all', async () => {
+    await updateGuildSettings(db, G, { logsLevel: 'blueprints' });
+    await updateGuildSettings(db, H, { logsLevel: 'all' });
+    const sent = new Map([[CHANNEL_G, [] as string[]], [CHANNEL_H, [] as string[]]]);
+    const poster = new LogsPoster(fakeClient(sent), db, quiet);
+    // Not a member anywhere: never posted
+    await addBlueprint(db, '963000000000000008', U.blueprint2, 'companion');
+    await addBlueprint(db, OLGA, U.blueprint2, 'companion');
+    const b = (await add(db, mia, { ...metal, quality: 950, amount: '1' })).batch!;
+    await share(db, mia, { batchId: b.id, guildIds: [G, H] });
+    await removeBlueprint(db, OLGA, U.blueprint2, 'bot');
+    await poster.round();
+    const label = async (lang: 'en' | 'de') => escapeMarkdown((await blueprintCatalog(db, lang)).byUuid.get(U.blueprint2)!.label);
+    const [en, de] = [await label('en'), await label('de')];
+    const olga = `<@${OLGA}>`;
+    assert.deepEqual(sent.get(CHANNEL_G)!.join('\n').split('\n'), [
+      `📘 ${olga} added blueprint **${en}**`,
+      `📕 ${olga} removed blueprint **${en}**`,
+    ]);
+    assert.deepEqual(sent.get(CHANNEL_H)!.join('\n').split('\n'), [
+      `📘 ${olga} trägt Blueprint ein: **${de}**`,
+      `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** Q950 · Test Station`,
+      `📕 ${olga} trägt Blueprint aus: **${de}**`,
+    ]);
   });
 });

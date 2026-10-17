@@ -6,7 +6,7 @@ import { guild } from '../db/schema/bot.ts';
 import type { BoardStyle } from './board.ts';
 import type { Lang } from './i18n.ts';
 
-export const LOGS_LEVELS = ['off', 'org'] as const;
+export const LOGS_LEVELS = ['off', 'stock', 'blueprints', 'all'] as const;
 export type LogsLevel = (typeof LOGS_LEVELS)[number];
 
 export interface GuildSettings {
