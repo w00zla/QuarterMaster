@@ -1,12 +1,16 @@
 // The inventory scan in the app: the OCR's reads (Rust event "inventory-read") go through
-// InventoryScan (inventory.ts) into sightings; each complete sighting is a proposal (one per stack,
-// with what the user's stored stock at the chosen location already holds of that material and
-// quality), which waits until the user registers or dismisses it. The location is picked before a
-// session starts and kept (localStorage). Starting a session clears the sightings of the one before.
-// The catalog (names in both languages plus the player's language pack) is the refinery sync's.
+// InventoryScan (inventory.ts: the freight manager's warehouse, materials and items) and
+// ComponentScan (components.ts: the character inventory, ship components) into sightings; each
+// complete sighting is a proposal (one per stack, with what the user's stored stock at the chosen
+// location already holds of that material and quality; one per component tile), which waits until
+// the user registers or dismisses it. The kind filter (Mats / Items / Comps, kept in localStorage)
+// decides what is detected at all. The location is picked before a session starts and kept. Starting
+// a session clears the sightings of the one before. The catalog (names in both languages plus the
+// player's language pack) is the refinery sync's.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, ref } from "vue";
 import type { OkResponse, StockBatch, StockListResponse } from "../../src/webapp/api-types";
+import { addRequest as componentRequest, ComponentScan, proposalsOf as componentProposalsOf, type ComponentProposal, type ComponentSighting } from "./components";
 import { addRequest, InventoryScan, proposalsOf, type InventoryReadEvent, type Proposal, type Sighting } from "./inventory";
 import { ensureCatalog, syncCatalog } from "./refinerySync";
 import { startScan, stopScan } from "./scan";
@@ -14,12 +18,43 @@ import { api, connected } from "./state";
 import { toastError } from "./toasts";
 
 const LOCATION_KEY = "qm.companion.inventory.location";
+const KINDS_KEY = "qm.companion.inventory.kinds";
+
+export type Kind = "mats" | "items" | "comps";
+export const KINDS: Kind[] = ["mats", "items", "comps"];
 
 const scan = new InventoryScan();
+const componentScan = new ComponentScan();
 export const sightings = ref<Sighting[]>([]);
+export const componentSightings = ref<ComponentSighting[]>([]);
 export const locationUuid = ref<string | null>(localStorage.getItem(LOCATION_KEY));
 const batches = ref<StockBatch[]>([]);
 const dismissed = ref(new Set<string>());
+
+function storedKinds(): Set<Kind> {
+  try {
+    const list = JSON.parse(localStorage.getItem(KINDS_KEY) ?? "null") as unknown;
+    if (Array.isArray(list)) {
+      const kinds = new Set(list.filter((k): k is Kind => KINDS.includes(k as Kind)));
+      if (kinds.size) return kinds;
+    }
+  } catch {
+    // Not valid: every kind
+  }
+  return new Set(KINDS);
+}
+
+// What the scan detects; a change applies to the reads from then on
+export const kinds = ref<Set<Kind>>(storedKinds());
+
+export function toggleKind(kind: Kind) {
+  const next = new Set(kinds.value);
+  if (next.has(kind)) next.delete(kind);
+  else next.add(kind);
+  if (!next.size) return;
+  kinds.value = next;
+  localStorage.setItem(KINDS_KEY, JSON.stringify([...next]));
+}
 
 export function setLocation(uuid: string | null) {
   locationUuid.value = uuid;
@@ -30,11 +65,13 @@ export function setLocation(uuid: string | null) {
 export const proposals = computed<Proposal[]>(() =>
   locationUuid.value ? proposalsOf(sightings.value, batches.value, locationUuid.value).filter((p) => !dismissed.value.has(p.id)) : [],
 );
+export const componentProposals = computed<ComponentProposal[]>(() => componentProposalsOf(componentSightings.value).filter((p) => !dismissed.value.has(p.id)));
 
 // The debug window shows the sightings too: it gets them with every change and on request
 const publish = () => {
   sightings.value = scan.list();
-  void emit("inventory-sightings", sightings.value).catch(() => undefined);
+  componentSightings.value = componentScan.list();
+  void emit("inventory-sightings", { materials: sightings.value, components: componentSightings.value }).catch(() => undefined);
 };
 
 async function loadStock() {
@@ -52,7 +89,15 @@ function onRead(e: InventoryReadEvent) {
     if (!connected.value) return;
     await ensureCatalog();
     const cat = syncCatalog.value!;
-    if (scan.feed(e, { materials: cat.allMaterials, units: cat.units, components: new Set(cat.components.components.map((c) => c.uuid)) })) publish();
+    let changed = false;
+    if (e.grid) {
+      const inventoryCatalog = { materials: cat.allMaterials, units: cat.units, components: new Set(cat.components.components.map((c) => c.uuid)) };
+      changed = !!scan.feed(e, inventoryCatalog, (s) => kinds.value.has(s.unit === "SCU" ? "mats" : "items"));
+    }
+    if (e.components) {
+      changed = !!componentScan.feed(e.atMs, e.components, cat.components, () => kinds.value.has("comps")) || changed;
+    }
+    if (changed) publish();
   });
 }
 
@@ -60,6 +105,7 @@ function onRead(e: InventoryReadEvent) {
 export async function startInventoryScan() {
   if (!locationUuid.value) return;
   scan.clear();
+  componentScan.clear();
   dismissed.value = new Set();
   publish();
   try {
@@ -81,7 +127,7 @@ export async function watchInventory() {
 // The orgs the user shares registered stacks in (the dialog's switches; kept for the session)
 export const shareGuildIds = ref<string[]>([]);
 
-/** Books a proposal, shared in `shareGuildIds`; true when done. The sighting goes with it. */
+/** Books a stack proposal, shared in `shareGuildIds`; true when done. The sighting goes with it. */
 export async function accept(p: Proposal): Promise<boolean> {
   if (!locationUuid.value) return false;
   try {
@@ -97,6 +143,20 @@ export async function accept(p: Proposal): Promise<boolean> {
   }
 }
 
-export function dismiss(p: Proposal) {
-  dismissed.value = new Set([...dismissed.value, p.id]);
+/** Books a component proposal (one piece, its stats), shared in `shareGuildIds`; true when done. */
+export async function acceptComponent(p: ComponentProposal): Promise<boolean> {
+  if (!locationUuid.value) return false;
+  try {
+    await api<OkResponse>("POST", "/stock/add", componentRequest(p, locationUuid.value, shareGuildIds.value));
+    componentScan.sightings.delete(p.id);
+    publish();
+    return true;
+  } catch (e) {
+    toastError(e);
+    return false;
+  }
+}
+
+export function dismiss(id: string) {
+  dismissed.value = new Set([...dismissed.value, id]);
 }

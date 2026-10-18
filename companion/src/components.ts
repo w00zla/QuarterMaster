@@ -1,15 +1,16 @@
-// The ship component scan: what the OCR read off the character inventory's tooltip (Rust:
-// components.rs, event "components-read") turned into sightings of components, and the sightings
-// into proposals, one per tile. Pure (tested from test/companion-components.test.ts): no Vue, no
-// Tauri.
+// The ship component part of the inventory scan: what the OCR read off the character inventory's
+// tooltip (Rust: components.rs, the `components` part of the event "inventory-read") turned into
+// sightings of components, and the sightings into proposals. Pure (tested from
+// test/companion-components.test.ts): no Vue, no Tauri.
 //
 // The tooltip's title names the component with the game's "class/size/grade" prefix ("Mil/3/A
 // Blizzard"); the stat lines show absolute values ("Coolant Rating: 67.50"), the stock keeps a crafted
 // component's gain over the unmodified value (`CatalogStat.base`: "12.5" = +12.5 %, power pips in
 // steps), so each read stat is converted; a tooltip without stat lines is a looted component (no
-// stats). A tile's identity is its page and cell plus what it holds: the same tile hovered again is
-// the same sighting, two equal components in two tiles are two. A sighting counts only once two
-// reads in a row agree (an OCR glitch in one read books nothing).
+// stats). A sighting's identity is its content in its column on its page (the pane scrolls, so the
+// row says nothing): a tile hovered again after a scroll is the same sighting, equal components in
+// one column collapse (a known limit), in other columns or on other pages they stay apart. A
+// sighting counts only once two reads in a row agree (an OCR glitch in one read books nothing).
 import { norm } from "../../src/stock/material-names.ts";
 import type { CatalogResponse, CatalogStat, StockAddRequest } from "../../src/webapp/api-types.ts";
 
@@ -33,16 +34,12 @@ export interface ReadTooltip {
   rect: ReadRect;
 }
 
-export interface ComponentReadEvent {
-  atMs: number;
-  ms: number;
-  width: number;
-  height: number;
+/** The character inventory's part of a read. */
+export interface ComponentRead {
   tooltip: ReadTooltip | null;
   page: { index: number; total: number } | null;
   // The storage grid's cell under the mouse cursor; null outside it
-  cell: { row: number; col: number } | null;
-  cursor: [number, number] | null;
+  cell: { row: number; col: number; rect: ReadRect } | null;
 }
 
 // --- catalog ---------------------------------------------------------------------------------------
@@ -178,7 +175,7 @@ export function statsOf(def: ComponentDef, lines: string[], cat: ComponentCatalo
 export type ComponentProblem = "unknownComponent" | "ambiguousComponent" | "statsUnreadable";
 
 export interface ComponentSighting {
-  // page | row | col | component (or title) | stats
+  // page | col | component (or title) | stats
   key: string;
   // As the tooltip shows it
   title: string;
@@ -197,7 +194,7 @@ export interface ComponentSighting {
 }
 
 /** The sighting in a read: the tooltip at the cursor's cell; null without both. */
-export function sightingOf(e: ComponentReadEvent, cat: ComponentCatalog): ComponentSighting | null {
+export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog): ComponentSighting | null {
   if (!e.tooltip || !e.cell) return null;
   const title = e.tooltip.title.trim();
   const hits = findComponents(cat, title);
@@ -207,7 +204,7 @@ export function sightingOf(e: ComponentReadEvent, cat: ComponentCatalog): Compon
   const page = e.page?.index ?? null;
   const stats = problem ? null : read.stats;
   return {
-    key: `${page ?? "?"}|${e.cell.row}|${e.cell.col}|${def?.uuid ?? norm(title)}|${stats ? JSON.stringify(stats) : "-"}`,
+    key: `${page ?? "?"}|${e.cell.col}|${def?.uuid ?? norm(title)}|${stats ? JSON.stringify(stats) : "-"}`,
     title,
     componentUuid: def?.uuid ?? null,
     label: def?.label ?? title,
@@ -216,7 +213,7 @@ export function sightingOf(e: ComponentReadEvent, cat: ComponentCatalog): Compon
     page,
     row: e.cell.row,
     col: e.cell.col,
-    atMs: e.atMs,
+    atMs,
     problem,
   };
 }
@@ -227,21 +224,17 @@ export class ComponentScan {
   // The last read's sighting, waiting for a second read that agrees
   private pending: ComponentSighting | null = null;
 
-  /** Takes a read in; the sighting it added, null when nothing changed (the same tile read again, or
-   * a first read still waiting for its confirmation). A tile read anew with other content replaces
-   * what that tile held before (the previous sighting of that page and cell goes). */
-  feed(e: ComponentReadEvent, cat: ComponentCatalog): ComponentSighting | null {
-    const s = sightingOf(e, cat);
-    if (!s) return null;
+  /** Takes a read in; the sighting it added, null when nothing changed (a known sighting read again,
+   * a first read still waiting for its confirmation, or one `accept` turns down). */
+  feed(atMs: number, e: ComponentRead, cat: ComponentCatalog, accept: (s: ComponentSighting) => boolean = () => true): ComponentSighting | null {
+    const s = sightingOf(atMs, e, cat);
+    if (!s || !accept(s)) return null;
     if (this.sightings.has(s.key)) return null;
     if (this.pending?.key !== s.key) {
       this.pending = s;
       return null;
     }
     this.pending = null;
-    for (const [key, o] of this.sightings) {
-      if (o.page === s.page && o.row === s.row && o.col === s.col) this.sightings.delete(key);
-    }
     this.sightings.set(s.key, s);
     return s;
   }

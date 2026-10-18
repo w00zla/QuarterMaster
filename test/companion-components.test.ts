@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import type { CatalogResponse, CatalogStat } from '../src/webapp/api-types.ts';
 import {
   addRequest, buildComponentCatalog, ComponentScan, findComponents, parseField, parseNumber, proposalsOf, sightingOf, statFromTooltip, statNameKeys, statsOf,
-  type ComponentCatalog, type ComponentReadEvent,
+  type ComponentCatalog, type ComponentRead,
 } from '../companion/src/components.ts';
 
 const BLIZZARD = '00000000-0000-4000-8000-000000000001';
@@ -46,8 +46,8 @@ function responses(): CatalogResponse[] {
 const catalog = (gameNames: Record<string, string> = {}): ComponentCatalog => buildComponentCatalog(responses(), gameNames);
 
 const rect = { x0: 0, y0: 0, x1: 10, y1: 10 };
-const read = (atMs: number, title: string | null, lines: string[] = [], cell: { row: number; col: number } | null = { row: 1, col: 2 }, page = 2): ComponentReadEvent =>
-  ({ atMs, ms: 300, width: 3840, height: 1600, tooltip: title ? { title, lines: lines.map((text) => ({ text, rect })), rect } : null, page: { index: page, total: 3 }, cell, cursor: null });
+const read = (title: string | null, lines: string[] = [], cell: { row: number; col: number } | null = { row: 1, col: 2 }, page = 2): ComponentRead =>
+  ({ tooltip: title ? { title, lines: lines.map((text) => ({ text, rect })), rect } : null, page: { index: page, total: 3 }, cell: cell && { ...cell, rect } });
 
 const BLIZZARD_LINES = ['Volume: 756000 µSCU', 'Item Type: Cooler', 'Manufacturer: Aegis Dynamics', 'Size: 3', 'Grade: A', 'Class: Military',
   'Navy mechanics worked with Aegis engineers to', 'ensure the Blizzard met their specific needs.', 'Coolant Rating: 60.00', 'Integrity: 1800.00'];
@@ -115,43 +115,47 @@ describe('tooltip lines', () => {
 });
 
 describe('sightings', () => {
-  it('a component with the gains read, keyed by page, cell and content', () => {
-    const s = sightingOf(read(1, 'Mil/3/A Blizzard', ['Item Type: Cooler', 'Coolant Rating: 67.50', 'Integrity: 1800.00']), catalog());
+  it('a component with the gains read, keyed by page, column and content', () => {
+    const s = sightingOf(1, read('Mil/3/A Blizzard', ['Item Type: Cooler', 'Coolant Rating: 67.50', 'Integrity: 1800.00']), catalog());
     assert.deepEqual([s?.componentUuid, s?.stats, s?.page, s?.row, s?.col, s?.problem, s?.label], [BLIZZARD, { [COOLANT]: '12.5' }, 2, 1, 2, null, 'Blizzard · Cooler · S3 · A Military']);
-    assert.equal(s?.key, `2|1|2|${BLIZZARD}|{"${COOLANT}":"12.5"}`);
-    const looted = sightingOf(read(1, 'Mil/3/A Blizzard', BLIZZARD_LINES), catalog());
+    assert.equal(s?.key, `2|2|${BLIZZARD}|{"${COOLANT}":"12.5"}`);
+    const looted = sightingOf(1, read('Mil/3/A Blizzard', BLIZZARD_LINES), catalog());
     assert.deepEqual([looted?.stats, looted?.problem], [{}, null]);
   });
 
   it('names what keeps a sighting from a proposal', () => {
     const cat = catalog();
-    assert.equal(sightingOf(read(1, 'Mil/3/A Frostbite', ['Item Type: Cooler']), cat)?.problem, 'unknownComponent');
-    assert.equal(sightingOf(read(1, 'Blizzard', ['Item Type: Cooler']), cat)?.problem, 'ambiguousComponent');
-    const bad = sightingOf(read(1, 'Mil/3/A Blizzard', ['Coolant Rating: 80.00', 'Integrity: 1800.00']), cat);
+    assert.equal(sightingOf(1, read('Mil/3/A Frostbite', ['Item Type: Cooler']), cat)?.problem, 'unknownComponent');
+    assert.equal(sightingOf(1, read('Blizzard', ['Item Type: Cooler']), cat)?.problem, 'ambiguousComponent');
+    const bad = sightingOf(1, read('Mil/3/A Blizzard', ['Coolant Rating: 80.00', 'Integrity: 1800.00']), cat);
     assert.deepEqual([bad?.problem, bad?.unreadable, bad?.stats], ['statsUnreadable', ['Coolant Rating'], null]);
-    assert.equal(sightingOf(read(1, 'Mil/3/A Blizzard', BLIZZARD_LINES, null), cat), null, 'no cell under the cursor');
-    assert.equal(sightingOf(read(1, null), cat), null);
+    assert.equal(sightingOf(1, read('Mil/3/A Blizzard', BLIZZARD_LINES, null), cat), null, 'no cell under the cursor');
+    assert.equal(sightingOf(1, read(null), cat), null);
   });
 
-  it('counts a tile after two agreeing reads, one sighting per tile', () => {
+  it('counts a component after two agreeing reads, by page, column and content', () => {
     const cat = catalog();
     const scan = new ComponentScan();
-    assert.equal(scan.feed(read(1, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50']), cat), null, 'first read waits');
+    const blizzard = ['Coolant Rating: 67.50'];
+    assert.equal(scan.feed(1, read('Mil/3/A Blizzard', blizzard), cat), null, 'first read waits');
     // A glitch in between starts over (a trailing letter is a unit, so the number must break)
-    assert.equal(scan.feed(read(2, 'Mil/3/A Blizzard', ['Coolant Rating: 6Z.50']), cat), null);
-    assert.equal(scan.feed(read(3, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50']), cat), null);
-    assert.ok(scan.feed(read(4, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50']), cat));
-    assert.equal(scan.feed(read(5, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50']), cat), null, 'known tile');
-    // The same component in the next cell and on the next page: tiles of their own
-    scan.feed(read(6, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50'], { row: 1, col: 3 }), cat);
-    assert.ok(scan.feed(read(7, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50'], { row: 1, col: 3 }), cat));
-    scan.feed(read(8, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50'], { row: 1, col: 2 }, 3), cat);
-    assert.ok(scan.feed(read(9, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50'], { row: 1, col: 2 }, 3), cat));
+    assert.equal(scan.feed(2, read('Mil/3/A Blizzard', ['Coolant Rating: 6Z.50']), cat), null);
+    assert.equal(scan.feed(3, read('Mil/3/A Blizzard', blizzard), cat), null);
+    assert.ok(scan.feed(4, read('Mil/3/A Blizzard', blizzard), cat));
+    assert.equal(scan.feed(5, read('Mil/3/A Blizzard', blizzard), cat), null, 'known');
+    // Scrolled: another row in the same column is the same sighting
+    scan.feed(6, read('Mil/3/A Blizzard', blizzard, { row: 4, col: 2 }), cat);
+    assert.equal(scan.feed(7, read('Mil/3/A Blizzard', blizzard, { row: 4, col: 2 }), cat), null);
+    // The same component in the next column and on the next page: sightings of their own
+    scan.feed(8, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 3 }), cat);
+    assert.ok(scan.feed(9, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 3 }), cat));
+    scan.feed(10, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 2 }, 3), cat);
+    assert.ok(scan.feed(11, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 2 }, 3), cat));
     assert.equal(scan.sightings.size, 3);
-    // The first tile read anew with other content replaces its sighting
-    scan.feed(read(10, 'Mil/1/B Sovereign IP-10', ['Power Pips: 17']), cat);
-    const replaced = scan.feed(read(11, 'Mil/1/B Sovereign IP-10', ['Power Pips: 17']), cat);
-    assert.deepEqual([replaced?.componentUuid, replaced?.stats, scan.sightings.size], [SOVEREIGN, { [PIPS]: '1' }, 3]);
+    // A filter turns a sighting down before it is counted
+    scan.feed(12, read('Mil/1/B Sovereign IP-10', ['Power Pips: 17']), cat, () => false);
+    assert.equal(scan.feed(13, read('Mil/1/B Sovereign IP-10', ['Power Pips: 17']), cat, () => false), null);
+    assert.equal(scan.sightings.size, 3);
     assert.equal(scan.list()[0]?.atMs, 11);
     scan.clear();
     assert.equal(scan.sightings.size, 0);
@@ -162,9 +166,9 @@ describe('proposals', () => {
   it('one per complete sighting, one piece each, stats only when there are any', () => {
     const cat = catalog();
     const scan = new ComponentScan();
-    for (let i = 0; i < 2; i++) scan.feed(read(i, 'Mil/3/A Blizzard', ['Coolant Rating: 67.50', 'Integrity: 1836.00']), cat);
-    for (let i = 2; i < 4; i++) scan.feed(read(i, 'Mil/3/A Blizzard', BLIZZARD_LINES, { row: 2, col: 0 }), cat);
-    for (let i = 4; i < 6; i++) scan.feed(read(i, 'Mil/3/A Frostbite', ['Item Type: Cooler'], { row: 2, col: 1 }), cat);
+    for (let i = 0; i < 2; i++) scan.feed(i, read('Mil/3/A Blizzard', ['Coolant Rating: 67.50', 'Integrity: 1836.00']), cat);
+    for (let i = 2; i < 4; i++) scan.feed(i, read('Mil/3/A Blizzard', BLIZZARD_LINES, { row: 2, col: 0 }), cat);
+    for (let i = 4; i < 6; i++) scan.feed(i, read('Mil/3/A Frostbite', ['Item Type: Cooler'], { row: 2, col: 1 }), cat);
     const proposals = proposalsOf(scan.list());
     assert.deepEqual(proposals.map((p) => [p.componentUuid, p.stats]), [[BLIZZARD, {}], [BLIZZARD, { [COOLANT]: '12.5', [HEALTH]: '2' }]]);
     assert.deepEqual(addRequest(proposals[1]!, LOC, ['9400']), { subjectUuid: BLIZZARD, locationUuid: LOC, quality: 0, amount: '1', stats: { [COOLANT]: '12.5', [HEALTH]: '2' }, guildIds: ['9400'] });

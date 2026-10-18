@@ -22,8 +22,6 @@ import { isKey, t } from "./i18n";
 import { config, connectError, connected, connectionText, loadConfig, log, meAvatar, meName, refreshConnection, watchConnection, watchLog } from "./state";
 import { preparing, watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
-import { watchComponents } from "./componentsSync";
-import ComponentsPanel from "./components/ComponentsPanel.vue";
 import { gameSeen, scanMode, watchScan } from "./scan";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
@@ -33,11 +31,10 @@ provide(PICKER_LABELS, { clear: t("pick.clear"), noMatch: t("pick.noMatch") });
 const settingsOpen = ref(false);
 const ready = ref(false);
 // The panel tabs; the last one stays for the next start
-type Tab = "inventory" | "components" | "refinery" | "unlocks";
+type Tab = "inventory" | "refinery" | "unlocks";
 const TAB_KEY = "qm.companion.tab";
 const TABS = [
   { id: "inventory", icon: "item", label: "inventory.title" },
-  { id: "components", icon: "type-module", label: "components.title" },
   { id: "refinery", icon: "drop", label: "refinery.title" },
   { id: "unlocks", icon: "blueprint", label: "unlocks.title" },
 ] as const;
@@ -65,7 +62,7 @@ const scanState = computed(() =>
     : preparing.value
       ? ({ cls: "", icon: "clock", label: "scan.preparing" } as const)
       : gameSeen.value
-      ? ({ cls: "ok", icon: "eye", label: scanMode.value === "inventory" ? "scan.inventory" : scanMode.value === "components" ? "scan.components" : "scan.refinery" } as const)
+      ? ({ cls: "ok", icon: "eye", label: scanMode.value === "inventory" ? "scan.inventory" : "scan.refinery" } as const)
       : ({ cls: "warn", icon: "warning", label: "scan.noGame" } as const),
 );
 const logTip = computed(() => (!log.value ? null : log.value.found ? log.value.path : t("log.notFound", { path: log.value.path })));
@@ -83,7 +80,6 @@ onMounted(async () => {
   await watchScan().catch(toastError);
   await watchRefinery().catch(toastError);
   await watchInventory().catch(toastError);
-  await watchComponents().catch(toastError);
   ready.value = true;
   if (!connected.value && !outdated.value) settingsOpen.value = true;
 });
@@ -133,7 +129,6 @@ onMounted(async () => {
       <!-- All panels stay mounted (v-show): the unlocks panel's catalog and scan progress survive a tab switch -->
       <main class="main">
         <InventoryPanel v-show="tab === 'inventory'" />
-        <ComponentsPanel v-show="tab === 'components'" />
         <RefineryPanel v-show="tab === 'refinery'" />
         <UnlocksPanel v-show="tab === 'unlocks'" />
       </main>

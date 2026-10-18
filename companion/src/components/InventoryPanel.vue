@@ -1,32 +1,67 @@
 <script setup lang="ts">
-// The inventory scan (inventorySync.ts): in the head the location the warehouse belongs to (a
-// searchable picker, kept), the Scan button (start/stop the session; the user then hovers every
-// stack in the freight manager's warehouse) and "Register all"; below the proposals as a compact
-// table, one per stack (kind, resource, quality, amount: Register / Discard). Registering (one or
-// all) asks first, with a switch per org to share the stacks there right away. The sightings behind
-// the proposals, also the incomplete ones, are in the debug window (settings).
+// The inventory scan (inventorySync.ts): in the head the location the warehouse or the inventory's
+// storage belongs to (a searchable picker, kept), the Scan button (start/stop the session; the user
+// then hovers every stack in the freight manager's warehouse and every component in the character
+// inventory's storage pane) and "Register all"; below it the kind filter (Mats / Items / Comps: what
+// the scan detects), then the proposals as a compact table, one per stack or component (kind,
+// resource, quality, amount; a component's stats after its name: Register / Discard). Registering
+// (one or all) asks first, with a switch per org to share right away. The sightings behind the
+// proposals, also the incomplete ones, are in the debug window (settings).
 import { computed, ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import { statValueText } from "../../../src/stock/component-stats";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import Picker from "../../../webapp/src/components/Picker.vue";
+import type { ComponentProposal } from "../components";
 import { t } from "../i18n";
 import type { Proposal } from "../inventory";
-import { accept, dismiss, locationUuid, proposals, setLocation, shareGuildIds, startInventoryScan, stopInventoryScan } from "../inventorySync";
+import {
+  accept, acceptComponent, componentProposals, dismiss, KINDS, kinds, locationUuid, proposals, setLocation, shareGuildIds, startInventoryScan, stopInventoryScan, toggleKind,
+  type Kind,
+} from "../inventorySync";
 import { materialName, syncCatalog } from "../refinerySync";
 import { scanMode } from "../scan";
 import { connected, meOrgs } from "../state";
 import { toast } from "../toasts";
+
+// One row per proposal: a stack (materials, items) or a component
+interface Row {
+  kind: Kind;
+  id: string;
+  name: string;
+  // A component's stats ("Coolant Rating +12.5 %"), or "no stats"
+  detail: string | null;
+  quality: string;
+  amount: string;
+  stack: Proposal | null;
+  component: ComponentProposal | null;
+}
 
 const scanning = computed(() => scanMode.value === "inventory");
 const locationOptions = computed(() => (syncCatalog.value?.locations ?? []).map((l) => ({ value: l.uuid, label: l.short })));
 const locationLabel = computed(() => syncCatalog.value?.locations.find((l) => l.uuid === locationUuid.value)?.short ?? "?");
 
 const amount = (value: string, unit: "SCU" | "pcs") => (unit === "SCU" ? `${value} SCU` : t("inventory.pieces", { n: value }));
-const what = (p: Proposal) => `${materialName(p.materialUuid)} · ${p.quality} · ${amount(p.amount, p.unit)}`;
+// "Coolant Rating +12.5 % · Integrity +2.0 %" in the catalog's order, or "no stats"
+function statsText(p: ComponentProposal): string {
+  const defs = syncCatalog.value?.components.components.find((c) => c.uuid === p.componentUuid)?.stats ?? [];
+  const parts = defs.filter((s) => s.uuid in p.stats).map((s) => `${s.name} ${statValueText(s.kind, p.stats[s.uuid]!)}`);
+  return parts.length ? parts.join(" · ") : t("components.noStats");
+}
+const rows = computed<Row[]>(() => [
+  ...proposals.value.map((p): Row => ({
+    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), detail: null, quality: String(p.quality), amount: amount(p.amount, p.unit), stack: p, component: null,
+  })),
+  ...componentProposals.value.map((p): Row => ({
+    kind: "comps", id: p.id, name: p.label, detail: statsText(p), quality: "–", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
+  })),
+]);
+const what = (r: Row) => [r.name, r.detail ?? r.quality, r.amount].join(" · ");
+const tagClass: Record<Kind, string> = { mats: "ok", items: "", comps: "accent" };
 
-// The register dialog: one proposal, or all of them
-const registering = ref<Proposal[] | null>(null);
+// The register dialog: one row, or all of them
+const registering = ref<Row[] | null>(null);
 const busy = ref(false);
 const registerButtons = computed<ConfirmButton[]>(() => [
   { label: t("common.cancel"), kind: "outline", value: "cancel" },
@@ -43,8 +78,9 @@ async function onRegister(value: string) {
   busy.value = true;
   let done = 0;
   try {
-    for (const p of list) {
-      if (!(await accept(p))) break;
+    for (const r of list) {
+      const ok = r.stack ? await accept(r.stack) : await acceptComponent(r.component!);
+      if (!ok) break;
       done++;
     }
   } finally {
@@ -75,12 +111,16 @@ function toggleScan() {
         </button>
       </Tooltip>
       <Tooltip :text="lockTip">
-        <button type="button" class="btn small primary" :disabled="!connected || !proposals.length || busy" @click="registering = [...proposals]">
+        <button type="button" class="btn small primary" :disabled="!connected || !rows.length || busy" @click="registering = [...rows]">
           <Icon name="check" :size="14" /> {{ t("inventory.addAll") }}
         </button>
       </Tooltip>
     </div>
-    <div v-if="!proposals.length" class="empty-line">
+    <!-- What the scan detects -->
+    <div class="chips filter">
+      <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="{ active: kinds.has(k) }" @click="toggleKind(k)">{{ t(`inventory.kind.${k}`) }}</button>
+    </div>
+    <div v-if="!rows.length" class="empty-line">
       {{ t(scanning ? "inventory.hover" : "inventory.empty") }}
     </div>
     <template v-else>
@@ -92,16 +132,16 @@ function toggleScan() {
         <span />
         <span />
       </div>
-      <div v-for="p in proposals" :key="p.id" class="row">
-        <span class="tag" :class="p.unit === 'SCU' ? 'ok' : ''">{{ t(p.unit === "SCU" ? "inventory.kind.mats" : "inventory.kind.items") }}</span>
-        <span class="row-name">{{ materialName(p.materialUuid) }}</span>
-        <span class="num">{{ p.quality }}</span>
-        <span class="num">{{ amount(p.amount, p.unit) }}</span>
+      <div v-for="r in rows" :key="r.id" class="row">
+        <span class="tag" :class="tagClass[r.kind]">{{ t(`inventory.kind.${r.kind}`) }}</span>
+        <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+        <span class="num">{{ r.quality }}</span>
+        <span class="num">{{ r.amount }}</span>
         <Tooltip :text="t('inventory.register')">
-          <button type="button" class="icon-btn" :disabled="!connected || busy" @click="registering = [p]"><Icon name="check" :size="14" /></button>
+          <button type="button" class="icon-btn" :disabled="!connected || busy" @click="registering = [r]"><Icon name="check" :size="14" /></button>
         </Tooltip>
         <Tooltip :text="t('inventory.drop')">
-          <button type="button" class="icon-btn" @click="dismiss(p)"><Icon name="close" :size="14" /></button>
+          <button type="button" class="icon-btn" @click="dismiss(r.id)"><Icon name="close" :size="14" /></button>
         </Tooltip>
       </div>
     </template>
@@ -113,10 +153,10 @@ function toggleScan() {
       @choose="onRegister"
     >
       <div class="confirm">
-        <div v-for="p in registering" :key="p.id" class="confirm-row">
-          <span class="row-name">{{ materialName(p.materialUuid) }}</span>
-          <span class="num">{{ p.quality }}</span>
-          <span class="num">{{ amount(p.amount, p.unit) }}</span>
+        <div v-for="r in registering" :key="r.id" class="confirm-row">
+          <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+          <span class="num">{{ r.quality }}</span>
+          <span class="num">{{ r.amount }}</span>
         </div>
         <div v-if="meOrgs.length" class="share">
           <div class="share-title">{{ t("inventory.shareTitle") }}</div>
@@ -144,7 +184,12 @@ function toggleScan() {
   max-width: 260px;
 }
 
-/* One compact row per stack, like the refinery's rows: kind, resource, quality, amount, two icon buttons */
+/* The kind filter below the head */
+.filter {
+  padding: 0 16px 8px;
+}
+
+/* One compact row per stack or component, like the refinery's rows: kind, resource, quality, amount, two icon buttons */
 .row {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) 40px 88px 24px 24px;
@@ -185,13 +230,18 @@ function toggleScan() {
   color: var(--text);
 }
 
+/* A component's stats after its name */
+.detail {
+  color: var(--text-2);
+}
+
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* The register dialog: the stacks, then the share switches */
+/* The register dialog: the rows, then the share switches */
 .confirm {
   display: flex;
   flex-direction: column;

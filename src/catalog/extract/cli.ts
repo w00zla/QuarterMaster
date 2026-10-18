@@ -26,9 +26,10 @@ const HELP = `Usage: pnpm catalog:extract [options]
 
   --p4k <path>          Data.p4k of the game install (default: $SC_DATA_P4K)
   --out <file>          Snapshot file (default: local/snapshots/catalog-<channel>-<build>.json.gz)
-  --starbreaker <bin>   StarBreaker CLI (default: local/starbreaker)
+  --starbreaker <bin>   StarBreaker CLI (default: local/starbreaker, on Windows local/starbreaker.exe)
   --work <dir>          Working directory for extracted files (default: local/work/<channel>-<build>)
   --keep-work           Keep the working directory afterwards
+  --reuse-work          Skip the extraction when the working directory holds it already (normalizer changes)
   -h, --help`;
 
 async function main() {
@@ -36,9 +37,11 @@ async function main() {
     options: {
       'p4k': { type: 'string' },
       'out': { type: 'string' },
-      'starbreaker': { type: 'string', default: 'local/starbreaker' },
+      // The CLI binary per platform: local/starbreaker (Linux) next to local/starbreaker.exe (Windows)
+      'starbreaker': { type: 'string', default: process.platform === 'win32' ? 'local/starbreaker.exe' : 'local/starbreaker' },
       'work': { type: 'string' },
       'keep-work': { type: 'boolean', default: false },
+      'reuse-work': { type: 'boolean', default: false },
       'help': { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -82,24 +85,31 @@ async function main() {
   console.log(`Game: ${channel} build ${build} (${game.branch}, ${game.version}) | StarBreaker ${sbVersion}`);
 
   const work = resolve(args.work ?? join('local/work', `${channel.toLowerCase()}-${build}`));
-  rmSync(work, { recursive: true, force: true });
-  mkdirSync(work, { recursive: true });
-
-  await step('Extract Game2.dcb + global.ini', async () => {
-    await starbreaker(bin, ['p4k', 'extract', '--p4k', p4k, '-o', work, '--filter', '**/Game2.dcb']);
-    await starbreaker(bin, ['p4k', 'extract', '--p4k', p4k, '-o', work, '--filter', '**/global.ini']);
-  });
-  const dcb = join(work, 'Data/Game2.dcb');
-  if (!existsSync(dcb)) throw new Error('Game2.dcb not found after extraction');
-
   const recordsDir = join(work, 'records');
+  const reuse = args['reuse-work'] && existsSync(recordsDir);
+  if (!reuse) {
+    rmSync(work, { recursive: true, force: true });
+    mkdirSync(work, { recursive: true });
+  }
+
   const exported: Record<string, number | null> = {};
-  await step('Export DataCore records', async () => {
-    for (const filter of DCB_FILTERS) {
-      const out = await starbreaker(bin, ['dcb', 'extract', '--dcb', dcb, '-o', recordsDir, '--format', 'json', '--filter', filter]);
-      exported[filter] = exportedCount(out);
-    }
-  });
+  if (reuse) {
+    console.log(`Reusing ${work}`);
+  } else {
+    await step('Extract Game2.dcb + global.ini', async () => {
+      await starbreaker(bin, ['p4k', 'extract', '--p4k', p4k, '-o', work, '--filter', '**/Game2.dcb']);
+      await starbreaker(bin, ['p4k', 'extract', '--p4k', p4k, '-o', work, '--filter', '**/global.ini']);
+    });
+    const dcb = join(work, 'Data/Game2.dcb');
+    if (!existsSync(dcb)) throw new Error('Game2.dcb not found after extraction');
+
+    await step('Export DataCore records', async () => {
+      for (const filter of DCB_FILTERS) {
+        const out = await starbreaker(bin, ['dcb', 'extract', '--dcb', dcb, '-o', recordsDir, '--format', 'json', '--filter', filter]);
+        exported[filter] = exportedCount(out);
+      }
+    });
+  }
 
   const localizations = await step('Parse localization', () => {
     const map = new Map<string, Map<string, string>>();
@@ -127,7 +137,7 @@ async function main() {
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, out.endsWith('.gz') ? gzipSync(json) : json);
   });
-  if (!args['keep-work']) rmSync(work, { recursive: true, force: true });
+  if (!args['keep-work'] && !reuse) rmSync(work, { recursive: true, force: true });
 
   // --- metrics ---
   const byCode = new Map<string, number>();

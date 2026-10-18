@@ -35,7 +35,7 @@ use image::{GrayImage, ImageFormat, RgbImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::components::{read_components, ComponentRead};
+use crate::components::{cell_of, read_page, read_tooltip, ComponentRead};
 use crate::inventory::{read_grid, Grid};
 use crate::locale::LabelSource;
 use crate::ocr::{Ocr, TextBox};
@@ -44,7 +44,6 @@ use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
 pub const REFINERY_VISIT: &str = "refinery-visit";
 pub const INVENTORY_READ: &str = "inventory-read";
-pub const COMPONENTS_READ: &str = "components-read";
 /// Whether a refinery session waits for the terminal's titles before reading (the former automatic
 /// detection); off: the session reads right away
 const AUTO_REFINERY: bool = false;
@@ -164,28 +163,29 @@ struct InventoryEvent {
     /// The frame's size (the overlays of the debug view scale with it)
     width: u32,
     height: u32,
-    /// None: no inventory terminal in the frame
+    /// None: no warehouse grid in the frame (or the frame was read as the character inventory)
     grid: Option<Grid>,
+    /// The character inventory's read (tooltip, page, cursor cell); None when the frame was read as
+    /// the warehouse
+    components: Option<ComponentRead>,
+    /// The mouse cursor in frame pixels, if known
+    cursor: Option<(f32, f32)>,
     /// Every text the OCR detected (for the debug view)
     boxes: Vec<TextBox>,
     /// While debugging: the frame as a JPEG data URL, DEBUG_FRAME_WIDTH wide
     frame: Option<String>,
 }
 
-/// A read of the inventory screen during a components session (`components.rs`).
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct ComponentsEvent {
-    at_ms: u64,
-    /// The read's duration
-    ms: u64,
-    width: u32,
-    height: u32,
-    #[serde(flatten)]
-    read: ComponentRead,
-    /// The mouse cursor in frame pixels, if known
-    cursor: Option<(f32, f32)>,
+/// Which screen an inventory session is looking at: decided once (the page number marks the character
+/// inventory, a fitted grid the warehouse) and kept until the reader found nothing `SCREEN_MISSES`
+/// times in a row (a switch between the screens takes the player seconds).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Screen {
+    Unknown,
+    Warehouse,
+    Inventory,
 }
+const SCREEN_MISSES: u32 = 3;
 
 /// One inventory read kept for the debug export.
 pub struct DebugRead {
@@ -194,6 +194,7 @@ pub struct DebugRead {
     pub width: u32,
     pub height: u32,
     pub grid: Option<Grid>,
+    pub components: Option<ComponentRead>,
     pub boxes: Vec<TextBox>,
     /// The frame as PNG
     pub png: Vec<u8>,
@@ -215,6 +216,7 @@ struct ExportRead<'a> {
     width: u32,
     height: u32,
     grid: &'a Option<Grid>,
+    components: &'a Option<ComponentRead>,
     boxes: &'a [TextBox],
 }
 
@@ -238,7 +240,7 @@ impl DebugStore {
         let reads = self.0.lock().unwrap();
         for (n, r) in reads.iter().enumerate() {
             std::fs::write(folder.join(format!("read-{n}.png")), &r.png).map_err(|e| e.to_string())?;
-            let json = serde_json::to_string_pretty(&ExportRead { at_ms: r.at_ms, ms: r.ms, width: r.width, height: r.height, grid: &r.grid, boxes: &r.boxes })
+            let json = serde_json::to_string_pretty(&ExportRead { at_ms: r.at_ms, ms: r.ms, width: r.width, height: r.height, grid: &r.grid, components: &r.components, boxes: &r.boxes })
                 .map_err(|e| e.to_string())?;
             std::fs::write(folder.join(format!("read-{n}.json")), json).map_err(|e| e.to_string())?;
         }
@@ -333,11 +335,10 @@ pub type Detect = Arc<AtomicBool>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanMode {
     Off,
-    /// The freight manager's warehouse (materials and items)
+    /// The freight manager's warehouse (materials and items) and the character inventory (ship
+    /// components): the worker tells the screens apart
     Inventory,
     Refinery,
-    /// The character inventory's storage pane (ship components)
-    Components,
 }
 
 impl ScanMode {
@@ -346,7 +347,6 @@ impl ScanMode {
             ScanMode::Off => "off",
             ScanMode::Inventory => "inventory",
             ScanMode::Refinery => "refinery",
-            ScanMode::Components => "components",
         }
     }
 
@@ -355,7 +355,6 @@ impl ScanMode {
             "off" => Some(ScanMode::Off),
             "inventory" => Some(ScanMode::Inventory),
             "refinery" => Some(ScanMode::Refinery),
-            "components" => Some(ScanMode::Components),
             _ => None,
         }
     }
@@ -364,7 +363,6 @@ impl ScanMode {
         match v {
             1 => ScanMode::Inventory,
             2 => ScanMode::Refinery,
-            3 => ScanMode::Components,
             _ => ScanMode::Off,
         }
     }
@@ -437,6 +435,9 @@ struct Worker {
     visit: Option<Visit>,
     /// The last inventory read's grid pitch: the next fit's prior
     last_pitch: Option<(f32, f32)>,
+    /// Which screen the inventory session looks at, and how many reads in a row found nothing there
+    screen: Screen,
+    screen_misses: u32,
 }
 
 fn unix_ms(t: SystemTime) -> u64 {
@@ -455,7 +456,7 @@ fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
 
 impl Worker {
     fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Self {
-        Self { app, detect, scan, debug, store, ocr: None, gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None }
+        Self { app, detect, scan, debug, store, ocr: None, gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None, screen: Screen::Unknown, screen_misses: 0 }
     }
 
     fn run(mut self, rx: Receiver<Frame>) {
@@ -471,8 +472,10 @@ impl Worker {
             }
             if mode == ScanMode::Off {
                 self.gate = Gate::default();
-                // The next session may see the terminal from elsewhere
+                // The next session may see the terminal from elsewhere, or another screen
                 self.last_pitch = None;
+                self.screen = Screen::Unknown;
+                self.screen_misses = 0;
                 // No session: the OCR's memory goes right away (the next start loads it again in
                 // well under a second); while a session runs it stays, read or not
                 if self.ocr.take().is_some() {
@@ -489,7 +492,6 @@ impl Worker {
             }
             let result = match mode {
                 ScanMode::Inventory => self.look_inventory(frame),
-                ScanMode::Components => self.look_components(frame),
                 _ => self.look(frame),
             };
             if let Err(e) = result {
@@ -500,27 +502,84 @@ impl Worker {
         }
     }
 
-    /// Reads the inventory tiles and the tooltip in a frame (every tile's badge only while debugging:
-    /// the sightings need the hovered tile's).
+    /// Reads a frame of an inventory session: the warehouse grid and its tooltip (every tile's badge
+    /// only while debugging: the sightings need the hovered tile's), or the character inventory's
+    /// tooltip, page and cursor cell. Which one is decided by `Screen` (see there): unknown, the cheap
+    /// page read decides, else the grid read, and a frame with neither is tried as the inventory too.
     fn look_inventory(&mut self, frame: Frame) -> Result<(), String> {
         let debug = self.debug.0.load(Ordering::Relaxed);
         let ocr = ensure_ocr(&mut self.ocr)?;
         let image = frame.pixels.into_rgb();
         let (width, height) = image.dimensions();
         let started = Instant::now();
-        let (grid, boxes) = read_grid(ocr, &image, frame.cursor, self.last_pitch, debug)?;
-        let ms = started.elapsed().as_millis() as u64;
-        match &grid {
-            Some(g) => {
-                // Only a strong fit sets the pitch the weaker reads keep
-                if g.fit_weight >= crate::inventory::STRONG_FIT_WEIGHT {
-                    self.last_pitch = Some((g.pitch_x, g.pitch_y));
+        let mut grid = None;
+        let mut components = None;
+        let mut boxes = Vec::new();
+        let mut found = false;
+        if self.screen != Screen::Inventory {
+            let probe_page = self.screen == Screen::Unknown;
+            let page = if probe_page {
+                let (page, page_boxes) = read_page(ocr, &image)?;
+                boxes.extend(page_boxes);
+                page
+            } else {
+                None
+            };
+            if page.is_none() {
+                let (g, grid_boxes) = read_grid(ocr, &image, frame.cursor, self.last_pitch, debug)?;
+                boxes.extend(grid_boxes);
+                if let Some(g) = &g {
+                    // Only a strong fit sets the pitch the weaker reads keep
+                    if g.fit_weight >= crate::inventory::STRONG_FIT_WEIGHT {
+                        self.last_pitch = Some((g.pitch_x, g.pitch_y));
+                    }
+                    found = true;
+                    self.screen = Screen::Warehouse;
                 }
+                grid = g;
+            }
+            if self.screen == Screen::Unknown || page.is_some() {
+                // The page or nothing at all: try the character inventory
+                let (tooltip, tip_boxes) = read_tooltip(ocr, &image)?;
+                boxes.extend(tip_boxes);
+                let page = if probe_page { page } else { read_page(ocr, &image).map(|(p, b)| { boxes.extend(b); p })? };
+                found = found || page.is_some() || tooltip.is_some();
+                if page.is_some() {
+                    self.screen = Screen::Inventory;
+                }
+                components = Some(ComponentRead { tooltip, page, cell: frame.cursor.and_then(|c| cell_of(c, width as f32, height as f32)) });
+            }
+        } else {
+            let (tooltip, tip_boxes) = read_tooltip(ocr, &image)?;
+            let (page, page_boxes) = read_page(ocr, &image)?;
+            boxes.extend(tip_boxes);
+            boxes.extend(page_boxes);
+            found = page.is_some() || tooltip.is_some();
+            components = Some(ComponentRead { tooltip, page, cell: frame.cursor.and_then(|c| cell_of(c, width as f32, height as f32)) });
+        }
+        // A screen that shows nothing SCREEN_MISSES times in a row is left: the next frame probes again
+        if found {
+            self.screen_misses = 0;
+        } else if self.screen != Screen::Unknown {
+            self.screen_misses += 1;
+            if self.screen_misses >= SCREEN_MISSES {
+                log::info!("inventory scan: left the {:?} screen", self.screen);
+                self.screen = Screen::Unknown;
+                self.screen_misses = 0;
+            }
+        }
+        let ms = started.elapsed().as_millis() as u64;
+        match (&grid, &components) {
+            (Some(g), _) => {
                 let tip = g.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {} Q{:?} {:?}", t.name, t.quality, t.scu));
                 let hovered = g.tiles.iter().find(|t| t.hovered).map_or(String::new(), |t| format!(", hovered r{} c{} Q{:?} x{:?}", t.row, t.col, t.quality, t.count));
                 log::info!("inventory read in {ms} ms: {}×{} tiles at pitch {:.0}×{:.0} (weight {}), cursor {:?}, {tip}{hovered}", g.cols.len(), g.rows.len(), g.pitch_x, g.pitch_y, g.fit_weight, frame.cursor);
             }
-            None => log::debug!("no warehouse grid ({ms} ms)"),
+            (None, Some(c)) if c.tooltip.is_some() || c.page.is_some() => {
+                let tip = c.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {:?} with {} lines", t.title, t.lines.len()));
+                log::info!("components read in {ms} ms: {tip}, page {:?}, cursor {:?} in cell {:?}", c.page.map(|p| (p.index, p.total)), frame.cursor, c.cell.map(|x| (x.row, x.col)));
+            }
+            _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", self.screen),
         }
         let frame_url = if debug { Some(jpeg_data_url(&image, DEBUG_FRAME_WIDTH)?) } else { None };
         if debug {
@@ -529,27 +588,9 @@ impl Worker {
             if reads.len() >= DEBUG_KEEP {
                 reads.pop_front();
             }
-            reads.push_back(DebugRead { at_ms: frame.at_ms, ms, width, height, grid: grid.clone(), boxes: boxes.clone(), png });
+            reads.push_back(DebugRead { at_ms: frame.at_ms, ms, width, height, grid: grid.clone(), components: components.clone(), boxes: boxes.clone(), png });
         }
-        let _ = self.app.emit(INVENTORY_READ, InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, boxes, frame: frame_url });
-        Ok(())
-    }
-
-    /// Reads the hovered item's tooltip, the page and the cursor's cell in a frame of the character
-    /// inventory (the components session; only the tooltip's and the page number's areas go through
-    /// the OCR).
-    fn look_components(&mut self, frame: Frame) -> Result<(), String> {
-        let ocr = ensure_ocr(&mut self.ocr)?;
-        let image = frame.pixels.into_rgb();
-        let (width, height) = image.dimensions();
-        let started = Instant::now();
-        let read = read_components(ocr, &image, frame.cursor)?;
-        let ms = started.elapsed().as_millis() as u64;
-        match &read.tooltip {
-            Some(t) => log::info!("components read in {ms} ms: {:?} with {} lines, page {:?}, cursor {:?} in cell {:?}", t.title, t.lines.len(), read.page, frame.cursor, read.cell),
-            None => log::debug!("no tooltip ({ms} ms), page {:?}, cell {:?}", read.page, read.cell),
-        }
-        let _ = self.app.emit(COMPONENTS_READ, ComponentsEvent { at_ms: frame.at_ms, ms, width, height, read, cursor: frame.cursor });
+        let _ = self.app.emit(INVENTORY_READ, InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, components, cursor: frame.cursor, boxes, frame: frame_url });
         Ok(())
     }
 

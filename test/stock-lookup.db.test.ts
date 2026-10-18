@@ -54,13 +54,14 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     assert.deepEqual(await locationChoices(db, 'en', 'test'), [{ name: 'Test Station', value: U.station }]);
   });
 
-  it('offers recipe materials with their unit, never ores', async () => {
+  it('offers recipe materials with their unit and ship components by type, never ores', async () => {
     const materials = await materialCatalog(db, 'en');
-    assert.deepEqual([...materials.values()].map((m) => [m.uuid, m.kind]).sort(), [
-      [U.metal, 'resource'], [U.gem, 'item'],
+    // The fixture's blueprint output is a cooler: a component by its type, bookable although no recipe uses it
+    assert.deepEqual([...materials.values()].map((m) => [m.uuid, m.kind, m.component]).sort(), [
+      [U.metal, 'resource', false], [U.gem, 'item', false], [U.output, 'item', true],
     ].sort());
     const regular = await materialChoices(db, 'de', '');
-    assert.deepEqual(regular.map((c) => c.value).sort(), [`item:${U.gem}`, `resource:${U.metal}`].sort());
+    assert.deepEqual(regular.map((c) => c.value).sort(), [`item:${U.gem}`, `item:${U.output}`, `resource:${U.metal}`].sort());
     assert.ok(regular.some((c) => c.name === 'Testmetall (SCU)'));
     assert.ok(regular.some((c) => c.name.endsWith('(Stk.)')));
   });

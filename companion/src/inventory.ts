@@ -13,6 +13,7 @@
 // produced the same key (an OCR glitch in one read, "56" for "561", books nothing).
 import { findMaterial, type MaterialNames } from "../../src/stock/material-names.ts";
 import type { StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
+import type { ComponentRead } from "./components.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------
 
@@ -80,8 +81,12 @@ export interface InventoryReadEvent {
   ms: number;
   width: number;
   height: number;
-  // null: no warehouse grid in the frame
+  // null: no warehouse grid in the frame (or the frame was read as the character inventory)
   grid: ReadGrid | null;
+  // The character inventory's read; null when the frame was read as the warehouse
+  components: ComponentRead | null;
+  // The mouse cursor in frame pixels, if known
+  cursor: [number, number] | null;
   // Every text the OCR detected
   boxes: ReadBox[];
   // While debugging: the frame as a JPEG data URL (1280 px wide)
@@ -164,12 +169,12 @@ export class InventoryScan {
   private pending: Sighting | null = null;
 
   /** Takes a read in; the sighting it added or changed, null when nothing changed (the same stack
-   * read again, or a first read still waiting for its confirmation). An uncertain count merges into
-   * a certain read of the same material, quality and column, and a certain read replaces an
-   * uncertain one. */
-  feed(e: InventoryReadEvent, cat: InventoryCatalog): Sighting | null {
+   * read again, a first read still waiting for its confirmation, or one `accept` turns down). An
+   * uncertain count merges into a certain read of the same material, quality and column, and a
+   * certain read replaces an uncertain one. */
+  feed(e: InventoryReadEvent, cat: InventoryCatalog, accept: (s: Sighting) => boolean = () => true): Sighting | null {
     const s = sightingOf(e, cat);
-    if (!s) return null;
+    if (!s || !accept(s)) return null;
     if (this.sightings.has(s.key)) return null;
     // Two reads in a row must agree
     if (this.pending?.key !== s.key) {

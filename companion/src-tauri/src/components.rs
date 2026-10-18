@@ -1,18 +1,19 @@
 //! Reads the tooltip of the hovered item in the character inventory (the "Storage Access" screen,
-//! SC 4.x; the user's screenshots of 2026-10-18, 3840×1600): the companion's ship component scan.
-//! The storage pane on the right is a fixed grid of 4 columns × 6 rows per page (pages "2/3" at its
-//! bottom), the tooltip of the hovered tile opens at a fixed place right of the character, not at the
-//! cursor: title ("Mil/3/A Blizzard"), "Volume: …", "Item Type: Cooler", manufacturer, size, grade,
-//! class, the description and, for components with stats, lines like "Coolant Rating:  60.00" with
-//! the value in a column of its own. Everything is read as text lines; what they mean is decided in
-//! the frontend (`components.ts`: the title against the catalog, the stat lines against the stat
-//! names in the player's language).
+//! SC 4.x; the user's screenshots of 2026-10-18, 3840×1600): the ship component part of the
+//! companion's inventory scan. The storage pane on the right is a fixed grid of 4 columns × 6 cells
+//! per page (pages "2/3" at its bottom; the pane also scrolls), the tooltip of the hovered tile opens
+//! at a fixed place right of the character, not at the cursor: title ("Mil/3/A Blizzard"),
+//! "Volume: …", "Item Type: Cooler", manufacturer, size, grade, class, the description and, for
+//! components with stats, lines like "Coolant Rating:  60.00" with the value in a column of its own.
+//! Everything is read as text lines; what they mean is decided in the frontend (`components.ts`: the
+//! title against the catalog, the stat lines against the stat names in the player's language).
 //!
 //! The UI scales with the frame height and sits around the frame's centre, so every position is a
 //! share of the height, horizontally from the centre. Only the tooltip's area and the page number's
-//! are run through the OCR; the hovered tile is the grid cell under the mouse cursor (the capture
-//! passes it), which with the page tells one tile from another holding the same component. Verified
-//! on 3840×1600 only.
+//! are run through the OCR; the page number read (`read_page`, ~30 ms) also tells this screen from
+//! the freight manager's terminal (`ocrwatch`). The grid cell under the mouse cursor (the capture
+//! passes it) gives the column a tile sits in (rows shift with the pane's scroll). Verified on
+//! 3840×1600 only.
 //!
 //! Anything unexpected yields `None` fields, never a panic.
 
@@ -77,12 +78,13 @@ pub struct Page {
     pub total: u32,
 }
 
-/// A cell of the storage grid (0 = top left).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// A cell of the storage grid (0 = top left) with its area in frame pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cell {
     pub row: u32,
     pub col: u32,
+    pub rect: Rect,
 }
 
 /// What one frame of the inventory screen read.
@@ -93,8 +95,6 @@ pub struct ComponentRead {
     pub page: Option<Page>,
     /// The grid cell under the mouse cursor (None: no cursor, or outside the grid)
     pub cell: Option<Cell>,
-    /// Every text the OCR detected in the read areas (frame pixels; for the log and tests)
-    pub boxes: Vec<TextBox>,
 }
 
 fn union(a: Rect, b: Rect) -> Rect {
@@ -103,21 +103,26 @@ fn union(a: Rect, b: Rect) -> Rect {
 
 /// The grid cell at a frame position, if inside the storage grid.
 pub fn cell_of(cursor: (f32, f32), frame_w: f32, frame_h: f32) -> Option<Cell> {
-    let (x, y) = ((cursor.0 - frame_w / 2.0) / frame_h, cursor.1 / frame_h);
+    let (cx, s) = (frame_w / 2.0, frame_h);
+    let (x, y) = ((cursor.0 - cx) / s, cursor.1 / s);
     let (fx, fy) = ((x - GRID_LEFT) / CELL_W, (y - GRID_TOP) / CELL_H);
     if fx < 0.0 || fy < 0.0 {
         return None;
     }
     let (col, row) = (fx as u32, fy as u32);
-    (col < GRID_COLS && row < GRID_ROWS).then_some(Cell { row, col })
+    if col >= GRID_COLS || row >= GRID_ROWS {
+        return None;
+    }
+    let (x0, y0) = (cx + (GRID_LEFT + col as f32 * CELL_W) * s, (GRID_TOP + row as f32 * CELL_H) * s);
+    Some(Cell { row, col, rect: Rect { x0, y0, x1: x0 + CELL_W * s, y1: y0 + CELL_H * s } })
 }
 
-/// "2/3" (also "2 / 3", "2/ 3") -> (2, 3).
+/// "2/3" (also "2 / 3", "2/ 3") -> (2, 3); at most 99 pages (an SCU text like "10/5000" is none).
 pub fn parse_page(text: &str) -> Option<Page> {
     let t: String = text.chars().filter(|c| !c.is_whitespace()).collect();
     let (a, b) = t.split_once('/')?;
     let (index, total) = (a.parse::<u32>().ok()?, b.parse::<u32>().ok()?);
-    (index >= 1 && total >= index).then_some(Page { index, total })
+    (index >= 1 && total >= index && total <= 99).then_some(Page { index, total })
 }
 
 /// The OCR boxes of the tooltip area grouped into text lines, top to bottom: boxes whose vertical
@@ -187,20 +192,36 @@ fn read_area(ocr: &mut Ocr, frame: &RgbImage, rect: Rect, scale: f32) -> Result<
     Ok(boxes)
 }
 
-/// Reads the hovered item's tooltip, the storage pane's page number and the grid cell under the
-/// `cursor` (frame pixels) in a frame of the inventory screen.
-pub fn read_components(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>) -> Result<ComponentRead, String> {
+/// Reads the storage pane's page number ("2/3"): cheap (a small area), and present only on the
+/// inventory screen. The boxes read, in frame pixels.
+pub fn read_page(ocr: &mut Ocr, frame: &RgbImage) -> Result<(Option<Page>, Vec<TextBox>), String> {
+    let (w, h) = frame.dimensions();
+    let (s, cx) = (h as f32, w as f32 / 2.0);
+    let page_area = Rect { x0: cx + PAGE_LEFT * s, y0: PAGE_TOP * s, x1: cx + PAGE_RIGHT * s, y1: PAGE_BOTTOM * s };
+    let boxes = read_area(ocr, frame, page_area, PAGE_SCALE as f32)?;
+    let page = boxes.iter().find_map(|b| parse_page(&b.text));
+    Ok((page, boxes))
+}
+
+/// Reads the hovered item's tooltip in its fixed area. The boxes read, in frame pixels.
+pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage) -> Result<(Option<Tooltip>, Vec<TextBox>), String> {
     let (w, h) = frame.dimensions();
     let (s, cx) = (h as f32, w as f32 / 2.0);
     let tip_area = Rect { x0: cx + TIP_LEFT * s, y0: TIP_TOP * s, x1: cx + TIP_RIGHT * s, y1: TIP_BOTTOM * s };
-    let mut boxes = read_area(ocr, frame, tip_area, (TIP_SCALE_HEIGHT / s).max(1.0))?;
+    let boxes = read_area(ocr, frame, tip_area, (TIP_SCALE_HEIGHT / s).max(1.0))?;
     let tooltip = tooltip_of(lines_of(&boxes, s));
-    let page_area = Rect { x0: cx + PAGE_LEFT * s, y0: PAGE_TOP * s, x1: cx + PAGE_RIGHT * s, y1: PAGE_BOTTOM * s };
-    let page_boxes = read_area(ocr, frame, page_area, PAGE_SCALE as f32)?;
-    let page = page_boxes.iter().find_map(|b| parse_page(&b.text));
+    Ok((tooltip, boxes))
+}
+
+/// Reads the hovered item's tooltip, the storage pane's page number and the grid cell under the
+/// `cursor` (frame pixels) in a frame of the inventory screen. The boxes read, in frame pixels.
+pub fn read_components(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>) -> Result<(ComponentRead, Vec<TextBox>), String> {
+    let (w, h) = frame.dimensions();
+    let (tooltip, mut boxes) = read_tooltip(ocr, frame)?;
+    let (page, page_boxes) = read_page(ocr, frame)?;
     boxes.extend(page_boxes);
-    let cell = cursor.and_then(|c| cell_of(c, w as f32, s));
-    Ok(ComponentRead { tooltip, page, cell, boxes })
+    let cell = cursor.and_then(|c| cell_of(c, w as f32, h as f32));
+    Ok((ComponentRead { tooltip, page, cell }, boxes))
 }
 
 #[cfg(test)]
@@ -218,12 +239,16 @@ mod tests {
         assert_eq!(parse_page("0/3"), None);
         assert_eq!(parse_page("4/3"), None);
         assert_eq!(parse_page("2-3"), None);
+        assert_eq!(parse_page("10/5000"), None, "an SCU text");
         // 3840×1600: the grid's first tile starts at x ≈ 2560, y ≈ 390; the tile in row 3, column 0 at y ≈ 845
-        assert_eq!(cell_of((2600.0, 420.0), 3840.0, 1600.0), Some(Cell { row: 0, col: 0 }));
-        assert_eq!(cell_of((2640.0, 900.0), 3840.0, 1600.0), Some(Cell { row: 3, col: 0 }));
-        assert_eq!(cell_of((3100.0, 1200.0), 3840.0, 1600.0), Some(Cell { row: 5, col: 3 }));
-        assert_eq!(cell_of((2400.0, 420.0), 3840.0, 1600.0), None, "left of the grid");
-        assert_eq!(cell_of((2600.0, 1400.0), 3840.0, 1600.0), None, "below the grid");
+        let at = |x: f32, y: f32| cell_of((x, y), 3840.0, 1600.0).map(|c| (c.row, c.col));
+        assert_eq!(at(2600.0, 420.0), Some((0, 0)));
+        assert_eq!(at(2640.0, 900.0), Some((3, 0)));
+        assert_eq!(at(3100.0, 1200.0), Some((5, 3)));
+        let first = cell_of((2600.0, 420.0), 3840.0, 1600.0).unwrap().rect;
+        assert!((first.x0 - 2560.0).abs() < 2.0 && (first.y0 - 390.4).abs() < 2.0 && first.w() > 150.0, "{first:?}");
+        assert_eq!(at(2400.0, 420.0), None, "left of the grid");
+        assert_eq!(at(2600.0, 1400.0), None, "below the grid");
     }
 
     #[test]
@@ -294,7 +319,7 @@ mod tests {
             ];
             for (suffix, title, stats, page) in cases {
                 let started = std::time::Instant::now();
-                let read = read_components(&mut ocr, &frame(&dir, suffix), None).unwrap();
+                let (read, _boxes) = read_components(&mut ocr, &frame(&dir, suffix), None).unwrap();
                 eprintln!("{suffix}: {:?} in {:?}, page {:?}", read.tooltip.as_ref().map(|t| &t.title), started.elapsed(), read.page);
                 let tip = read.tooltip.unwrap_or_else(|| panic!("{suffix}: no tooltip"));
                 assert_eq!(norm(&tip.title), norm(title), "{suffix}: {}", tip.title);

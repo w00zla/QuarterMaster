@@ -1,6 +1,7 @@
 // Turns exported DataCore records into a catalog snapshot.
 // Robust by design: unexpected shapes become anomalies, never crashes.
 import { displayText, isMissingTranslation, locKey } from './localization.ts';
+import { isComponentType } from '../components.ts';
 import { isAppKey } from '../labels.ts';
 import { isObj, recordKey, refPath, type DcbRecord, type Obj, type RecordStore } from './records.ts';
 import {
@@ -18,6 +19,7 @@ export const PATHS = {
   qualityQuantization: 'libs/foundry/records/crafting/qualityquantization/',
   globalParams: 'libs/foundry/records/crafting/globalparams/craftingglobalparams.json',
   resourceTypes: 'libs/foundry/records/resourcetypedatabase/resourcetypedatabase.json',
+  shipItems: 'libs/foundry/records/entities/scitem/ships/',
   starmap: 'libs/foundry/records/starmap/',
   starmapTypes: 'libs/foundry/records/starmap/starmapobjecttypes.json',
 };
@@ -306,6 +308,17 @@ export function normalize(input: NormalizeInput): Snapshot {
   }
 
   // --- items and manufacturers -------------------------------------------------------
+  // Besides the items the blueprints reference, every named ship item of a component type is in the
+  // catalog (looted and bought components are stock too); templates are no items the game shows
+  for (const path of store.list(PATHS.shipItems)) {
+    if (entityPaths.has(path) || path.includes('template')) continue;
+    const r = store.get(path);
+    const attach = arr(r?._RecordValue_.Components).find((c) => isObj(c) && c._Type_ === 'SAttachableComponentParams');
+    const def = isObj(attach) && isObj(attach.AttachDef) ? attach.AttachDef : null;
+    if (!def || !isComponentType(str(def.Type))) continue;
+    if (!locKey(isObj(def.Localization) ? def.Localization.Name : null)) continue;
+    entityPaths.add(path);
+  }
   const manufacturerPaths = new Set<string>();
   const items: Item[] = [...entityPaths].sort().map((path) => {
     const r = store.get(path)!;

@@ -13,7 +13,7 @@
 // actor's source (bot, web app, companion app).
 import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
-import { BLUEPRINT_CATEGORY_GROUP_SQL } from '../catalog/labels.ts';
+import { COMPONENT_TYPES } from '../catalog/components.ts';
 import type { Db, Tx } from '../db/client.ts';
 import { one, rows } from '../db/query.ts';
 import { refineryLocations } from '../ext/refineries.ts';
@@ -97,12 +97,9 @@ export const selectableLocationSql = (l = 'l') => sql.raw(`(${l}.nav_icon IN ('S
   AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);
 
 /** Ship component groups among the blueprint categories (sizes stripped): their outputs are bookable as components. */
-export const COMPONENT_GROUPS = ['VehicleComponent', 'VehicleWeapons'];
-
-/** The item `uuid` (a column) is a ship component: the output of a blueprint in one of COMPONENT_GROUPS. */
-export const componentItemSql = (uuid = 'i.uuid') => sql.raw(`EXISTS (SELECT 1 FROM catalog.blueprint cb
-  JOIN catalog.blueprint_category c ON c.uuid = cb.category_uuid
-  WHERE cb.output_item_uuid = ${uuid} AND ${BLUEPRINT_CATEGORY_GROUP_SQL} IN (${COMPONENT_GROUPS.map((g) => `'${g}'`).join(', ')}))`);
+/** The item `uuid` (a column) is a ship component: an item of one of the COMPONENT_TYPES (crafted or not). */
+export const componentItemSql = (uuid = 'i.uuid') => sql.raw(`EXISTS (SELECT 1 FROM catalog.item ci
+  WHERE ci.uuid = ${uuid} AND ci.type IN (${COMPONENT_TYPES.map((t) => `'${t}'`).join(', ')}))`);
 
 /** Components have no quality: every batch of one is stored with this one. */
 export const COMPONENT_QUALITY = 0;
