@@ -97,9 +97,22 @@ export const selectableLocationSql = (l = 'l') => sql.raw(`(${l}.nav_icon IN ('S
   AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);
 
 /** Ship component groups among the blueprint categories (sizes stripped): their outputs are bookable as components. */
-/** The item `uuid` (a column) is a ship component: an item of one of the COMPONENT_TYPES (crafted or not). */
+/** Whether item `x` is no blueprint's output (sorts after the crafted ones). */
+const notCraftedSql = (x: string) => `NOT EXISTS (SELECT 1 FROM catalog.blueprint cb WHERE cb.output_item_uuid = ${x}.uuid AND cb.retired_at IS NULL)`;
+
+/**
+ * The item `uuid` (a column) is a ship component: an item of one of the COMPONENT_TYPES (crafted or
+ * not). Of the items sharing a name, type, size and grade (the game's ship-bound, turret, low-poly
+ * and derelict variants of one part: 414 of 1243 in 4.10) only one counts, the plain part: a
+ * blueprint's output first, else the shortest class name ("KLWE_LaserRepeater_S5", not its
+ * "_Idris_M", "_LowPoly" or "_Turret"). Items without a name are left as they are.
+ */
 export const componentItemSql = (uuid = 'i.uuid') => sql.raw(`EXISTS (SELECT 1 FROM catalog.item ci
-  WHERE ci.uuid = ${uuid} AND ci.type IN (${COMPONENT_TYPES.map((t) => `'${t}'`).join(', ')}))`);
+  WHERE ci.uuid = ${uuid} AND ci.type IN (${COMPONENT_TYPES.map((t) => `'${t}'`).join(', ')})
+    AND (ci.name_key IS NULL OR NOT EXISTS (SELECT 1 FROM catalog.item o
+      WHERE o.retired_at IS NULL AND o.uuid <> ci.uuid AND o.type = ci.type AND o.name_key = ci.name_key
+        AND o.size IS NOT DISTINCT FROM ci.size AND o.grade_letter IS NOT DISTINCT FROM ci.grade_letter
+        AND (${notCraftedSql('o')}, length(o.class_name), o.class_name) < (${notCraftedSql('ci')}, length(ci.class_name), ci.class_name))))`);
 
 /** Components have no quality: every batch of one is stored with this one. */
 export const COMPONENT_QUALITY = 0;
