@@ -20,14 +20,17 @@ onMounted(async () => {
 <template>
   <section v-if="view" class="panel tile">
     <div class="head">
-      <span class="head-title">{{ view.title }} <span class="count">{{ view.count }}</span></span>
+      <span class="head-title">{{ view.title }} <span class="count">{{ view.count }}</span><template v-if="view.place"> · {{ view.place }}</template></span>
       <span v-for="(x, i) in view.tags" :key="i" class="tag" :class="[x.cls, { icon: !x.text }]"><Icon :name="x.icon" :size="12" /> {{ x.text }}</span>
     </div>
-    <div v-if="!view.rows.length" class="empty">{{ view.empty }}</div>
-    <div v-for="(r, i) in view.rows" :key="i" class="row">
-      <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="12" />{{ r.tag }}</span>
-      <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
-      <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
+    <!-- The rows take what is left and clip there: the tile's bottom padding stays free -->
+    <div class="body">
+      <div v-if="!view.rows.length" class="empty">{{ view.empty }}</div>
+      <div v-for="(r, i) in view.rows" :key="i" class="row">
+        <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="12" />{{ r.tag }}</span>
+        <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+        <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
+      </div>
     </div>
     <div v-if="view.more" class="more">{{ view.more }}</div>
   </section>
@@ -64,6 +67,12 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* The row count after the title, kept quiet */

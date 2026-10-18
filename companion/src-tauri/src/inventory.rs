@@ -63,16 +63,24 @@ const QUALITY_BOTTOM: f32 = 0.92;
 /// tile (reaching into the gaps around it: the fitted edges are a few pixels off)
 const QUALITY_BAND: (f32, f32, f32, f32) = (-0.08, 0.76, 0.55, 1.02);
 const BADGE_AREA: (f32, f32, f32, f32) = (0.66, -0.02, 1.06, 0.19);
+/// Where a detected badge box is looked for: the badge area with room for the fit's error (right of
+/// the tile's middle: the quality text of the tile above sits at the left)
+const BADGE_SEARCH: (f32, f32, f32, f32) = (0.55, -0.15, 1.12, 0.32);
 /// The badge crops are upscaled by this before recognition (small text in a dark box)
 const BADGE_SCALE: u32 = 3;
-/// Padding around a detected badge box when it is read on its own
+/// Padding around a detected badge box when it is read on its own, on its right a share of its height
 const BADGE_PAD: f32 = 6.0;
+const BADGE_RIGHT_PAD: f32 = 0.6;
+/// What a count badge can hold ("X 14", "×1"): the recognizer picks among these only
+const BADGE_CHARS: &str = "Xx× 0123456789";
 /// Minimum recognizer confidence of a cell's text
 const MIN_SCORE: f32 = 0.5;
 /// The tooltip opens right below the cursor: the cursor is about this far up and left of its title
 const CURSOR_OFFSET: f32 = 0.01;
 /// A quality band covered by the tooltip beyond this share is not read
 const TOOLTIP_COVER: f32 = 0.2;
+/// The same for a badge, far stricter: read as digits only, the tooltip's text passes for a count
+const BADGE_COVER: f32 = 0.05;
 
 /// One tile as a frame shows it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -422,6 +430,11 @@ fn tooltip_from_boxes(boxes: &[TextBox], tiles: &[Rect], frame_h: f32) -> Option
     let mut quality = None;
     let mut scu = None;
     let mut rect = title.rect;
+    // The tooltip is see-through: a tile's quality behind it shows in the title's row ("Janalite 360"
+    // over a 360Q tile). The quality is the chip's: right of the name's repeat in the chip row
+    let below_title = |b: &TextBox| b.rect.cy() > title.rect.y1;
+    let chip_name = group.iter().find(|b| !std::ptr::eq(**b, title) && below_title(b) && norm(&b.text) == key);
+    let mut loose = None;
     for b in &group {
         rect = union(rect, b.rect);
         if std::ptr::eq(*b, title) {
@@ -431,7 +444,11 @@ fn tooltip_from_boxes(boxes: &[TextBox], tiles: &[Rect], frame_h: f32) -> Option
         if let Some(v) = parse_scu(t) {
             scu = scu.or(Some(v));
         } else if let Some(q) = digits(t) {
-            quality = quality.or(Some(q));
+            if chip_name.is_some_and(|c| (b.rect.cy() - c.rect.cy()).abs() < 0.5 * line && b.rect.x0 > c.rect.x0) {
+                quality = quality.or(Some(q));
+            } else if below_title(b) {
+                loose = loose.or(Some(q));
+            }
         } else if let Some(rest) = norm(t).strip_prefix(key.as_str()) {
             // The chip's name with its number in one box ("Aphorite 523")
             if let Some(q) = digits(rest) {
@@ -439,6 +456,8 @@ fn tooltip_from_boxes(boxes: &[TextBox], tiles: &[Rect], frame_h: f32) -> Option
             }
         }
     }
+    // Without the name's repeat read: a number below the title row, never one in it
+    let quality = quality.or(loose);
     let name = title.text.trim().to_string();
     (!name.is_empty()).then_some((Tooltip { name, quality, scu, x: title.rect.x0, y: title.rect.y0, rect }, hovered))
 }
@@ -495,8 +514,11 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
         }),
     };
     // The badges: the area at the tile's top right and, when the detector found the badge there, that
-    // box on its own (the count's digits are thin: whichever read has them wins), both upscaled
-    let wanted: Vec<usize> = if all_badges { (0..positions.len()).collect() } else { hovered.into_iter().collect() };
+    // box on its own (the count's digits are thin: whichever read has them wins), both upscaled, read
+    // as a badge's characters only. One the tooltip covers (the cursor near the tile's top: the
+    // tooltip opens there) is not read: its text would pass for a count
+    let badge_hidden = |i: usize| tooltip.as_ref().is_some_and(|(t, _)| covered(t.rect, part(tile_rects[i], BADGE_AREA)) > BADGE_COVER);
+    let wanted: Vec<usize> = (0..positions.len()).filter(|&i| (all_badges || hovered == Some(i)) && !badge_hidden(i)).collect();
     let upscaled = |r: Rect| {
         let c = crop(frame, r);
         imageops::resize(&c, c.width() * BADGE_SCALE, c.height() * BADGE_SCALE, FilterType::CatmullRom)
@@ -504,12 +526,24 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
     let mut badge_rects: Vec<(usize, Rect)> = Vec::new();
     for &i in &wanted {
         let area = part(tile_rects[i], BADGE_AREA);
-        badge_rects.push((i, area));
-        if let Some(b) = boxes.iter().find(|b| is_badge_box(b, s) && contains(area, b.rect.cx(), b.rect.cy())) {
-            badge_rects.push((i, Rect { x0: b.rect.x0 - BADGE_PAD, y0: b.rect.y0 - BADGE_PAD, x1: b.rect.x1 + BADGE_PAD, y1: b.rect.y1 + BADGE_PAD }));
+        // The fitted grid can sit ~30 px off the tiles, the general model reads "X 2" as "xa": any box
+        // of a badge's size around the corner counts, the nearest to where the badge should be. It is
+        // read first: with digits in both reads, the first wins, and the box sits on the badge
+        let search = part(tile_rects[i], BADGE_SEARCH);
+        let dist = |b: &&TextBox| (b.rect.cx() - area.cx()).abs() + (b.rect.cy() - area.cy()).abs();
+        let found = boxes
+            .iter()
+            .filter(|b| is_text_sized(b, s) && b.rect.w() <= BADGE_MAX_W * s && contains(search, b.rect.cx(), b.rect.cy()))
+            .min_by(|a, b| dist(a).total_cmp(&dist(b)));
+        // More room on the right (a share of its height): a digit at the crop's edge is read as "8"
+        // or lost ("X 6" -> "X8", "X")
+        if let Some(b) = found {
+            let right = BADGE_PAD.max(BADGE_RIGHT_PAD * b.rect.h());
+            badge_rects.push((i, Rect { x0: b.rect.x0 - BADGE_PAD, y0: b.rect.y0 - BADGE_PAD, x1: b.rect.x1 + right, y1: b.rect.y1 + BADGE_PAD }));
         }
+        badge_rects.push((i, area));
     }
-    let badge_texts = ocr.recognize_images(&badge_rects.iter().map(|&(_, r)| upscaled(r)).collect::<Vec<_>>())?;
+    let badge_texts = ocr.recognize_images_only(&badge_rects.iter().map(|&(_, r)| upscaled(r)).collect::<Vec<_>>(), BADGE_CHARS)?;
     let mut cells = Vec::new();
     let mut tiles = Vec::new();
     for (i, (&(row, col), &rect)) in positions.iter().zip(&tile_rects).enumerate() {
@@ -523,6 +557,7 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
         let parsed: Vec<((u32, bool), &String)> = reads.iter().filter(|(_, (_, sc))| *sc >= MIN_SCORE).filter_map(|(_, (t, _))| parse_badge(t).map(|p| (p, t))).collect();
         let (count, badge_text) = match parsed.iter().find(|(p, _)| !p.1).or(parsed.first()) {
             Some((p, t)) => (Some(*p), (*t).clone()),
+            None if hovered == Some(i) && badge_hidden(i) => (None, "(under the tooltip)".to_string()),
             None => (None, reads.iter().map(|(_, (t, _))| t.as_str()).collect::<Vec<_>>().join(" | ")),
         };
         tiles.push(Tile {
@@ -686,5 +721,24 @@ mod tests {
         let (t, hovered) = tooltip_from_boxes(&item, &tiles, 1600.0).expect("tooltip");
         assert_eq!((t.name.as_str(), t.quality, t.scu), ("RediMake Item Fabricator", None, None));
         assert_eq!(hovered % 4, 1);
+    }
+
+    #[test]
+    fn the_quality_is_the_chips_not_a_tile_behind_the_tooltip() {
+        // The recording of 2026-10-19 (read 47): Janalite 269Q hovered, the see-through tooltip over the
+        // neighbour's "360Q", which shows in the title's row
+        let boxes = vec![
+            tb(1972.0, 917.0, 80.0, 37.0, "269Q"),
+            tb(2097.0, 924.0, 108.0, 32.0, "Janalite"),
+            tb(2250.0, 926.0, 55.0, 27.0, "360"),
+            tb(2520.0, 928.0, 81.0, 37.0, "348Q"),
+            tb(2096.0, 961.0, 175.0, 28.0, "Capacity: 1.00mSCU"),
+            tb(2109.0, 986.0, 75.0, 25.0, "Janalite"),
+            tb(2216.0, 987.0, 43.0, 27.0, "269"),
+            tb(2345.0, 990.0, 96.0, 25.0, "0.001 SCU"),
+        ];
+        let tiles = [Rect { x0: 1960.0, y0: 640.0, x1: 2210.0, y1: 960.0 }];
+        let (t, _) = tooltip_from_boxes(&boxes, &tiles, 1600.0).expect("tooltip");
+        assert_eq!((t.name.as_str(), t.quality, t.scu.as_deref()), ("Janalite", Some(269), Some("0.001")));
     }
 }

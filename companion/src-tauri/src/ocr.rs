@@ -130,6 +130,17 @@ impl Ocr {
     /// The text of every image (one text line each, in their order), read in batches of lines of
     /// similar shape.
     pub fn recognize_images(&mut self, crops: &[RgbImage]) -> Result<Vec<(String, f32)>, String> {
+        self.recognize_images_in(crops, None)
+    }
+
+    /// The same, picking only characters of `allowed` (a count badge: "Xx× 0123456789"): the
+    /// multi-language recognizer otherwise takes a thin "6" for "日" now and then.
+    pub fn recognize_images_only(&mut self, crops: &[RgbImage], allowed: &str) -> Result<Vec<(String, f32)>, String> {
+        let mask: Vec<bool> = self.chars.iter().map(|c| c.chars().count() == 1 && c.chars().all(|ch| allowed.contains(ch))).collect();
+        self.recognize_images_in(crops, Some(&mask))
+    }
+
+    fn recognize_images_in(&mut self, crops: &[RgbImage], allowed: Option<&[bool]>) -> Result<Vec<(String, f32)>, String> {
         let ratio = |c: &RgbImage| c.width() as f32 / c.height() as f32;
         // Similar widths in one batch: the narrow lines are padded less
         let mut order: Vec<usize> = (0..crops.len()).collect();
@@ -161,7 +172,7 @@ impl Ocr {
                 return Err(format!("rec model has {classes} classes, the dictionary {}: wrong dictionary", self.chars.len()));
             }
             for (n, &i) in batch.iter().enumerate() {
-                out[i] = ctc_decode(&probs[n * steps * classes..(n + 1) * steps * classes], steps, classes, &self.chars);
+                out[i] = ctc_decode(&probs[n * steps * classes..(n + 1) * steps * classes], steps, classes, &self.chars, allowed);
             }
         }
         Ok(out)
@@ -269,13 +280,23 @@ fn db_boxes(prob: &[f32], w: usize, h: usize) -> Vec<Rect> {
 
 /// Greedy CTC decoding of `steps`×`classes` probabilities: the most likely class per step, repeats
 /// and blanks dropped; the score is the mean probability of the kept characters.
-fn ctc_decode(probs: &[f32], steps: usize, classes: usize, chars: &[String]) -> (String, f32) {
+/// `allowed`: only these classes (and the blank) can be picked, each step's probability taken among
+/// them (a "6" the model rates just below a "日" is still a sure "6"); None = every class.
+fn ctc_decode(probs: &[f32], steps: usize, classes: usize, chars: &[String], allowed: Option<&[bool]>) -> (String, f32) {
     let mut text = String::new();
     let mut scores = Vec::new();
     let mut last = 0usize;
+    let ok = |i: usize| i == 0 || allowed.is_none_or(|a| a.get(i).copied().unwrap_or(false));
     for t in 0..steps {
         let row = &probs[t * classes..(t + 1) * classes];
-        let (best, p) = row.iter().enumerate().fold((0, f32::MIN), |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc });
+        let (best, p) = row.iter().enumerate().filter(|&(i, _)| ok(i)).fold((0, f32::MIN), |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc });
+        let p = match allowed {
+            Some(_) => {
+                let mass: f32 = row.iter().enumerate().filter(|&(i, _)| ok(i)).map(|(_, &v)| v).sum();
+                if mass > 0.0 { p / mass } else { 0.0 }
+            }
+            None => p,
+        };
         if best != 0 && best != last {
             if let Some(c) = chars.get(best) {
                 text.push_str(c);
@@ -301,7 +322,20 @@ mod tests {
         for (t, &c) in seq.iter().enumerate() {
             probs[t * 3 + c] = 0.9;
         }
-        assert_eq!(ctc_decode(&probs, seq.len(), 3, &chars).0, "aab");
+        assert_eq!(ctc_decode(&probs, seq.len(), 3, &chars, None).0, "aab");
+    }
+
+    #[test]
+    fn ctc_picks_only_allowed_characters() {
+        let chars: Vec<String> = ["", "X", "6", "日"].iter().map(|s| s.to_string()).collect();
+        // X, then a step the model rates 日 0.6, 6 0.3, blank 0.1
+        let probs = [0.0, 0.9, 0.05, 0.05, 0.1, 0.0, 0.3, 0.6];
+        assert_eq!(ctc_decode(&probs, 2, 4, &chars, None).0, "X日");
+        let allowed = [true, true, true, false];
+        let (text, score) = ctc_decode(&probs, 2, 4, &chars, Some(&allowed));
+        assert_eq!(text, "X6");
+        // 6 among the allowed: 0.3 / (0.1 + 0.3)
+        assert!(score > 0.8, "{score}");
     }
 
     #[test]

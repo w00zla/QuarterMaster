@@ -300,6 +300,48 @@ impl DebugStore {
     }
 }
 
+/// Starts the debug writer: for each read it gets while debugging it encodes the frame (the JPEG
+/// data URL for the event, the full frame for the kept reads and a recording), keeps it, writes it
+/// to a running recording and emits the event. Off the worker: encoding and writing a 3840×1600
+/// frame held the next read back (1.8 s between reads while recording instead of 1.05 s).
+fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> Sender<(RgbImage, InventoryEvent)> {
+    let (tx, rx) = channel::<(RgbImage, InventoryEvent)>();
+    std::thread::spawn(move || {
+        for (image, mut event) in rx {
+            event.frame = jpeg_data_url(&image, DEBUG_FRAME_WIDTH).map_err(|e| log::warn!("debug frame: {e}")).ok();
+            match jpeg_bytes(&image) {
+                Ok(jpeg) => {
+                    let read = DebugRead {
+                        at_ms: event.at_ms,
+                        ms: event.ms,
+                        width: event.width,
+                        height: event.height,
+                        grid: event.grid.clone(),
+                        components: event.components.clone(),
+                        boxes: event.boxes.clone(),
+                        jpeg,
+                    };
+                    let mut state = store.0.lock().unwrap();
+                    // A running recording gets every read as a file right away
+                    if let Some(rec) = &mut state.recording {
+                        if let Err(e) = write_read(&rec.folder, rec.next, &read) {
+                            log::warn!("debug recording: {e}");
+                        }
+                        rec.next += 1;
+                    }
+                    if state.reads.len() >= DEBUG_KEEP {
+                        state.reads.pop_front();
+                    }
+                    state.reads.push_back(read);
+                }
+                Err(e) => log::warn!("debug frame: {e}"),
+            }
+            let _ = app.emit(INVENTORY_READ, event);
+        }
+    });
+    tx
+}
+
 /// The frame as a JPEG data URL, `width` pixels wide.
 fn jpeg_data_url(image: &RgbImage, width: u32) -> Result<String, String> {
     let (w, h) = image.dimensions();
@@ -475,7 +517,8 @@ struct Worker {
     detect: Detect,
     scan: Scan,
     debug: Debug,
-    store: DebugStore,
+    /// While debugging, the reads go with their frame to the debug writer (`spawn_debug_writer`)
+    debug_tx: Sender<(RgbImage, InventoryEvent)>,
     ocr: Option<Ocr>,
     gate: Gate,
     labels: LabelSource,
@@ -505,7 +548,22 @@ fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
 
 impl Worker {
     fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Self {
-        Self { app, detect, scan, debug, store, ocr: None, gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None, screen: Screen::Unknown, screen_misses: 0, last_probe_ms: 0 }
+        let debug_tx = spawn_debug_writer(app.clone(), store);
+        Self {
+            app,
+            detect,
+            scan,
+            debug,
+            debug_tx,
+            ocr: None,
+            gate: Gate::default(),
+            labels: LabelSource::default(),
+            visit: None,
+            last_pitch: None,
+            screen: Screen::Unknown,
+            screen_misses: 0,
+            last_probe_ms: 0,
+        }
     }
 
     fn run(mut self, rx: Receiver<Frame>) {
@@ -648,24 +706,11 @@ impl Worker {
             }
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", self.screen),
         }
-        let frame_url = if debug { Some(jpeg_data_url(&image, DEBUG_FRAME_WIDTH)?) } else { None };
-        if debug {
-            let jpeg = jpeg_bytes(&image)?;
-            let read = DebugRead { at_ms: frame.at_ms, ms, width, height, grid: grid.clone(), components: components.clone(), boxes: boxes.clone(), jpeg };
-            let mut state = self.store.0.lock().unwrap();
-            // A running recording gets every read as a file right away
-            if let Some(rec) = &mut state.recording {
-                if let Err(e) = write_read(&rec.folder, rec.next, &read) {
-                    log::warn!("debug recording: {e}");
-                }
-                rec.next += 1;
-            }
-            if state.reads.len() >= DEBUG_KEEP {
-                state.reads.pop_front();
-            }
-            state.reads.push_back(read);
+        let event = InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, components, cursor: frame.cursor, boxes, frame: None };
+        // While debugging the debug writer adds the frame and emits; the worker goes on reading
+        if !debug || self.debug_tx.send((image, event.clone())).is_err() {
+            let _ = self.app.emit(INVENTORY_READ, event);
         }
-        let _ = self.app.emit(INVENTORY_READ, InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, components, cursor: frame.cursor, boxes, frame: frame_url });
         Ok(())
     }
 

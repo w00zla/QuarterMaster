@@ -9,8 +9,10 @@
 // vertically, so a tile hovered again after a scroll is the same sighting, while equal stacks in
 // different columns stay apart (equal stacks in one column collapse: a known limit). A read whose
 // count badge had no digits is uncertain: it merges with a certain read of the same material,
-// quality and column, and a certain read replaces it. A sighting counts only once two reads in a row
-// produced the same key (an OCR glitch in one read, "56" for "561", books nothing).
+// quality and column, and a certain read replaces it. A sighting counts once two reads in a row of
+// the same hovered tile produced the same key (an OCR glitch in one read, "56" for "561", books
+// nothing; right after a move the game may still show the previous tile's tooltip, for one read so
+// far: that read disagrees with the next).
 import { findMaterial, type MaterialNames } from "../../src/stock/material-names.ts";
 import type { StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
 import type { ComponentRead } from "./components.ts";
@@ -162,21 +164,38 @@ export function sightingOf(e: InventoryReadEvent, cat: InventoryCatalog): Sighti
 
 const sightingKey = (col: number, material: string, quality: number | null, amount: string | null) => `${col}|${material}|${quality ?? "-"}|${amount ?? "-"}`;
 
+/** Where the hovered tile sits in the frame (its centre) and the grid's pitch; null without one. */
+function hoveredSpot(e: InventoryReadEvent): { x: number; y: number; px: number; py: number } | null {
+  const tile = e.grid?.tiles.find((t) => t.hovered);
+  if (!e.grid || !tile) return null;
+  return { x: (tile.rect.x0 + tile.rect.x1) / 2, y: (tile.rect.y0 + tile.rect.y1) / 2, px: e.grid.pitchX, py: e.grid.pitchY };
+}
+
 /** The sightings of one scan session, by key. */
 export class InventoryScan {
   readonly sightings = new Map<string, Sighting>();
   // The last read's sighting, waiting for a second read that agrees
   private pending: Sighting | null = null;
+  // The last read's hovered tile: the two agreeing reads must be of one tile (right after a move the
+  // game may still show the previous tile's tooltip, for one read so far). By its place in the
+  // frame, not its row: the grid is fitted per frame, a partly visible top row shifts the rows
+  private lastSpot: { x: number; y: number } | null = null;
 
   /** Takes a read in; the sighting it added or changed, null when nothing changed (the same stack
    * read again, a first read still waiting for its confirmation, or one `accept` turns down). An
    * uncertain count merges into a certain read of the same material, quality and column, and a
    * certain read replaces an uncertain one. */
   feed(e: InventoryReadEvent, cat: InventoryCatalog, accept: (s: Sighting) => boolean = () => true): Sighting | null {
+    const spot = hoveredSpot(e);
+    const last = this.lastSpot;
+    const stayed = !!spot && !!last && Math.abs(spot.x - last.x) < spot.px / 2 && Math.abs(spot.y - last.y) < spot.py / 2;
+    this.lastSpot = spot;
+    // On another tile than the read before: whatever waited was another tile's
+    if (!stayed) this.pending = null;
     const s = sightingOf(e, cat);
     if (!s || !accept(s)) return null;
     if (this.sightings.has(s.key)) return null;
-    // Two reads in a row must agree
+    // Two reads in a row of one tile must agree
     if (this.pending?.key !== s.key) {
       this.pending = s;
       return null;
@@ -196,6 +215,7 @@ export class InventoryScan {
   clear() {
     this.sightings.clear();
     this.pending = null;
+    this.lastSpot = null;
   }
 
   /** Newest first. */

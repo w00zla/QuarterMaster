@@ -52,9 +52,12 @@ export interface OverlayState {
 /** What the overlay shows: the panel's title, tags (inventory: the kinds detected; else the state),
  * the newest rows (or why there are none). */
 export interface OverlayView {
+  // The mode
   title: string;
   // How many rows the panel lists (more than the tile shows)
   count: number;
+  // The inventory's location, after the count
+  place: string | null;
   tags: OverlayState[];
   rows: OverlayRow[];
   more: string | null;
@@ -87,11 +90,10 @@ const view = computed<OverlayView>(() => {
   const mode = tab.value;
   const all = overlayRows[mode];
   const location = syncCatalog.value?.locations.find((l) => l.uuid === locationUuid.value)?.short;
-  let title = t(TITLES[mode]);
+  const title = t(TITLES[mode]);
   let tags = [scanState.value];
   let empty = t("refinery.empty");
   if (mode === "inventory") {
-    if (location) title += ` · ${location}`;
     // That it scans goes without saying; what it detects does not (icons only, like the rows' badges)
     tags = locationUuid.value
       ? KINDS.filter((k) => kinds.value.has(k)).map((k) => ({ cls: KIND_CLASS[k], icon: KIND_ICON[k], text: "" }))
@@ -102,7 +104,7 @@ const view = computed<OverlayView>(() => {
     empty = t("overlay.noUnlocks");
   }
   const more = all.length > MAX_ROWS ? t("overlay.more", { n: all.length - MAX_ROWS }) : null;
-  return { title, count: all.length, tags, rows: all.slice(0, MAX_ROWS), more, empty };
+  return { title, count: all.length, place: mode === "inventory" ? (location ?? null) : null, tags, rows: all.slice(0, MAX_ROWS), more, empty };
 });
 
 const publish = () => {

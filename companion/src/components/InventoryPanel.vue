@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // The inventory scan (inventorySync.ts): in the head the location the warehouse or the inventory's
-// storage belongs to (a searchable picker, kept), the Scan button (start/stop the session; the user
-// then hovers every stack in the freight manager's warehouse and every component in the character
-// inventory's storage pane) and "Register all"; below it the kind filter (Mats / Items / Comps: what
-// the scan detects), then the proposals as a compact table, one per stack or component (kind,
-// resource, quality, amount; a component's stats after its name: Register / Discard). Registering
-// (one or all) asks first, with a switch per org to share right away. The sightings behind the
-// proposals, also the incomplete ones, are in the debug window (settings).
+// storage belongs to (a searchable picker, kept, changeable while scanning: each location collects
+// its own), the Scan button (start/stop the session; the user then hovers every stack in the freight
+// manager's warehouse and every component in the character inventory's storage pane) and "Register
+// all"; below it the kind filter (what the scan detects), then the proposals of every location as a
+// compact table, one per stack or component (kind, resource, location, quality, amount; a
+// component's stats after its name: Register / Discard). Registering (one or all, each at its own
+// location) asks first, with a switch per org to share right away. The overlay shows the current
+// location's only. The sightings behind the proposals, also the incomplete ones, are in the debug
+// window (settings).
 import { computed, ref, watchEffect } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
@@ -19,7 +21,7 @@ import type { Proposal } from "../inventory";
 import {
   accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, KINDS, kinds, locationUuid, proposals, setLocation, shareGuildIds, sightings, startInventoryScan,
   stopInventoryScan, toggleKind,
-  type Kind,
+  type Kind, type Located,
 } from "../inventorySync";
 import { overlayOn, overlayRows, tabCounts } from "../overlay";
 import { materialName, syncCatalog } from "../refinerySync";
@@ -34,15 +36,17 @@ interface Row {
   name: string;
   // A component's stats ("Coolant Rating +12.5 %"), or "no stats"
   detail: string | null;
+  locationUuid: string;
+  location: string;
   quality: string;
   amount: string;
-  stack: Proposal | null;
-  component: ComponentProposal | null;
+  stack: Located<Proposal> | null;
+  component: Located<ComponentProposal> | null;
 }
 
 const scanning = computed(() => scanMode.value === "inventory");
 const locationOptions = computed(() => (syncCatalog.value?.locations ?? []).map((l) => ({ value: l.uuid, label: l.short })));
-const locationLabel = computed(() => syncCatalog.value?.locations.find((l) => l.uuid === locationUuid.value)?.short ?? "?");
+const locationName = (uuid: string) => syncCatalog.value?.locations.find((l) => l.uuid === uuid)?.short ?? "?";
 
 const amount = (value: string, unit: "SCU" | "pcs") => (unit === "SCU" ? `${value} SCU` : t("inventory.pieces", { n: value }));
 // Every stat the tooltip showed, in the catalog's order, as its gain: "Coolant Rating +12.5 % · Integrity ±0.0 %";
@@ -54,19 +58,22 @@ function statsText(p: ComponentProposal): string {
 }
 const rows = computed<Row[]>(() => [
   ...proposals.value.map((p): Row => ({
-    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), detail: null, quality: String(p.quality), amount: amount(p.amount, p.unit), stack: p, component: null,
+    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), detail: null, locationUuid: p.locationUuid, location: locationName(p.locationUuid),
+    quality: String(p.quality), amount: amount(p.amount, p.unit), stack: p, component: null,
   })),
   ...componentProposals.value.map((p): Row => ({
-    kind: "comps", id: p.id, name: p.label, detail: statsText(p), quality: "–", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
+    kind: "comps", id: p.id, name: p.label, detail: statsText(p), locationUuid: p.locationUuid, location: locationName(p.locationUuid),
+    quality: "–", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
   })),
 ]);
 const what = (r: Row) => [r.name, r.detail ?? r.quality, r.amount].join(" · ");
 const tagClass: Record<Kind, string> = KIND_CLASS;
 const kindIcon = KIND_ICON;
-// The scan overlay shows the same rows, the most recently seen first (stacks and components mixed)
+// The scan overlay shows the current location's rows, the most recently seen first (stacks and components mixed)
 watchEffect(() => {
   const seen = new Map([...sightings.value, ...componentSightings.value].map((s) => [s.key, s.atMs]));
-  overlayRows.inventory = [...rows.value]
+  overlayRows.inventory = rows.value
+    .filter((r) => r.locationUuid === locationUuid.value)
     .sort((a, b) => (seen.get(b.id) ?? 0) - (seen.get(a.id) ?? 0))
     .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: [r.quality, r.amount] }));
   tabCounts.inventory = rows.value.length;
@@ -79,6 +86,14 @@ const registerButtons = computed<ConfirmButton[]>(() => [
   { label: t("common.cancel"), kind: "outline", value: "cancel" },
   { label: t("inventory.register"), kind: "primary", value: "add", icon: "check", disabled: busy.value || !connected.value },
 ]);
+// The dialog's title names the location when all rows share one
+const registeringTitle = computed(() => {
+  const list = registering.value ?? [];
+  const places = new Set(list.map((r) => r.locationUuid));
+  if (places.size > 1) return t("inventory.confirmAddMany", { n: list.length, count: places.size });
+  const location = list[0] ? list[0].location : "?";
+  return list.length === 1 ? t("inventory.confirmOne", { location }) : t("inventory.confirmAdd", { n: list.length, location });
+});
 const shared = (guildId: string) => shareGuildIds.value.includes(guildId);
 function toggleShare(guildId: string) {
   shareGuildIds.value = shared(guildId) ? shareGuildIds.value.filter((g) => g !== guildId) : [...shareGuildIds.value, guildId];
@@ -115,7 +130,7 @@ function toggleScan() {
   <section class="panel inventory">
     <div class="head">
       <span class="head-title">{{ t("inventory.title") }} <span class="head-count">{{ rows.length }}</span></span>
-      <Picker class="location" :model-value="locationUuid" :options="locationOptions" :placeholder="t('inventory.location')" :disabled="scanning" @update:model-value="setLocation" />
+      <Picker class="location" :model-value="locationUuid" :options="locationOptions" :placeholder="t('inventory.location')" @update:model-value="setLocation" />
       <Tooltip :text="overlayOn ? t('overlay.controls') : !locationUuid ? t('inventory.pickLocation') : null">
         <button type="button" class="btn small outline" :disabled="!locationUuid || !connected || overlayOn" @click="toggleScan">
           <Icon :name="scanning ? 'eye-off' : 'eye'" :size="14" /> {{ t(scanning ? "scan.stop" : "scan.start") }}
@@ -142,6 +157,7 @@ function toggleScan() {
       <div class="row table-head">
         <span />
         <span>{{ t("col.material") }}</span>
+        <span>{{ t("col.location") }}</span>
         <span class="num">{{ t("col.quality") }}</span>
         <span class="num">{{ t("col.amount") }}</span>
         <span />
@@ -154,6 +170,7 @@ function toggleScan() {
             <span class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="12" /></span>
           </Tooltip>
           <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+          <span class="row-place">{{ r.location }}</span>
           <span class="num">{{ r.quality }}</span>
           <span class="num">{{ r.amount }}</span>
           <Tooltip :text="t('inventory.register')">
@@ -167,7 +184,7 @@ function toggleScan() {
     </template>
     <ConfirmDialog
       v-if="registering"
-      :title="registering.length === 1 ? t('inventory.confirmOne', { location: locationLabel }) : t('inventory.confirmAdd', { n: registering.length, location: locationLabel })"
+      :title="registeringTitle"
       icon="plus"
       :buttons="registerButtons"
       @choose="onRegister"
@@ -175,6 +192,7 @@ function toggleScan() {
       <div class="confirm">
         <div v-for="r in registering" :key="r.id" class="confirm-row">
           <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+          <span class="row-place">{{ r.location }}</span>
           <span class="num">{{ r.quality }}</span>
           <span class="num">{{ r.amount }}</span>
         </div>
@@ -256,7 +274,7 @@ function toggleScan() {
 /* One compact row per stack or component, like the refinery's rows: kind badge, resource, quality, amount, two icon buttons */
 .row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 40px 88px 24px 24px;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(0, 110px) 40px 88px 24px 24px;
   align-items: center;
   gap: 8px;
   min-height: 28px;
@@ -289,7 +307,8 @@ function toggleScan() {
   padding: 0 5px;
 }
 
-.row-name {
+.row-name,
+.row-place {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -321,7 +340,7 @@ function toggleScan() {
 
 .confirm-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px 88px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 110px) 40px 88px;
   gap: 8px;
 }
 

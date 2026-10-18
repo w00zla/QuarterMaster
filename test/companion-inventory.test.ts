@@ -29,8 +29,10 @@ function catalog(): InventoryCatalog {
 }
 
 const rect = { x0: 0, y0: 0, x1: 10, y1: 10 };
+// A tile's place in the frame at the read's pitch (260 × 255)
+const tileRect = (row: number, col: number) => ({ x0: 1980 + col * 260, y0: 650 + row * 255, x1: 2220 + col * 260, y1: 890 + row * 255 });
 const tile = (row: number, col: number, quality: number | null, count: number | null, hovered = false, countUncertain = false): ReadTile =>
-  ({ rect, row, col, quality, qualityAmbiguous: false, count, countUncertain, hovered, qualityText: quality === null ? '' : `${quality}Q`, badgeText: count === null ? '' : `X${count}` });
+  ({ rect: tileRect(row, col), row, col, quality, qualityAmbiguous: false, count, countUncertain, hovered, qualityText: quality === null ? '' : `${quality}Q`, badgeText: count === null ? '' : `X${count}` });
 const tooltip = (name: string, quality: number | null, scu: string | null): ReadTooltip => ({ name, quality, scu, x: 0, y: 0, rect });
 const read = (atMs: number, tiles: ReadTile[], tip: ReadTooltip | null): InventoryReadEvent =>
   ({ atMs, ms: 400, width: 3840, height: 1600, grid: { tiles, tooltip: tip, cells: [], cols: [], rows: [], pitchX: 260, pitchY: 255 }, components: null, cursor: null, boxes: [], frame: null });
@@ -72,7 +74,7 @@ describe('sightings', () => {
 
 describe('InventoryScan', () => {
   const cat = catalog();
-  /** Feeds the same read twice (a sighting needs two reads that agree); the second's result. */
+  /** Feeds the same read twice (a sighting needs two reads of one tile that agree); the second's result. */
   const twice = (scan: InventoryScan, e: InventoryReadEvent) => {
     scan.feed(e, cat);
     return scan.feed({ ...e, atMs: e.atMs + 1 }, cat);
@@ -91,14 +93,40 @@ describe('InventoryScan', () => {
     assert.equal(scan.list().length, 0);
   });
 
-  it('a single read books nothing: two in a row must agree', () => {
+  it('a single read books nothing: two in a row of one tile must agree', () => {
     const scan = new InventoryScan();
-    assert.equal(scan.feed(read(1, [tile(0, 0, null, 14, true)], tooltip('Aphorite', 561, '0.001')), cat), null);
+    assert.equal(scan.feed(read(1, [tile(0, 0, null, 14, true)], tooltip('Aphorite', 561, '0.001')), cat), null, 'the first read waits');
     // The chip misread once ("56"): no sighting, and the pending one starts over
     assert.equal(scan.feed(read(2, [tile(0, 0, null, 14, true)], tooltip('Aphorite', 56, '0.001')), cat), null);
     assert.equal(scan.feed(read(3, [tile(0, 0, null, 14, true)], tooltip('Aphorite', 561, '0.001')), cat), null);
     assert.ok(scan.feed(read(4, [tile(0, 0, null, 14, true)], tooltip('Aphorite', 561, '0.001')), cat));
     assert.deepEqual(scan.list().map((s) => [s.quality, s.amount]), [[561, '14']]);
+  });
+
+  it('the previous tile\'s tooltip, still shown right after the cursor moved on, counts nowhere', () => {
+    const scan = new InventoryScan();
+    // Aphorite Q724 on r0 c1, then the cursor on r0 c2 (x2) while that tooltip still shows: one read
+    twice(scan, read(1, [tile(0, 1, 724, 4, true), tile(0, 2, null, 2)], tooltip('Aphorite', 724, '0.001')));
+    assert.equal(scan.feed(read(3, [tile(0, 1, 724, 4), tile(0, 2, null, 2, true)], tooltip('Aphorite', 724, '0.001')), cat), null);
+    assert.equal(scan.feed(read(4, [tile(0, 1, 724, 4), tile(0, 2, null, 2, true)], tooltip('Aphorite', 523, '0.001')), cat), null);
+    assert.ok(scan.feed(read(5, [tile(0, 1, 724, 4), tile(0, 2, null, 2, true)], tooltip('Aphorite', 523, '0.001')), cat));
+    assert.deepEqual(scan.list().map((s) => [s.col, s.quality, s.amount]), [[2, 523, '2'], [1, 724, '4']]);
+  });
+
+  it('two agreeing reads of different tiles count nothing', () => {
+    const scan = new InventoryScan();
+    // The same stack text read over two tiles (the cursor moving down a column of equal stacks):
+    // neither read was confirmed on its own tile
+    scan.feed(read(1, [tile(0, 0, 561, 14, true)], tooltip('Aphorite', 561, '0.001')), cat);
+    assert.equal(scan.feed(read(2, [tile(1, 0, 561, 14, true)], tooltip('Aphorite', 561, '0.001')), cat), null);
+  });
+
+  it('the same tile though the fit counts its rows from another top row', () => {
+    const scan = new InventoryScan();
+    // Same place in the frame, row 0 in one read and row 1 in the next (a partly visible top row fitted)
+    scan.feed(read(1, [tile(0, 0, 561, 14, true)], tooltip('Aphorite', 561, '0.001')), cat);
+    const moved = { ...tile(1, 0, 561, 14, true), rect: tileRect(0, 0) };
+    assert.ok(scan.feed(read(2, [moved], tooltip('Aphorite', 561, '0.001')), cat));
   });
 
   it('an uncertain count merges with a certain read of the same stack', () => {
