@@ -1,23 +1,32 @@
 <script setup lang="ts">
-// API token (created in the web app's Companion dialog and pasted here) and game folder; saving checks
-// the connection and reloads the log state (the path may have changed). The server is fixed (only the
-// config file changes it).
+// API token (created in the web app's Companion dialog and pasted here), game folder and the UI
+// language; saving checks the connection and reloads the log state (the path may have changed). The
+// server is fixed (only the config file changes it). The diagnostics group opens the debug window.
 import { computed, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
+import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { setConfig } from "../backend";
+import { openDebugWindow, setConfig } from "../backend";
 import { t } from "../i18n";
-import { config, loadLog, refreshConnection } from "../state";
-import { errorText, toast } from "../toasts";
+import { applyConfig, config, loadLog, refreshConnection } from "../state";
+import { errorText, toast, toastError } from "../toasts";
 
 const emit = defineEmits<{ close: [] }>();
 
 const token = ref(config.value?.token ?? "");
 const gameDir = ref(config.value?.gameDir ?? "");
+const language = ref(config.value?.language ?? "");
 const busy = ref(false);
 
+const languageOptions = computed(() => [
+  { value: "", label: t("lang.system") },
+  { value: "de", label: t("lang.de") },
+  { value: "en", label: t("lang.en") },
+]);
+
 const changed = computed(() => token.value.trim() !== (config.value?.token ?? "")
-  || gameDir.value.trim() !== (config.value?.gameDir ?? ""));
+  || gameDir.value.trim() !== (config.value?.gameDir ?? "")
+  || language.value !== (config.value?.language ?? ""));
 const buttons = computed<ConfirmButton[]>(() => [
   { label: t("common.close"), kind: "outline", value: "close" },
   { label: t("common.save"), kind: "primary", value: "save", icon: "check", form: "settings", disabled: !changed.value || busy.value },
@@ -27,7 +36,7 @@ async function save() {
   if (!changed.value || busy.value) return;
   busy.value = true;
   try {
-    config.value = await setConfig({ server: config.value?.server ?? "", token: token.value.trim(), gameDir: gameDir.value.trim() });
+    applyConfig(await setConfig({ server: config.value?.server ?? "", token: token.value.trim(), gameDir: gameDir.value.trim(), language: language.value }));
     await Promise.all([refreshConnection(), loadLog()]);
     toast(t("settings.saved"));
   } catch (e) {
@@ -48,11 +57,15 @@ async function pickFolder() {
   <ConfirmDialog :title="t('settings.title')" icon="settings" :buttons="buttons" @choose="emit('close')">
     <form id="settings" class="form single flush groups" @submit.prevent="save">
       <section class="group">
-        <div class="group-title">{{ t("settings.connection") }}</div>
+        <div class="group-title">{{ t("settings.app") }}</div>
         <label class="field">
           {{ t("settings.token") }}
           <input v-model="token" class="input" type="password" autocomplete="off" spellcheck="false" />
         </label>
+        <div class="field">
+          {{ t("settings.language") }}
+          <Dropdown v-model="language" :options="languageOptions" variant="outline" />
+        </div>
       </section>
       <section class="group">
         <div class="group-title">Star Citizen</div>
@@ -62,6 +75,13 @@ async function pickFolder() {
             <input v-model="gameDir" class="input" type="text" autocomplete="off" spellcheck="false" />
             <button type="button" class="btn outline" @click="pickFolder">{{ t("settings.pick") }}</button>
           </div>
+        </div>
+      </section>
+      <section class="group">
+        <div class="group-title">{{ t("settings.diagnostics") }}</div>
+        <div class="line">
+          <span class="hint">{{ t("settings.debugHint") }}</span>
+          <button type="button" class="btn outline" @click="openDebugWindow().catch(toastError)">{{ t("debug.open") }}</button>
         </div>
       </section>
     </form>
@@ -109,5 +129,12 @@ async function pickFolder() {
 .line .input {
   flex: 1;
   min-width: 0;
+}
+
+.line .hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-2);
 }
 </style>

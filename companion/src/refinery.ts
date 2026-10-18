@@ -56,20 +56,27 @@ export function cscuToScu(cscu: number): string {
 // --- names ---------------------------------------------------------------------------------------
 
 export interface SyncCatalog {
+  // The refinery's materials: resources only
   materials: MaterialNames;
+  // The inventory's: every bookable material (resources and items)
+  allMaterials: MaterialNames;
+  // Material UUID -> its unit
+  units: Map<string, "SCU" | "pcs">;
   // Normalized station name -> location UUID (refineries only)
   stations: Map<string, string>;
   // Location UUID -> display name
   stationNames: Map<string, string>;
-  // Resource UUID -> display name
+  // Material UUID -> display name (resources and items; the first language's)
   materialNames: Map<string, string>;
+  // Every selectable location for the inventory's location picker (the first language's labels)
+  locations: { uuid: string; label: string; short: string }[];
 }
 
 /** The loc keys whose texts the player's language pack may change (materials, refinery stations). */
 export function gameNameKeys(responses: CatalogResponse[]): string[] {
   const keys = new Set<string>();
   for (const r of responses) {
-    for (const m of r.materials) if (m.kind === "resource" && m.nameKey) keys.add(m.nameKey);
+    for (const m of r.materials) if (m.nameKey) keys.add(m.nameKey);
     for (const l of r.locations) if (l.refinery && l.nameKey) keys.add(l.nameKey);
   }
   return [...keys];
@@ -77,15 +84,21 @@ export function gameNameKeys(responses: CatalogResponse[]): string[] {
 
 /** The lookups from the web app's catalog (each language) and the player's own texts (`gameNames`: loc key -> text). */
 export function buildCatalog(responses: CatalogResponse[], gameNames: Record<string, string>): SyncCatalog {
-  const cat: SyncCatalog = { materials: emptyNames(), stations: new Map(), stationNames: new Map(), materialNames: new Map() };
+  const cat: SyncCatalog = {
+    materials: emptyNames(), allMaterials: emptyNames(), units: new Map(), stations: new Map(), stationNames: new Map(), materialNames: new Map(), locations: [],
+  };
   for (const r of responses) {
     for (const m of r.materials) {
+      const own = m.nameKey ? gameNames[m.nameKey] : undefined;
+      addName(cat.allMaterials, m.name, m.uuid);
+      if (own) addName(cat.allMaterials, own, m.uuid);
+      cat.units.set(m.uuid, m.unit);
+      if (!cat.materialNames.has(m.uuid)) cat.materialNames.set(m.uuid, m.name);
       if (m.kind !== "resource") continue;
       addName(cat.materials, m.name, m.uuid);
-      const own = m.nameKey ? gameNames[m.nameKey] : undefined;
       if (own) addName(cat.materials, own, m.uuid);
-      if (!cat.materialNames.has(m.uuid)) cat.materialNames.set(m.uuid, m.name);
     }
+    if (!cat.locations.length) cat.locations = r.locations.map((l) => ({ uuid: l.uuid, label: l.label, short: l.short }));
     for (const l of r.locations) {
       if (!l.refinery) continue;
       // The location's own name: the label's first part ("Name · planet · system")

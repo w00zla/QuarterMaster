@@ -1,6 +1,8 @@
-// Downloads the OCR models (PaddleOCR PP-OCRv5 as ONNX, Apache-2.0, converted by RapidOCR) into
-// src-tauri/resources/ocr/, checked against pinned SHA-256 hashes. The models stay out of git; run
-// this once per checkout (and after a model change): pnpm --filter sc-quartermaster-companion ocr:models
+// Downloads the OCR models (PaddleOCR PP-OCRv6 "small" as ONNX, Apache-2.0, converted by RapidOCR,
+// its default since RapidOCR 3.9; multi-language, one dictionary of 18708 characters) into
+// src-tauri/resources/ocr/, checked against pinned SHA-256 hashes (the models' from RapidOCR's
+// default_models.yaml). The models stay out of git; run this once per checkout (and after a model
+// change): pnpm --filter sc-quartermaster-companion ocr:models
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -8,12 +10,12 @@ import { fileURLToPath } from "node:url";
 
 const BASE = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0";
 const MODELS = [
-  { file: "det.onnx", url: `${BASE}/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx`,
-    sha256: "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae" },
-  { file: "rec.onnx", url: `${BASE}/onnx/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile.onnx`,
-    sha256: "b20bd37c168a570f583afbc8cd7925603890efbcdc000a59e22c269d160b5f5a" },
-  { file: "rec_dict.txt", url: `${BASE}/paddle/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile/ppocrv5_latin_dict.txt`,
-    sha256: "3c0a8a79b612653c25f765271714f71281e4e955962c153e272b7b8c1d2b13ff" },
+  { file: "det.onnx", url: `${BASE}/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx`,
+    sha256: "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f" },
+  { file: "rec.onnx", url: `${BASE}/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx`,
+    sha256: "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884" },
+  { file: "rec_dict.txt", url: `${BASE}/paddle/PP-OCRv6/rec/PP-OCRv6_rec_small/ppocrv6_dict.txt`,
+    sha256: "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d" },
 ];
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), "../src-tauri/resources/ocr");

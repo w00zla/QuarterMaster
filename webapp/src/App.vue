@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
+import { computed, onMounted, provide, watch } from "vue";
 import { RouterView } from "vue-router";
+import { PICKER_LABELS } from "./components/Picker.vue";
 import AppFooter from "./components/AppFooter.vue";
 import Toasts from "./components/Toasts.vue";
 // Notices of actions from the bot and the companion app (listens to the realtime messages)
@@ -10,6 +11,9 @@ import LoginView from "./views/LoginView.vue";
 import { t } from "./i18n";
 import { startRealtime, stopRealtime } from "./realtime";
 import { loadMe, status } from "./session";
+
+// The pickers' own texts (the component has no i18n: the companion app imports it too)
+provide(PICKER_LABELS, computed(() => ({ clear: t("pick.clear"), noMatch: t("common.noMatch") })).value);
 
 onMounted(loadMe);
 // Live updates while logged in

@@ -8,6 +8,8 @@ export default defineConfig(() => ({
   plugins: [vue()],
   // Rust errors stay visible in `tauri dev`
   clearScreen: false,
+  // Two pages: the app and the debug window
+  build: { rollupOptions: { input: { main: "index.html", debug: "debug.html" } } },
   server: {
     port: 1430,
     strictPort: true,
@@ -15,6 +17,6 @@ export default defineConfig(() => ({
     hmr: host ? { protocol: "ws", host, port: 1431 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
     // Only what the app imports (styles and components shared with the web apps)
-    fs: { allow: [".", "../adminapp/src", "../webapp/src/styles.css", "../webapp/src/components/ConfirmDialog.vue", "../src/webapp/api-types.ts", "../src/stock/ore-names.ts"] },
+    fs: { allow: [".", "../adminapp/src", "../webapp/src/styles.css", "../webapp/src/components/ConfirmDialog.vue", "../webapp/src/components/Picker.vue", "../src/webapp/api-types.ts", "../src/stock/material-names.ts"] },
   },
 }));

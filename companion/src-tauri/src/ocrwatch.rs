@@ -1,34 +1,56 @@
-//! Feeds frames to the refinery OCR off the main thread. Platform independent: frames come through a
-//! channel from a source — the screen capture (`capture.rs`, Windows so far) or, for tests, a folder of
-//! images (`QM_OCR_FRAMES=<dir>`: every image put there is read once, its modification time as the frame time).
+//! Feeds frames to the OCR off the main thread. Platform independent: frames come through a channel
+//! from a source — the screen capture (`capture.rs`, Windows so far) or, for tests, a folder of images
+//! (`QM_OCR_FRAMES=<dir>`: every image put there is read once, its modification time as the frame time).
 //!
-//! Two modes. Idle: a live frame that passes a cheap gate (a 96×40 grey thumbnail: the view came to rest
-//! after it moved) gets the cheap check for a refinery terminal (`terminal_in_view`, its big titles at a
-//! low resolution); moving around and standing anywhere cost nothing but the thumbnails (the game's
-//! scene changes a little all the time: checking every changed frame took ~5 % CPU). A hit starts a
-//! visit (`refinery-visit` true): the terminal is read in full every 2 s (and on every change) and each
-//! work order overview goes out as `refinery-overview`. A few reads in a row without the terminal (or a
-//! minute without frames) end the visit (`refinery-visit` false). After 5 minutes without any read the
-//! OCR is dropped (its memory arena keeps the full reads' peak); the next check loads it again.
+//! Reading is a **scan session** the user starts and stops (`Scan`: off, inventory or refinery; off at
+//! every start). A live frame is read once the view came to rest after it moved, during a session also
+//! every 2 s (the `Gate`, a 96×40 grey thumbnail: the game's scene changes a little all the time,
+//! checking every changed frame took ~5 % CPU). Inventory: each read goes out as `inventory-read`
+//! (`inventory.rs`: the tiles, the tooltip, the layout). Refinery: the session is a visit
+//! (`refinery-visit` true) and each work order overview goes out as `refinery-overview`; a minute
+//! without frames ends the visit. After 5 minutes without any read the OCR is dropped (its memory arena
+//! keeps the full reads' peak); the next read loads it again.
+//!
+//! The former automatic refinery detection (idle: the cheap check `terminal_in_view` on every view that
+//! came to rest, a hit starting the visit, a few reads without the terminal ending it) is kept behind
+//! `AUTO_REFINERY` for a possible return.
+//!
+//! Troubleshooting (`Debug`, the inventory panel's debug dialog): while on, every inventory event
+//! carries the frame as a JPEG (scaled to 1280 px wide) for the overlay view, and the last reads are
+//! kept with their full frames (`DebugStore`) for an export to a folder (PNG + JSON per read, an
+//! info file) the user can send in.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::VecDeque;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use image::{GrayImage, RgbImage};
+use base64::Engine;
+use image::{GrayImage, ImageFormat, RgbImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::inventory::{read_grid, Grid};
 use crate::locale::LabelSource;
-use crate::ocr::Ocr;
+use crate::ocr::{Ocr, TextBox};
 use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
 
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
 pub const REFINERY_VISIT: &str = "refinery-visit";
-// ONNX Runtime threads: the game runs at the same time
-const OCR_THREADS: usize = 2;
+pub const INVENTORY_READ: &str = "inventory-read";
+/// Whether a refinery session waits for the terminal's titles before reading (the former automatic
+/// detection); off: the session reads right away
+const AUTO_REFINERY: bool = false;
+/// Width of the frame sent with an inventory event while debugging
+const DEBUG_FRAME_WIDTH: u32 = 1280;
+/// Reads kept for the debug export (full frames as PNG: ~8 MB each on 3840×1600)
+const DEBUG_KEEP: usize = 3;
+// ONNX Runtime threads: the game runs at the same time (3: the inventory reads confirm every stack
+// twice, the user waits for them)
+const OCR_THREADS: usize = 3;
 const THUMB: (u32, u32) = (96, 40);
 // Samples per thumbnail pixel and axis (a box average of the frame's pixels; fewer let small details
 // flicker)
@@ -39,6 +61,9 @@ const THUMB_SAMPLES: u32 = 16;
 const STILL: f32 = 3.0;
 const NEW: f32 = 1.5;
 const REREAD_MS: u64 = 2_000;
+// The inventory scan reads every frame the capture delivers (one per second, a read takes about as
+// long): a stack counts after two agreeing reads, the user waits for them
+const INVENTORY_REREAD_MS: u64 = 0;
 // Full reads in a row without the terminal that end a visit
 const LEAVE_AFTER: u32 = 3;
 // A visit also ends without any frame for this long (the game not in front)
@@ -110,6 +135,8 @@ pub struct Frame {
     pub pixels: Pixels,
     /// From the screen capture: passes the gate; test frames are always read
     pub live: bool,
+    /// The mouse cursor in frame pixels (the capture knows it; test frames have none)
+    pub cursor: Option<(f32, f32)>,
 }
 
 #[derive(Serialize, Clone)]
@@ -126,6 +153,105 @@ struct VisitEvent {
     active: bool,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct InventoryEvent {
+    at_ms: u64,
+    /// The read's duration
+    ms: u64,
+    /// The frame's size (the overlays of the debug view scale with it)
+    width: u32,
+    height: u32,
+    /// None: no inventory terminal in the frame
+    grid: Option<Grid>,
+    /// Every text the OCR detected (for the debug view)
+    boxes: Vec<TextBox>,
+    /// While debugging: the frame as a JPEG data URL, DEBUG_FRAME_WIDTH wide
+    frame: Option<String>,
+}
+
+/// One inventory read kept for the debug export.
+pub struct DebugRead {
+    pub at_ms: u64,
+    pub ms: u64,
+    pub width: u32,
+    pub height: u32,
+    pub grid: Option<Grid>,
+    pub boxes: Vec<TextBox>,
+    /// The frame as PNG
+    pub png: Vec<u8>,
+}
+
+/// Whether the debug view is open: frames go with the events and the last reads are kept.
+#[derive(Default, Clone)]
+pub struct Debug(pub Arc<AtomicBool>);
+
+/// The last inventory reads while debugging, newest last.
+#[derive(Default, Clone)]
+pub struct DebugStore(pub Arc<Mutex<VecDeque<DebugRead>>>);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportRead<'a> {
+    at_ms: u64,
+    ms: u64,
+    width: u32,
+    height: u32,
+    grid: &'a Option<Grid>,
+    boxes: &'a [TextBox],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportInfo<'a> {
+    version: &'a str,
+    platform: &'a str,
+    exported_at_ms: u64,
+    game_dir: &'a str,
+    reads: usize,
+}
+
+impl DebugStore {
+    /// Writes the kept reads into a new folder below `dir` (`read-N.png`, `read-N.json`, `info.json`);
+    /// the folder's path.
+    pub fn export(&self, dir: &Path, game_dir: &str) -> Result<PathBuf, String> {
+        let now = unix_ms(SystemTime::now());
+        let folder = dir.join(format!("qm-inventory-debug-{}", now / 1000));
+        std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+        let reads = self.0.lock().unwrap();
+        for (n, r) in reads.iter().enumerate() {
+            std::fs::write(folder.join(format!("read-{n}.png")), &r.png).map_err(|e| e.to_string())?;
+            let json = serde_json::to_string_pretty(&ExportRead { at_ms: r.at_ms, ms: r.ms, width: r.width, height: r.height, grid: &r.grid, boxes: &r.boxes })
+                .map_err(|e| e.to_string())?;
+            std::fs::write(folder.join(format!("read-{n}.json")), json).map_err(|e| e.to_string())?;
+        }
+        let info = ExportInfo {
+            version: env!("CARGO_PKG_VERSION"),
+            platform: if cfg!(windows) { "windows" } else { "linux" },
+            exported_at_ms: now,
+            game_dir,
+            reads: reads.len(),
+        };
+        std::fs::write(folder.join("info.json"), serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        Ok(folder)
+    }
+}
+
+/// The frame as a JPEG data URL, `width` pixels wide.
+fn jpeg_data_url(image: &RgbImage, width: u32) -> Result<String, String> {
+    let (w, h) = image.dimensions();
+    let scaled = if w > width { image::imageops::resize(image, width, (h as u64 * width as u64 / w as u64).max(1) as u32, image::imageops::FilterType::Triangle) } else { image.clone() };
+    let mut bytes = Cursor::new(Vec::new());
+    scaled.write_to(&mut bytes, ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+    Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())))
+}
+
+fn png_bytes(image: &RgbImage) -> Result<Vec<u8>, String> {
+    let mut bytes = Cursor::new(Vec::new());
+    image.write_to(&mut bytes, ImageFormat::Png).map_err(|e| e.to_string())?;
+    Ok(bytes.into_inner())
+}
+
 /// Decides which live frames are worth reading.
 pub struct Gate {
     previous: Option<GrayImage>,
@@ -135,12 +261,14 @@ pub struct Gate {
     moved: bool,
     /// At a refinery terminal: read again every REREAD_MS
     visit: bool,
+    /// How long after a read a still view is read again during a visit
+    reread_ms: u64,
 }
 
 impl Default for Gate {
     fn default() -> Self {
         // The first still view is checked
-        Self { previous: None, last_read: None, last_read_ms: 0, moved: true, visit: false }
+        Self { previous: None, last_read: None, last_read_ms: 0, moved: true, visit: false, reread_ms: REREAD_MS }
     }
 }
 
@@ -161,7 +289,7 @@ impl Gate {
         let pass = still
             && if self.visit {
                 let new = self.last_read.as_ref().is_none_or(|l| diff(l, &t) > NEW);
-                new || at_ms.saturating_sub(self.last_read_ms) >= REREAD_MS
+                new || at_ms.saturating_sub(self.last_read_ms) >= self.reread_ms
             } else {
                 self.moved
             };
@@ -180,9 +308,59 @@ impl Gate {
     }
 }
 
-/// Whether detection is on (the refinery panel's button; on at start). Off: every frame is
-/// dropped unread (the screen capture is meant to stop as well).
+/// Whether a scan session runs (the capture runs only then; off at start). Off: every frame is
+/// dropped unread.
 pub type Detect = Arc<AtomicBool>;
+
+/// What a scan session reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanMode {
+    Off,
+    Inventory,
+    Refinery,
+}
+
+impl ScanMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            ScanMode::Off => "off",
+            ScanMode::Inventory => "inventory",
+            ScanMode::Refinery => "refinery",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "off" => Some(ScanMode::Off),
+            "inventory" => Some(ScanMode::Inventory),
+            "refinery" => Some(ScanMode::Refinery),
+            _ => None,
+        }
+    }
+
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => ScanMode::Inventory,
+            2 => ScanMode::Refinery,
+            _ => ScanMode::Off,
+        }
+    }
+}
+
+/// The session's mode, shared with the commands (`Detect` says whether one runs at all: the capture
+/// only looks at that). Its own type: Tauri keeps managed state by type.
+#[derive(Default, Clone)]
+pub struct Scan(pub Arc<AtomicU8>);
+
+impl Scan {
+    pub fn get(&self) -> ScanMode {
+        ScanMode::from_u8(self.0.load(Ordering::Relaxed))
+    }
+
+    pub fn set(&self, mode: ScanMode) {
+        self.0.store(mode as u8, Ordering::Relaxed);
+    }
+}
 
 /// Whether Star Citizen runs, as the screen capture sees it while detection is on (never true on
 /// platforms without a capture); changes go to the frontend as `game-seen`. Its own type, not an alias
@@ -191,10 +369,10 @@ pub type Detect = Arc<AtomicBool>;
 pub struct GameSeen(pub Arc<AtomicBool>);
 pub const GAME_SEEN: &str = "game-seen";
 
-/// Starts the OCR worker; frames sent to the returned channel are read in order while `detect` is on.
-pub fn spawn(app: AppHandle, detect: Detect) -> Sender<Frame> {
+/// Starts the OCR worker; frames sent to the returned channel are read in order while a session runs.
+pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Sender<Frame> {
     let (tx, rx) = channel::<Frame>();
-    std::thread::spawn(move || Worker::new(app, detect).run(rx));
+    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store).run(rx));
     if let Some(dir) = std::env::var_os("QM_OCR_FRAMES") {
         spawn_folder_source(PathBuf::from(dir), tx.clone());
     }
@@ -227,20 +405,35 @@ struct Visit {
 struct Worker {
     app: AppHandle,
     detect: Detect,
+    scan: Scan,
+    debug: Debug,
+    store: DebugStore,
     ocr: Option<Ocr>,
     last_used: Instant,
     gate: Gate,
     labels: LabelSource,
     visit: Option<Visit>,
+    /// The last inventory read's grid pitch: the next fit's prior
+    last_pitch: Option<(f32, f32)>,
 }
 
 fn unix_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
+/// The OCR, loaded on first use.
+fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
+    if slot.is_none() {
+        let started = Instant::now();
+        *slot = Some(Ocr::new(OCR_THREADS).map_err(|e| format!("models: {e}"))?);
+        log::info!("OCR loaded in {:?}", started.elapsed());
+    }
+    Ok(slot.as_mut().expect("loaded above"))
+}
+
 impl Worker {
-    fn new(app: AppHandle, detect: Detect) -> Self {
-        Self { app, detect, ocr: None, last_used: Instant::now(), gate: Gate::default(), labels: LabelSource::default(), visit: None }
+    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Self {
+        Self { app, detect, scan, debug, store, ocr: None, last_used: Instant::now(), gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None }
     }
 
     fn run(mut self, rx: Receiver<Frame>) {
@@ -254,42 +447,86 @@ impl Worker {
                 log::info!("OCR unloaded (unused)");
             }
             let Some(frame) = frame else { continue };
-            if !self.detect.load(Ordering::Relaxed) {
+            let mode = if self.detect.load(Ordering::Relaxed) { self.scan.get() } else { ScanMode::Off };
+            if mode != ScanMode::Refinery {
+                self.end_visit("scan stopped");
+            }
+            if mode == ScanMode::Off {
                 self.gate = Gate::default();
-                self.end_visit("detection off");
+                // The next session may see the terminal from elsewhere
+                self.last_pitch = None;
                 continue;
             }
             if let Some(v) = &mut self.visit {
                 v.last_frame = Instant::now();
             }
+            self.gate.reread_ms = if mode == ScanMode::Inventory { INVENTORY_REREAD_MS } else { REREAD_MS };
             if frame.live && !self.gate.pass(frame.pixels.thumb(), frame.at_ms) {
                 continue;
             }
-            if let Err(e) = self.look(frame) {
+            let result = match mode {
+                ScanMode::Inventory => self.look_inventory(frame),
+                _ => self.look(frame),
+            };
+            if let Err(e) = result {
                 log::warn!("OCR: {e}");
             }
-            self.gate.read(self.visit.is_some());
+            // A session reads again every REREAD_MS, not only when the view moved
+            self.gate.read(true);
             self.last_used = Instant::now();
         }
     }
 
-    /// Checks a frame for the terminal (idle) or reads it in full (visit).
-    fn look(&mut self, frame: Frame) -> Result<(), String> {
-        if self.ocr.is_none() {
-            let started = Instant::now();
-            self.ocr = Some(Ocr::new(OCR_THREADS).map_err(|e| format!("models: {e}"))?);
-            log::info!("OCR loaded in {:?}", started.elapsed());
-        }
-        let ocr = self.ocr.as_mut().expect("loaded above");
+    /// Reads the inventory tiles and the tooltip in a frame (every tile's badge only while debugging:
+    /// the sightings need the hovered tile's).
+    fn look_inventory(&mut self, frame: Frame) -> Result<(), String> {
+        let debug = self.debug.0.load(Ordering::Relaxed);
+        let ocr = ensure_ocr(&mut self.ocr)?;
         let image = frame.pixels.into_rgb();
+        let (width, height) = image.dimensions();
+        let started = Instant::now();
+        let (grid, boxes) = read_grid(ocr, &image, frame.cursor, self.last_pitch, debug)?;
+        let ms = started.elapsed().as_millis() as u64;
+        match &grid {
+            Some(g) => {
+                // Only a strong fit sets the pitch the weaker reads keep
+                if g.fit_weight >= crate::inventory::STRONG_FIT_WEIGHT {
+                    self.last_pitch = Some((g.pitch_x, g.pitch_y));
+                }
+                let tip = g.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {} Q{:?} {:?}", t.name, t.quality, t.scu));
+                let hovered = g.tiles.iter().find(|t| t.hovered).map_or(String::new(), |t| format!(", hovered r{} c{} Q{:?} x{:?}", t.row, t.col, t.quality, t.count));
+                log::info!("inventory read in {ms} ms: {}×{} tiles at pitch {:.0}×{:.0} (weight {}), cursor {:?}, {tip}{hovered}", g.cols.len(), g.rows.len(), g.pitch_x, g.pitch_y, g.fit_weight, frame.cursor);
+            }
+            None => log::debug!("no warehouse grid ({ms} ms)"),
+        }
+        let frame_url = if debug { Some(jpeg_data_url(&image, DEBUG_FRAME_WIDTH)?) } else { None };
+        if debug {
+            let png = png_bytes(&image)?;
+            let mut reads = self.store.0.lock().unwrap();
+            if reads.len() >= DEBUG_KEEP {
+                reads.pop_front();
+            }
+            reads.push_back(DebugRead { at_ms: frame.at_ms, ms, width, height, grid: grid.clone(), boxes: boxes.clone(), png });
+        }
+        let _ = self.app.emit(INVENTORY_READ, InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, boxes, frame: frame_url });
+        Ok(())
+    }
+
+    /// Reads the refinery terminal's work order overview in a frame (the session is the visit; with
+    /// `AUTO_REFINERY` the visit starts only once the terminal's titles are seen).
+    fn look(&mut self, frame: Frame) -> Result<(), String> {
         let game_dir = PathBuf::from(&self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.game_dir);
         let labels = self.labels.get(&game_dir).clone();
+        let ocr = ensure_ocr(&mut self.ocr)?;
+        let image = frame.pixels.into_rgb();
         let started = Instant::now();
         if self.visit.is_none() {
-            let found = terminal_in_view(ocr, &image, &labels)?;
-            log::debug!("terminal check in {:?}: {found}", started.elapsed());
-            if !found {
-                return Ok(());
+            if AUTO_REFINERY {
+                let found = terminal_in_view(ocr, &image, &labels)?;
+                log::debug!("terminal check in {:?}: {found}", started.elapsed());
+                if !found {
+                    return Ok(());
+                }
             }
             log::info!("refinery visit started");
             self.visit = Some(Visit { misses: 0, last_frame: Instant::now() });
@@ -311,7 +548,8 @@ impl Worker {
             Read::Nothing => {
                 visit.misses += 1;
                 log::debug!("no refinery terminal ({:?}), {} in a row", started.elapsed(), visit.misses);
-                if visit.misses >= LEAVE_AFTER {
+                // A manual session goes on until stopped (the user looks away and back)
+                if AUTO_REFINERY && visit.misses >= LEAVE_AFTER {
                     self.end_visit("left");
                 }
             }
@@ -347,7 +585,7 @@ fn spawn_folder_source(dir: PathBuf, tx: Sender<Frame>) {
                 let at_ms = std::fs::metadata(&path).and_then(|m| m.modified()).map_or(unix_ms(SystemTime::now()), unix_ms);
                 match image::open(&path) {
                     Ok(img) => {
-                        if tx.send(Frame { at_ms, pixels: Pixels::Rgb(img.to_rgb8()), live: false }).is_err() {
+                        if tx.send(Frame { at_ms, pixels: Pixels::Rgb(img.to_rgb8()), live: false, cursor: None }).is_err() {
                             return;
                         }
                     }

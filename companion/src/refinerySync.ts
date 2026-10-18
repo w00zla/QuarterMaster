@@ -2,11 +2,12 @@
 // "refinery-overview" and "refinery-visit") go through RefinerySync (refinery.ts) against the user's
 // running jobs. Matched running jobs are updated right away; proposals wait in the list until the user
 // confirms or dismisses them. Names are resolved against the web app's catalog in both languages and
-// the player's own language pack (the terminal shows its texts).
+// the player's own language pack (the terminal shows its texts); the catalog is shared with the
+// inventory scan (inventorySync.ts). The scan session itself is in scan.ts.
 import { listen } from "@tauri-apps/api/event";
 import { ref, shallowRef, watch } from "vue";
 import type { CatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
-import { gameNames, getDetect, getGameSeen, setDetect } from "./backend";
+import { gameNames } from "./backend";
 import { t } from "./i18n";
 import {
   buildCatalog, doneRequest, gameNameKeys, jobsOf, RefinerySync, removeRequest, startRequest,
@@ -17,23 +18,10 @@ import { toast, toastError } from "./toasts";
 
 const sync = new RefinerySync();
 export const proposals = ref<Proposal[]>([]);
-// Detection on (on at every start; the state row's toggle switches it)
-export const detecting = ref(true);
-// Star Citizen runs (seen by the screen capture while detection is on)
-export const gameSeen = ref(false);
 export const syncCatalog = shallowRef<SyncCatalog | null>(null);
 // The catalog and the player's language pack are being loaded (the state row shows it)
 export const preparing = ref(false);
 let jobs: Job[] = [];
-
-export async function toggleDetect() {
-  try {
-    await setDetect(!detecting.value);
-    detecting.value = await getDetect();
-  } catch (e) {
-    toastError(e);
-  }
-}
 
 const publish = () => (proposals.value = [...sync.proposals]);
 
@@ -55,6 +43,11 @@ async function loadCatalog() {
   } finally {
     preparing.value = false;
   }
+}
+
+/** The catalog, loaded when missing. */
+export async function ensureCatalog() {
+  if (!syncCatalog.value) await loadCatalog();
 }
 
 async function loadJobs() {
@@ -117,11 +110,6 @@ function onVisit(e: VisitEvent) {
 }
 
 export async function watchRefinery() {
-  detecting.value = await getDetect();
-  gameSeen.value = await getGameSeen();
-  await listen<boolean>("game-seen", (e) => {
-    gameSeen.value = e.payload;
-  });
   await listen<OverviewEvent>("refinery-overview", (e) => onOverview(e.payload));
   await listen<VisitEvent>("refinery-visit", (e) => onVisit(e.payload));
   // Ready before the first visit: loaded once connected (the catalog comes from the server), again for another game folder

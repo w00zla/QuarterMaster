@@ -32,8 +32,11 @@ memchr = "2"
 # OCR of the refinery terminal: ONNX Runtime (prebuilt, linked statically) for the PP-OCRv5 models,
 # rustls for its build-time download like reqwest
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-rustls"] }
-# Decoding screenshots (tests, test frames); live frames come as raw pixels
+# Decoding screenshots (tests, test frames); live frames come as raw pixels; encoding the debug
+# view's frames (JPEG for the event, PNG for the export)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# The debug view's frame in the event (already a dependency of others)
+base64 = "0.21"
 
 # Screen capture for the refinery OCR (DXGI Desktop Duplication); the version Tauri already uses
 [target.'cfg(windows)'.dependencies]
