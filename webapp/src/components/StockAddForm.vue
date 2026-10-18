@@ -94,8 +94,8 @@ async function submit() {
 <template>
   <form class="form" @submit.prevent="submit">
     <label class="field subject-field">
-      {{ components ? t("field.component") : t("field.material") }}
-      <Picker v-model="subject" strong :options="components ? componentOptions : materialOptions" :placeholder="components ? t('pick.component') : t('pick.material')" />
+      {{ components ? t("field.component") : t("field.resource") }}
+      <Picker v-model="subject" strong :options="components ? componentOptions : materialOptions" :placeholder="components ? t('pick.component') : t('pick.resource')" />
     </label>
     <label class="field">
       {{ t("field.location") }}

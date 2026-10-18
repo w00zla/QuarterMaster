@@ -130,7 +130,7 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ..
         <div class="slots">
           <div class="slot-row head-row">
             <span class="panel-title">{{ t("crafting.slot") }}</span>
-            <span class="panel-title">{{ t("field.material") }}</span>
+            <span class="panel-title">{{ t("field.resource") }}</span>
             <span class="panel-title amount-col">{{ t("field.amount") }}</span>
             <span class="panel-title quality-title">{{ t("field.quality") }}</span>
           </div>
