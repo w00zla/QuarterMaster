@@ -8,8 +8,8 @@
 //! checking every changed frame took ~5 % CPU). Inventory: each read goes out as `inventory-read`
 //! (`inventory.rs`: the tiles, the tooltip, the layout). Refinery: the session is a visit
 //! (`refinery-visit` true) and each work order overview goes out as `refinery-overview`; a minute
-//! without frames ends the visit. After 5 minutes without any read the OCR is dropped (its memory arena
-//! keeps the full reads' peak); the next read loads it again.
+//! without frames ends the visit. The OCR is dropped as soon as the session stops (its memory arena
+//! keeps the full reads' peak), and after 5 minutes without any read; the next read loads it again.
 //!
 //! The former automatic refinery detection (idle: the cheap check `terminal_in_view` on every view that
 //! came to rest, a hit starting the visit, a few reads without the terminal ending it) is kept behind
@@ -455,6 +455,11 @@ impl Worker {
                 self.gate = Gate::default();
                 // The next session may see the terminal from elsewhere
                 self.last_pitch = None;
+                // No session: the OCR's memory goes right away (the next start loads it again in
+                // well under a second)
+                if self.ocr.take().is_some() {
+                    log::info!("OCR unloaded (scan stopped)");
+                }
                 continue;
             }
             if let Some(v) = &mut self.visit {
