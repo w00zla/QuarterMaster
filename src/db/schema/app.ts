@@ -79,9 +79,14 @@ export const stockBatch = app.table('stock_batch', {
   // A part split off by its owner (a random UUID): kept apart from the batch it came from, so it can be
   // shared on its own; NULL for everything booked normally
   lot: uuid('lot'),
+  // Ship components only: the stats, {crafted property UUID: text} like the crafting check shows them (a
+  // multiplier's change in percent, additive steps; src/stock/component-stats.ts), keys sorted; NULL = none
+  // (looted, or not entered). Part of the merge key
+  stats: jsonb('stats'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
+  check('stock_batch_stats', sql`${t.stats} IS NULL OR (${t.kind} = 'item' AND jsonb_typeof(${t.stats}) = 'object')`),
   check('stock_batch_kind', sql`(${t.kind} = 'resource' AND ${t.resourceUuid} IS NOT NULL AND ${t.itemUuid} IS NULL)
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
   check('stock_batch_state', sql`${t.state} IN ('stored', 'refining')`),
@@ -94,9 +99,9 @@ export const stockBatch = app.table('stock_batch', {
   check('stock_batch_refine_ends', sql`${t.refineEndsAt} IS NULL OR ${t.refineEndsAt} >= ${t.refineStartedAt}`),
   check('stock_batch_refine_job_id', sql`(${t.state} = 'refining') = (${t.refineJob} IS NOT NULL)`),
   // The job keeps two refinery jobs with the same material, place and quality apart, the lot a split-off part
-  // (stored stock: both NULL, merges)
+  // (stored stock: both NULL, merges), the stats components with other values
   unique('stock_batch_merge_key').on(
-    t.ownerUserId, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineJob, t.lot,
+    t.ownerUserId, t.kind, t.resourceUuid, t.itemUuid, t.locationUuid, t.state, t.quality, t.refineJob, t.lot, t.stats,
   ).nullsNotDistinct(),
   index().on(t.ownerUserId),
   index().on(t.refineJob),
@@ -132,6 +137,8 @@ export const stockJournal = app.table('stock_journal', {
   locationUuid: uuid('location_uuid').notNull().references(() => location.uuid),
   state: text('state').notNull(),
   quality: integer('quality').notNull(),
+  // Copy of the batch's stats (ship components)
+  stats: jsonb('stats'),
   // Signed
   delta: quantity('delta').notNull(),
   note: text('note'),

@@ -13,12 +13,13 @@ import type {
 import type { IconName } from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { locationOptions, locations } from "../catalog";
-import { amountOf, ownerText, qty, qualityPrefix, sharedText, unitText, withQuality } from "../format";
+import { amountOf, ownerText, qty, qualityPrefix, sharedText, withQuality } from "../format";
 import { t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
 import { me } from "../session";
 import { toast, toastError } from "../toasts";
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
+import AmountStepper from "./AmountStepper.vue";
 import Picker from "./Picker.vue";
 
 export type BatchAction = "share" | "split" | "merge" | "move" | "adjust" | "remove";
@@ -193,27 +194,21 @@ async function book() {
         <span class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}<template v-if="b.sharedIn.length"> · {{ sharedText(b) }}</template></span>
       </div>
       <div v-if="action === 'remove' || action === 'move'" class="field">
-        {{ t("field.amount") }}
+        {{ b.component ? t("field.count") : t("field.amount") }}
         <span class="with-unit">
           <label class="check"><input v-model="all" type="checkbox" /> {{ t("field.everything") }}</label>
-          <input v-model="amount" class="input" :class="{ invalid: !all && amount.trim() !== '' && !amt }" type="text" inputmode="decimal" :disabled="all" />
-          <span class="unit">{{ unitText(b.unit) }}</span>
+          <AmountStepper v-model="amount" :unit="b.unit" :invalid="!all && amount.trim() !== '' && !amt" :disabled="all" />
         </span>
       </div>
-      <label v-if="action === 'split'" class="field">
+      <div v-if="action === 'split'" class="field">
         {{ t("field.splitAmount") }}
-        <span class="with-unit">
-          <input v-model="amount" class="input" :class="{ invalid: amount.trim() !== '' && !valid }" type="text" inputmode="decimal" />
-          <span class="unit">{{ unitText(b.unit) }}</span>
-        </span>
-      </label>
-      <label v-if="action === 'adjust'" class="field">
+        <AmountStepper v-model="amount" :unit="b.unit" :invalid="amount.trim() !== '' && !valid" :label="t('field.splitAmount')" />
+      </div>
+      <!-- Counted: "0" empties the batch -->
+      <div v-if="action === 'adjust'" class="field">
         {{ t("field.counted") }}
-        <span class="with-unit">
-          <input v-model="amount" class="input" type="text" inputmode="decimal" />
-          <span class="unit">{{ unitText(b.unit) }}</span>
-        </span>
-      </label>
+        <AmountStepper v-model="amount" :unit="b.unit" :min="0" :label="t('field.counted')" />
+      </div>
       <template v-if="action === 'move'">
         <label class="field">
           {{ t("field.location") }}

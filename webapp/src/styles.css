@@ -154,6 +154,9 @@
   flex-wrap: wrap;
   gap: 8px;
   grid-column: 1 / -1;
+  /* Set apart from the fields above by a quiet dashed line */
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-dim);
 }
 
 .hint-line {
@@ -196,6 +199,11 @@
 /* The add form inside a list's panel, between its head and the filters */
 .add-area {
   border-bottom: 1px solid var(--border-dim);
+}
+
+/* Its title ("Add stock to …") runs straight into the form, no line between */
+.add-area > .head {
+  border-bottom: none;
 }
 
 /* The big scope switch above a view: personal or one of your orgs */

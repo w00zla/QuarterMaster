@@ -8,9 +8,10 @@ import type { OkResponse, RefineryStartRequest } from "../../../src/webapp/api-t
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { locations, materials, refineryLocationOptions, resourceOptions, yieldBonus } from "../catalog";
-import { amountOf, durationOfParts, hm, qty, qualityOf, unitText } from "../format";
+import { amountOf, durationOfParts, hm, qty, qualityOf } from "../format";
 import { t } from "../i18n";
 import { toast, toastError } from "../toasts";
+import AmountStepper from "./AmountStepper.vue";
 import Picker from "./Picker.vue";
 
 const emit = defineEmits<{ done: [] }>();
@@ -24,7 +25,8 @@ interface MaterialRow {
 }
 
 let nextId = 0;
-const newRow = (): MaterialRow => ({ id: nextId++, material: null, quality: "", amount: "" });
+// A new row starts at 1 SCU, like the stock add form
+const newRow = (): MaterialRow => ({ id: nextId++, material: null, quality: "", amount: "1" });
 
 const location = ref<string | null>(null);
 const hours = ref("");
@@ -117,10 +119,7 @@ async function submit() {
       <template v-for="r in rows" :key="r.id">
         <Picker v-model="r.material" :options="resourceOptions" :placeholder="t('pick.material')" />
         <input v-model="r.quality" class="input" :class="{ invalid: r.quality.trim() !== '' && q(r) === null }" type="text" inputmode="numeric" placeholder="0–1000" />
-        <span class="with-unit">
-          <input v-model="r.amount" class="input" :class="{ invalid: r.amount.trim() !== '' && !amt(r) }" type="text" inputmode="decimal" />
-          <span class="unit">{{ unitText("SCU") }}</span>
-        </span>
+        <AmountStepper v-model="r.amount" unit="SCU" :invalid="r.amount.trim() !== '' && !amt(r)" :label="t('field.expectedYield')" />
         <button type="button" class="icon-btn" :title="t('refinery.removeRow')" @click="removeRow(r.id)"><Icon name="trash" :size="14" /></button>
       </template>
     </div>
@@ -140,7 +139,7 @@ async function submit() {
 .material-rows {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) minmax(90px, 1fr) minmax(130px, 1fr) 32px;
+  grid-template-columns: minmax(260px, 3fr) minmax(90px, 1fr) auto 32px;
   gap: 8px 12px;
   align-items: center;
 }

@@ -23,7 +23,7 @@ import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import StockAddForm from "../components/StockAddForm.vue";
-import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, sharedText, tierMark, tierQualities } from "../format";
+import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, sharedText, statsText, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
 import { takeQuery } from "../deepLink";
@@ -123,14 +123,15 @@ const filtered = computed(() => {
       ? (!typeFilter.value || typeOf(b) === typeFilter.value) && (!sizeFilter.value || String(sizeOf(b)) === sizeFilter.value)
         && (!gradeFilter.value || gradeOf(b) === gradeFilter.value)
       : qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value)
-    && words.every((w) => `${nameOf(b)} ${b.location}`.toLowerCase().includes(w)));
+    && words.every((w) => `${nameOf(b)} ${b.location} ${statsText(b.subjectUuid, b.stats)}`.toLowerCase().includes(w)));
 });
 
 // --- the table: one group per material (header with the total), its batches below ------------
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: props.components ? t("stock.col.component") : t("stock.col.material"), width: 200 },
   ...(props.components ? [] : [{ key: "quality", label: t("stock.col.quality"), width: 130 }]),
-  { key: "amount", label: t("stock.col.amount"), width: 120 },
+  { key: "amount", label: props.components ? t("stock.col.count") : t("stock.col.amount"), width: 120 },
+  ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260 }] : []),
   { key: "location", label: t("stock.col.location"), width: 280 },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
   ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200 }] : []),
@@ -148,6 +149,7 @@ function valueOf(b: StockBatch, key: string): string | number {
     case "material": return nameOf(b);
     case "quality": return b.quality;
     case "amount": return Number(b.quantity);
+    case "stats": return statsText(b.subjectUuid, b.stats);
     case "location": return b.location;
     case "holder": return b.holderName ?? "";
     case "owner": return ownerText(b);
@@ -279,6 +281,7 @@ function open(batch: StockBatch, action: BatchAction) {
             <span />
             <span v-if="!components" class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
+            <span v-if="components" class="cell" :title="statsText(b.subjectUuid, b.stats)">{{ statsText(b.subjectUuid, b.stats) }}</span>
             <span class="cell">{{ b.location }}</span>
             <span v-if="org" class="cell">{{ b.holderName }}</span>
             <span v-if="scope === 'all'" class="cell">{{ ownerText(b) }}</span>

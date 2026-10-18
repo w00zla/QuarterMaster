@@ -1,7 +1,9 @@
 // Display helpers and input checks for stock (amounts are validated like the server does, as text).
 import type { StockBatch } from "../../src/webapp/api-types";
 import { parseAmount } from "../../src/stock/amount";
+import { statValueText } from "../../src/stock/component-stats";
 import { qMark, qualityStars } from "../../src/stock/quality";
+import { materials } from "./catalog";
 import { t } from "./i18n";
 import { orgOf } from "./orgs";
 import { me } from "./session";
@@ -59,10 +61,33 @@ export const ownerText = (b: StockBatch) => (b.holderUserId === me.value?.userId
 export const sharedText = (b: StockBatch) => t("stock.sharedIn", { org: b.sharedIn.map((g) => orgOf(g)?.name ?? "Org").join(", ") });
 
 /** "Quantanium · ★★★★ 820"; a component has no quality: its name only. */
-export const withQuality = (b: StockBatch) => (b.component ? b.material : `${b.material} · ${qText(b.quality)}`);
+export const withQuality = (b: StockBatch) => {
+  if (!b.component) return `${b.material} · ${qText(b.quality)}`;
+  const stats = statsText(b.subjectUuid, b.stats);
+  return stats ? `${b.material} · ${stats}` : b.material;
+};
 
-/** "★★★★ 820 · " before a batch's place; nothing for a component. */
-export const qualityPrefix = (b: StockBatch) => (b.component ? "" : `${qText(b.quality)} · `);
+/** "★★★★ 820 · " before a batch's place; a component's stats instead ("Coolant Rating +5.0 % · "), if any. */
+export const qualityPrefix = (b: StockBatch) => {
+  if (!b.component) return `${qText(b.quality)} · `;
+  const stats = statsText(b.subjectUuid, b.stats);
+  return stats ? `${stats} · ` : "";
+};
+
+/**
+ * A component's stats with the game's names, in the tooltip's order, like the crafting check shows them:
+ * "Coolant Rating +5.0 % · Integrity −2.0 %", power pips "+1"; "" without.
+ */
+export function statsText(subjectUuid: string, stats: Record<string, string> | null): string {
+  if (!stats) return "";
+  const named = materials.value.get(subjectUuid)?.stats ?? [];
+  const known = named.filter((s) => s.uuid in stats).map((s) => `${s.name} ${statValueText(s.kind, stats[s.uuid]!)}`);
+  // A stat the catalog no longer lists (blueprint changed) still shows its value
+  const other = Object.keys(stats).filter((k) => !named.some((s) => s.uuid === k)).map((k) => `? ${stats[k]}`);
+  return [...known, ...other].join(" · ");
+}
+
+export { statValueText };
 
 /** "Quantanium · ★★★★ 820 · Area18 · Pers." */
 export const batchText = (b: StockBatch) => `${b.material} · ${qText(b.quality)} · ${b.location} · ${ownerText(b)}`;

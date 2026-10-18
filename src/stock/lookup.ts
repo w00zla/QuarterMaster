@@ -2,11 +2,13 @@
 // memory per language, reloaded after a newer catalog import) and the batches an actor may change.
 // No Discord here: the bot and the web UI build their own labels from these.
 import { sql, type SQL } from 'drizzle-orm';
+import { ITEM_TYPE_KEY_PREFIX, typeLabel } from '../catalog/labels.ts';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { itemClassText, locText, rows } from '../db/query.ts';
 import type { SubjectKind } from './amount.ts';
-import { componentItemSql, selectableLocationSql, type Actor, type Batch } from './service.ts';
+import type { StatBounds } from './component-stats.ts';
+import { componentItemSql, componentStats, selectableLocationSql, type Actor, type Batch } from './service.ts';
 
 export interface LocationEntry {
   uuid: string;
@@ -63,35 +65,53 @@ export interface MaterialEntry {
   size: number | null;
   gradeLetter: string | null;
   itemClass: string | null;
-  manufacturerCode: string | null;
-  // Components: unique within the catalog ("Name · S3 · B Industrial · CHCO"); else the name
+  // Components: unique within the catalog ("Name · Cooler · S3 · B Industrial"); else the name
   label: string;
+  // Components: the stats a batch can carry (its blueprints' crafted properties); else none
+  stats: ComponentStat[];
+}
+
+export interface ComponentStat extends StatBounds {
+  // The crafted property
+  uuid: string;
+  // As the game names it ("Coolant Rating")
+  name: string;
 }
 
 /** What can be booked: recipe resources and items, and ship components (same rules as the stock service; never ores). */
 export const materialCatalog = importCache(async (db, lang): Promise<Map<string, MaterialEntry>> => {
-  const found = await rows<Omit<MaterialEntry, 'label'> & { className: string | null }>(db, sql`
+  const found = await rows<Omit<MaterialEntry, 'label' | 'stats'> & { className: string | null; type: string | null; typeText: string | null }>(db, sql`
     SELECT 'resource' AS kind, r.uuid, coalesce(${locText(lang, sql`r.name_key`)}, r.key) AS name,
       coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", lower(r.name_key) AS "nameKey", false AS component,
-      NULL::int AS size, NULL AS "gradeLetter", NULL AS "itemClass", NULL AS "manufacturerCode", NULL AS "className"
+      NULL::int AS size, NULL AS "gradeLetter", NULL AS "itemClass", NULL AS "className", NULL AS type, NULL AS "typeText"
     FROM catalog.resource r
     WHERE r.retired_at IS NULL AND EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.resource_uuid = r.uuid)
     UNION ALL
     SELECT 'item', i.uuid, coalesce(${locText(lang, sql`i.name_key`)}, i.class_name),
       coalesce(${locText('en', sql`i.name_key`)}, i.class_name), lower(i.name_key), ${componentItemSql()},
-      i.size, i.grade_letter, ${itemClassText(lang, 'i')}, m.code, i.class_name
-    FROM catalog.item i LEFT JOIN catalog.manufacturer m ON m.uuid = i.manufacturer_uuid
+      i.size, i.grade_letter, ${itemClassText(lang, 'i')}, i.class_name, i.type,
+      ${locText(lang, sql`${ITEM_TYPE_KEY_PREFIX} || lower(i.type)`)}
+    FROM catalog.item i
     WHERE i.retired_at IS NULL AND (EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid) OR ${componentItemSql()})`);
   const labels = found.map((m) => (m.component
-    ? [m.name, m.size !== null ? `S${m.size}` : null, [m.gradeLetter, m.itemClass].filter(Boolean).join(' ') || null, m.manufacturerCode]
+    ? [m.name, typeLabel(m.type, m.typeText), m.size !== null ? `S${m.size}` : null, [m.gradeLetter, m.itemClass].filter(Boolean).join(' ') || null]
       .filter(Boolean).join(' · ')
     : m.name));
   const counts = new Map<string, number>();
   found.forEach((m, i) => m.component && counts.set(labels[i]!, (counts.get(labels[i]!) ?? 0) + 1));
+  // The stats each component can carry with their bounds, in the tooltip's order (Integrity last)
+  const bounds = await componentStats(db, sql`i.retired_at IS NULL`);
+  const properties = new Map((await rows<{ uuid: string; key: string; name: string }>(db, sql`
+    SELECT cp.uuid, cp.key, coalesce(${locText(lang, sql`cp.name_key`)}, cp.key) AS name FROM catalog.crafted_property cp`))
+    .map((p) => [p.uuid, p]));
+  const statsOf = (item: string): ComponentStat[] => [...(bounds.get(item) ?? [])]
+    .map(([uuid, b]) => ({ uuid, name: properties.get(uuid)?.name ?? uuid, key: properties.get(uuid)?.key ?? uuid, ...b }))
+    .sort((a, b) => Number(a.key === 'GPP_Health_MaxHealth') - Number(b.key === 'GPP_Health_MaxHealth') || a.key.localeCompare(b.key))
+    .map(({ key: _k, ...s }) => s);
   // Component labels that still collide get the class name
-  return new Map(found.map(({ className, ...m }, i) => {
+  return new Map(found.map(({ className, type: _t, typeText: _x, ...m }, i) => {
     const label = m.component && counts.get(labels[i]!)! > 1 ? `${labels[i]} · ${className}` : labels[i]!;
-    return [m.uuid, { ...m, label }];
+    return [m.uuid, { ...m, label, stats: m.component ? statsOf(m.uuid) : [] }];
   }));
 });
 
@@ -185,7 +205,7 @@ async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBa
   const found = await rows<Batch & { holderName: string | null; sharedIn: string[]; refine: RefineInfo; component: boolean }>(db, sql`
     SELECT b.id::int AS id, b.owner_user_id AS "ownerUserId", b.kind, ${componentItemSql('b.item_uuid')} AS component,
       b.resource_uuid AS "resourceUuid", b.item_uuid AS "itemUuid", b.location_uuid AS "locationUuid", b.state, b.quality,
-      b.quantity::text AS quantity, b.lot,
+      b.quantity::text AS quantity, b.lot, b.stats,
       coalesce((SELECT array_agg(s.guild_id ORDER BY s.guild_id) FROM app.stock_share s WHERE s.batch_id = b.id), '{}') AS "sharedIn",
       (SELECT m.display_name FROM app.stock_share s JOIN app.member m ON m.guild_id = s.guild_id AND m.user_id = b.owner_user_id
         WHERE s.batch_id = b.id ORDER BY m.active DESC, s.guild_id LIMIT 1) AS "holderName",

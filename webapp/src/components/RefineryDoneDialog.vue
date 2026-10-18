@@ -6,9 +6,10 @@
 import { computed, reactive, ref } from "vue";
 import type { OkResponse, RefineryDoneRequest, StockBatch } from "../../../src/webapp/api-types";
 import { api } from "../api";
-import { amountOf, qText, qty, unitText } from "../format";
+import { amountOf, qText, qty } from "../format";
 import { t } from "../i18n";
 import { toast, toastError } from "../toasts";
+import AmountStepper from "./AmountStepper.vue";
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 
 const props = defineProps<{ batches: StockBatch[] }>();
@@ -83,10 +84,8 @@ async function book() {
       <span class="field">{{ t("refinery.col.received") }}</span>
       <template v-for="l in lines" :key="l.batch.id">
         <span class="material">{{ l.batch.material }} · {{ qText(l.batch.quality) }} · {{ qty(l.batch.quantity, l.batch.unit) }}</span>
-        <span class="with-unit">
-          <input v-model="l.amount" class="input" :class="{ invalid: l.amount.trim() !== '' && amt(l.amount) === null }" type="text" inputmode="decimal" />
-          <span class="unit">{{ unitText("SCU") }}</span>
-        </span>
+        <!-- "0": nothing came out -->
+        <AmountStepper v-model="l.amount" unit="SCU" :min="0" :invalid="l.amount.trim() !== '' && amt(l.amount) === null" :label="t('refinery.col.received')" />
       </template>
     </div>
 
@@ -103,7 +102,7 @@ async function book() {
 <style scoped>
 .done-lines {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 12px;
   align-items: center;
 }

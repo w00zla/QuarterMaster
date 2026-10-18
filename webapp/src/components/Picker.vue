@@ -28,8 +28,9 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 const labels = inject(PICKER_LABELS, { clear: "Clear", noMatch: "No match" });
 
 const props = withDefaults(
-  defineProps<{ modelValue: string | null; options: PickerOption[]; placeholder?: string; disabled?: boolean }>(),
-  { placeholder: "", disabled: false },
+  // strong: the picked entry in bold (the main choice of a form)
+  defineProps<{ modelValue: string | null; options: PickerOption[]; placeholder?: string; disabled?: boolean; strong?: boolean }>(),
+  { placeholder: "", disabled: false, strong: false },
 );
 const emit = defineEmits<{ "update:modelValue": [value: string | null] }>();
 
@@ -123,6 +124,7 @@ function onKey(e: KeyboardEvent) {
     <input
       v-model="text"
       class="picker-input"
+      :class="{ picked: strong && selected && text === selected.label }"
       type="text"
       role="combobox"
       autocomplete="off"
@@ -186,6 +188,11 @@ function onKey(e: KeyboardEvent) {
 
 .picker-input::placeholder {
   color: rgba(173, 211, 235, 0.6);
+}
+
+/* strong: the picked entry stands out (not while typing a search) */
+.picker-input.picked {
+  font-weight: 600;
 }
 
 .disabled .picker-input {

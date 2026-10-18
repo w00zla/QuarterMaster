@@ -48,13 +48,26 @@ export interface CatalogMaterial {
   typeLabel: string | null;
   // A ship component (an item without quality: booked with quality 0, its own view)
   component: boolean;
-  // Components: unique display label ("Name · S3 · B Industrial · CHCO"); else the name
+  // Components: unique display label ("Name · Cooler · S3 · B Industrial"); else the name
   label: string;
-  // Items: size, grade letter, class and manufacturer code where the game has them
+  // Items: size, grade letter and class where the game has them
   size: number | null;
   gradeLetter: string | null;
   itemClass: string | null;
-  manufacturerCode: string | null;
+  // Components: the stats a batch can carry, in the game tooltip's order; else none
+  stats: CatalogStat[];
+}
+
+export interface CatalogStat {
+  // The crafted property (the key in StockBatch.stats and StockAddRequest.stats)
+  uuid: string;
+  // As the game names it ("Coolant Rating")
+  name: string;
+  // What the blueprint can make of it, like the crafting check shows it: a multiplier as its change in
+  // percent (min/max e.g. -19.3/20.8, one decimal), additive steps as whole numbers (power pips, e.g. -2/2)
+  kind: 'multiplier' | 'additive';
+  min: number;
+  max: number;
 }
 
 export interface CatalogLocation {
@@ -113,6 +126,8 @@ export interface StockBatch {
   kind: 'resource' | 'item';
   // A ship component (shown in its own view, not in the stock view)
   component: boolean;
+  // Components: the stats, {property UUID: value in CatalogStat's unit} (CatalogMaterial.stats names them); null = none
+  stats: Record<string, string> | null;
   subjectUuid: string;
   material: string;
   locationUuid: string;
@@ -160,6 +175,9 @@ export interface StockAddRequest {
   amount: string;
   // Shared in these orgs right away (else unshared; the batch it lands in keeps its shares)
   guildIds?: string[];
+  // Components only: stats in CatalogStat's unit, {property UUID: value} (the component's CatalogMaterial.stats,
+  // within min/max; empty values are left out; else 422 invalidStats). Batches with other stats stay apart
+  stats?: Record<string, string>;
 }
 
 export interface StockRemoveRequest {

@@ -12,6 +12,8 @@ export type HistoryTargetKind = 'resource' | 'item' | 'blueprint';
 export interface HistoryDetails {
   amount?: string;
   quality?: number;
+  // Ship components: the batch's stats ({crafted property UUID: decimal text}), if any
+  stats?: Record<string, string>;
   locationUuid?: string;
   designation?: 'personal' | 'org';
   // Move: where it went

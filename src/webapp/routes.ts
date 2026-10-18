@@ -48,7 +48,10 @@ const quality = z.number().int();
 const amount = z.string().max(32);
 
 const schemas = {
-  add: z.object({ subjectUuid: uuid, locationUuid: uuid, quality, amount, guildIds: z.array(snowflake).max(25).optional() }).strict(),
+  add: z.object({
+    subjectUuid: uuid, locationUuid: uuid, quality, amount, guildIds: z.array(snowflake).max(25).optional(),
+    stats: z.record(uuid, z.string().max(20)).refine((s) => Object.keys(s).length <= 20).optional(),
+  }).strict(),
   remove: z.object({ batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount }).strict(),
   adjust: z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict(),
   move: z.object({
@@ -155,6 +158,7 @@ function toBatch(p: PickableBatch, viewer: string, viewerOrgs: Set<string>): Sto
     part: b.lot !== null,
     kind: b.kind,
     component: p.component,
+    stats: b.stats,
     subjectUuid: b.resourceUuid ?? b.itemUuid!,
     material: p.material,
     locationUuid: b.locationUuid,
@@ -192,7 +196,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     return c.json({
       materials: [...materials.values()].map((m) => ({
         uuid: m.uuid, kind: m.kind, name: m.name, nameKey: m.nameKey, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
-        component: m.component, label: m.label, size: m.size, gradeLetter: m.gradeLetter, itemClass: m.itemClass, manufacturerCode: m.manufacturerCode,
+        component: m.component, label: m.label, size: m.size, gradeLetter: m.gradeLetter, itemClass: m.itemClass, stats: m.stats,
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
@@ -235,7 +239,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const actor = await actorFor(c, db, me, undefined);
     return book(c, () => stock.add(db, actor, {
       kind: material.kind, uuid: input.subjectUuid, locationUuid: input.locationUuid, quality: input.quality, amount: input.amount,
-      shareIn: input.guildIds,
+      shareIn: input.guildIds, stats: input.stats,
     }));
   });
 

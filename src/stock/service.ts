@@ -18,7 +18,9 @@ import type { Db, Tx } from '../db/client.ts';
 import { one, rows } from '../db/query.ts';
 import { refineryLocations } from '../ext/refineries.ts';
 import { recordHistory, type HistoryCategory, type HistoryDetails, type Source } from '../history/record.ts';
+import type { ModifierRange } from '../planner/types.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
+import { statBounds, statValue, unionBounds, type StatBounds } from './component-stats.ts';
 
 export type StockState = 'stored' | 'refining';
 export type JournalAction = 'add' | 'remove' | 'adjust' | 'move_out' | 'move_in' | 'refine_out' | 'refine_in';
@@ -44,7 +46,11 @@ export interface Batch {
   quantity: string;
   // A split-off part (UUID), else null
   lot: string | null;
+  // Ship components: their stats ({crafted property UUID: decimal text}), else null
+  stats: Stats | null;
 }
+
+export type Stats = Record<string, string>;
 
 type BatchKey = Omit<Batch, 'id' | 'quantity'>;
 
@@ -66,7 +72,7 @@ export interface StockResult {
 export type StockErrorCode =
   | 'notAllowed' | 'unknownSubject' | 'notBookable' | 'unknownLocation' | 'notRefinery' | 'invalidDuration' | 'retired'
   | 'invalidAmount' | 'invalidQuality' | 'batchNotFound' | 'batchChanged' | 'insufficient' | 'holderNotMember'
-  | 'notRefining' | 'refiningFixed' | 'nothingToMove' | 'noChange' | 'sharedSplit';
+  | 'notRefining' | 'refiningFixed' | 'nothingToMove' | 'noChange' | 'sharedSplit' | 'invalidStats';
 
 /** A booking that is refused; the caller turns the code into a message. */
 export class StockError extends Error {
@@ -101,12 +107,66 @@ export const componentItemSql = (uuid = 'i.uuid') => sql.raw(`EXISTS (SELECT 1 F
 /** Components have no quality: every batch of one is stored with this one. */
 export const COMPONENT_QUALITY = 0;
 
+/**
+ * The stats components can carry (`where`: a condition on catalog.item `i`), per item and crafted
+ * property: what its blueprints' slots can make of it (component-stats.ts). Those are what the game
+ * lists in a crafted component's tooltip; a stat nothing can change (a flat range) is left out.
+ */
+export async function componentStats(db: Db | Tx, where: SQL): Promise<Map<string, Map<string, StatBounds>>> {
+  const found = await rows<{ item: string; blueprint: string; property: string; ranges: ModifierRange[] }>(db, sql`
+    SELECT cb.output_item_uuid AS item, cb.uuid AS blueprint, lower(m->>'propertyUuid') AS property, m->'ranges' AS ranges
+    FROM catalog.blueprint cb
+    JOIN catalog.blueprint_slot s ON s.blueprint_uuid = cb.uuid
+    CROSS JOIN LATERAL jsonb_array_elements(s.modifiers) m
+    WHERE cb.retired_at IS NULL AND m->>'propertyUuid' IS NOT NULL
+      AND cb.output_item_uuid IN (SELECT i.uuid FROM catalog.item i WHERE ${where} AND ${componentItemSql()})`);
+  // item -> property -> blueprint -> the slots' ranges
+  const grouped = new Map<string, Map<string, Map<string, ModifierRange[][]>>>();
+  for (const r of found) {
+    const byProperty = grouped.get(r.item) ?? new Map<string, Map<string, ModifierRange[][]>>();
+    const byBlueprint = byProperty.get(r.property) ?? new Map<string, ModifierRange[][]>();
+    byBlueprint.set(r.blueprint, [...(byBlueprint.get(r.blueprint) ?? []), Array.isArray(r.ranges) ? r.ranges : []]);
+    byProperty.set(r.property, byBlueprint);
+    grouped.set(r.item, byProperty);
+  }
+  const result = new Map<string, Map<string, StatBounds>>();
+  for (const [item, byProperty] of grouped) {
+    const stats = new Map<string, StatBounds>();
+    for (const [property, byBlueprint] of byProperty) {
+      const each = [...byBlueprint.values()].map(statBounds);
+      const bounds = each.every((b) => b) ? unionBounds(each as StatBounds[]) : null;
+      if (bounds) stats.set(property, bounds);
+    }
+    result.set(item, stats);
+  }
+  return result;
+}
+
 const BATCH_COLUMNS = sql.raw(`id::int AS id, owner_user_id AS "ownerUserId", kind,
-  resource_uuid AS "resourceUuid", item_uuid AS "itemUuid", location_uuid AS "locationUuid", state, quality, quantity::text AS quantity, lot`);
+  resource_uuid AS "resourceUuid", item_uuid AS "itemUuid", location_uuid AS "locationUuid", state, quality, quantity::text AS quantity, lot, stats`);
 
 const JOURNAL_COLUMNS = sql.raw(`id::int AS id, group_id AS "groupId", action, actor_user_id AS "actorUserId",
   owner_user_id AS "ownerUserId", kind, resource_uuid AS "resourceUuid", item_uuid AS "itemUuid",
-  location_uuid AS "locationUuid", state, quality, delta::text AS delta`);
+  location_uuid AS "locationUuid", state, quality, stats, delta::text AS delta`);
+
+/**
+ * A component's stats as stored: only stats its blueprints can improve, each within its bounds and
+ * normalized (statValue), keys sorted (the merge key compares the JSON); empty values and no change ("0")
+ * dropped, none at all = null (the same batch as a looted one).
+ */
+async function checkStats(tx: Tx, itemUuid: string, input: Record<string, string>): Promise<Stats | null> {
+  const entries = Object.entries(input).map(([k, v]) => [k.toLowerCase(), v.trim()] as const).filter(([, v]) => v !== '');
+  if (!entries.length) return null;
+  const allowed = (await componentStats(tx, sql`i.uuid = ${itemUuid}`)).get(itemUuid) ?? new Map<string, StatBounds>();
+  const stats: Stats = {};
+  for (const [k, v] of entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const bounds = allowed.get(k);
+    const value = bounds ? statValue(bounds, v) : null;
+    if (value === null || k in stats) throw new StockError('invalidStats');
+    if (value !== '0') stats[k] = value;
+  }
+  return Object.keys(stats).length ? stats : null;
+}
 
 function parse(text: string, kind: SubjectKind): string {
   const amount = parseAmount(text, kind);
@@ -178,13 +238,13 @@ async function lockBatch(tx: Tx, actor: Actor, id: number, expected?: string): P
 }
 
 const keyValues = (k: Omit<BatchKey, 'lot'>): SQL => sql`${k.ownerUserId}, ${k.kind}, ${k.resourceUuid}, ${k.itemUuid},
-  ${k.locationUuid}, ${k.state}, ${k.quality}`;
+  ${k.locationUuid}, ${k.state}, ${k.quality}, ${k.stats ? JSON.stringify(k.stats) : null}::jsonb`;
 
 /** Adds to the batch with this key (merge) or creates it; `created` = a new batch. */
 async function upsert(tx: Tx, key: BatchKey, quantity: string): Promise<Batch & { created: boolean }> {
   try {
     return (await one<Batch & { created: boolean }>(tx, sql`
-      INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality, lot, quantity)
+      INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality, stats, lot, quantity)
       VALUES (${keyValues(key)}, ${key.lot}::uuid, ${quantity}::numeric)
       ON CONFLICT ON CONSTRAINT stock_batch_merge_key
       DO UPDATE SET quantity = app.stock_batch.quantity + excluded.quantity, updated_at = now()
@@ -213,7 +273,7 @@ async function decrease(tx: Tx, batch: Batch, amount: string): Promise<Batch | n
 
 async function journal(tx: Tx, actor: Actor, action: JournalAction, key: BatchKey, delta: string, groupId: string | null = null) {
   return (await one<JournalEntry>(tx, sql`
-    INSERT INTO app.stock_journal (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality,
+    INSERT INTO app.stock_journal (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality, stats,
       action, group_id, actor_user_id, delta)
     VALUES (${keyValues(key)}, ${action}, ${groupId}, ${actor.userId}, ${delta}::numeric)
     RETURNING ${JOURNAL_COLUMNS}`))!;
@@ -230,7 +290,7 @@ async function history(tx: Tx, actor: Actor, category: HistoryCategory, action: 
     toOwnerUserId: to && to.ownerUserId !== key.ownerUserId ? to.ownerUserId : null,
     guildId,
     targetKind: key.kind, targetUuid: key.resourceUuid ?? key.itemUuid!,
-    details: { quality: key.quality, locationUuid: key.locationUuid, ...details },
+    details: { quality: key.quality, ...(key.stats ? { stats: key.stats } : {}), locationUuid: key.locationUuid, ...details },
   });
 }
 
@@ -268,6 +328,8 @@ export interface AddInput {
   org?: boolean;
   // Also shared in these orgs right away (the owner an active member in each; same rule as `org`)
   shareIn?: string[];
+  // Ship components: stats as typed, {crafted property UUID: value}; empty values are left out
+  stats?: Record<string, string>;
 }
 
 /** Books new stock. */
@@ -278,6 +340,8 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
     await ensureUser(tx, actor.userId);
     const subject = await subjectInfo(tx, input.kind, input.uuid);
     if (subject.component && input.quality !== COMPONENT_QUALITY) throw new StockError('invalidQuality');
+    if (input.stats && Object.keys(input.stats).length && !subject.component) throw new StockError('invalidStats');
+    const stats = subject.component && input.stats ? await checkStats(tx, input.uuid, input.stats) : null;
     await checkLocation(tx, input.locationUuid);
     if (input.org) {
       if (!actor.guildId) throw new StockError('notAllowed');
@@ -286,6 +350,7 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
     const key: BatchKey = {
       ownerUserId: actor.userId, kind: input.kind, resourceUuid: input.kind === 'resource' ? input.uuid : null,
       itemUuid: input.kind === 'item' ? input.uuid : null, locationUuid: input.locationUuid, state: 'stored', quality: input.quality, lot: null,
+      stats,
     };
     const { created: _c, ...batch } = await upsert(tx, key, amount);
     // Added to a batch that is shared already: the orgs see their offer grow
@@ -358,10 +423,10 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
       await subjectInfo(tx, 'resource', row.resourceUuid);
       const key: BatchKey = {
         ownerUserId: actor.userId, kind: 'resource', resourceUuid: row.resourceUuid, itemUuid: null,
-        locationUuid: input.locationUuid, state: 'refining', quality: row.quality, lot: null,
+        locationUuid: input.locationUuid, state: 'refining', quality: row.quality, lot: null, stats: null,
       };
       const batch = (await one<Batch>(tx, sql`
-        INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality, quantity,
+        INSERT INTO app.stock_batch (owner_user_id, kind, resource_uuid, item_uuid, location_uuid, state, quality, stats, quantity,
           refine_job, refine_started_at, refine_ends_at)
         VALUES (${keyValues(key)}, ${row.amount}::numeric, ${jobId}, ${started}::timestamptz,
           ${started}::timestamptz + ${seconds}::int * interval '1 second')

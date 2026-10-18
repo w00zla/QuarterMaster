@@ -5,7 +5,7 @@ import type { PickableBatch } from '../src/stock/lookup.ts';
 
 const batch = (id: number, material: string, quality: number, quantity: string, extra: Partial<PickableBatch> = {}): PickableBatch => ({
   batch: {
-    id, ownerUserId: 'me', kind: 'resource', resourceUuid: material, itemUuid: null, locationUuid: 'loc', state: 'stored', quality, quantity, lot: null,
+    id, ownerUserId: 'me', kind: 'resource', resourceUuid: material, itemUuid: null, locationUuid: 'loc', state: 'stored', quality, quantity, lot: null, stats: null,
   },
   material, component: false, location: 'Area18', holderName: null, sharedIn: [], refine: null, ...extra,
 });

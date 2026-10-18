@@ -32,6 +32,15 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     // The fixture's blueprint (output: a cooler) becomes a ship component blueprint
     await db.execute(sql`UPDATE catalog.blueprint_category SET key = 'VehicleComponentS2' WHERE uuid = ${U.category}`);
+    // Its stat as on a real cooler: multipliers 0.8–1.2 in one slot (the fixture mixes range types)
+    const ranges = [
+      { type: 'Linear', startQuality: 0, endQuality: 500, values: { modifierAtStart: 0.8, modifierAtEnd: 1 } },
+      { type: 'Linear', startQuality: 501, endQuality: 1000, values: { modifierAtStart: 1, modifierAtEnd: 1.2 } },
+    ];
+    // in its first slot only (the other slots modify nothing)
+    await db.execute(sql`UPDATE catalog.blueprint_slot SET modifiers = CASE WHEN slot_index = 0 AND tier_index = 0
+        THEN ${JSON.stringify([{ propertyUuid: U.property, ranges }])}::jsonb ELSE '[]'::jsonb END
+      WHERE blueprint_uuid IN (SELECT uuid FROM catalog.blueprint WHERE output_item_uuid = ${U.output})`);
     await ensureGuild(db, G, 'Component Org');
     const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
     await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
@@ -43,7 +52,7 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     const cooler = materials.get(U.output)!;
     assert.equal(cooler.kind, 'item');
     assert.equal(cooler.component, true);
-    assert.equal(cooler.label, 'Test Cooler · S2 · B Military · TEST');
+    assert.equal(cooler.label, 'Test Cooler · Cooler · S2 · B Military');
     assert.equal(materials.get(U.gem)!.component, false);
     assert.equal(materials.get(U.metal)!.component, false);
   });
@@ -59,9 +68,48 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
       [[U.gem, false, '3'], [U.output, true, '2']].sort());
   });
 
+  it('offers the stats of the component blueprint with their bounds, nothing for other materials', async () => {
+    const materials = await materialCatalog(db, 'en');
+    assert.deepEqual(materials.get(U.output)!.stats.map(({ uuid, kind, min, max }) => ({ uuid, kind, min, max })),
+      [{ uuid: U.property, kind: 'multiplier', min: 0, max: 20 }]);
+    assert.deepEqual(materials.get(U.gem)!.stats, []);
+  });
+
+  it('keeps batches with other stats apart and merges the same stats, normalized', async () => {
+    const cooler = { kind: 'item' as const, uuid: U.output, locationUuid: U.station, quality: COMPONENT_QUALITY };
+    const statsOf = async () => (await stockList(db, { scope: { personalOf: MIA } }, 'en'))
+      .filter((p) => p.component).map((p) => [p.batch.stats, formatAmount(p.batch.quantity)] as const)
+      .toSorted((a, b) => JSON.stringify(a[0]).localeCompare(JSON.stringify(b[0])));
+    const first = await add(db, mia, { ...cooler, amount: '1', stats: { [U.property]: '+5,0' } });
+    assert.deepEqual(first.batch!.stats, { [U.property]: '5' });
+    assert.deepEqual(first.journal[0]!.stats, { [U.property]: '5' });
+    await add(db, mia, { ...cooler, amount: '1', stats: { [U.property]: '5' } });
+    await add(db, mia, { ...cooler, amount: '1', stats: { [U.property]: '12.5' } });
+    // Empty values and no change count as none: the batch without stats from before
+    await add(db, mia, { ...cooler, amount: '1', stats: { [U.property]: ' ' } });
+    await add(db, mia, { ...cooler, amount: '1', stats: { [U.property]: '0' } });
+    assert.deepEqual(await statsOf(), [[{ [U.property]: '12.5' }, '1'], [{ [U.property]: '5' }, '2'], [null, '4']]);
+    const [row] = await db.execute<{ stats: unknown }>(sql`
+      SELECT details->'stats' AS stats FROM app.history WHERE target_uuid = ${U.output} AND action = 'add' ORDER BY id DESC OFFSET 2 LIMIT 1`);
+    assert.deepEqual(row!.stats, { [U.property]: '12.5' });
+  });
+
+  it('refuses stats a component cannot have, and stats on other materials', async () => {
+    const cooler = { kind: 'item' as const, uuid: U.output, locationUuid: U.station, quality: COMPONENT_QUALITY, amount: '1' };
+    const invalid = (e: unknown) => e instanceof StockError && e.code === 'invalidStats';
+    await assert.rejects(add(db, mia, { ...cooler, stats: { [U.metal]: '1' } }), invalid);
+    await assert.rejects(add(db, mia, { ...cooler, stats: { [U.property]: '5 %' } }), invalid);
+    await assert.rejects(add(db, mia, { ...cooler, stats: { [U.property]: '20.1' } }), invalid);
+    // Never worse than a looted one
+    await assert.rejects(add(db, mia, { ...cooler, stats: { [U.property]: '-5' } }), invalid);
+    await assert.rejects(add(db, mia, { ...cooler, stats: { [U.property]: '5.25' } }), invalid);
+    await assert.rejects(add(db, mia, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 100, amount: '1', stats: { [U.property]: '1' } }), invalid);
+  });
+
   it('counts components apart from items', async () => {
     const m = (await orgMetrics(db, [G])).get(G)!;
     assert.deepEqual(m.items, { kinds: 1, pieces: '3', locations: 1 });
-    assert.deepEqual(m.components, { kinds: 1, pieces: '2', locations: 1 });
+    // The shared batch without stats (2 + 2 later); the ones with stats are unshared
+    assert.deepEqual(m.components, { kinds: 1, pieces: '4', locations: 1 });
   });
 });

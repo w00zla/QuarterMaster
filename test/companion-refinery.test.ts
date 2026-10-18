@@ -16,7 +16,7 @@ const ARC = '00000000-0000-4000-8000-0000000000c2';
 
 const material = (uuid: string, name: string, nameKey: string) =>
   ({ uuid, kind: 'resource' as const, name, nameKey, unit: 'SCU' as const, type: null, typeLabel: null,
-    component: false, label: name, size: null, gradeLetter: null, itemClass: null, manufacturerCode: null });
+    component: false, label: name, size: null, gradeLetter: null, itemClass: null, stats: [] });
 const location = (uuid: string, label: string, nameKey: string, refinery = true) =>
   ({ uuid, label, short: label.split(' · ')[0]!, nameKey, refinery, yields: {} });
 
@@ -174,7 +174,7 @@ describe('companion refinery sync', () => {
 
   it('jobs from a personal stock list', () => {
     const batch = (id: number, state: 'stored' | 'refining', jobId: string | null): StockBatch => ({
-      id, sharedIn: [], part: false, kind: 'resource', component: false, subjectUuid: HEPH, material: 'Hephaestanite', locationUuid: CRU, location: 'CRU-L1',
+      id, sharedIn: [], part: false, kind: 'resource', component: false, stats: null, subjectUuid: HEPH, material: 'Hephaestanite', locationUuid: CRU, location: 'CRU-L1',
       state, quality: 572, quantity: '0.91', unit: 'SCU', holderUserId: '1', holderName: null, canChange: true,
       refine: jobId ? { jobId, startedAt: null, endsAt: null } : null,
     });
