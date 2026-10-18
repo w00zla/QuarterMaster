@@ -194,6 +194,13 @@ Throwaway script, not in the repo. Result:
   - Line breaks are written as a literal `\n`; the extractor converts them.
   - 4 blueprint outputs have no name even in English (e.g. `COOL_AEGS_S04_Javelin_SCItem`) → the app needs a fallback to `class_name`.
   - The community file (variant "Hybrid") keeps item names English on purpose ("Borase (Ore)" vs. the game's "Borase (Erz)").
+- **Crafted stats** (checked 2026-10-18 on build 12881860, ship components):
+  - A slot's modifier changes one crafted property (`CraftingGameplayPropertyDef`) by quality: `Linear` ranges are **factors** (typically 0–500: 0.8→1, 501–1000: 1→1.2; Q500 = no change), `LinearIntegerAdditive` ranges are **steps** in constant bands (only `GPP_ItemResource_PowerGeneration`, "Power Pips": −1/0/+1 per slot). Several slots may change the same stat (a cooler's coolant: COOLANT 0.85–1.15 and PUMP IMPELLER 0.95–1.05).
+  - Per component type: Cooler = Coolant Rating + Integrity, PowerPlant = Power Pips + Integrity, Shield = Max. Shield Strength + Integrity, QuantumDrive = Quantum Speed + Fuel Requirement (flat 1.0) + Integrity, Radar = two aim assist distances + Integrity, ship weapons and mining lasers = Impact Force + Integrity, tractor/salvage heads 3–4 own values. The names match the game's tooltip ("Coolant Rating: 22.00, Integrity: 110.00").
+  - The **absolute values** need the item's base value, which is not in the blueprint but in its `raw_record` (HeatSafe cooler: `Components[…].Health` 110, coolant `states[…].deltas[…].generation.resourceAmountPerSecond.standardResourceUnits` 22), at a different path per property; the app does not read them (the web app stores stats as the crafting check shows them: percent change / steps).
+  - **How several slots on one stat combine is unverified**: the crafting check multiplies the factors and adds the steps (as erkul.games and sc-craft.tools do); SC Crafter, the Citizen Starter Guide blueprint finder, scblueprintfinder and SC-Toolbox's Craft Database add the deltas instead. None measured it in game; at the current spans the results differ by 1–2 %. One craft decides: an IcePlunge cooler (base coolant 22) with both slots at Q1000 shows 26.57 (product) or 26.40 (sum).
+  - Materials below Q500 (the only ones that lower a stat) cannot be used for crafting at the moment (user, 2026-10-18), although recipe inputs have `minQuality` from 0.
+  - Display transformations (`CraftingDisplayTransformation_*`: `Scale`, `ConvertValueToFactorOfBaseValue`, `ConvertFactorToPercentChange`) are documented nowhere; known scales: coolant 1e-6, quantum speed 1e-6.
 - **Prepared but unused by CIG:** `tiers[]` (always 1), `optionalCosts` (always empty), `research` (always null). The schema should not block them.
 - **Catalog is global**, not per guild. One import affects every server → safeguards matter.
 
@@ -202,6 +209,7 @@ Throwaway script, not in the repo. Result:
 ## Open points
 
 - Meaning of the quality band `mappedValue`.
+- Crafted stats: product or sum of the slots' factors (see "Crafted stats"; one IcePlunge craft decides, nobody has one yet).
 - 0.04 vs 0.046 SCU (see above) → check in game.
 - How the import CLIs reach the PROD DB (DB access from the local machine; details TBD).
 - How fast scunpacked-data follows a patch (4.10.2 expected ~2026-10-07/08).
