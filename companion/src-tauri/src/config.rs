@@ -1,8 +1,8 @@
 //! Persistent app config (JSON in the app config dir, like BindSight's —
 //! `%APPDATA%\com.w00zla.quartermaster.companion\config.json` on Windows,
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
-//! Quartermaster server, the user's API token and the SC channel folder whose
-//! `Game.log` is followed. The server is fixed in the app; only a `server` entry
+//! Quartermaster server, the user's API token, the SC channel folder whose
+//! `Game.log` is followed, the UI language and the scan overlay's position and hotkeys. The server is fixed in the app; only a `server` entry
 //! in the file changes it (e.g. a dev server, read at start), the settings UI
 //! does not show it and saving never writes or overwrites that entry.
 
@@ -41,11 +41,38 @@ pub struct Config {
     /// The UI language: "de", "en", or empty = the system's.
     #[serde(default)]
     pub language: String,
+    /// Where in the game window the scan overlay sits: "top-left", "top-center", "top-right",
+    /// "bottom-left", "bottom-center" or "bottom-right".
+    #[serde(default = "default_overlay_position")]
+    pub overlay_position: String,
+    /// The overlay's hotkeys as accelerators ("Ctrl+Shift+KeyQ"); empty = none (the mode's default).
+    #[serde(default = "default_hotkey_overlay")]
+    pub hotkey_overlay: String,
+    #[serde(default)]
+    pub hotkey_mode: String,
+}
+
+pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
+
+fn default_overlay_position() -> String {
+    "top-left".into()
+}
+
+fn default_hotkey_overlay() -> String {
+    "Ctrl+Shift+KeyQ".into()
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { server: default_server(), token: String::new(), game_dir: default_game_dir(), language: String::new() }
+        Self {
+            server: default_server(),
+            token: String::new(),
+            game_dir: default_game_dir(),
+            language: String::new(),
+            overlay_position: default_overlay_position(),
+            hotkey_overlay: default_hotkey_overlay(),
+            hotkey_mode: String::new(),
+        }
     }
 }
 
@@ -124,7 +151,7 @@ mod tests {
 
     #[test]
     fn saving_keeps_the_files_server_entry() {
-        let c = Config { server: DEFAULT_SERVER.into(), token: "qmt_x".into(), game_dir: "D:/SC/LIVE".into(), language: "de".into() };
+        let c = Config { token: "qmt_x".into(), game_dir: "D:/SC/LIVE".into(), language: "de".into(), ..Config::default() };
         // No file or no entry: none written (the default stays a default)
         for current in [None, Some("{}"), Some("not json")] {
             let saved: serde_json::Value = serde_json::from_str(&to_file(&c, current).unwrap()).unwrap();

@@ -5,11 +5,12 @@
 // duration, so the end stays the game's) or Discard; "Register all" in the head after a confirmation.
 // A finished job: Store (the terminal's yields). A job no read of the station showed: Remove (after a
 // confirmation) or Keep. Matched running jobs are updated without asking.
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { langRef, t } from "../i18n";
+import { overlayRows, tabCounts } from "../overlay";
 import { cscuToScu, type Proposal } from "../refinery";
 import { accept, dismiss, materialName, proposals, stationName } from "../refinerySync";
 import { connected } from "../state";
@@ -56,6 +57,21 @@ const KIND = {
   store: { tag: "refinery.kind.store", cls: "ok", action: "refinery.store", icon: "check", done: "refinery.stored" },
   missing: { tag: "refinery.kind.missing", cls: "warn", action: "refinery.remove", icon: "trash", done: "refinery.removed" },
 } as const;
+
+// The scan overlay shows one line per card: station, materials, the end
+watchEffect(() => {
+  overlayRows.refinery = proposals.value.map((p) => {
+    const end = endOf(p);
+    return {
+      tag: t(KIND[p.kind].tag),
+      cls: KIND[p.kind].cls,
+      name: stationName(p.locationUuid),
+      detail: rows(p).map((x) => materialName(x.uuid)).join(", "),
+      cols: end === null ? [] : [t("refinery.readyAt", { time: time(end) })],
+    };
+  });
+  tabCounts.refinery = proposals.value.length;
+});
 
 async function run(p: Proposal) {
   if (busy.value.has(p.id)) return;
@@ -115,7 +131,7 @@ async function registerAll(value: string) {
 <template>
   <section class="panel refinery">
     <div class="head">
-      <span class="head-title">{{ t("refinery.title") }}</span>
+      <span class="head-title">{{ t("refinery.title") }} <span class="head-count">{{ proposals.length }}</span></span>
       <Tooltip :text="t('refinery.scanSoon')">
         <button type="button" class="btn small outline" disabled>
           <Icon name="eye" :size="14" /> {{ t("scan.start") }}
@@ -128,32 +144,35 @@ async function registerAll(value: string) {
       </Tooltip>
     </div>
     <div v-if="!proposals.length" class="empty-line">{{ t("refinery.empty") }}</div>
-    <div v-for="p in proposals" :key="p.id" class="job">
-      <div class="job-head">
-        <span class="tag" :class="KIND[p.kind].cls">{{ t(KIND[p.kind].tag) }}</span>
-        <span class="job-title">{{ stationName(p.locationUuid) }}</span>
-        <button
-          type="button"
-          class="btn small"
-          :class="p.kind === 'missing' ? 'outline' : 'primary'"
-          :disabled="!connected || busy.has(p.id)"
-          @click="primary(p)"
-        >
-          <Icon :name="KIND[p.kind].icon" :size="14" /> {{ t(KIND[p.kind].action) }}
-        </button>
-        <Tooltip :text="t(p.kind === 'missing' ? 'refinery.keep' : 'refinery.drop')">
-          <button type="button" class="icon-btn" @click="dismiss(p)"><Icon name="close" :size="14" /></button>
-        </Tooltip>
-      </div>
-      <div v-if="endOf(p) !== null" class="job-time">
-        <Icon name="clock" :size="12" />
-        <span v-if="endOf(p)! > now" class="num">{{ left(endOf(p)! - now) }}</span>
-        <span>{{ t("refinery.readyAt", { time: time(endOf(p)!) }) }}</span>
-      </div>
-      <div v-for="(x, i) in rows(p)" :key="i" class="row">
-        <span class="row-name">{{ materialName(x.uuid) }}</span>
-        <span class="num">{{ x.quality }}</span>
-        <span class="num">{{ x.scu }} SCU</span>
+    <!-- Only the jobs scroll: the head stays -->
+    <div v-else class="jobs">
+      <div v-for="p in proposals" :key="p.id" class="job">
+        <div class="job-head">
+          <span class="tag" :class="KIND[p.kind].cls">{{ t(KIND[p.kind].tag) }}</span>
+          <span class="job-title">{{ stationName(p.locationUuid) }}</span>
+          <button
+            type="button"
+            class="btn small"
+            :class="p.kind === 'missing' ? 'outline' : 'primary'"
+            :disabled="!connected || busy.has(p.id)"
+            @click="primary(p)"
+          >
+            <Icon :name="KIND[p.kind].icon" :size="14" /> {{ t(KIND[p.kind].action) }}
+          </button>
+          <Tooltip :text="t(p.kind === 'missing' ? 'refinery.keep' : 'refinery.drop')">
+            <button type="button" class="icon-btn" @click="dismiss(p)"><Icon name="close" :size="14" /></button>
+          </Tooltip>
+        </div>
+        <div v-if="endOf(p) !== null" class="job-time">
+          <Icon name="clock" :size="12" />
+          <span v-if="endOf(p)! > now" class="num">{{ left(endOf(p)! - now) }}</span>
+          <span>{{ t("refinery.readyAt", { time: time(endOf(p)!) }) }}</span>
+        </div>
+        <div v-for="(x, i) in rows(p)" :key="i" class="row">
+          <span class="row-name">{{ materialName(x.uuid) }}</span>
+          <span class="num">{{ x.quality }}</span>
+          <span class="num">{{ x.scu }} SCU</span>
+        </div>
       </div>
     </div>
     <ConfirmDialog
@@ -174,9 +193,20 @@ async function registerAll(value: string) {
 </template>
 
 <style scoped>
+/* Fills the main area, only its jobs scroll */
 .refinery {
-  flex-shrink: 0;
-  margin-bottom: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.jobs {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.jobs > .job:first-child {
+  border-top: none;
 }
 
 .job {

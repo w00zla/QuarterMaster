@@ -7,10 +7,12 @@
 // Blizzard"); the stat lines show absolute values ("Coolant Rating: 67.50"), the stock keeps a crafted
 // component's gain over the unmodified value (`CatalogStat.base`: "12.5" = +12.5 %, power pips in
 // steps), so each read stat is converted; a tooltip without stat lines is a looted component (no
-// stats). A sighting's identity is its content in its column on its page (the pane scrolls, so the
-// row says nothing): a tile hovered again after a scroll is the same sighting, equal components in
-// one column collapse (a known limit), in other columns or on other pages they stay apart. A
-// sighting counts only once two reads in a row agree (an OCR glitch in one read books nothing).
+// stats). A sighting's identity is its tile's place in the page's content (page, row with the pane's
+// scroll counted in, units; the Rust side finds them) and its content: a tile hovered again after a
+// scroll is the same sighting, equal components on other tiles stay apart. A tooltip counts only once
+// the cursor stayed on its tile for a read (right after a move the game may still show the previous
+// tile's tooltip), and a sighting only once two such reads in a row agree (an OCR glitch in one read
+// books nothing).
 import { norm } from "../../src/stock/material-names.ts";
 import type { CatalogResponse, CatalogStat, StockAddRequest } from "../../src/webapp/api-types.ts";
 
@@ -38,8 +40,9 @@ export interface ReadTooltip {
 export interface ComponentRead {
   tooltip: ReadTooltip | null;
   page: { index: number; total: number } | null;
-  // The storage grid's cell under the mouse cursor; null outside it
-  cell: { row: number; col: number; rect: ReadRect } | null;
+  // The tile under the mouse cursor: its row in the page's content (the pane's scroll counted in), its
+  // first unit of four and how many it spans (weapons 2); null outside the grid or without a lit tile
+  cell: { row: number; col: number; span: number; rect: ReadRect } | null;
 }
 
 // --- catalog ---------------------------------------------------------------------------------------
@@ -192,7 +195,8 @@ export function statsOf(def: ComponentDef, lines: string[], cat: ComponentCatalo
 export type ComponentProblem = "unknownComponent" | "ambiguousComponent" | "statsUnreadable";
 
 export interface ComponentSighting {
-  // page | col | component (or title) | stats
+  // page | row | col | span | component (or title) | stats: the tile's place in the page's content, so
+  // equal components stay apart and a tile hovered again after a scroll is the same
   key: string;
   // As the tooltip shows it
   title: string;
@@ -208,11 +212,15 @@ export interface ComponentSighting {
   page: number | null;
   row: number;
   col: number;
+  span: number;
   atMs: number;
   problem: ComponentProblem | null;
 }
 
-/** The sighting in a read: the tooltip at the cursor's cell; null without both. */
+/** A read's tile as text (page, row, units), null without one. */
+const tileOf = (e: ComponentRead) => (e.cell ? `${e.page?.index ?? "?"}|${e.cell.row}|${e.cell.col}|${e.cell.span}` : null);
+
+/** The sighting in a read: the tooltip at the cursor's tile; null without both. */
 export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog): ComponentSighting | null {
   if (!e.tooltip || !e.cell) return null;
   const title = e.tooltip.title.trim();
@@ -223,7 +231,7 @@ export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog
   const page = e.page?.index ?? null;
   const stats = problem ? null : read.stats;
   return {
-    key: `${page ?? "?"}|${e.cell.col}|${def?.uuid ?? norm(title)}|${stats ? JSON.stringify(stats) : "-"}`,
+    key: `${tileOf(e)}|${def?.uuid ?? norm(title)}|${stats ? JSON.stringify(stats) : "-"}`,
     title,
     componentUuid: def?.uuid ?? null,
     label: def?.label ?? title,
@@ -233,6 +241,7 @@ export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog
     page,
     row: e.cell.row,
     col: e.cell.col,
+    span: e.cell.span,
     atMs,
     problem,
   };
@@ -243,10 +252,21 @@ export class ComponentScan {
   readonly sightings = new Map<string, ComponentSighting>();
   // The last read's sighting, waiting for a second read that agrees
   private pending: ComponentSighting | null = null;
+  // The last read's tile: a tooltip counts only once the cursor stayed on its tile for a read (right
+  // after a move the game may still show the previous tile's tooltip)
+  private lastTile: string | null = null;
 
-  /** Takes a read in; the sighting it added, null when nothing changed (a known sighting read again,
-   * a first read still waiting for its confirmation, or one `accept` turns down). */
+  /** Takes a read in; the sighting it added, null when nothing changed (the cursor just came to the
+   * tile, a known sighting read again, a first read still waiting for its confirmation, or one
+   * `accept` turns down). */
   feed(atMs: number, e: ComponentRead, cat: ComponentCatalog, accept: (s: ComponentSighting) => boolean = () => true): ComponentSighting | null {
+    const tile = tileOf(e);
+    const arrived = tile !== this.lastTile;
+    this.lastTile = tile;
+    if (arrived) {
+      this.pending = null;
+      return null;
+    }
     const s = sightingOf(atMs, e, cat);
     if (!s || !accept(s)) return null;
     if (this.sightings.has(s.key)) return null;
@@ -262,6 +282,7 @@ export class ComponentScan {
   clear() {
     this.sightings.clear();
     this.pending = null;
+    this.lastTile = null;
   }
 
   /** Newest first. */

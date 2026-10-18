@@ -49,8 +49,8 @@ function responses(): CatalogResponse[] {
 const catalog = (gameNames: Record<string, string> = {}): ComponentCatalog => buildComponentCatalog(responses(), gameNames);
 
 const rect = { x0: 0, y0: 0, x1: 10, y1: 10 };
-const read = (title: string | null, lines: string[] = [], cell: { row: number; col: number } | null = { row: 1, col: 2 }, page = 2): ComponentRead =>
-  ({ tooltip: title ? { title, lines: lines.map((text) => ({ text, rect })), rect } : null, page: { index: page, total: 3 }, cell: cell && { ...cell, rect } });
+const read = (title: string | null, lines: string[] = [], cell: { row: number; col: number; span?: number } | null = { row: 1, col: 2 }, page = 2): ComponentRead =>
+  ({ tooltip: title ? { title, lines: lines.map((text) => ({ text, rect })), rect } : null, page: { index: page, total: 3 }, cell: cell && { span: 1, ...cell, rect } });
 
 const BLIZZARD_LINES = ['Volume: 756000 µSCU', 'Item Type: Cooler', 'Manufacturer: Aegis Dynamics', 'Size: 3', 'Grade: A', 'Class: Military',
   'Navy mechanics worked with Aegis engineers to', 'ensure the Blizzard met their specific needs.', 'Coolant Rating: 60.00', 'Integrity: 1800.00'];
@@ -120,10 +120,10 @@ describe('tooltip lines', () => {
 });
 
 describe('sightings', () => {
-  it('a component with the gains read, keyed by page, column and content', () => {
+  it('a component with the gains read, keyed by page, row, units and content', () => {
     const s = sightingOf(1, read('Mil/3/A Blizzard', ['Item Type: Cooler', 'Coolant Rating: 67.50', 'Integrity: 1800.00']), catalog());
     assert.deepEqual([s?.componentUuid, s?.stats, s?.page, s?.row, s?.col, s?.problem, s?.label], [BLIZZARD, { [COOLANT]: '12.5' }, 2, 1, 2, null, 'Blizzard · Cooler · S3 · A Military']);
-    assert.equal(s?.key, `2|2|${BLIZZARD}|{"${COOLANT}":"12.5"}`);
+    assert.equal(s?.key, `2|1|2|1|${BLIZZARD}|{"${COOLANT}":"12.5"}`);
     const looted = sightingOf(1, read('Mil/3/A Blizzard', BLIZZARD_LINES), catalog());
     assert.deepEqual([looted?.stats, looted?.readStats, looted?.problem], [{}, [COOLANT, HEALTH], null]);
   });
@@ -138,30 +138,43 @@ describe('sightings', () => {
     assert.equal(sightingOf(1, read(null), cat), null);
   });
 
-  it('counts a component after two agreeing reads, by page, column and content', () => {
+  it('counts a component on a tile it stayed on, after two agreeing reads, by tile and content', () => {
     const cat = catalog();
     const scan = new ComponentScan();
     const blizzard = ['Coolant Rating: 67.50'];
-    assert.equal(scan.feed(1, read('Mil/3/A Blizzard', blizzard), cat), null, 'first read waits');
+    assert.equal(scan.feed(1, read('Mil/3/A Blizzard', blizzard), cat), null, 'the cursor just came to the tile');
+    assert.equal(scan.feed(2, read('Mil/3/A Blizzard', blizzard), cat), null, 'first read waits');
     // A glitch in between starts over (a trailing letter is a unit, so the number must break)
-    assert.equal(scan.feed(2, read('Mil/3/A Blizzard', ['Coolant Rating: 6Z.50']), cat), null);
-    assert.equal(scan.feed(3, read('Mil/3/A Blizzard', blizzard), cat), null);
-    assert.ok(scan.feed(4, read('Mil/3/A Blizzard', blizzard), cat));
-    assert.equal(scan.feed(5, read('Mil/3/A Blizzard', blizzard), cat), null, 'known');
-    // Scrolled: another row in the same column is the same sighting
-    scan.feed(6, read('Mil/3/A Blizzard', blizzard, { row: 4, col: 2 }), cat);
-    assert.equal(scan.feed(7, read('Mil/3/A Blizzard', blizzard, { row: 4, col: 2 }), cat), null);
-    // The same component in the next column and on the next page: sightings of their own
-    scan.feed(8, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 3 }), cat);
-    assert.ok(scan.feed(9, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 3 }), cat));
-    scan.feed(10, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 2 }, 3), cat);
-    assert.ok(scan.feed(11, read('Mil/3/A Blizzard', blizzard, { row: 1, col: 2 }, 3), cat));
-    assert.equal(scan.sightings.size, 3);
+    assert.equal(scan.feed(3, read('Mil/3/A Blizzard', ['Coolant Rating: 6Z.50']), cat), null);
+    assert.equal(scan.feed(4, read('Mil/3/A Blizzard', blizzard), cat), null);
+    assert.ok(scan.feed(5, read('Mil/3/A Blizzard', blizzard), cat));
+    assert.equal(scan.feed(6, read('Mil/3/A Blizzard', blizzard), cat), null, 'known');
+    // The same component on the tile below, beside it, and on the next page: sightings of their own
+    for (const [at, cell, page] of [[7, { row: 2, col: 2 }, 2], [10, { row: 1, col: 3 }, 2], [13, { row: 1, col: 2 }, 3]] as const) {
+      assert.equal(scan.feed(at, read('Mil/3/A Blizzard', blizzard, cell, page), cat), null, 'arrived');
+      scan.feed(at + 1, read('Mil/3/A Blizzard', blizzard, cell, page), cat);
+      assert.ok(scan.feed(at + 2, read('Mil/3/A Blizzard', blizzard, cell, page), cat));
+    }
+    assert.equal(scan.sightings.size, 4);
+    // Back on the first tile (as after a scroll: the Rust side counts the scroll into the row): known
+    scan.feed(16, read('Mil/3/A Blizzard', blizzard), cat);
+    scan.feed(17, read('Mil/3/A Blizzard', blizzard), cat);
+    assert.equal(scan.feed(18, read('Mil/3/A Blizzard', blizzard), cat), null);
+    assert.equal(scan.sightings.size, 4);
+    // The previous tile's tooltip, still shown for a read after the cursor moved on to a wide tile,
+    // counts nowhere; the wide tile's own does
+    const left = { row: 5, col: 0, span: 2 };
+    const right = { row: 5, col: 2, span: 2 };
+    scan.feed(19, read('Mil/3/A Frostbite', ['Item Type: Cooler'], left), cat);
+    scan.feed(20, read('Mil/3/A Frostbite', ['Item Type: Cooler'], left), cat);
+    assert.equal(scan.feed(21, read('Mil/3/A Frostbite', ['Item Type: Cooler'], right), cat), null);
+    scan.feed(22, read('Mil/3/A Blizzard', blizzard, right), cat);
+    assert.ok(scan.feed(23, read('Mil/3/A Blizzard', blizzard, right), cat));
+    assert.equal(scan.list().filter((s) => s.row === 5).map((s) => `${s.title} ${s.col}`).join(), 'Mil/3/A Blizzard 2');
     // A filter turns a sighting down before it is counted
-    scan.feed(12, read('Mil/1/B Sovereign IP-10', ['Power Pips: 17']), cat, () => false);
-    assert.equal(scan.feed(13, read('Mil/1/B Sovereign IP-10', ['Power Pips: 17']), cat, () => false), null);
-    assert.equal(scan.sightings.size, 3);
-    assert.equal(scan.list()[0]?.atMs, 11);
+    for (let at = 24; at < 27; at++) assert.equal(scan.feed(at, read('Mil/1/B Sovereign IP-10', ['Power Pips: 17'], { row: 0, col: 0 }), cat, () => false), null);
+    assert.equal(scan.sightings.size, 5);
+    assert.equal(scan.list()[0]?.atMs, 23);
     scan.clear();
     assert.equal(scan.sightings.size, 0);
   });
@@ -171,9 +184,10 @@ describe('proposals', () => {
   it('one per complete sighting, one piece each, stats only when there are any', () => {
     const cat = catalog();
     const scan = new ComponentScan();
-    for (let i = 0; i < 2; i++) scan.feed(i, read('Mil/3/A Blizzard', ['Coolant Rating: 67.50', 'Integrity: 1836.00']), cat);
-    for (let i = 2; i < 4; i++) scan.feed(i, read('Mil/3/A Blizzard', BLIZZARD_LINES, { row: 2, col: 0 }), cat);
-    for (let i = 4; i < 6; i++) scan.feed(i, read('Mil/3/A Frostbite', ['Item Type: Cooler'], { row: 2, col: 1 }), cat);
+    // Three reads each: the cursor arrives, then two agreeing reads
+    for (let i = 0; i < 3; i++) scan.feed(i, read('Mil/3/A Blizzard', ['Coolant Rating: 67.50', 'Integrity: 1836.00']), cat);
+    for (let i = 3; i < 6; i++) scan.feed(i, read('Mil/3/A Blizzard', BLIZZARD_LINES, { row: 2, col: 0 }), cat);
+    for (let i = 6; i < 9; i++) scan.feed(i, read('Mil/3/A Frostbite', ['Item Type: Cooler'], { row: 2, col: 1 }), cat);
     const proposals = proposalsOf(scan.list());
     assert.deepEqual(proposals.map((p) => [p.componentUuid, p.stats, p.readStats]), [[BLIZZARD, {}, [COOLANT, HEALTH]], [BLIZZARD, { [COOLANT]: '12.5', [HEALTH]: '2' }, [COOLANT, HEALTH]]]);
     assert.deepEqual(addRequest(proposals[1]!, LOC, ['9400']), { subjectUuid: BLIZZARD, locationUuid: LOC, quality: 0, amount: '1', stats: { [COOLANT]: '12.5', [HEALTH]: '2' }, guildIds: ['9400'] });

@@ -11,7 +11,13 @@ export interface Config {
   gameDir: string;
   // The UI language: "de", "en" or "" = the system's
   language: string;
+  // The scan overlay: where in the game window it sits, its hotkeys ("Ctrl+Shift+KeyQ", "" = none)
+  overlayPosition: OverlayPosition;
+  hotkeyOverlay: string;
+  hotkeyMode: string;
 }
+
+export type OverlayPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
 
 export interface Unlock {
   // As logged (UTC, ISO)
@@ -59,6 +65,8 @@ export const stopDebugRecording = () => call<void>("stop_debug_recording");
 // The debug window (debug.html), opened or focused
 export const openDebugWindow = () => call<void>("open_debug_window");
 export const getGameSeen = () => call<boolean>("get_game_seen");
+// The scan overlay's window (Windows only), shown while the game is in front
+export const setOverlayWindow = (on: boolean) => call<void>("set_overlay", { on });
 // Texts of these loc keys (lower case) in the player's active language pack (global.ini); missing keys are left out
 export const gameNames = (keys: string[]) => call<Record<string, string>>("game_names", { keys });
 

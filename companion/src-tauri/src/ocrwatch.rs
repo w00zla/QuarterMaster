@@ -35,7 +35,7 @@ use image::{GrayImage, ImageFormat, RgbImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::components::{cell_of, read_page, read_tooltip, ComponentRead};
+use crate::components::{hovered_tile, read_page, read_tooltip, ComponentRead};
 use crate::inventory::{read_grid, Grid};
 use crate::locale::LabelSource;
 use crate::ocr::{Ocr, TextBox};
@@ -573,9 +573,9 @@ impl Worker {
         let mut components = None;
         let mut boxes = Vec::new();
         let mut found = false;
-        // The storage grid's cell under the cursor; without one no tooltip can belong to a tile, so
-        // the tooltip read is skipped (the page read keeps the screen)
-        let cell = frame.cursor.and_then(|c| cell_of(c, width as f32, height as f32));
+        // The storage grid's tile under the cursor (lit by the game); without one no tooltip can
+        // belong to a tile, so the tooltip read is skipped (the page read keeps the screen)
+        let cell = frame.cursor.and_then(|c| hovered_tile(&image, c));
         let tooltip_read = |ocr: &mut Ocr, boxes: &mut Vec<TextBox>| -> Result<_, String> {
             if cell.is_none() && frame.cursor.is_some() {
                 return Ok(None);
@@ -644,7 +644,7 @@ impl Worker {
             (None, Some(c)) if c.tooltip.is_some() || c.page.is_some() => {
                 // The lines as read: what the frontend matches the stat names against
                 let tip = c.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {:?} with {} lines: {}", t.title, t.lines.len(), t.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" | ")));
-                log::info!("components read in {ms} ms: page {:?}, cursor {:?} in cell {:?}, {tip}", c.page.map(|p| (p.index, p.total)), frame.cursor, c.cell.map(|x| (x.row, x.col)));
+                log::info!("components read in {ms} ms: page {:?}, cursor {:?} in tile {:?}, {tip}", c.page.map(|p| (p.index, p.total)), frame.cursor, c.cell.map(|x| (x.row, x.col, x.span)));
             }
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", self.screen),
         }

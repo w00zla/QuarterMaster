@@ -3,7 +3,7 @@
 // compared with the user's registered blueprints. New ones are registered one by one right away
 // (ambiguous ones after picking the variant) or all at once after a confirmation.
 // The log itself is followed in state.ts (the top bar shows whether it is found).
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { BlueprintListResponse, CatalogBlueprint, CatalogResponse, OkResponse } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
@@ -12,6 +12,7 @@ import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/component
 import { scanBackups } from "../backend";
 import { langRef, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
+import { overlayRows, tabCounts } from "../overlay";
 import { api, connected, loadLog, log } from "../state";
 import { toast, toastError } from "../toasts";
 
@@ -67,6 +68,14 @@ const rows = computed<Row[]>(() => (log.value?.unlocks ?? [])
     return { name: u.name, at: u.at, state, candidates };
   })
   .sort((a, b) => b.at.localeCompare(a.at)));
+
+// The scan overlay shows the rows still to register (new, ambiguous), newest first
+watchEffect(() => {
+  overlayRows.unlocks = rows.value
+    .filter((r) => r.state === "new" || r.state === "pick")
+    .map((r) => ({ tag: t(r.state === "new" ? "state.new" : "state.pick"), cls: r.state === "new" ? "ok" : "warn", name: r.name, detail: null, cols: [] }));
+  tabCounts.unlocks = rows.value.length;
+});
 
 /** The blueprint a row would register, null when none. */
 function selection(row: Row): string | null {
@@ -186,7 +195,7 @@ watch(connected, () => void loadCatalog());
         <span>{{ t("unlocks.scanning", { done: progress?.done ?? 0, total: progress?.total ?? "…" }) }}</span>
         <div class="bar"><div class="fill" :style="{ width: `${progressPct}%` }" /></div>
       </div>
-      <span v-else class="head-title">{{ t("unlocks.title") }}</span>
+      <span v-else class="head-title">{{ t("unlocks.title") }} <span class="head-count">{{ rows.length }}</span></span>
       <button type="button" class="btn small outline" :disabled="scanning" @click="scan">
         <Icon name="history" :size="14" /> {{ t("unlocks.scan") }}
       </button>

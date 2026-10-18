@@ -38,6 +38,8 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # The debug view's frame in the event (already a dependency of others)
 base64 = "0.21"
+# The main and the debug window come back where they were (place, size, monitor)
+tauri-plugin-window-state = "2"
 
 # Screen capture for the refinery OCR (DXGI Desktop Duplication); the version Tauri already uses
 [target.'cfg(windows)'.dependencies]
@@ -50,6 +52,8 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

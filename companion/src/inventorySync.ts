@@ -22,6 +22,9 @@ const KINDS_KEY = "qm.companion.inventory.kinds";
 
 export type Kind = "mats" | "items" | "comps";
 export const KINDS: Kind[] = ["mats", "items", "comps"];
+// Each kind's tag colour and icon (panel rows, filter chips, the overlay's head)
+export const KIND_CLASS = { mats: "ok", items: "", comps: "accent" } as const satisfies Record<Kind, string>;
+export const KIND_ICON = { mats: "resource", items: "item", comps: "type-module" } as const satisfies Record<Kind, string>;
 
 const scan = new InventoryScan();
 const componentScan = new ComponentScan();
@@ -113,14 +116,17 @@ function onRead(e: InventoryReadEvent) {
   });
 }
 
-/** Starts an inventory session for the chosen location: the earlier sightings go. */
-export async function startInventoryScan() {
+/** Starts an inventory session for the chosen location: the earlier sightings go, unless `fresh` is
+ * false (the overlay's mode switching back to the inventory resumes). */
+export async function startInventoryScan(fresh = true) {
   if (!locationUuid.value) return;
-  scan.clear();
-  componentScan.clear();
-  dismissed.value = new Set();
-  registered.value = new Set();
-  publish();
+  if (fresh) {
+    scan.clear();
+    componentScan.clear();
+    dismissed.value = new Set();
+    registered.value = new Set();
+    publish();
+  }
   try {
     await ensureCatalog();
     await loadStock();

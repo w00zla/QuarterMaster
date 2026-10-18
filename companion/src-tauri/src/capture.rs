@@ -109,17 +109,37 @@ fn game_window(last: &mut Option<HWND>) -> Option<HWND> {
         if pid == GetCurrentProcessId() {
             return last.filter(|&h| IsWindow(Some(h)).as_bool() && !IsIconic(h).as_bool());
         }
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let mut buf = [0u16; 1024];
-        let mut len = buf.len() as u32;
-        let named = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
-        let _ = CloseHandle(process);
-        named.ok()?;
-        let game = is_game(&String::from_utf16_lossy(&buf[..len as usize])).then_some(hwnd);
+        let game = is_game_process(pid).then_some(hwnd);
         if game.is_some() {
             *last = game;
         }
         game
+    }
+}
+
+/// The foreground window if it is Star Citizen's and not minimized (the scan overlay follows it;
+/// unlike the capture, the companion in front does not count).
+pub fn foreground_game() -> Option<HWND> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() || IsIconic(hwnd).as_bool() {
+            return None;
+        }
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        is_game_process(pid).then_some(hwnd)
+    }
+}
+
+/// Whether the process runs Star Citizen's executable.
+fn is_game_process(pid: u32) -> bool {
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let named = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
+        let _ = CloseHandle(process);
+        named.is_ok() && is_game(&String::from_utf16_lossy(&buf[..len as usize]))
     }
 }
 
@@ -207,7 +227,8 @@ fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<(Pixels, Op
     Ok(Some((pixels, cursor)))
 }
 
-fn client_rect(hwnd: HWND) -> Result<RECT, String> {
+/// The window's client area in screen coordinates (physical pixels).
+pub fn client_rect(hwnd: HWND) -> Result<RECT, String> {
     unsafe {
         let mut r = RECT::default();
         GetClientRect(hwnd, &mut r).ctx("GetClientRect")?;

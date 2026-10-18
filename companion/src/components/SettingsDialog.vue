@@ -1,32 +1,46 @@
 <script setup lang="ts">
 // API token (created in the web app's Companion dialog and pasted here), game folder and the UI
 // language; saving checks the connection and reloads the log state (the path may have changed). The
-// server is fixed (only the config file changes it). The diagnostics group opens the debug window.
+// server is fixed (only the config file changes it). The scan overlay group (Windows only): its
+// switch acts at once (not stored: off at every start), position and hotkeys are saved. The
+// diagnostics group opens the debug window.
 import { computed, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { openDebugWindow, setConfig } from "../backend";
+import { openDebugWindow, setConfig, type OverlayPosition } from "../backend";
 import { t } from "../i18n";
+import { overlayOn, setOverlay } from "../overlay";
 import { applyConfig, config, loadLog, refreshConnection } from "../state";
 import { errorText, toast, toastError } from "../toasts";
+import HotkeyInput from "./HotkeyInput.vue";
 
 const emit = defineEmits<{ close: [] }>();
 
 const token = ref(config.value?.token ?? "");
 const gameDir = ref(config.value?.gameDir ?? "");
 const language = ref(config.value?.language ?? "");
+const overlayPosition = ref<OverlayPosition>(config.value?.overlayPosition ?? "top-left");
+const hotkeyOverlay = ref(config.value?.hotkeyOverlay ?? "");
+const hotkeyMode = ref(config.value?.hotkeyMode ?? "");
 const busy = ref(false);
+// The overlay needs the screen capture's window tracking (Windows only so far)
+const isWindows = navigator.userAgent.includes("Windows");
 
 const languageOptions = computed(() => [
   { value: "", label: t("lang.system") },
   { value: "de", label: t("lang.de") },
   { value: "en", label: t("lang.en") },
 ]);
+// The places where they are: top row, then bottom row
+const POSITIONS: OverlayPosition[] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
 const changed = computed(() => token.value.trim() !== (config.value?.token ?? "")
   || gameDir.value.trim() !== (config.value?.gameDir ?? "")
-  || language.value !== (config.value?.language ?? ""));
+  || language.value !== (config.value?.language ?? "")
+  || overlayPosition.value !== config.value?.overlayPosition
+  || hotkeyOverlay.value !== config.value?.hotkeyOverlay
+  || hotkeyMode.value !== config.value?.hotkeyMode);
 const buttons = computed<ConfirmButton[]>(() => [
   { label: t("common.close"), kind: "outline", value: "close" },
   { label: t("common.save"), kind: "primary", value: "save", icon: "check", form: "settings", disabled: !changed.value || busy.value },
@@ -36,7 +50,15 @@ async function save() {
   if (!changed.value || busy.value) return;
   busy.value = true;
   try {
-    applyConfig(await setConfig({ server: config.value?.server ?? "", token: token.value.trim(), gameDir: gameDir.value.trim(), language: language.value }));
+    applyConfig(await setConfig({
+      server: config.value?.server ?? "",
+      token: token.value.trim(),
+      gameDir: gameDir.value.trim(),
+      language: language.value,
+      overlayPosition: overlayPosition.value,
+      hotkeyOverlay: hotkeyOverlay.value,
+      hotkeyMode: hotkeyMode.value,
+    }));
     await Promise.all([refreshConnection(), loadLog()]);
     toast(t("settings.saved"));
   } catch (e) {
@@ -62,8 +84,8 @@ async function pickFolder() {
           {{ t("settings.token") }}
           <input v-model="token" class="input" type="password" autocomplete="off" spellcheck="false" />
         </label>
-        <div class="field">
-          {{ t("settings.language") }}
+        <div class="line between">
+          <span class="label">{{ t("settings.language") }}</span>
           <Dropdown v-model="language" :options="languageOptions" variant="outline" />
         </div>
       </section>
@@ -75,6 +97,39 @@ async function pickFolder() {
             <input v-model="gameDir" class="input" type="text" autocomplete="off" spellcheck="false" />
             <button type="button" class="btn outline" @click="pickFolder">{{ t("settings.pick") }}</button>
           </div>
+        </div>
+      </section>
+      <section v-if="isWindows" class="group">
+        <div class="group-title">{{ t("settings.overlay") }}</div>
+        <label class="switch-line">
+          <span class="switch-label label">
+            {{ t("settings.overlayShow") }}
+            <span class="hint">{{ t("settings.overlayHint") }}</span>
+          </span>
+          <input type="checkbox" class="switch" :checked="overlayOn" @change="setOverlay(!overlayOn)" />
+        </label>
+        <div class="line between">
+          <span class="label">{{ t("settings.overlayPosition") }}</span>
+          <div class="corners">
+            <button
+              v-for="p in POSITIONS"
+              :key="p"
+              type="button"
+              class="btn small"
+              :class="overlayPosition === p ? 'primary' : 'outline'"
+              @click="overlayPosition = p"
+            >
+              {{ t(`overlay.pos.${p}`) }}
+            </button>
+          </div>
+        </div>
+        <div class="line between">
+          <span class="label">{{ t("settings.hotkeyOverlay") }}</span>
+          <HotkeyInput v-model="hotkeyOverlay" class="hotkey-field" />
+        </div>
+        <div class="line between">
+          <span class="label">{{ t("settings.hotkeyMode") }}</span>
+          <HotkeyInput v-model="hotkeyMode" class="hotkey-field" />
         </div>
       </section>
       <section class="group">
@@ -131,10 +186,51 @@ async function pickFolder() {
   min-width: 0;
 }
 
+.hint {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
 .line .hint {
   flex: 1;
   min-width: 0;
+}
+
+/* A setting's name in a row: like a field's label above its control */
+.label {
   font-size: 12px;
+  font-weight: 400;
   color: var(--text-2);
+}
+
+/* A setting on the left, its control pushed to the right edge (as in BindSight) */
+.line.between {
+  justify-content: space-between;
+}
+
+/* The overlay switch: its label with the hint below it, the switch on the right */
+.switch-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.switch-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The overlay's places as buttons where they are: top row, bottom row */
+.corners {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+.hotkey-field {
+  width: 200px;
 }
 </style>

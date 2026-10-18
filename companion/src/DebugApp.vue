@@ -89,6 +89,8 @@ const stateOf = (key: string, problem: string | null): { state: string; problem:
   if (report.value.dismissed.includes(key)) return { state: t("debug.state.dismissed"), problem: false };
   return { state: t("debug.state.open"), problem: false };
 };
+// A tile's units, 1-based: "2" or "2–3" (a wide tile)
+const units = (col: number, span: number) => (span > 1 ? `${col + 1}–${col + span}` : `${col + 1}`);
 const rows = computed<Row[]>(() => {
   const materials = report.value.materials.map((s): Row => ({
     key: s.key, source: "FE", kind: s.unit === "SCU" ? "mats" : "items", name: s.name, quality: String(s.quality ?? "–"), amount: amount(s),
@@ -96,7 +98,7 @@ const rows = computed<Row[]>(() => {
   }));
   const components = report.value.components.map((s): Row => ({
     key: s.key, source: "INV", kind: "comps", name: s.label, quality: "–", amount: s.problem ? "–" : componentStats(s),
-    cell: `${s.page ?? "?"}/ r${s.row + 1} c${s.col + 1}`,
+    cell: `${s.page ?? "?"}/ r${s.row + 1} c${units(s.col, s.span)}`,
     ...stateOf(s.key, s.problem ? `${t(COMPONENT_PROBLEM[s.problem])}${s.unreadable.length ? `: ${s.unreadable.join(", ")}` : ""}` : null), atMs: s.atMs,
   }));
   return [...materials, ...components].filter((r) => kinds.value.has(r.kind)).sort((a, b) => b.atMs - a.atMs);
@@ -187,7 +189,7 @@ async function toggleRecording() {
         <div v-if="!grid && comp" class="facts">
           <span class="tag">{{ t("debug.tooltip") }}</span>
           <span>{{ comp.tooltip ? `${comp.tooltip.title} · ${t("debug.lines", { n: comp.tooltip.lines.length })}` : t("debug.noTooltip") }}</span>
-          <span v-if="comp.cell" class="tag ok">{{ t("debug.cell", { row: comp.cell.row + 1, col: comp.cell.col + 1 }) }}</span>
+          <span v-if="comp.cell" class="tag ok">{{ t("debug.cell", { row: comp.cell.row + 1, col: units(comp.cell.col, comp.cell.span) }) }}</span>
           <span v-else class="tag warn">{{ t("debug.noCell") }}</span>
         </div>
         <div v-if="read.frame" class="frame">
@@ -209,8 +211,8 @@ async function toggleRecording() {
           </svg>
         </div>
         <div v-else class="empty-line">{{ t("debug.noFrame") }}</div>
-        <template v-if="comp?.tooltip">
-          <div class="sub-head">{{ t("debug.lines", { n: comp.tooltip.lines.length }) }}</div>
+        <details v-if="comp?.tooltip" class="more">
+          <summary>{{ t("debug.lines", { n: comp.tooltip.lines.length }) }}</summary>
           <div class="row">
             <span class="num">{{ Math.round(comp.tooltip.rect.x0) }}, {{ Math.round(comp.tooltip.rect.y0) }}</span>
             <span class="text">{{ comp.tooltip.title }}</span>
@@ -221,7 +223,7 @@ async function toggleRecording() {
             <span class="text">{{ l.text }}</span>
             <span />
           </div>
-        </template>
+        </details>
         <template v-if="grid?.tiles.length">
           <div class="sub-head">{{ t("debug.tiles", { n: grid.tiles.length }) }}</div>
           <div v-for="x in grid.tiles" :key="`${x.row}:${x.col}`" class="row" :class="{ hovered: x.hovered }">

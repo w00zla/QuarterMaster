@@ -4,6 +4,7 @@
 //! Reads the inventory terminals (`inventory.rs`) and the refinery terminal (`refinery.rs`) from
 //! frames during a scan session the user starts (`ocr.rs`, `ocrwatch.rs`), in the player's game
 //! language (`locale.rs`); the frames come from the screen capture (`capture.rs`, Windows only so far).
+//! The scan overlay (`overlay.rs`, Windows only) shows the main window's detections over the game.
 
 #[cfg(windows)]
 mod capture;
@@ -15,6 +16,8 @@ pub mod locale;
 mod logwatch;
 pub mod ocr;
 mod ocrwatch;
+#[cfg(windows)]
+mod overlay;
 pub mod refinery;
 mod server;
 
@@ -43,7 +46,7 @@ const CONFIG_CHANGED: &str = "config-changed";
 const DEBUG_WINDOW: &str = "debug";
 /// The main window's WebView2 arguments (tauri.conf.json `additionalBrowserArgs`), for every further window
 #[cfg(windows)]
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
+pub(crate) const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
 
 struct AppData {
     config: Config,
@@ -125,16 +128,23 @@ fn get_config(state: State) -> Config {
     state.lock().unwrap().config.clone()
 }
 
-/// Saves token, game folder and language; the server stays as loaded (only the config file changes
-/// it). Every window hears about it (`config-changed`).
+/// Saves token, game folder, language and the overlay's position and hotkeys; the server stays as
+/// loaded (only the config file changes it). Invalid hotkeys refuse the save (the ones before stay).
+/// Every window hears about it (`config-changed`).
 #[tauri::command]
 fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config, String> {
-    config.server = state.lock().unwrap().config.server.clone();
+    let before = state.lock().unwrap().config.clone();
+    config.server = before.server.clone();
     config.token = config.token.trim().to_string();
     config.game_dir = config.game_dir.trim().to_string();
     if !matches!(config.language.as_str(), "de" | "en") {
         config.language = String::new();
     }
+    if !config::OVERLAY_POSITIONS.contains(&config.overlay_position.as_str()) {
+        config.overlay_position = Config::default().overlay_position;
+    }
+    #[cfg(windows)]
+    overlay::set_hotkeys(&app, &config.hotkey_overlay, &config.hotkey_mode)?;
     config::save(&app, &config)?;
     state.lock().unwrap().config = config.clone();
     let _ = app.emit(CONFIG_CHANGED, ());
@@ -327,6 +337,22 @@ fn get_game_seen(seen: tauri::State<ocrwatch::GameSeen>) -> bool {
     seen.0.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Switches the scan overlay on (its window, shown while the game is in front) or off (Windows only).
+/// Async: building a window must not run on the main thread (see the debug window).
+#[tauri::command]
+async fn set_overlay(app: AppHandle, on: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let overlay = app.state::<overlay::Overlay>().inner().clone();
+        overlay::set(&app, &overlay, on)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, on);
+        Err("unsupported".into())
+    }
+}
+
 /// Opens the configured server's web app in the browser.
 #[tauri::command]
 fn open_webapp(app: AppHandle) -> Result<(), String> {
@@ -362,6 +388,16 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // The main and the debug window open where they were closed (place incl. monitor, size,
+        // maximized); the overlay places itself
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::POSITION | tauri_plugin_window_state::StateFlags::SIZE | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .with_denylist(&["overlay"])
+                .build(),
+        )
         .setup(|app| {
             std::panic::set_hook(Box::new(|info| log::error!("panic: {info}")));
             let config = config::load(app.handle());
@@ -386,6 +422,22 @@ pub fn run() {
             app.manage(debug);
             app.manage(store);
             app.manage(seen);
+            // The scan overlay: off at every start; its hotkeys from the config (invalid ones only logged)
+            #[cfg(windows)]
+            {
+                let overlay = overlay::Overlay::default();
+                let handle = app.handle().clone();
+                overlay::spawn(app.handle().clone(), overlay.clone(), move || {
+                    handle.state::<Mutex<AppData>>().lock().unwrap().config.overlay_position.clone()
+                });
+                app.manage(overlay);
+                app.manage(overlay::Hotkeys::default());
+                let c = app.state::<Mutex<AppData>>().lock().unwrap().config.clone();
+                if let Err(e) = overlay::set_hotkeys(app.handle(), &c.hotkey_overlay, &c.hotkey_mode) {
+                    log::warn!("overlay hotkeys not set: {e}");
+                }
+                overlay::spawn_hotkeys(app.handle().clone());
+            }
             // Closing the main window ends the app, the debug window included (else it would keep
             // the process alive)
             if let Some(main) = app.get_webview_window("main") {
@@ -415,6 +467,7 @@ pub fn run() {
             open_debug_window,
             get_game_seen,
             game_names,
+            set_overlay,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

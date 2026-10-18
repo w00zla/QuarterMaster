@@ -2,7 +2,8 @@
 // The title bar, a row with the game log state (a small tag while found) and the scan session's (a
 // tag: off, running without the game, running with the game; started and stopped in the panels), the
 // user (avatar, name) or why the connection is down (chip only then) with a button that opens the web
-// app, then a tab bar (icons like the debug window's) with the panels: warehouse, refinery, unlocks.
+// app, then a tab bar (icons like the debug window's) with the panels: warehouse, refinery, unlocks
+// (the tab is the scan overlay's mode, overlay.ts).
 // The chips open the settings; the settings also open by themselves while the app is not connected
 // (no server or token, or the token is refused). An app the server calls outdated shows only the
 // update hint (no work until updated).
@@ -20,9 +21,10 @@ import WindowEdges from "./components/WindowEdges.vue";
 import { AppError, appInfo, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
 import { config, connectError, connected, connectionText, loadConfig, log, meAvatar, meName, refreshConnection, watchConnection, watchLog } from "./state";
-import { preparing, watchRefinery } from "./refinerySync";
+import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
-import { gameSeen, scanMode, watchScan } from "./scan";
+import { pickTab, scanState, tab, tabCounts, watchOverlay } from "./overlay";
+import { watchScan } from "./scan";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
 
@@ -30,20 +32,12 @@ provide(PICKER_LABELS, { clear: t("pick.clear"), noMatch: t("pick.noMatch") });
 
 const settingsOpen = ref(false);
 const ready = ref(false);
-// The panel tabs; the last one stays for the next start
-type Tab = "inventory" | "refinery" | "unlocks";
-const TAB_KEY = "qm.companion.tab";
+// The panel tabs (also the scan overlay's modes, overlay.ts)
 const TABS = [
   { id: "inventory", icon: "item", label: "inventory.title" },
   { id: "refinery", icon: "drop", label: "refinery.title" },
   { id: "unlocks", icon: "blueprint", label: "unlocks.title" },
 ] as const;
-const stored = localStorage.getItem(TAB_KEY);
-const tab = ref<Tab>(TABS.some((x) => x.id === stored) ? (stored as Tab) : "inventory");
-function pickTab(id: Tab) {
-  tab.value = id;
-  localStorage.setItem(TAB_KEY, id);
-}
 const info = ref<{ version: string; platform: "windows" | "linux" } | null>(null);
 const downloadUrl = computed(() => (info.value && outdated.value?.downloads[info.value.platform]) ?? null);
 
@@ -54,17 +48,6 @@ const serverLabel = computed(() => {
 });
 const serverTip = computed(() => [connectionText.value, config.value?.server].filter(Boolean).join(" · "));
 // Found: just the path; missing: where it was looked for
-// The scan session: off (neutral), getting ready (catalog, game language), running without the game
-// (yellow), running with the game (green)
-const scanState = computed(() =>
-  scanMode.value === "off"
-    ? ({ cls: "", icon: "eye-off", label: "scan.off" } as const)
-    : preparing.value
-      ? ({ cls: "", icon: "clock", label: "scan.preparing" } as const)
-      : gameSeen.value
-      ? ({ cls: "ok", icon: "eye", label: scanMode.value === "inventory" ? "scan.inventory" : "scan.refinery" } as const)
-      : ({ cls: "warn", icon: "warning", label: "scan.noGame" } as const),
-);
 const logTip = computed(() => (!log.value ? null : log.value.found ? log.value.path : t("log.notFound", { path: log.value.path })));
 
 onMounted(async () => {
@@ -80,6 +63,7 @@ onMounted(async () => {
   await watchScan().catch(toastError);
   await watchRefinery().catch(toastError);
   await watchInventory().catch(toastError);
+  await watchOverlay().catch(toastError);
   ready.value = true;
   if (!connected.value && !outdated.value) settingsOpen.value = true;
 });
@@ -97,7 +81,7 @@ onMounted(async () => {
           <Icon name="warning" :size="12" /> {{ t("log.missing") }}
         </button>
       </Tooltip>
-      <span class="tag" :class="scanState.cls"><Icon :name="scanState.icon" :size="12" /> {{ t(scanState.label) }}</span>
+      <span class="tag" :class="scanState.cls"><Icon :name="scanState.icon" :size="12" /> {{ scanState.text }}</span>
       <div class="spacer" />
       <Tooltip v-if="!connected && connectError" :text="serverTip">
         <button type="button" class="tag err problem" @click="settingsOpen = true">
@@ -124,6 +108,7 @@ onMounted(async () => {
       <nav class="tabs">
         <button v-for="x in TABS" :key="x.id" type="button" class="tab" :class="{ active: tab === x.id }" @click="pickTab(x.id)">
           <Icon :name="x.icon" :size="14" /> {{ t(x.label) }}
+          <span class="tab-count">{{ tabCounts[x.id] }}</span>
         </button>
       </nav>
       <!-- All panels stay mounted (v-show): the unlocks panel's catalog and scan progress survive a tab switch -->
@@ -249,5 +234,12 @@ onMounted(async () => {
 .tab.active {
   color: var(--text);
   border-bottom-color: var(--accent, currentColor);
+}
+
+/* How many rows the tab's table lists */
+.tab-count {
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 </style>

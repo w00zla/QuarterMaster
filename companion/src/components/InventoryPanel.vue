@@ -7,7 +7,7 @@
 // resource, quality, amount; a component's stats after its name: Register / Discard). Registering
 // (one or all) asks first, with a switch per org to share right away. The sightings behind the
 // proposals, also the incomplete ones, are in the debug window (settings).
-import { computed, ref } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import { statValueText } from "../../../src/stock/component-stats";
@@ -17,9 +17,11 @@ import type { ComponentProposal } from "../components";
 import { t } from "../i18n";
 import type { Proposal } from "../inventory";
 import {
-  accept, acceptComponent, componentProposals, dismiss, KINDS, kinds, locationUuid, proposals, setLocation, shareGuildIds, startInventoryScan, stopInventoryScan, toggleKind,
+  accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, KINDS, kinds, locationUuid, proposals, setLocation, shareGuildIds, sightings, startInventoryScan,
+  stopInventoryScan, toggleKind,
   type Kind,
 } from "../inventorySync";
+import { overlayOn, overlayRows, tabCounts } from "../overlay";
 import { materialName, syncCatalog } from "../refinerySync";
 import { scanMode } from "../scan";
 import { connected, meOrgs } from "../state";
@@ -59,8 +61,16 @@ const rows = computed<Row[]>(() => [
   })),
 ]);
 const what = (r: Row) => [r.name, r.detail ?? r.quality, r.amount].join(" · ");
-const tagClass: Record<Kind, string> = { mats: "ok", items: "", comps: "accent" };
-const kindIcon = { mats: "resource", items: "item", comps: "type-module" } as const;
+const tagClass: Record<Kind, string> = KIND_CLASS;
+const kindIcon = KIND_ICON;
+// The scan overlay shows the same rows, the most recently seen first (stacks and components mixed)
+watchEffect(() => {
+  const seen = new Map([...sightings.value, ...componentSightings.value].map((s) => [s.key, s.atMs]));
+  overlayRows.inventory = [...rows.value]
+    .sort((a, b) => (seen.get(b.id) ?? 0) - (seen.get(a.id) ?? 0))
+    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: [r.quality, r.amount] }));
+  tabCounts.inventory = rows.value.length;
+});
 
 // The register dialog: one row, or all of them
 const registering = ref<Row[] | null>(null);
@@ -104,10 +114,10 @@ function toggleScan() {
 <template>
   <section class="panel inventory">
     <div class="head">
-      <span class="head-title">{{ t("inventory.title") }}</span>
+      <span class="head-title">{{ t("inventory.title") }} <span class="head-count">{{ rows.length }}</span></span>
       <Picker class="location" :model-value="locationUuid" :options="locationOptions" :placeholder="t('inventory.location')" :disabled="scanning" @update:model-value="setLocation" />
-      <Tooltip :text="!locationUuid ? t('inventory.pickLocation') : null">
-        <button type="button" class="btn small outline" :disabled="!locationUuid || !connected" @click="toggleScan">
+      <Tooltip :text="overlayOn ? t('overlay.controls') : !locationUuid ? t('inventory.pickLocation') : null">
+        <button type="button" class="btn small outline" :disabled="!locationUuid || !connected || overlayOn" @click="toggleScan">
           <Icon :name="scanning ? 'eye-off' : 'eye'" :size="14" /> {{ t(scanning ? "scan.stop" : "scan.start") }}
         </button>
       </Tooltip>
@@ -120,8 +130,9 @@ function toggleScan() {
     <!-- What the scan detects -->
     <div class="chips filter">
       <span class="filter-label">{{ t("inventory.scanned") }}</span>
-      <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="{ active: kinds.has(k) }" @click="toggleKind(k)">
+      <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="[tagClass[k], { active: kinds.has(k) }]" :aria-pressed="kinds.has(k)" @click="toggleKind(k)">
         <Icon :name="kindIcon[k]" :size="12" /> {{ t(`inventory.kind.${k}`) }}
+        <Icon v-if="kinds.has(k)" name="check" :size="12" />
       </button>
     </div>
     <div v-if="!rows.length" class="empty-line">
@@ -136,17 +147,22 @@ function toggleScan() {
         <span />
         <span />
       </div>
-      <div v-for="r in rows" :key="r.id" class="row">
-        <span class="tag" :class="tagClass[r.kind]">{{ t(`inventory.kind.${r.kind}`) }}</span>
-        <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
-        <span class="num">{{ r.quality }}</span>
-        <span class="num">{{ r.amount }}</span>
-        <Tooltip :text="t('inventory.register')">
-          <button type="button" class="icon-btn" :disabled="!connected || busy" @click="registering = [r]"><Icon name="check" :size="14" /></button>
-        </Tooltip>
-        <Tooltip :text="t('inventory.drop')">
-          <button type="button" class="icon-btn" @click="dismiss(r.id)"><Icon name="close" :size="14" /></button>
-        </Tooltip>
+      <!-- Only the rows scroll: head, filter and column titles stay -->
+      <div class="rows">
+        <div v-for="r in rows" :key="r.id" class="row">
+          <Tooltip :text="t(`inventory.kind.${r.kind}`)">
+            <span class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="12" /></span>
+          </Tooltip>
+          <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+          <span class="num">{{ r.quality }}</span>
+          <span class="num">{{ r.amount }}</span>
+          <Tooltip :text="t('inventory.register')">
+            <button type="button" class="icon-btn" :disabled="!connected || busy" @click="registering = [r]"><Icon name="check" :size="14" /></button>
+          </Tooltip>
+          <Tooltip :text="t('inventory.drop')">
+            <button type="button" class="icon-btn" @click="dismiss(r.id)"><Icon name="close" :size="14" /></button>
+          </Tooltip>
+        </div>
       </div>
     </template>
     <ConfirmDialog
@@ -175,11 +191,19 @@ function toggleScan() {
 </template>
 
 <style scoped>
-/* The picker's list must reach past the panel (ui.css clips panels) */
+/* Fills the main area, only its rows scroll; the picker's list must reach past the panel (ui.css
+   clips panels) */
 .inventory {
-  flex-shrink: 0;
-  margin-bottom: 12px;
+  flex: 1;
+  min-height: 0;
   overflow: visible;
+}
+
+.rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-dim);
 }
 
 .location {
@@ -203,17 +227,36 @@ function toggleScan() {
   letter-spacing: 0.04em;
 }
 
+/* Toggles: on = the kind's badge colour with a check, off = dashed and dimmed */
 .filter .chip {
+  --kind: var(--text-2);
   height: 22px;
   gap: 4px;
   padding: 0 8px;
   font-size: 11px;
+  border-style: dashed;
+  color: var(--text-3);
 }
 
-/* One compact row per stack or component, like the refinery's rows: kind, resource, quality, amount, two icon buttons */
+.filter .chip.ok {
+  --kind: var(--ok);
+}
+
+.filter .chip.accent {
+  --kind: var(--accent);
+}
+
+.filter .chip.active {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--kind) 45%, transparent);
+  background: color-mix(in srgb, var(--kind) 14%, transparent);
+  color: var(--kind);
+}
+
+/* One compact row per stack or component, like the refinery's rows: kind badge, resource, quality, amount, two icon buttons */
 .row {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) 40px 88px 24px 24px;
+  grid-template-columns: 24px minmax(0, 1fr) 40px 88px 24px 24px;
   align-items: center;
   gap: 8px;
   min-height: 28px;
@@ -239,6 +282,11 @@ function toggleScan() {
 
 .row .tag {
   justify-self: start;
+}
+
+/* The kind badge: its icon only (the tooltip names it) */
+.tag.kind {
+  padding: 0 5px;
 }
 
 .row-name {
