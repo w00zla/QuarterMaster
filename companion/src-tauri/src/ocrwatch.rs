@@ -19,8 +19,8 @@
 //!
 //! Troubleshooting (`Debug`, the inventory panel's debug dialog): while on, every inventory event
 //! carries the frame as a JPEG (scaled to 1280 px wide) for the overlay view, and the last reads are
-//! kept with their full frames (`DebugStore`) for an export to a folder (PNG + JSON per read, an
-//! info file) the user can send in.
+//! kept with their full frames (`DebugStore`); a recording the user starts writes them and every
+//! read after into a folder (PNG + JSON per read, an info file) the user can send in.
 
 use std::collections::VecDeque;
 use std::io::Cursor;
@@ -49,8 +49,9 @@ pub const INVENTORY_READ: &str = "inventory-read";
 const AUTO_REFINERY: bool = false;
 /// Width of the frame sent with an inventory event while debugging
 const DEBUG_FRAME_WIDTH: u32 = 1280;
-/// Reads kept for the debug export (full frames as PNG: ~8 MB each on 3840×1600)
+/// Reads kept for the debug window and a recording (full frames as JPEG: ~0.6 MB each on 3840×1600)
 const DEBUG_KEEP: usize = 3;
+const RECORD_JPEG_QUALITY: u8 = 90;
 // ONNX Runtime threads: the game runs at the same time (3: the inventory reads confirm every stack
 // twice, the user waits for them)
 const OCR_THREADS: usize = 3;
@@ -186,6 +187,8 @@ enum Screen {
     Inventory,
 }
 const SCREEN_MISSES: u32 = 3;
+/// How often an inventory session that knows no screen looks for one
+const PROBE_MS: u64 = 2_000;
 
 /// One inventory read kept for the debug export.
 pub struct DebugRead {
@@ -197,16 +200,38 @@ pub struct DebugRead {
     pub components: Option<ComponentRead>,
     pub boxes: Vec<TextBox>,
     /// The frame as PNG
-    pub png: Vec<u8>,
+    /// The frame as JPEG
+    pub jpeg: Vec<u8>,
 }
 
 /// Whether the debug view is open: frames go with the events and the last reads are kept.
 #[derive(Default, Clone)]
 pub struct Debug(pub Arc<AtomicBool>);
 
-/// The last inventory reads while debugging, newest last.
+/// A running recording: every read goes into this folder as `read-N.jpg` + `read-N.json`.
+pub struct Recording {
+    folder: PathBuf,
+    next: usize,
+}
+
+/// What the debug window holds: the last reads (RAM, `DEBUG_KEEP`) and the recording, if one runs.
+#[derive(Default)]
+pub struct DebugState {
+    pub reads: VecDeque<DebugRead>,
+    pub recording: Option<Recording>,
+}
+
+impl DebugState {
+    /// Drops the kept reads and ends a recording (the debug window closed).
+    pub fn clear(&mut self) {
+        self.reads.clear();
+        self.recording = None;
+    }
+}
+
+/// The debug window's state, shared with the worker and the commands.
 #[derive(Default, Clone)]
-pub struct DebugStore(pub Arc<Mutex<VecDeque<DebugRead>>>);
+pub struct DebugStore(pub Arc<Mutex<DebugState>>);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -230,29 +255,48 @@ struct ExportInfo<'a> {
     reads: usize,
 }
 
+/// Writes one read as `read-N.jpg` + `read-N.json` into `folder`.
+fn write_read(folder: &Path, n: usize, r: &DebugRead) -> Result<(), String> {
+    std::fs::write(folder.join(format!("read-{n}.jpg")), &r.jpeg).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&ExportRead { at_ms: r.at_ms, ms: r.ms, width: r.width, height: r.height, grid: &r.grid, components: &r.components, boxes: &r.boxes })
+        .map_err(|e| e.to_string())?;
+    std::fs::write(folder.join(format!("read-{n}.json")), json).map_err(|e| e.to_string())
+}
+
+fn write_info(folder: &Path, game_dir: &str, reads: usize) -> Result<(), String> {
+    let info = ExportInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        platform: if cfg!(windows) { "windows" } else { "linux" },
+        exported_at_ms: unix_ms(SystemTime::now()),
+        game_dir,
+        reads,
+    };
+    std::fs::write(folder.join("info.json"), serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
 impl DebugStore {
-    /// Writes the kept reads into a new folder below `dir` (`read-N.png`, `read-N.json`, `info.json`);
-    /// the folder's path.
-    pub fn export(&self, dir: &Path, game_dir: &str) -> Result<PathBuf, String> {
-        let now = unix_ms(SystemTime::now());
-        let folder = dir.join(format!("qm-inventory-debug-{}", now / 1000));
+    /// Starts a recording into a new folder below `dir`: the reads kept so far go in first, every
+    /// read from now on follows as it happens (`info.json` holds the count, rewritten at the stop).
+    /// The folder's path.
+    pub fn start_recording(&self, dir: &Path, game_dir: &str) -> Result<PathBuf, String> {
+        let folder = dir.join(format!("qm-inventory-debug-{}", unix_ms(SystemTime::now()) / 1000));
         std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-        let reads = self.0.lock().unwrap();
-        for (n, r) in reads.iter().enumerate() {
-            std::fs::write(folder.join(format!("read-{n}.png")), &r.png).map_err(|e| e.to_string())?;
-            let json = serde_json::to_string_pretty(&ExportRead { at_ms: r.at_ms, ms: r.ms, width: r.width, height: r.height, grid: &r.grid, components: &r.components, boxes: &r.boxes })
-                .map_err(|e| e.to_string())?;
-            std::fs::write(folder.join(format!("read-{n}.json")), json).map_err(|e| e.to_string())?;
+        let mut state = self.0.lock().unwrap();
+        for (n, r) in state.reads.iter().enumerate() {
+            write_read(&folder, n, r)?;
         }
-        let info = ExportInfo {
-            version: env!("CARGO_PKG_VERSION"),
-            platform: if cfg!(windows) { "windows" } else { "linux" },
-            exported_at_ms: now,
-            game_dir,
-            reads: reads.len(),
-        };
-        std::fs::write(folder.join("info.json"), serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        write_info(&folder, game_dir, state.reads.len())?;
+        state.recording = Some(Recording { folder: folder.clone(), next: state.reads.len() });
         Ok(folder)
+    }
+
+    /// Ends the recording; its folder, if one ran.
+    pub fn stop_recording(&self, game_dir: &str) -> Option<PathBuf> {
+        let rec = self.0.lock().unwrap().recording.take()?;
+        if let Err(e) = write_info(&rec.folder, game_dir, rec.next) {
+            log::warn!("debug recording info: {e}");
+        }
+        Some(rec.folder)
     }
 }
 
@@ -265,9 +309,12 @@ fn jpeg_data_url(image: &RgbImage, width: u32) -> Result<String, String> {
     Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())))
 }
 
-fn png_bytes(image: &RgbImage) -> Result<Vec<u8>, String> {
+/// The frame as JPEG at `RECORD_JPEG_QUALITY` (~0.6 MB on 3840×1600 instead of ~7 MB as PNG, and
+/// encoded in a fraction of the time; the OCR reads such frames like the game's own screenshots).
+fn jpeg_bytes(image: &RgbImage) -> Result<Vec<u8>, String> {
     let mut bytes = Cursor::new(Vec::new());
-    image.write_to(&mut bytes, ImageFormat::Png).map_err(|e| e.to_string())?;
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, RECORD_JPEG_QUALITY);
+    encoder.encode_image(image).map_err(|e| e.to_string())?;
     Ok(bytes.into_inner())
 }
 
@@ -438,6 +485,8 @@ struct Worker {
     /// Which screen the inventory session looks at, and how many reads in a row found nothing there
     screen: Screen,
     screen_misses: u32,
+    /// When an inventory session last read a frame (probing without a known screen is throttled)
+    last_probe_ms: u64,
 }
 
 fn unix_ms(t: SystemTime) -> u64 {
@@ -456,7 +505,7 @@ fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
 
 impl Worker {
     fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Self {
-        Self { app, detect, scan, debug, store, ocr: None, gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None, screen: Screen::Unknown, screen_misses: 0 }
+        Self { app, detect, scan, debug, store, ocr: None, gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None, screen: Screen::Unknown, screen_misses: 0, last_probe_ms: 0 }
     }
 
     fn run(mut self, rx: Receiver<Frame>) {
@@ -487,9 +536,17 @@ impl Worker {
                 v.last_frame = Instant::now();
             }
             self.gate.reread_ms = if mode == ScanMode::Refinery { REREAD_MS } else { INVENTORY_REREAD_MS };
-            if frame.live && !self.gate.pass(frame.pixels.thumb(), frame.at_ms) {
+            // An inventory session reads every frame: the character and the world behind the
+            // translucent inventory screen never come to rest, and the user waits for each stack.
+            // While it does not know its screen (nothing in view: a menu, the verse) it probes
+            // every PROBE_MS only: a frame with neither screen costs the grid and the tooltip read
+            if frame.live && mode != ScanMode::Inventory && !self.gate.pass(frame.pixels.thumb(), frame.at_ms) {
                 continue;
             }
+            if frame.live && mode == ScanMode::Inventory && self.screen == Screen::Unknown && frame.at_ms.saturating_sub(self.last_probe_ms) < PROBE_MS {
+                continue;
+            }
+            self.last_probe_ms = frame.at_ms;
             let result = match mode {
                 ScanMode::Inventory => self.look_inventory(frame),
                 _ => self.look(frame),
@@ -516,6 +573,17 @@ impl Worker {
         let mut components = None;
         let mut boxes = Vec::new();
         let mut found = false;
+        // The storage grid's cell under the cursor; without one no tooltip can belong to a tile, so
+        // the tooltip read is skipped (the page read keeps the screen)
+        let cell = frame.cursor.and_then(|c| cell_of(c, width as f32, height as f32));
+        let tooltip_read = |ocr: &mut Ocr, boxes: &mut Vec<TextBox>| -> Result<_, String> {
+            if cell.is_none() && frame.cursor.is_some() {
+                return Ok(None);
+            }
+            let (tooltip, tip_boxes) = read_tooltip(ocr, &image)?;
+            boxes.extend(tip_boxes);
+            Ok(tooltip)
+        };
         if self.screen != Screen::Inventory {
             let probe_page = self.screen == Screen::Unknown;
             let page = if probe_page {
@@ -540,22 +608,20 @@ impl Worker {
             }
             if self.screen == Screen::Unknown || page.is_some() {
                 // The page or nothing at all: try the character inventory
-                let (tooltip, tip_boxes) = read_tooltip(ocr, &image)?;
-                boxes.extend(tip_boxes);
+                let tooltip = tooltip_read(ocr, &mut boxes)?;
                 let page = if probe_page { page } else { read_page(ocr, &image).map(|(p, b)| { boxes.extend(b); p })? };
                 found = found || page.is_some() || tooltip.is_some();
                 if page.is_some() {
                     self.screen = Screen::Inventory;
                 }
-                components = Some(ComponentRead { tooltip, page, cell: frame.cursor.and_then(|c| cell_of(c, width as f32, height as f32)) });
+                components = Some(ComponentRead { tooltip, page, cell });
             }
         } else {
-            let (tooltip, tip_boxes) = read_tooltip(ocr, &image)?;
+            let tooltip = tooltip_read(ocr, &mut boxes)?;
             let (page, page_boxes) = read_page(ocr, &image)?;
-            boxes.extend(tip_boxes);
             boxes.extend(page_boxes);
             found = page.is_some() || tooltip.is_some();
-            components = Some(ComponentRead { tooltip, page, cell: frame.cursor.and_then(|c| cell_of(c, width as f32, height as f32)) });
+            components = Some(ComponentRead { tooltip, page, cell });
         }
         // A screen that shows nothing SCREEN_MISSES times in a row is left: the next frame probes again
         if found {
@@ -576,19 +642,28 @@ impl Worker {
                 log::info!("inventory read in {ms} ms: {}×{} tiles at pitch {:.0}×{:.0} (weight {}), cursor {:?}, {tip}{hovered}", g.cols.len(), g.rows.len(), g.pitch_x, g.pitch_y, g.fit_weight, frame.cursor);
             }
             (None, Some(c)) if c.tooltip.is_some() || c.page.is_some() => {
-                let tip = c.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {:?} with {} lines", t.title, t.lines.len()));
-                log::info!("components read in {ms} ms: {tip}, page {:?}, cursor {:?} in cell {:?}", c.page.map(|p| (p.index, p.total)), frame.cursor, c.cell.map(|x| (x.row, x.col)));
+                // The lines as read: what the frontend matches the stat names against
+                let tip = c.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {:?} with {} lines: {}", t.title, t.lines.len(), t.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" | ")));
+                log::info!("components read in {ms} ms: page {:?}, cursor {:?} in cell {:?}, {tip}", c.page.map(|p| (p.index, p.total)), frame.cursor, c.cell.map(|x| (x.row, x.col)));
             }
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", self.screen),
         }
         let frame_url = if debug { Some(jpeg_data_url(&image, DEBUG_FRAME_WIDTH)?) } else { None };
         if debug {
-            let png = png_bytes(&image)?;
-            let mut reads = self.store.0.lock().unwrap();
-            if reads.len() >= DEBUG_KEEP {
-                reads.pop_front();
+            let jpeg = jpeg_bytes(&image)?;
+            let read = DebugRead { at_ms: frame.at_ms, ms, width, height, grid: grid.clone(), components: components.clone(), boxes: boxes.clone(), jpeg };
+            let mut state = self.store.0.lock().unwrap();
+            // A running recording gets every read as a file right away
+            if let Some(rec) = &mut state.recording {
+                if let Err(e) = write_read(&rec.folder, rec.next, &read) {
+                    log::warn!("debug recording: {e}");
+                }
+                rec.next += 1;
             }
-            reads.push_back(DebugRead { at_ms: frame.at_ms, ms, width, height, grid: grid.clone(), components: components.clone(), boxes: boxes.clone(), png });
+            if state.reads.len() >= DEBUG_KEEP {
+                state.reads.pop_front();
+            }
+            state.reads.push_back(read);
         }
         let _ = self.app.emit(INVENTORY_READ, InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, components, cursor: frame.cursor, boxes, frame: frame_url });
         Ok(())

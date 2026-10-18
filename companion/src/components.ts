@@ -92,10 +92,12 @@ export function buildComponentCatalog(responses: CatalogResponse[], gameNames: R
   return { components: [...byUuid.values()], statNames };
 }
 
-// "Ind/1/B Guardian", "Mil/3/A JS-500", "Sth/2/B Bolt"
-const PREFIX = /^[A-Za-z]{3}\/(\d+)\/([A-Z])\s+(.+)$/;
+// "Ind/1/B Guardian", "Mil/3/A JS-500", "Sth/2/B Bolt"; the OCR drops the space now and then ("Sth/1/ASnowBlind")
+const PREFIX = /^[A-Za-z]{3}\/(\d+)\/([A-Z])\s*(.+)$/;
 
-/** The components a tooltip title can mean: none, one, or several (the prefix's size and grade narrow them). */
+/** The components a tooltip title can mean: none, one, or several. The prefix's size and grade narrow
+ * them; among variants that share a name (a ship weapon's turret, low-poly and ship-fitted records next
+ * to the one the blueprints make), the craftable ones (with stats) count. */
 export function findComponents(cat: ComponentCatalog, title: string): ComponentDef[] {
   const prefix = PREFIX.exec(title.trim());
   let hits = cat.components.filter((c) => c.names.has(norm(title)));
@@ -103,6 +105,10 @@ export function findComponents(cat: ComponentCatalog, title: string): ComponentD
   if (hits.length > 1 && prefix) {
     const narrowed = hits.filter((c) => c.size === Number(prefix[1]) && c.gradeLetter === prefix[2]);
     if (narrowed.length) hits = narrowed;
+  }
+  if (hits.length > 1) {
+    const crafted = hits.filter((c) => c.stats.length);
+    if (crafted.length) hits = crafted;
   }
   return hits;
 }
@@ -151,12 +157,20 @@ export function statFromTooltip(stat: CatalogStat, value: string): string | null
   return String(steps);
 }
 
-export type StatsResult = { stats: Record<string, string>; unreadable: string[] };
+export type StatsResult = {
+  // {property UUID: gain}, only gains (what is booked)
+  stats: Record<string, string>;
+  // The property UUIDs whose line was read, gain or not (an unmodified component shows its stats at ±0)
+  read: string[];
+  // The stats whose line could not be turned into a gain
+  unreadable: string[];
+};
 
-/** The component's stats in the tooltip's lines: {property UUID: gain}, only gains; `unreadable` names
- * the stats whose line could not be turned into one. Lines of other labels are ignored. */
+/** The component's stats in the tooltip's lines: the gains to book, which stats were read at all, and
+ * the stats whose line could not be read. Lines of other labels are ignored. */
 export function statsOf(def: ComponentDef, lines: string[], cat: ComponentCatalog): StatsResult {
   const stats: Record<string, string> = {};
+  const read: string[] = [];
   const unreadable: string[] = [];
   const fields = lines.map(parseField).filter((f): f is Field => f !== null);
   for (const s of def.stats) {
@@ -165,9 +179,12 @@ export function statsOf(def: ComponentDef, lines: string[], cat: ComponentCatalo
     if (!field) continue;
     const value = statFromTooltip(s, field.value);
     if (value === null) unreadable.push(s.name);
-    else if (value !== "0") stats[s.uuid] = value;
+    else {
+      read.push(s.uuid);
+      if (value !== "0") stats[s.uuid] = value;
+    }
   }
-  return { stats: Object.fromEntries(Object.entries(stats).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))), unreadable };
+  return { stats: Object.fromEntries(Object.entries(stats).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))), read, unreadable };
 }
 
 // --- sightings -------------------------------------------------------------------------------------
@@ -184,6 +201,8 @@ export interface ComponentSighting {
   label: string;
   // The gains read off the tooltip ({} = none); null while unreadable
   stats: Record<string, string> | null;
+  // The stats read at all (property UUIDs): shown at ±0 where there is no gain
+  readStats: string[];
   // The stats that could not be read
   unreadable: string[];
   page: number | null;
@@ -199,7 +218,7 @@ export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog
   const title = e.tooltip.title.trim();
   const hits = findComponents(cat, title);
   const def = hits.length === 1 ? hits[0]! : null;
-  const read = def ? statsOf(def, e.tooltip.lines.map((l) => l.text), cat) : { stats: {}, unreadable: [] };
+  const read: StatsResult = def ? statsOf(def, e.tooltip.lines.map((l) => l.text), cat) : { stats: {}, read: [], unreadable: [] };
   const problem: ComponentProblem | null = !hits.length ? "unknownComponent" : !def ? "ambiguousComponent" : read.unreadable.length ? "statsUnreadable" : null;
   const page = e.page?.index ?? null;
   const stats = problem ? null : read.stats;
@@ -209,6 +228,7 @@ export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog
     componentUuid: def?.uuid ?? null,
     label: def?.label ?? title,
     stats,
+    readStats: read.read,
     unreadable: read.unreadable,
     page,
     row: e.cell.row,
@@ -257,7 +277,10 @@ export interface ComponentProposal {
   id: string;
   componentUuid: string;
   label: string;
+  // The gains to book
   stats: Record<string, string>;
+  // The stats read at all, to show (±0 without a gain)
+  readStats: string[];
 }
 
 /** One proposal per complete sighting (one piece each). */
@@ -265,7 +288,7 @@ export function proposalsOf(sightings: Iterable<ComponentSighting>): ComponentPr
   const out: ComponentProposal[] = [];
   for (const s of sightings) {
     if (s.problem || !s.componentUuid || !s.stats) continue;
-    out.push({ id: s.key, componentUuid: s.componentUuid, label: s.label, stats: s.stats });
+    out.push({ id: s.key, componentUuid: s.componentUuid, label: s.label, stats: s.stats, readStats: s.readStats });
   }
   return out;
 }

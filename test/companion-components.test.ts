@@ -13,6 +13,8 @@ const BLIZZARD = '00000000-0000-4000-8000-000000000001';
 const BLIZZARD_S2 = '00000000-0000-4000-8000-000000000002';
 const SOVEREIGN = '00000000-0000-4000-8000-000000000003';
 const ATLAS = '00000000-0000-4000-8000-000000000004';
+// A record sharing the Blizzard's name, size and grade without a blueprint (a ship-fitted variant)
+const BLIZZARD_VARIANT = '00000000-0000-4000-8000-000000000005';
 const COOLANT = '00000000-0000-4000-8000-0000000000a1';
 const HEALTH = '00000000-0000-4000-8000-0000000000a2';
 const PIPS = '00000000-0000-4000-8000-0000000000a3';
@@ -33,6 +35,7 @@ function responses(): CatalogResponse[] {
   const en: CatalogResponse['materials'] = [
     material(BLIZZARD, 'Blizzard', 3, 'A', [coolant(60), health(1800)]),
     material(BLIZZARD_S2, 'Blizzard', 2, 'A', [coolant(40), health(1200)]),
+    material(BLIZZARD_VARIANT, 'Blizzard', 3, 'A', []),
     material(SOVEREIGN, 'Sovereign IP-10', 1, 'B', [stat(PIPS, 'Power Pips', 16, 'additive', 2), health(400)]),
     material(ATLAS, 'Atlas', 1, 'A', [stat(SPEED, 'Quantum Speed', 259.0545), health(200)]),
     // A resource: never a component
@@ -55,7 +58,7 @@ const BLIZZARD_LINES = ['Volume: 756000 µSCU', 'Item Type: Cooler', 'Manufactur
 describe('catalog', () => {
   it('collects the components with their names in every language and the pack, and the stat names', () => {
     const cat = catalog({ item_name_blizzard: 'Schneesturm', statname_coolantrating: 'Coolant Output' });
-    assert.equal(cat.components.length, 4);
+    assert.equal(cat.components.length, 5);
     const blizzard = cat.components.find((c) => c.uuid === BLIZZARD)!;
     assert.deepEqual([...blizzard.names].sort(), ['BLIZZARD', 'SCHNEESTURM']);
     assert.deepEqual([...cat.statNames.get(COOLANT)!].sort(), ['COOLANTOUTPUT', 'COOLANTRATING', 'KÜHLLEISTUNG']);
@@ -64,9 +67,10 @@ describe('catalog', () => {
 
   it('finds a component by its title, the prefix narrowing size and grade', () => {
     const cat = catalog();
-    assert.deepEqual(findComponents(cat, 'Mil/3/A Blizzard').map((c) => c.uuid), [BLIZZARD]);
+    assert.deepEqual(findComponents(cat, 'Mil/3/A Blizzard').map((c) => c.uuid), [BLIZZARD], 'the craftable one among the S3 A variants');
+    assert.deepEqual(findComponents(cat, 'Mil/3/ABlizzard').map((c) => c.uuid), [BLIZZARD], 'the OCR dropped the space');
     assert.deepEqual(findComponents(cat, 'Mil/2/A Blizzard').map((c) => c.uuid), [BLIZZARD_S2]);
-    assert.equal(findComponents(cat, 'Blizzard').length, 2, 'without a prefix both stay');
+    assert.equal(findComponents(cat, 'Blizzard').length, 2, 'without a prefix both craftable sizes stay');
     assert.deepEqual(findComponents(cat, 'Mil/1/B Sovereign IP-10').map((c) => c.uuid), [SOVEREIGN]);
     assert.deepEqual(findComponents(cat, 'Sovereign IP-10').map((c) => c.uuid), [SOVEREIGN]);
     assert.deepEqual(findComponents(cat, 'Mil/3/A Frostbite'), []);
@@ -107,10 +111,11 @@ describe('tooltip lines', () => {
   it('reads the stats of a component off its lines in any language, ignoring the rest', () => {
     const cat = catalog();
     const blizzard = cat.components.find((c) => c.uuid === BLIZZARD)!;
-    assert.deepEqual(statsOf(blizzard, BLIZZARD_LINES, cat), { stats: {}, unreadable: [] });
-    assert.deepEqual(statsOf(blizzard, ['Item Type: Cooler', 'Kühlleistung: 67.50', 'Integrität: 1836.00'], cat), { stats: { [COOLANT]: '12.5', [HEALTH]: '2' }, unreadable: [] });
-    assert.deepEqual(statsOf(blizzard, ['Coolant Rating: 67.50', 'Integrity: 1B00.00'], cat), { stats: { [COOLANT]: '12.5' }, unreadable: ['Integrity'] });
-    assert.deepEqual(statsOf(blizzard, ['Registered To You'], cat), { stats: {}, unreadable: [] }, 'no stat lines: a looted component');
+    // An unmodified component: both stats read, no gain
+    assert.deepEqual(statsOf(blizzard, BLIZZARD_LINES, cat), { stats: {}, read: [COOLANT, HEALTH], unreadable: [] });
+    assert.deepEqual(statsOf(blizzard, ['Item Type: Cooler', 'Kühlleistung: 67.50', 'Integrität: 1836.00'], cat), { stats: { [COOLANT]: '12.5', [HEALTH]: '2' }, read: [COOLANT, HEALTH], unreadable: [] });
+    assert.deepEqual(statsOf(blizzard, ['Coolant Rating: 67.50', 'Integrity: 1B00.00'], cat), { stats: { [COOLANT]: '12.5' }, read: [COOLANT], unreadable: ['Integrity'] });
+    assert.deepEqual(statsOf(blizzard, ['Registered To You'], cat), { stats: {}, read: [], unreadable: [] }, 'no stat lines: an item without stats');
   });
 });
 
@@ -120,7 +125,7 @@ describe('sightings', () => {
     assert.deepEqual([s?.componentUuid, s?.stats, s?.page, s?.row, s?.col, s?.problem, s?.label], [BLIZZARD, { [COOLANT]: '12.5' }, 2, 1, 2, null, 'Blizzard · Cooler · S3 · A Military']);
     assert.equal(s?.key, `2|2|${BLIZZARD}|{"${COOLANT}":"12.5"}`);
     const looted = sightingOf(1, read('Mil/3/A Blizzard', BLIZZARD_LINES), catalog());
-    assert.deepEqual([looted?.stats, looted?.problem], [{}, null]);
+    assert.deepEqual([looted?.stats, looted?.readStats, looted?.problem], [{}, [COOLANT, HEALTH], null]);
   });
 
   it('names what keeps a sighting from a proposal', () => {
@@ -170,7 +175,7 @@ describe('proposals', () => {
     for (let i = 2; i < 4; i++) scan.feed(i, read('Mil/3/A Blizzard', BLIZZARD_LINES, { row: 2, col: 0 }), cat);
     for (let i = 4; i < 6; i++) scan.feed(i, read('Mil/3/A Frostbite', ['Item Type: Cooler'], { row: 2, col: 1 }), cat);
     const proposals = proposalsOf(scan.list());
-    assert.deepEqual(proposals.map((p) => [p.componentUuid, p.stats]), [[BLIZZARD, {}], [BLIZZARD, { [COOLANT]: '12.5', [HEALTH]: '2' }]]);
+    assert.deepEqual(proposals.map((p) => [p.componentUuid, p.stats, p.readStats]), [[BLIZZARD, {}, [COOLANT, HEALTH]], [BLIZZARD, { [COOLANT]: '12.5', [HEALTH]: '2' }, [COOLANT, HEALTH]]]);
     assert.deepEqual(addRequest(proposals[1]!, LOC, ['9400']), { subjectUuid: BLIZZARD, locationUuid: LOC, quality: 0, amount: '1', stats: { [COOLANT]: '12.5', [HEALTH]: '2' }, guildIds: ['9400'] });
     assert.deepEqual(addRequest(proposals[0]!, LOC), { subjectUuid: BLIZZARD, locationUuid: LOC, quality: 0, amount: '1' });
   });

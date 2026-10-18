@@ -12,20 +12,31 @@ import { computed, onMounted, ref, shallowRef } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import Icon from "../../adminapp/src/components/Icon.vue";
-import { exportInventoryDebug, getConfig, getScan, setDebug, type ScanMode } from "./backend";
+import { getConfig, getScan, setDebug, startDebugRecording, stopDebugRecording, type ScanMode } from "./backend";
 import { applyLangSetting, t } from "./i18n";
 import type { ComponentSighting } from "./components";
 import type { InventoryReadEvent, ReadRect, Sighting } from "./inventory";
+import type { Kind, SightingsReport } from "./inventorySync";
 import { errorText, toast, toastError } from "./toasts";
 import Toasts from "./components/Toasts.vue";
 
 const read = shallowRef<InventoryReadEvent | null>(null);
 const scanMode = ref<ScanMode>("off");
-const exporting = ref(false);
+// The recording's folder while one runs
+const recording = ref<string | null>(null);
+const busy = ref(false);
 // The main window's sightings of both scans (sent on every change and on request)
-const sightings = ref<Sighting[]>([]);
-const componentSightings = ref<ComponentSighting[]>([]);
+const report = ref<SightingsReport>({ materials: [], components: [], registered: [], dismissed: [] });
 const tab = ref<"read" | "sightings">("read");
+// The sightings table's kind filter (this window's own)
+const KINDS: Kind[] = ["mats", "items", "comps"];
+const kinds = ref(new Set<Kind>(KINDS));
+function toggleKind(kind: Kind) {
+  const next = new Set(kinds.value);
+  if (next.has(kind)) next.delete(kind);
+  else next.add(kind);
+  if (next.size) kinds.value = next;
+}
 
 const applyLanguage = async () => applyLangSetting((await getConfig()).language);
 
@@ -37,10 +48,7 @@ onMounted(async () => {
     scanMode.value = await getScan();
     await listen<InventoryReadEvent>("inventory-read", (e) => (read.value = e.payload));
     await listen<ScanMode>("scan-changed", (e) => (scanMode.value = e.payload));
-    await listen<{ materials: Sighting[]; components: ComponentSighting[] }>("inventory-sightings", (e) => {
-      sightings.value = e.payload.materials;
-      componentSightings.value = e.payload.components;
-    });
+    await listen<SightingsReport>("inventory-sightings", (e) => (report.value = e.payload));
     await emit("inventory-sightings-request");
   } catch (e) {
     toast(errorText(e), "error");
@@ -58,23 +66,61 @@ const time = (ms: number) => new Date(ms).toLocaleTimeString();
 const PROBLEM = { unknownMaterial: "inventory.unknown", component: "inventory.component", noQuality: "inventory.noQuality", noAmount: "inventory.noAmount" } as const;
 const COMPONENT_PROBLEM = { unknownComponent: "components.unknown", ambiguousComponent: "components.ambiguous", statsUnreadable: "components.statsUnreadable" } as const;
 const amount = (s: Sighting) => (s.amount === null ? "–" : s.unit === "SCU" ? `${s.amount} SCU` : t("inventory.pieces", { n: s.amount })) + (s.amountUncertain ? "?" : "");
-// A component sighting's stats as read ({property UUID: gain}: the UUIDs' first part, the window has no catalog), or its problem
-const componentState = (s: ComponentSighting) =>
-  s.problem
-    ? `${t(COMPONENT_PROBLEM[s.problem])}${s.unreadable.length ? `: ${s.unreadable.join(", ")}` : ""}`
-    : Object.entries(s.stats ?? {}).map(([k, v]) => `${k.slice(0, 8)} ${v}`).join(" · ") || t("components.noStats");
+// A component sighting's stats as read ({property UUID: gain}: the UUIDs' first part, the window has no catalog)
+const componentStats = (s: ComponentSighting) => s.readStats.map((k) => `${k.slice(0, 8)} ${s.stats?.[k] ?? "±0"}`).join(" · ") || t("components.noStats");
 
-async function exportReads() {
-  exporting.value = true;
+// One table for both scans: source (the freight manager's warehouse or the character inventory), kind,
+// what was read, where, and why it is no proposal (or that it is one, was registered or discarded)
+interface Row {
+  key: string;
+  source: "FE" | "INV";
+  kind: Kind;
+  name: string;
+  quality: string;
+  amount: string;
+  cell: string;
+  state: string;
+  problem: boolean;
+  atMs: number;
+}
+const stateOf = (key: string, problem: string | null): { state: string; problem: boolean } => {
+  if (problem) return { state: problem, problem: true };
+  if (report.value.registered.includes(key)) return { state: t("debug.state.registered"), problem: false };
+  if (report.value.dismissed.includes(key)) return { state: t("debug.state.dismissed"), problem: false };
+  return { state: t("debug.state.open"), problem: false };
+};
+const rows = computed<Row[]>(() => {
+  const materials = report.value.materials.map((s): Row => ({
+    key: s.key, source: "FE", kind: s.unit === "SCU" ? "mats" : "items", name: s.name, quality: String(s.quality ?? "–"), amount: amount(s),
+    cell: `r${s.row + 1} c${s.col + 1}`, ...stateOf(s.key, s.problem ? t(PROBLEM[s.problem]) : null), atMs: s.atMs,
+  }));
+  const components = report.value.components.map((s): Row => ({
+    key: s.key, source: "INV", kind: "comps", name: s.label, quality: "–", amount: s.problem ? "–" : componentStats(s),
+    cell: `${s.page ?? "?"}/ r${s.row + 1} c${s.col + 1}`,
+    ...stateOf(s.key, s.problem ? `${t(COMPONENT_PROBLEM[s.problem])}${s.unreadable.length ? `: ${s.unreadable.join(", ")}` : ""}` : null), atMs: s.atMs,
+  }));
+  return [...materials, ...components].filter((r) => kinds.value.has(r.kind)).sort((a, b) => b.atMs - a.atMs);
+});
+const total = computed(() => report.value.materials.length + report.value.components.length);
+
+/** Starts a recording into a folder the user picks (every read as PNG + JSON until stopped), or stops it. */
+async function toggleRecording() {
+  busy.value = true;
   try {
+    if (recording.value) {
+      await stopDebugRecording();
+      toast(t("debug.recordingStopped", { path: recording.value }));
+      recording.value = null;
+      return;
+    }
     const dir = await open({ directory: true });
     if (typeof dir !== "string") return;
-    const folder = await exportInventoryDebug(dir);
-    toast(t("debug.exported", { path: folder }));
+    recording.value = await startDebugRecording(dir);
+    toast(t("debug.recordingTo", { path: recording.value }));
   } catch (e) {
     toastError(e);
   } finally {
-    exporting.value = false;
+    busy.value = false;
   }
 }
 </script>
@@ -86,46 +132,36 @@ async function exportReads() {
       <span class="title">{{ t("debug.title") }}</span>
       <span class="tag" :class="scanMode === 'inventory' ? 'ok' : ''">{{ t(scanMode === "inventory" ? "scan.inventory" : scanMode === "refinery" ? "scan.refinery" : "scan.off") }}</span>
       <div class="spacer" />
-      <button type="button" class="btn small primary" :disabled="exporting || !read" @click="exportReads">
-        <Icon name="copy" :size="14" /> {{ t("debug.export") }}
+      <button type="button" class="btn small" :class="recording ? 'primary' : 'outline'" :disabled="busy" :title="recording ?? undefined" @click="toggleRecording">
+        <Icon :name="recording ? 'close' : 'file'" :size="14" /> {{ t(recording ? "debug.recording" : "debug.record") }}
       </button>
     </div>
     <nav class="tabs">
       <button type="button" class="tab" :class="{ active: tab === 'read' }" @click="tab = 'read'">{{ t("debug.tab.read") }}</button>
-      <button type="button" class="tab" :class="{ active: tab === 'sightings' }" @click="tab = 'sightings'">{{ t("inventory.sightings", { n: sightings.length + componentSightings.length }) }}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'sightings' }" @click="tab = 'sightings'">{{ t("inventory.sightings", { n: total }) }}</button>
     </nav>
     <main v-if="tab === 'sightings'" class="content">
-      <div v-if="!sightings.length && !componentSightings.length" class="empty-line">{{ t("debug.noSightings") }}</div>
-      <template v-if="componentSightings.length">
-        <div class="sub-head">{{ t("debug.components") }}</div>
-        <div class="crow table-head">
-          <span>{{ t("col.component") }}</span>
-          <span>{{ t("col.stats") }}</span>
-          <span>{{ t("col.page") }}</span>
-          <span>{{ t("col.cell") }}</span>
-        </div>
-        <div v-for="s in componentSightings" :key="s.key" class="crow" :class="{ problem: s.problem }">
-          <span class="text" :title="s.title">{{ s.label }}</span>
-          <span class="text">{{ componentState(s) }}</span>
-          <span class="num">{{ s.page ?? "?" }}</span>
-          <span class="num">r{{ s.row + 1 }} c{{ s.col + 1 }}</span>
-        </div>
-      </template>
-      <template v-if="sightings.length">
-        <div class="sub-head">{{ t("debug.materials") }}</div>
+      <div class="chips filter">
+        <span class="filter-label">{{ t("debug.show") }}</span>
+        <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="{ active: kinds.has(k) }" @click="toggleKind(k)">{{ t(`inventory.kind.${k}`) }}</button>
+      </div>
+      <div v-if="!total" class="empty-line">{{ t("debug.noSightings") }}</div>
+      <template v-else>
         <div class="srow table-head">
+          <span>{{ t("col.source") }}</span>
           <span>{{ t("col.material") }}</span>
           <span class="num">{{ t("col.quality") }}</span>
-          <span class="num">{{ t("col.amount") }}</span>
+          <span>{{ t("col.amount") }}</span>
           <span>{{ t("col.cell") }}</span>
           <span>{{ t("col.state") }}</span>
         </div>
-        <div v-for="s in sightings" :key="s.key" class="srow" :class="{ problem: s.problem }">
-          <span class="text">{{ s.name }}</span>
-          <span class="num">{{ s.quality ?? "–" }}</span>
-          <span class="num">{{ amount(s) }}</span>
-          <span class="num">r{{ s.row + 1 }} c{{ s.col + 1 }}</span>
-          <span class="text">{{ s.problem ? t(PROBLEM[s.problem]) : s.materialUuid ? t("debug.resolved") : "" }}</span>
+        <div v-for="r in rows" :key="r.key" class="srow" :class="{ problem: r.problem }">
+          <span class="tag" :class="r.source === 'FE' ? 'ok' : 'accent'">{{ r.source }}</span>
+          <span class="text">{{ r.name }}</span>
+          <span class="num">{{ r.quality }}</span>
+          <span class="text">{{ r.amount }}</span>
+          <span class="num">{{ r.cell }}</span>
+          <span class="text">{{ r.state }}</span>
         </div>
       </template>
     </main>
@@ -134,12 +170,13 @@ async function exportReads() {
       <template v-else>
         <div class="facts">
           <span>{{ time(read.atMs) }}</span>
-          <span class="num">{{ read.ms }} ms</span>
-          <span class="num">{{ read.width }}×{{ read.height }}</span>
           <span v-if="grid">{{ t("debug.grid", { cols: grid.cols.length, rows: grid.rows.length, px: Math.round(grid.pitchX), py: Math.round(grid.pitchY) }) }} · {{ t("debug.tiles", { n: grid.tiles.length }) }}</span>
           <span v-else-if="comp && (comp.page || comp.tooltip)">{{ comp.page ? t("debug.page", { i: comp.page.index, n: comp.page.total }) : t("debug.noPage") }}</span>
           <span v-else class="tag warn">{{ t("debug.noTerminal") }}</span>
           <span class="num">{{ t("debug.boxes", { n: read.boxes.length }) }}</span>
+          <!-- The read's duration and the frame's size at the right edge -->
+          <span class="num right">{{ read.ms }} ms</span>
+          <span class="num">{{ read.width }}×{{ read.height }}</span>
         </div>
         <div v-if="grid?.tooltip" class="facts">
           <span class="tag">{{ t("debug.tooltip") }}</span>
@@ -270,24 +307,40 @@ async function exportReads() {
   border-bottom-color: var(--accent, currentColor);
 }
 
+/* The sightings: source, name, quality, amount or stats, page and cell, state */
 .srow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px 96px 64px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1.2fr) 44px minmax(0, 1fr) 84px minmax(0, 1fr);
   gap: 8px;
+  align-items: center;
   line-height: 1.6;
 }
 
-.srow.problem .text:first-child,
-.crow.problem .text:first-child {
+.srow .tag {
+  justify-self: start;
+}
+
+.srow.problem .text:last-child {
   color: var(--warn, #d9a441);
 }
 
-/* The component sightings: component, stats or problem, page, cell */
-.crow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 48px 64px;
-  gap: 8px;
-  line-height: 1.6;
+.filter {
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.filter-label {
+  color: var(--text-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter .chip {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
 }
 
 .table-head {
@@ -370,5 +423,9 @@ async function exportReads() {
 .num {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.facts .right {
+  margin-left: auto;
 }
 </style>

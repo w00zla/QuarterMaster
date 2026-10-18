@@ -29,7 +29,9 @@ export const sightings = ref<Sighting[]>([]);
 export const componentSightings = ref<ComponentSighting[]>([]);
 export const locationUuid = ref<string | null>(localStorage.getItem(LOCATION_KEY));
 const batches = ref<StockBatch[]>([]);
+// Sightings the user discarded or registered: no proposal any more, still listed in the debug window
 const dismissed = ref(new Set<string>());
+const registered = ref(new Set<string>());
 
 function storedKinds(): Set<Kind> {
   try {
@@ -62,16 +64,26 @@ export function setLocation(uuid: string | null) {
   else localStorage.removeItem(LOCATION_KEY);
 }
 
+const open = (id: string) => !dismissed.value.has(id) && !registered.value.has(id);
 export const proposals = computed<Proposal[]>(() =>
-  locationUuid.value ? proposalsOf(sightings.value, batches.value, locationUuid.value).filter((p) => !dismissed.value.has(p.id)) : [],
+  locationUuid.value ? proposalsOf(sightings.value, batches.value, locationUuid.value).filter((p) => open(p.id)) : [],
 );
-export const componentProposals = computed<ComponentProposal[]>(() => componentProposalsOf(componentSightings.value).filter((p) => !dismissed.value.has(p.id)));
+export const componentProposals = computed<ComponentProposal[]>(() => componentProposalsOf(componentSightings.value).filter((p) => open(p.id)));
+
+/** What the debug window shows: the sightings of both scans and which of them were registered or discarded. */
+export interface SightingsReport {
+  materials: Sighting[];
+  components: ComponentSighting[];
+  registered: string[];
+  dismissed: string[];
+}
 
 // The debug window shows the sightings too: it gets them with every change and on request
 const publish = () => {
   sightings.value = scan.list();
   componentSightings.value = componentScan.list();
-  void emit("inventory-sightings", { materials: sightings.value, components: componentSightings.value }).catch(() => undefined);
+  const report: SightingsReport = { materials: sightings.value, components: componentSightings.value, registered: [...registered.value], dismissed: [...dismissed.value] };
+  void emit("inventory-sightings", report).catch(() => undefined);
 };
 
 async function loadStock() {
@@ -107,6 +119,7 @@ export async function startInventoryScan() {
   scan.clear();
   componentScan.clear();
   dismissed.value = new Set();
+  registered.value = new Set();
   publish();
   try {
     await ensureCatalog();
@@ -127,12 +140,12 @@ export async function watchInventory() {
 // The orgs the user shares registered stacks in (the dialog's switches; kept for the session)
 export const shareGuildIds = ref<string[]>([]);
 
-/** Books a stack proposal, shared in `shareGuildIds`; true when done. The sighting goes with it. */
+/** Books a stack proposal, shared in `shareGuildIds`; true when done. The sighting stays, marked registered. */
 export async function accept(p: Proposal): Promise<boolean> {
   if (!locationUuid.value) return false;
   try {
     await api<OkResponse>("POST", "/stock/add", addRequest(p, locationUuid.value, shareGuildIds.value));
-    scan.sightings.delete(p.id);
+    registered.value = new Set([...registered.value, p.id]);
     publish();
     return true;
   } catch (e) {
@@ -148,7 +161,7 @@ export async function acceptComponent(p: ComponentProposal): Promise<boolean> {
   if (!locationUuid.value) return false;
   try {
     await api<OkResponse>("POST", "/stock/add", componentRequest(p, locationUuid.value, shareGuildIds.value));
-    componentScan.sightings.delete(p.id);
+    registered.value = new Set([...registered.value, p.id]);
     publish();
     return true;
   } catch (e) {
@@ -159,4 +172,5 @@ export async function acceptComponent(p: ComponentProposal): Promise<boolean> {
 
 export function dismiss(id: string) {
   dismissed.value = new Set([...dismissed.value, id]);
+  publish();
 }

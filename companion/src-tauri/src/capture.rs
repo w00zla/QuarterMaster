@@ -28,9 +28,9 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic};
+use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindow};
 
 use crate::ocrwatch::{Detect, Frame, GameSeen, Pixels, GAME_SEEN};
 
@@ -45,10 +45,12 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen) 
     std::thread::spawn(move || {
         let mut dup: Option<Duplication> = None;
         let mut last_error = String::new();
+        // The game window last seen in front: it still counts while the companion itself is in front
+        let mut last_game: Option<HWND> = None;
         loop {
             std::thread::sleep(INTERVAL);
             let on = detect.load(Ordering::Relaxed);
-            let hwnd = if on { game_window() } else { None };
+            let hwnd = if on { game_window(&mut last_game) } else { None };
             let running = on && (hwnd.is_some() || game_running());
             if seen.0.swap(running, Ordering::Relaxed) != running {
                 let _ = app.emit(GAME_SEEN, running);
@@ -92,8 +94,11 @@ impl<T> Context<T> for windows::core::Result<T> {
     }
 }
 
-/// The foreground window if it belongs to Star Citizen and is not minimized.
-fn game_window() -> Option<HWND> {
+/// The game's window: the foreground window if it belongs to Star Citizen and is not minimized
+/// (remembered in `last`), or, while the companion itself is in front (the user registers what was
+/// scanned), the game window seen before as long as it is up and not minimized. Any other window in
+/// front ends the capture.
+fn game_window(last: &mut Option<HWND>) -> Option<HWND> {
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_invalid() || IsIconic(hwnd).as_bool() {
@@ -101,13 +106,20 @@ fn game_window() -> Option<HWND> {
         }
         let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == GetCurrentProcessId() {
+            return last.filter(|&h| IsWindow(Some(h)).as_bool() && !IsIconic(h).as_bool());
+        }
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buf = [0u16; 1024];
         let mut len = buf.len() as u32;
         let named = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
         let _ = CloseHandle(process);
         named.ok()?;
-        is_game(&String::from_utf16_lossy(&buf[..len as usize])).then_some(hwnd)
+        let game = is_game(&String::from_utf16_lossy(&buf[..len as usize])).then_some(hwnd);
+        if game.is_some() {
+            *last = game;
+        }
+        game
     }
 }
 

@@ -302,14 +302,23 @@ fn set_debug(debug: tauri::State<ocrwatch::Debug>, store: tauri::State<ocrwatch:
     log::info!("inventory debug {}", if on { "on" } else { "off" });
 }
 
-/// Writes the kept inventory reads (frames as PNG, reads as JSON, an info file) into a new folder
-/// below `dir`; its path.
+/// Starts recording the inventory reads (frames as PNG, reads as JSON, an info file) into a new
+/// folder below `dir`: the kept reads first, then every read while it runs; the folder's path.
 #[tauri::command]
-fn export_inventory_debug(app: AppHandle, store: tauri::State<ocrwatch::DebugStore>, dir: String) -> Result<String, String> {
+fn start_debug_recording(app: AppHandle, store: tauri::State<ocrwatch::DebugStore>, dir: String) -> Result<String, String> {
     let game_dir = app.state::<Mutex<AppData>>().lock().unwrap().config.game_dir.clone();
-    let folder = store.export(std::path::Path::new(&dir), &game_dir)?;
-    log::info!("inventory debug exported to {}", folder.display());
+    let folder = store.start_recording(std::path::Path::new(&dir), &game_dir)?;
+    log::info!("inventory debug recording to {}", folder.display());
     Ok(folder.display().to_string())
+}
+
+/// Ends the recording (closing the debug window ends it too).
+#[tauri::command]
+fn stop_debug_recording(app: AppHandle, store: tauri::State<ocrwatch::DebugStore>) {
+    let game_dir = app.state::<Mutex<AppData>>().lock().unwrap().config.game_dir.clone();
+    if let Some(folder) = store.stop_recording(&game_dir) {
+        log::info!("inventory debug recording stopped: {}", folder.display());
+    }
 }
 
 /// Whether the screen capture sees Star Citizen running (changes come as `game-seen`).
@@ -401,7 +410,8 @@ pub fn run() {
             get_scan,
             set_scan,
             set_debug,
-            export_inventory_debug,
+            start_debug_recording,
+            stop_debug_recording,
             open_debug_window,
             get_game_seen,
             game_names,

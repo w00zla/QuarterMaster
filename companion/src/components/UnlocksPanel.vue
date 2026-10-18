@@ -182,7 +182,6 @@ watch(connected, () => void loadCatalog());
 <template>
   <section class="panel unlocks">
     <div class="head">
-      <Icon name="blueprint" :size="16" />
       <div v-if="scanning" class="head-title scan">
         <span>{{ t("unlocks.scanning", { done: progress?.done ?? 0, total: progress?.total ?? "…" }) }}</span>
         <div class="bar"><div class="fill" :style="{ width: `${progressPct}%` }" /></div>

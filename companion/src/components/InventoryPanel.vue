@@ -43,10 +43,11 @@ const locationOptions = computed(() => (syncCatalog.value?.locations ?? []).map(
 const locationLabel = computed(() => syncCatalog.value?.locations.find((l) => l.uuid === locationUuid.value)?.short ?? "?");
 
 const amount = (value: string, unit: "SCU" | "pcs") => (unit === "SCU" ? `${value} SCU` : t("inventory.pieces", { n: value }));
-// "Coolant Rating +12.5 % · Integrity +2.0 %" in the catalog's order, or "no stats"
+// Every stat the tooltip showed, in the catalog's order, as its gain: "Coolant Rating +12.5 % · Integrity ±0.0 %";
+// "no stats" only when the tooltip showed none (weapons, event items)
 function statsText(p: ComponentProposal): string {
   const defs = syncCatalog.value?.components.components.find((c) => c.uuid === p.componentUuid)?.stats ?? [];
-  const parts = defs.filter((s) => s.uuid in p.stats).map((s) => `${s.name} ${statValueText(s.kind, p.stats[s.uuid]!)}`);
+  const parts = defs.filter((s) => p.readStats.includes(s.uuid) || s.uuid in p.stats).map((s) => `${s.name} ${statValueText(s.kind, p.stats[s.uuid] ?? "0")}`);
   return parts.length ? parts.join(" · ") : t("components.noStats");
 }
 const rows = computed<Row[]>(() => [
@@ -59,6 +60,7 @@ const rows = computed<Row[]>(() => [
 ]);
 const what = (r: Row) => [r.name, r.detail ?? r.quality, r.amount].join(" · ");
 const tagClass: Record<Kind, string> = { mats: "ok", items: "", comps: "accent" };
+const kindIcon = { mats: "resource", items: "item", comps: "type-module" } as const;
 
 // The register dialog: one row, or all of them
 const registering = ref<Row[] | null>(null);
@@ -102,7 +104,6 @@ function toggleScan() {
 <template>
   <section class="panel inventory">
     <div class="head">
-      <Icon name="item" :size="16" />
       <span class="head-title">{{ t("inventory.title") }}</span>
       <Picker class="location" :model-value="locationUuid" :options="locationOptions" :placeholder="t('inventory.location')" :disabled="scanning" @update:model-value="setLocation" />
       <Tooltip :text="!locationUuid ? t('inventory.pickLocation') : null">
@@ -118,7 +119,10 @@ function toggleScan() {
     </div>
     <!-- What the scan detects -->
     <div class="chips filter">
-      <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="{ active: kinds.has(k) }" @click="toggleKind(k)">{{ t(`inventory.kind.${k}`) }}</button>
+      <span class="filter-label">{{ t("inventory.scanned") }}</span>
+      <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="{ active: kinds.has(k) }" @click="toggleKind(k)">
+        <Icon :name="kindIcon[k]" :size="12" /> {{ t(`inventory.kind.${k}`) }}
+      </button>
     </div>
     <div v-if="!rows.length" class="empty-line">
       {{ t(scanning ? "inventory.hover" : "inventory.empty") }}
@@ -184,9 +188,26 @@ function toggleScan() {
   max-width: 260px;
 }
 
-/* The kind filter below the head */
+/* The kind filter below the head: a label, then compact chips with an icon */
 .filter {
-  padding: 0 16px 8px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px 8px;
+  font-size: 11px;
+}
+
+.filter-label {
+  color: var(--text-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter .chip {
+  height: 22px;
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 11px;
 }
 
 /* One compact row per stack or component, like the refinery's rows: kind, resource, quality, amount, two icon buttons */

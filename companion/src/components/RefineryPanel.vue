@@ -115,7 +115,6 @@ async function registerAll(value: string) {
 <template>
   <section class="panel refinery">
     <div class="head">
-      <Icon name="drop" :size="16" />
       <span class="head-title">{{ t("refinery.title") }}</span>
       <Tooltip :text="t('refinery.scanSoon')">
         <button type="button" class="btn small outline" disabled>

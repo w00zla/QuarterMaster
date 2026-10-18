@@ -52,9 +52,10 @@ export const openWebapp = () => call<void>("open_webapp");
 export type ScanMode = "off" | "inventory" | "refinery";
 export const getScan = () => call<ScanMode>("get_scan");
 export const setScan = (mode: ScanMode) => call<void>("set_scan", { mode });
-// The inventory debug window: frames with the reads, the last reads kept for an export (a folder below dir; its path)
+// The inventory debug window: frames with the reads, the last reads kept; a recording writes every read into a new folder below dir (its path)
 export const setDebug = (on: boolean) => call<void>("set_debug", { on });
-export const exportInventoryDebug = (dir: string) => call<string>("export_inventory_debug", { dir });
+export const startDebugRecording = (dir: string) => call<string>("start_debug_recording", { dir });
+export const stopDebugRecording = () => call<void>("stop_debug_recording");
 // The debug window (debug.html), opened or focused
 export const openDebugWindow = () => call<void>("open_debug_window");
 export const getGameSeen = () => call<boolean>("get_game_seen");

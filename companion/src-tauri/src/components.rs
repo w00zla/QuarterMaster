@@ -25,12 +25,13 @@ use crate::ocr::{Ocr, Rect, TextBox};
 
 /// The tooltip's area: right of the centre, below the screen's title row
 const TIP_LEFT: f32 = 0.02;
-const TIP_RIGHT: f32 = 0.42;
+/// Short of the storage grid (GRID_LEFT): its tiles' texts ("110/0") must not read as tooltip lines
+const TIP_RIGHT: f32 = 0.39;
 const TIP_TOP: f32 = 0.22;
 const TIP_BOTTOM: f32 = 0.76;
 /// The tooltip's texts are small (~0.012 of the height): its crop is scaled up to what this frame
 /// height would show
-const TIP_SCALE_HEIGHT: f32 = 2400.0;
+const TIP_SCALE_HEIGHT: f32 = 1800.0;
 /// The page number ("2/3") below the storage grid
 const PAGE_LEFT: f32 = 0.50;
 const PAGE_RIGHT: f32 = 0.70;
@@ -46,6 +47,11 @@ const GRID_COLS: u32 = 4;
 const GRID_ROWS: u32 = 6;
 /// Boxes below this confidence are noise (the character shows through the tooltip's panel)
 const MIN_SCORE: f32 = 0.3;
+/// A tooltip has at least this many lines below its title (a real one has 10 and more: volume,
+/// type, manufacturer, size, the description; stray texts of the scene read 1–3) and that many
+/// letters in the title
+const MIN_BODY_LINES: usize = 4;
+const MIN_TITLE_LETTERS: usize = 3;
 /// Text heights (shares of the frame height) a tooltip line can have
 const LINE_MIN_H: f32 = 0.006;
 const LINE_MAX_H: f32 = 0.03;
@@ -152,15 +158,15 @@ pub fn lines_of(boxes: &[TextBox], s: f32) -> Vec<Line> {
 }
 
 /// The tooltip in the area's lines: the first line is the title (it must hold letters), the rest its
-/// body; None without a body line (a stray text is no tooltip).
+/// body; None with fewer than MIN_BODY_LINES body lines (stray texts of the scene are no tooltip).
 pub fn tooltip_of(lines: Vec<Line>) -> Option<Tooltip> {
     let mut it = lines.into_iter();
     let title = it.next()?;
-    if !title.text.chars().any(char::is_alphabetic) {
+    if title.text.chars().filter(|c| c.is_alphabetic()).count() < MIN_TITLE_LETTERS {
         return None;
     }
     let lines: Vec<Line> = it.collect();
-    if lines.is_empty() {
+    if lines.len() < MIN_BODY_LINES {
         return None;
     }
     let rect = lines.iter().fold(title.rect, |r, l| union(r, l.rect));
@@ -273,8 +279,9 @@ mod tests {
         assert_eq!(tip.title, "Mil/3/A Blizzard");
         assert_eq!(tip.lines.len(), 4);
         assert!(tip.rect.x1 >= 2255.0 && tip.rect.y1 >= 789.0);
-        // A title alone or digits alone are no tooltip
+        // A title alone, a few stray lines or digits alone are no tooltip
         assert!(tooltip_of(lines_of(&boxes[..1], 1600.0)).is_none());
+        assert!(tooltip_of(lines_of(&boxes[..3], 1600.0)).is_none(), "two body lines: a stray read like \"DDS\" / \"11\"");
         assert!(tooltip_of(lines_of(&[tb(2015.0, 426.0, 40.0, 20.0, "0/0"), tb(2015.0, 450.0, 40.0, 20.0, "0/0")], 1600.0)).is_none());
     }
 
