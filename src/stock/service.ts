@@ -13,6 +13,7 @@
 // actor's source (bot, web app, companion app).
 import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
+import { BLUEPRINT_CATEGORY_GROUP_SQL } from '../catalog/labels.ts';
 import type { Db, Tx } from '../db/client.ts';
 import { one, rows } from '../db/query.ts';
 import { refineryLocations } from '../ext/refineries.ts';
@@ -89,6 +90,17 @@ export const selectableLocationSql = (l = 'l') => sql.raw(`(${l}.nav_icon IN ('S
   AND coalesce(${l}.type, '') NOT IN ('Anomaly', 'PointOfInterest')
   AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);
 
+/** Ship component groups among the blueprint categories (sizes stripped): their outputs are bookable as components. */
+export const COMPONENT_GROUPS = ['VehicleComponent', 'VehicleWeapons'];
+
+/** The item `uuid` (a column) is a ship component: the output of a blueprint in one of COMPONENT_GROUPS. */
+export const componentItemSql = (uuid = 'i.uuid') => sql.raw(`EXISTS (SELECT 1 FROM catalog.blueprint cb
+  JOIN catalog.blueprint_category c ON c.uuid = cb.category_uuid
+  WHERE cb.output_item_uuid = ${uuid} AND ${BLUEPRINT_CATEGORY_GROUP_SQL} IN (${COMPONENT_GROUPS.map((g) => `'${g}'`).join(', ')}))`);
+
+/** Components have no quality: every batch of one is stored with this one. */
+export const COMPONENT_QUALITY = 0;
+
 const BATCH_COLUMNS = sql.raw(`id::int AS id, owner_user_id AS "ownerUserId", kind,
   resource_uuid AS "resourceUuid", item_uuid AS "itemUuid", location_uuid AS "locationUuid", state, quality, quantity::text AS quantity, lot`);
 
@@ -108,8 +120,9 @@ function checkQuality(quality: number) {
 
 interface SubjectInfo {
   retired: boolean;
-  // Used in a recipe (ores never are: they are not booked at all)
+  // Used in a recipe (ores never are: they are not booked at all), or a ship component
   bookable: boolean;
+  component: boolean;
 }
 
 async function subjectInfo(tx: Tx, kind: SubjectKind, uuid: string): Promise<SubjectInfo> {
@@ -117,11 +130,12 @@ async function subjectInfo(tx: Tx, kind: SubjectKind, uuid: string): Promise<Sub
   const info = kind === 'resource'
     ? await one<SubjectInfo>(tx, sql`
         SELECT r.retired_at IS NOT NULL AS retired,
-          EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.resource_uuid = r.uuid) AS bookable
+          EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.resource_uuid = r.uuid) AS bookable, false AS component
         FROM catalog.resource r WHERE r.uuid = ${uuid}`)
     : await one<SubjectInfo>(tx, sql`
         SELECT i.retired_at IS NOT NULL AS retired,
-          EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid) AS bookable
+          (EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid) OR ${componentItemSql()}) AS bookable,
+          ${componentItemSql()} AS component
         FROM catalog.item i WHERE i.uuid = ${uuid}`);
   if (!info) throw new StockError('unknownSubject');
   if (info.retired) throw new StockError('retired');
@@ -262,7 +276,8 @@ export async function add(db: Db, actor: Actor, input: AddInput): Promise<StockR
   checkQuality(input.quality);
   return db.transaction(async (tx) => {
     await ensureUser(tx, actor.userId);
-    await subjectInfo(tx, input.kind, input.uuid);
+    const subject = await subjectInfo(tx, input.kind, input.uuid);
+    if (subject.component && input.quality !== COMPONENT_QUALITY) throw new StockError('invalidQuality');
     await checkLocation(tx, input.locationUuid);
     if (input.org) {
       if (!actor.guildId) throw new StockError('notAllowed');

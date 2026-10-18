@@ -94,7 +94,8 @@ describe('board (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }
 
     const m = (await orgMetrics(db, [G])).get(G)!;
     assert.deepEqual(m, {
-      resources: { kinds: 1, scu: '12.5', locations: 1 }, items: { kinds: 0, pieces: '0', locations: 0 }, members: 2, blueprints: 1,
+      resources: { kinds: 1, scu: '12.5', locations: 1 }, items: { kinds: 0, pieces: '0', locations: 0 },
+      components: { kinds: 0, pieces: '0', locations: 0 }, members: 2, blueprints: 1,
     });
 
     await updateGuildSettings(db, G, { boardChannelId: CHANNEL, baseLang: 'en' });

@@ -58,6 +58,12 @@ export const ownerText = (b: StockBatch) => (b.holderUserId === me.value?.userId
 /** "Shared · Org A, Org B": the orgs a batch is shared in. */
 export const sharedText = (b: StockBatch) => t("stock.sharedIn", { org: b.sharedIn.map((g) => orgOf(g)?.name ?? "Org").join(", ") });
 
+/** "Quantanium · ★★★★ 820"; a component has no quality: its name only. */
+export const withQuality = (b: StockBatch) => (b.component ? b.material : `${b.material} · ${qText(b.quality)}`);
+
+/** "★★★★ 820 · " before a batch's place; nothing for a component. */
+export const qualityPrefix = (b: StockBatch) => (b.component ? "" : `${qText(b.quality)} · `);
+
 /** "Quantanium · ★★★★ 820 · Area18 · Pers." */
 export const batchText = (b: StockBatch) => `${b.material} · ${qText(b.quality)} · ${b.location} · ${ownerText(b)}`;
 

@@ -48,9 +48,11 @@ export const blueprints = computed(() => byUuid<CatalogBlueprint>(catalog.value?
 
 const byName = (a: string, b: string) => a.localeCompare(b, lang.value);
 
-// Picker options, alphabetical
-export const materialOptions = computed(() => (catalog.value?.materials ?? [])
+// Picker options, alphabetical; materials without the ship components, those with their unique label
+export const materialOptions = computed(() => (catalog.value?.materials ?? []).filter((m) => !m.component)
   .map((m) => ({ value: m.uuid, label: m.name })).sort((a, b) => byName(a.label, b.label)));
+export const componentOptions = computed(() => (catalog.value?.materials ?? []).filter((m) => m.component)
+  .map((m) => ({ value: m.uuid, label: m.label })).sort((a, b) => byName(a.label, b.label)));
 // Resources only (refinery jobs: refined materials)
 export const resourceOptions = computed(() => (catalog.value?.materials ?? []).filter((m) => m.kind === "resource")
   .map((m) => ({ value: m.uuid, label: m.name })).sort((a, b) => byName(a.label, b.label)));

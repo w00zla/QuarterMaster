@@ -7,7 +7,8 @@ const lastScope = ref("personal");
 <script setup lang="ts">
 // Stock: personal, one org's or all of them, grouped by material (alphabetical), best quality first
 // within. Changes go through BatchDialog (confirmed); adding through StockAddForm (an org scope
-// starts with that org's share switched on; the form stays open for the next batch).
+// starts with that org's share switched on; the form stays open for the next batch). `components`:
+// the ship components instead of the materials (ComponentsView; no quality, filters by type, size, grade).
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
 import Dropdown from "../components/Dropdown.vue";
@@ -30,6 +31,8 @@ import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toastError } from "../toasts";
 
+const props = defineProps<{ components?: boolean }>();
+
 const scope = lastScope;
 // A deep link picks the scope: personal, all or one of your orgs
 const linked = takeQuery("scope");
@@ -41,6 +44,10 @@ const locationFilter = ref("");
 // Quality filter in tiers (qTier)
 const qualityLow = ref(0);
 const qualityHigh = ref(Q_TIER_MAX);
+// Components: type label, size and grade letter ("" = all)
+const typeFilter = ref("");
+const sizeFilter = ref("");
+const gradeFilter = ref("");
 // Adding in a panel below the head: the form, then its own confirmation
 const showAdd = ref(false);
 
@@ -99,18 +106,30 @@ onUnmounted(() => {
   reload.cancel();
 });
 
+// This view's batches: the materials or the ship components
+const batches = computed(() => (data.value?.batches ?? []).filter((b) => b.component === !!props.components));
+
+// A component's group shows its unique label (many share a name)
+const nameOf = (b: StockBatch) => (b.component ? materials.value.get(b.subjectUuid)?.label ?? b.material : b.material);
+const typeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.typeLabel ?? t("filter.noType");
+const sizeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.size;
+const gradeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.gradeLetter;
+
 const filtered = computed(() => {
   const words = materialText.value.toLowerCase().split(/\s+/).filter(Boolean);
-  return (data.value?.batches ?? []).filter((b) =>
+  return batches.value.filter((b) =>
     (!locationFilter.value || b.locationUuid === locationFilter.value)
-    && qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value
-    && words.every((w) => `${b.material} ${b.location}`.toLowerCase().includes(w)));
+    && (props.components
+      ? (!typeFilter.value || typeOf(b) === typeFilter.value) && (!sizeFilter.value || String(sizeOf(b)) === sizeFilter.value)
+        && (!gradeFilter.value || gradeOf(b) === gradeFilter.value)
+      : qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value)
+    && words.every((w) => `${nameOf(b)} ${b.location}`.toLowerCase().includes(w)));
 });
 
 // --- the table: one group per material (header with the total), its batches below ------------
 const columns = computed<ColumnSpec[]>(() => [
-  { key: "material", label: t("stock.col.material"), width: 200 },
-  { key: "quality", label: t("stock.col.quality"), width: 130 },
+  { key: "material", label: props.components ? t("stock.col.component") : t("stock.col.material"), width: 200 },
+  ...(props.components ? [] : [{ key: "quality", label: t("stock.col.quality"), width: 130 }]),
   { key: "amount", label: t("stock.col.amount"), width: 120 },
   { key: "location", label: t("stock.col.location"), width: 280 },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
@@ -118,11 +137,15 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "state", label: t("stock.col.state"), width: 180 },
   { key: "actions", label: "", width: 168, sortable: false, fixed: true, sep: true },
 ]);
-const cols = useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
+// Cells of a group row before the empty ones: name, (quality,) total
+const lead = props.components ? 2 : 3;
+const cols = props.components
+  ? useTableColumns("qm.webapp.columns.components", columns, { key: "amount", dir: "desc" })
+  : useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
 
 function valueOf(b: StockBatch, key: string): string | number {
   switch (key) {
-    case "material": return b.material;
+    case "material": return nameOf(b);
     case "quality": return b.quality;
     case "amount": return Number(b.quantity);
     case "location": return b.location;
@@ -141,7 +164,7 @@ const groups = computed(() => {
   const byName = (a: { material: string }, b: { material: string }) => a.material.localeCompare(b.material, lang.value);
   return [...by.values()]
     .map((rows) => ({
-      uuid: rows[0]!.subjectUuid, material: rows[0]!.material, unit: rows[0]!.unit,
+      uuid: rows[0]!.subjectUuid, material: nameOf(rows[0]!), unit: rows[0]!.unit,
       total: data.value?.totals[rows[0]!.subjectUuid] ?? "0",
       rows: sortRows(rows, cols.sort.value, valueOf, compareBatches),
     }))
@@ -153,12 +176,31 @@ const groups = computed(() => {
 
 const locationOptions = computed(() => {
   const seen = new Map<string, string>();
-  for (const b of data.value?.batches ?? []) seen.set(b.locationUuid, b.location);
+  for (const b of batches.value) seen.set(b.locationUuid, b.location);
   return [
     { value: "", label: t("stock.allLocations") },
     ...[...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, lang.value)),
   ];
 });
+
+// Components: what the listed batches offer
+const typeOptions = computed(() => [
+  { value: "", label: t("filter.allTypes") },
+  ...[...new Set(batches.value.map(typeOf))].sort((a, b) => a.localeCompare(b, lang.value)).map((v) => ({ value: v, label: v })),
+]);
+const sizeOptions = computed(() => [
+  { value: "", label: t("filter.allSizes") },
+  ...[...new Set(batches.value.map(sizeOf).filter((s): s is number => s != null))].sort((a, b) => a - b)
+    .map((s) => ({ value: String(s), label: `S${s}` })),
+]);
+const gradeOptions = computed(() => [
+  { value: "", label: t("filter.allGrades") },
+  ...[...new Set(batches.value.map(gradeOf).filter((g): g is string => !!g))].sort().map((g) => ({ value: g, label: g })),
+]);
+// A choice the list no longer offers is dropped
+watch(typeOptions, (o) => { if (!o.some((x) => x.value === typeFilter.value)) typeFilter.value = ""; });
+watch(sizeOptions, (o) => { if (!o.some((x) => x.value === sizeFilter.value)) sizeFilter.value = ""; });
+watch(gradeOptions, (o) => { if (!o.some((x) => x.value === gradeFilter.value)) gradeFilter.value = ""; });
 
 const holderOptions = computed(() => [
   { value: "", label: t("stock.allHolders") },
@@ -186,8 +228,8 @@ function open(batch: StockBatch, action: BatchAction) {
 
     <section class="panel unclipped">
       <div class="head">
-        <Icon name="type-crate" :size="16" />
-        <span class="head-title">{{ t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
+        <Icon :name="components ? 'type-module' : 'type-crate'" :size="16" />
+        <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
         <button type="button" class="btn small primary" @click="showAdd = !showAdd">
           <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ t("stock.add") }}
         </button>
@@ -197,7 +239,7 @@ function open(batch: StockBatch, action: BatchAction) {
           <Icon name="plus" :size="16" />
           <span class="head-title">{{ scope === "all" ? t("stock.addTitle") : t("stock.addTo", { scope: scopeName(scope) }) }}</span>
         </div>
-        <StockAddForm :target="scope === 'all' ? undefined : scope === 'personal' ? null : scope" @done="added" />
+        <StockAddForm :target="scope === 'all' ? undefined : scope === 'personal' ? null : scope" :components="components" @done="added" />
       </div>
       <div class="filters">
         <label class="search">
@@ -207,13 +249,18 @@ function open(batch: StockBatch, action: BatchAction) {
         </label>
         <Dropdown v-model="locationFilter" variant="chip" :options="locationOptions" />
         <Dropdown v-if="org" v-model="holder" variant="chip" :options="holderOptions" />
-        <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :detail="tierQualities" :label="t('field.quality')" />
+        <template v-if="components">
+          <Dropdown v-model="typeFilter" variant="chip" :options="typeOptions" />
+          <Dropdown v-model="sizeFilter" variant="chip" :options="sizeOptions" />
+          <Dropdown v-model="gradeFilter" variant="chip" :options="gradeOptions" />
+        </template>
+        <RangeSlider v-else v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :detail="tierQualities" :label="t('field.quality')" />
         <span class="spacer" />
-        <span class="head-count">{{ filtered.length }} / {{ data?.batches.length ?? 0 }}</span>
+        <span class="head-count">{{ filtered.length }} / {{ batches.length }}</span>
       </div>
 
       <div v-if="!data" class="empty-line">{{ t("common.loading") }}</div>
-      <div v-else-if="!data.batches.length" class="empty-line">{{ t("stock.empty") }}</div>
+      <div v-else-if="!batches.length" class="empty-line">{{ t("stock.empty") }}</div>
       <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
@@ -224,13 +271,13 @@ function open(batch: StockBatch, action: BatchAction) {
               <Icon :name="materialIcon(g.uuid)" :size="15" class="type-icon" />
               <InfoTip kind="material" :uuid="g.uuid">{{ g.material }}</InfoTip>
             </span>
-            <span />
+            <span v-if="!components" />
             <span class="num group-total">{{ qty(g.total, g.unit) }}</span>
-            <span v-for="c in columns.length - 3" :key="c" :class="{ sep: c === columns.length - 3 }" />
+            <span v-for="c in columns.length - lead" :key="c" :class="{ sep: c === columns.length - lead }" />
           </div>
           <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
             <span />
-            <span class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
+            <span v-if="!components" class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
             <span class="cell">{{ b.location }}</span>
             <span v-if="org" class="cell">{{ b.holderName }}</span>

@@ -1,19 +1,20 @@
 <script setup lang="ts">
 // Books new stock (POST /api/stock/add) right away; the toast says what was booked. Ores only go
 // into the refinery (RefineryStartForm). Sharing is a switch per org; `target` = the list's scope:
-// a guildId starts with that org switched on, null/undefined with none.
+// a guildId starts with that org switched on, null/undefined with none. `components`: ship components
+// instead of materials (no quality: booked with 0).
 import { computed, reactive, ref, watch } from "vue";
 import type { OkResponse, StockAddRequest } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
-import { locationOptions, locations, materialOptions, materials } from "../catalog";
+import { componentOptions, locationOptions, locations, materialOptions, materials } from "../catalog";
 import { amountOf, qText, qty, qualityOf, unitText } from "../format";
 import { t } from "../i18n";
 import { me } from "../session";
 import { toast, toastError } from "../toasts";
 import Picker from "./Picker.vue";
 
-const props = defineProps<{ target?: string | null }>();
+const props = defineProps<{ target?: string | null; components?: boolean }>();
 const emit = defineEmits<{ done: [] }>();
 
 const subject = ref<string | null>(null);
@@ -34,7 +35,7 @@ function resetShares() {
 watch(() => props.target, resetShares, { immediate: true });
 
 const unit = computed(() => (subject.value ? materials.value.get(subject.value)?.unit : undefined) ?? "SCU");
-const q = computed(() => qualityOf(quality.value));
+const q = computed(() => (props.components ? 0 : qualityOf(quality.value)));
 const amt = computed(() => amountOf(amount.value, unit.value));
 
 const valid = computed(() => !!subject.value && !!location.value && q.value !== null && !!amt.value);
@@ -52,7 +53,8 @@ function clear() {
 
 async function submit() {
   if (!valid.value || busy.value) return;
-  const what = `${qty(amt.value!, unit.value)} ${materials.value.get(subject.value!)?.name ?? ""} · ${qText(q.value)} · ${
+  const m = materials.value.get(subject.value!);
+  const what = `${qty(amt.value!, unit.value)} ${props.components ? m?.label ?? "" : `${m?.name ?? ""} · ${qText(q.value)}`} · ${
     locations.value.get(location.value!)?.short ?? ""} · ${ownerText()}`;
   busy.value = true;
   try {
@@ -75,14 +77,14 @@ async function submit() {
 <template>
   <form class="form" @submit.prevent="submit">
     <label class="field">
-      {{ t("field.material") }}
-      <Picker v-model="subject" :options="materialOptions" :placeholder="t('pick.material')" />
+      {{ components ? t("field.component") : t("field.material") }}
+      <Picker v-model="subject" :options="components ? componentOptions : materialOptions" :placeholder="components ? t('pick.component') : t('pick.material')" />
     </label>
     <label class="field">
       {{ t("field.location") }}
       <Picker v-model="location" :options="locationOptions" :placeholder="t('pick.location')" />
     </label>
-    <label class="field">
+    <label v-if="!components" class="field">
       {{ t("field.quality") }}
       <input v-model="quality" class="input" :class="{ invalid: quality.trim() !== '' && q === null }" type="text" inputmode="numeric" placeholder="0–1000" />
     </label>

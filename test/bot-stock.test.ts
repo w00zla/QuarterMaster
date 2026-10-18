@@ -7,7 +7,7 @@ const batch = (id: number, material: string, quality: number, quantity: string, 
   batch: {
     id, ownerUserId: 'me', kind: 'resource', resourceUuid: material, itemUuid: null, locationUuid: 'loc', state: 'stored', quality, quantity, lot: null,
   },
-  material, location: 'Area18', holderName: null, sharedIn: [], refine: null, ...extra,
+  material, component: false, location: 'Area18', holderName: null, sharedIn: [], refine: null, ...extra,
 });
 
 describe('/qm-stock input and lists', () => {

@@ -6,6 +6,7 @@ import { importCache } from '../db/import-cache.ts';
 import { REWARD_POOL_PATHS, rows } from '../db/query.ts';
 import type { StockMetrics } from '../webapp/api-types.ts';
 import { formatAmount } from './amount.ts';
+import { componentItemSql } from './service.ts';
 
 export interface OrgMetrics extends StockMetrics {
   // Active members
@@ -23,29 +24,40 @@ const obtainable = importCache(async (db: Db) =>
 export const obtainableBlueprints = (db: Db) => obtainable(db, '');
 
 /** Stock figures in the shape of the web app's tiles (exact decimal text). */
-export function stockMetrics(s: {
-  resources: number; scu: string; resourceLocations: number; items: number; pieces: string; itemLocations: number;
-} | undefined): StockMetrics {
+export function stockMetrics(s: StockMetricsRow | undefined): StockMetrics {
   return {
     resources: { kinds: s?.resources ?? 0, scu: formatAmount(s?.scu ?? '0'), locations: s?.resourceLocations ?? 0 },
     items: { kinds: s?.items ?? 0, pieces: formatAmount(s?.pieces ?? '0'), locations: s?.itemLocations ?? 0 },
+    components: { kinds: s?.components ?? 0, pieces: formatAmount(s?.componentPieces ?? '0'), locations: s?.componentLocations ?? 0 },
   };
+}
+
+export interface StockMetricsRow {
+  resources: number; scu: string; resourceLocations: number; items: number; pieces: string; itemLocations: number;
+  components: number; componentPieces: string; componentLocations: number;
+}
+
+/** The columns of StockMetricsRow over stored batches `b`. */
+export function stockMetricsSql() {
+  const comp = componentItemSql('b.item_uuid');
+  const item = sql`b.kind = 'item' AND NOT ${comp}`;
+  return sql`count(DISTINCT b.resource_uuid)::int AS resources,
+    coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'resource'), 0)::text AS scu,
+    count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'resource')::int AS "resourceLocations",
+    count(DISTINCT b.item_uuid) FILTER (WHERE ${item})::int AS items,
+    coalesce(sum(b.quantity) FILTER (WHERE ${item}), 0)::text AS pieces,
+    count(DISTINCT b.location_uuid) FILTER (WHERE ${item})::int AS "itemLocations",
+    count(DISTINCT b.item_uuid) FILTER (WHERE ${comp})::int AS components,
+    coalesce(sum(b.quantity) FILTER (WHERE ${comp}), 0)::text AS "componentPieces",
+    count(DISTINCT b.location_uuid) FILTER (WHERE ${comp})::int AS "componentLocations"`;
 }
 
 /** The figures of each org in `guildIds` (orgs without anything get zeros). */
 export async function orgMetrics(db: Db, guildIds: string[]): Promise<Map<string, OrgMetrics>> {
   if (!guildIds.length) return new Map();
   const ids = sql.join(guildIds.map((g) => sql`${g}`), sql`, `);
-  const stock = await rows<{
-    guildId: string; resources: number; scu: string; resourceLocations: number; items: number; pieces: string; itemLocations: number;
-  }>(db, sql`
-    SELECT sh.guild_id AS "guildId",
-      count(DISTINCT b.resource_uuid)::int AS resources,
-      coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'resource'), 0)::text AS scu,
-      count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'resource')::int AS "resourceLocations",
-      count(DISTINCT b.item_uuid)::int AS items,
-      coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'item'), 0)::text AS pieces,
-      count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'item')::int AS "itemLocations"
+  const stock = await rows<StockMetricsRow & { guildId: string }>(db, sql`
+    SELECT sh.guild_id AS "guildId", ${stockMetricsSql()}
     FROM app.stock_share sh
     JOIN app.stock_batch b ON b.id = sh.batch_id AND b.state = 'stored'
     JOIN app.member m ON m.guild_id = sh.guild_id AND m.user_id = b.owner_user_id AND m.active

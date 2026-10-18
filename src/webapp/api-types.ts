@@ -46,6 +46,15 @@ export interface CatalogMaterial {
   // Items: the item type (for its icon) and its display name; null for resources
   type: string | null;
   typeLabel: string | null;
+  // A ship component (an item without quality: booked with quality 0, its own view)
+  component: boolean;
+  // Components: unique display label ("Name · S3 · B Industrial · CHCO"); else the name
+  label: string;
+  // Items: size, grade letter, class and manufacturer code where the game has them
+  size: number | null;
+  gradeLetter: string | null;
+  itemClass: string | null;
+  manufacturerCode: string | null;
 }
 
 export interface CatalogLocation {
@@ -102,6 +111,8 @@ export interface StockBatch {
   // A part split off from its main batch (POST /api/stock/merge puts it back)
   part: boolean;
   kind: 'resource' | 'item';
+  // A ship component (shown in its own view, not in the stock view)
+  component: boolean;
   subjectUuid: string;
   material: string;
   locationUuid: string;
@@ -280,10 +291,11 @@ export interface BlueprintRequest {
 // --- summary (GET /api/summary) for the overview --------------------------------------------------
 
 export interface StockMetrics {
-  // Stored stock per kind: distinct materials, the amount (resources in SCU, items in pieces; exact
-  // decimal text) and the distinct locations
+  // Stored stock per kind: distinct materials, the amount (resources in SCU, items and components in
+  // pieces; exact decimal text) and the distinct locations; items without the ship components
   resources: { kinds: number; scu: string; locations: number };
   items: { kinds: number; pieces: string; locations: number };
+  components: { kinds: number; pieces: string; locations: number };
 }
 
 export interface RefiningMetrics {

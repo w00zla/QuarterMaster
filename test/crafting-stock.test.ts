@@ -26,7 +26,7 @@ const data: PlannerData = { defaultQuality: 500, recipes: [recipe('bp-1', '0.1',
 
 let nextId = 1;
 const batch = (over: Partial<StockBatch>): StockBatch => ({
-  id: nextId++, sharedIn: [], part: false, kind: 'resource', subjectUuid: 'r-metal', material: 'Metal', locationUuid: 'loc', location: 'Area18',
+  id: nextId++, sharedIn: [], part: false, kind: 'resource', component: false, subjectUuid: 'r-metal', material: 'Metal', locationUuid: 'loc', location: 'Area18',
   state: 'stored', quality: 700, quantity: '1', unit: 'SCU', holderUserId: 'me', holderName: 'Me', canChange: true, refine: null, ...over,
 });
 

@@ -8,6 +8,7 @@ const metrics = {
   members: 12, blueprints: 87,
   resources: { kinds: 23, scu: '1284.5', locations: 6 },
   items: { kinds: 2, pieces: '38', locations: 3 },
+  components: { kinds: 0, pieces: '0', locations: 0 },
 };
 const data = (materials: BoardData['materials']): BoardData => ({ orgName: 'Red_Hollow', subtitle: null, metrics, obtainable: 312, materials });
 const resource = (i: number) => ({ kind: 'resource' as const, uuid: `r${i}`, name: `Ore_${i}`, total: String(100 - i), bestQuality: 800, holders: 2 });

@@ -13,7 +13,7 @@ import type {
 import type { IconName } from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { locationOptions, locations } from "../catalog";
-import { amountOf, ownerText, qText, qty, sharedText, unitText } from "../format";
+import { amountOf, ownerText, qty, qualityPrefix, sharedText, unitText, withQuality } from "../format";
 import { t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
 import { me } from "../session";
@@ -136,7 +136,7 @@ async function book() {
   if (busy.value) return;
   busy.value = true;
   const typed = amount.value.trim();
-  const what = `${b.material} · ${qText(b.quality)} · ${b.location}`;
+  const what = `${withQuality(b)} · ${b.location}`;
   try {
     if (props.action === "remove") {
       const body: StockRemoveRequest = { batchId: b.id, amount: all.value ? null : typed, expected: b.quantity };
@@ -166,7 +166,7 @@ async function book() {
         body.toOwnerUserId = giveTo.value.userId;
       }
       await api<OkResponse>("/stock/move", { method: "POST", body });
-      toast(t("stock.moved", { what: `${amountText.value} ${b.material} · ${qText(b.quality)} → ${targetText.value}` }));
+      toast(t("stock.moved", { what: `${amountText.value} ${withQuality(b)} → ${targetText.value}` }));
     }
     emit("done");
     emit("close");
@@ -190,7 +190,7 @@ async function book() {
     <div v-if="step === 'input'" class="form single flush" @keydown.enter="onEnter">
       <div class="summary">
         <span class="big">{{ b.material }} · {{ qty(b.quantity, b.unit) }}</span>
-        <span class="dim">{{ qText(b.quality) }} · {{ b.location }} · {{ ownerText(b) }}<template v-if="b.sharedIn.length"> · {{ sharedText(b) }}</template></span>
+        <span class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}<template v-if="b.sharedIn.length"> · {{ sharedText(b) }}</template></span>
       </div>
       <div v-if="action === 'remove' || action === 'move'" class="field">
         {{ t("field.amount") }}
@@ -237,27 +237,27 @@ async function book() {
     <div v-else class="summary">
       <template v-if="action === 'remove'">
         <span class="big">−{{ amountText }} {{ b.material }}</span>
-        <span class="dim">{{ qText(b.quality) }} · {{ b.location }} · {{ ownerText(b) }}</span>
+        <span class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}</span>
       </template>
       <template v-else-if="action === 'adjust'">
         <span class="big">{{ qty(b.quantity, b.unit) }} → {{ qty(counted, b.unit) }} {{ b.material }}</span>
-        <span class="dim">{{ qText(b.quality) }} · {{ b.location }} · {{ ownerText(b) }}</span>
+        <span class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}</span>
       </template>
       <template v-else-if="action === 'share'">
-        <span class="big">{{ qty(b.quantity, b.unit) }} {{ b.material }} · {{ qText(b.quality) }}</span>
+        <span class="big">{{ qty(b.quantity, b.unit) }} {{ withQuality(b) }}</span>
         <span><span class="dim">{{ t("stock.from") }}:</span> {{ shareText(b.sharedIn) }}</span>
         <span><span class="dim">{{ t("stock.to") }}:</span> {{ shareText(sharedNow) }}</span>
       </template>
       <template v-else-if="action === 'merge'">
-        <span class="big">{{ qty(b.quantity, b.unit) }} {{ b.material }} · {{ qText(b.quality) }}</span>
+        <span class="big">{{ qty(b.quantity, b.unit) }} {{ withQuality(b) }}</span>
         <span>{{ t("stock.mergeInto") }}</span>
       </template>
       <template v-else-if="action === 'split'">
-        <span class="big">{{ qty(b.quantity, b.unit) }} {{ b.material }} · {{ qText(b.quality) }}</span>
+        <span class="big">{{ qty(b.quantity, b.unit) }} {{ withQuality(b) }}</span>
         <span>{{ t("stock.splitInto", { a: splitRest, b: qty(amt ?? "", b.unit) }) }}</span>
       </template>
       <template v-else>
-        <span class="big">{{ amountText }} {{ b.material }} · {{ qText(b.quality) }}</span>
+        <span class="big">{{ amountText }} {{ withQuality(b) }}</span>
         <span><span class="dim">{{ t("stock.from") }}:</span> {{ b.location }} · {{ ownerText(b) }}</span>
         <span><span class="dim">{{ t("stock.to") }}:</span> {{ targetText }}</span>
       </template>

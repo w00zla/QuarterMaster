@@ -14,7 +14,7 @@ import { loadPlannerData } from '../planner/load.ts';
 import { getBlueprint, getBlueprints, getItem, getItems, getResource, getResources } from '../adminapp/queries.ts';
 import { formatAmount } from '../stock/amount.ts';
 import { locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
-import { obtainableBlueprints, orgMetrics, stockMetrics } from '../stock/org-summary.ts';
+import { obtainableBlueprints, orgMetrics, stockMetrics, stockMetricsSql, type StockMetricsRow } from '../stock/org-summary.ts';
 import * as stock from '../stock/service.ts';
 import { MAX_REFINE_ROWS, StockError, type Actor } from '../stock/service.ts';
 import type { Source } from '../history/record.ts';
@@ -154,6 +154,7 @@ function toBatch(p: PickableBatch, viewer: string, viewerOrgs: Set<string>): Sto
     sharedIn: b.ownerUserId === viewer ? p.sharedIn : p.sharedIn.filter((g) => viewerOrgs.has(g)),
     part: b.lot !== null,
     kind: b.kind,
+    component: p.component,
     subjectUuid: b.resourceUuid ?? b.itemUuid!,
     material: p.material,
     locationUuid: b.locationUuid,
@@ -191,6 +192,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     return c.json({
       materials: [...materials.values()].map((m) => ({
         uuid: m.uuid, kind: m.kind, name: m.name, nameKey: m.nameKey, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
+        component: m.component, label: m.label, size: m.size, gradeLetter: m.gradeLetter, itemClass: m.itemClass, manufacturerCode: m.manufacturerCode,
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
@@ -361,15 +363,8 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const me = c.get('session').userId;
     // Your stored stock, shared or not; each org's figures (what its active members shared) come from
     // orgMetrics, like the bot's board: your shared stock counts in both
-    const [stock] = await rows<{
-      resources: number; scu: string; resourceLocations: number; items: number; pieces: string; itemLocations: number;
-    }>(db, sql`
-      SELECT count(DISTINCT b.resource_uuid)::int AS resources,
-        coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'resource'), 0)::text AS scu,
-        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'resource')::int AS "resourceLocations",
-        count(DISTINCT b.item_uuid)::int AS items,
-        coalesce(sum(b.quantity) FILTER (WHERE b.kind = 'item'), 0)::text AS pieces,
-        count(DISTINCT b.location_uuid) FILTER (WHERE b.kind = 'item')::int AS "itemLocations"
+    const [stock] = await rows<StockMetricsRow>(db, sql`
+      SELECT ${stockMetricsSql()}
       FROM app.stock_batch b
       WHERE b.state = 'stored' AND b.owner_user_id = ${me}`);
     // Refinery jobs are personal only

@@ -4,9 +4,9 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
-import { locText, rows } from '../db/query.ts';
+import { itemClassText, locText, rows } from '../db/query.ts';
 import type { SubjectKind } from './amount.ts';
-import { selectableLocationSql, type Actor, type Batch } from './service.ts';
+import { componentItemSql, selectableLocationSql, type Actor, type Batch } from './service.ts';
 
 export interface LocationEntry {
   uuid: string;
@@ -58,21 +58,41 @@ export interface MaterialEntry {
   nameEn: string;
   // The game's localization key of the name (lower case)
   nameKey: string | null;
+  // A ship component (an item, no quality); the fields below are set for items only
+  component: boolean;
+  size: number | null;
+  gradeLetter: string | null;
+  itemClass: string | null;
+  manufacturerCode: string | null;
+  // Components: unique within the catalog ("Name · S3 · B Industrial · CHCO"); else the name
+  label: string;
 }
 
-/** What can be booked: recipe resources and items (same rules as the stock service; never ores). */
+/** What can be booked: recipe resources and items, and ship components (same rules as the stock service; never ores). */
 export const materialCatalog = importCache(async (db, lang): Promise<Map<string, MaterialEntry>> => {
-  const found = await rows<MaterialEntry>(db, sql`
+  const found = await rows<Omit<MaterialEntry, 'label'> & { className: string | null }>(db, sql`
     SELECT 'resource' AS kind, r.uuid, coalesce(${locText(lang, sql`r.name_key`)}, r.key) AS name,
-      coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", lower(r.name_key) AS "nameKey"
+      coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", lower(r.name_key) AS "nameKey", false AS component,
+      NULL::int AS size, NULL AS "gradeLetter", NULL AS "itemClass", NULL AS "manufacturerCode", NULL AS "className"
     FROM catalog.resource r
     WHERE r.retired_at IS NULL AND EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.resource_uuid = r.uuid)
     UNION ALL
     SELECT 'item', i.uuid, coalesce(${locText(lang, sql`i.name_key`)}, i.class_name),
-      coalesce(${locText('en', sql`i.name_key`)}, i.class_name), lower(i.name_key)
-    FROM catalog.item i
-    WHERE i.retired_at IS NULL AND EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid)`);
-  return new Map(found.map((m) => [m.uuid, m]));
+      coalesce(${locText('en', sql`i.name_key`)}, i.class_name), lower(i.name_key), ${componentItemSql()},
+      i.size, i.grade_letter, ${itemClassText(lang, 'i')}, m.code, i.class_name
+    FROM catalog.item i LEFT JOIN catalog.manufacturer m ON m.uuid = i.manufacturer_uuid
+    WHERE i.retired_at IS NULL AND (EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid) OR ${componentItemSql()})`);
+  const labels = found.map((m) => (m.component
+    ? [m.name, m.size !== null ? `S${m.size}` : null, [m.gradeLetter, m.itemClass].filter(Boolean).join(' ') || null, m.manufacturerCode]
+      .filter(Boolean).join(' · ')
+    : m.name));
+  const counts = new Map<string, number>();
+  found.forEach((m, i) => m.component && counts.set(labels[i]!, (counts.get(labels[i]!) ?? 0) + 1));
+  // Component labels that still collide get the class name
+  return new Map(found.map(({ className, ...m }, i) => {
+    const label = m.component && counts.get(labels[i]!)! > 1 ? `${labels[i]} · ${className}` : labels[i]!;
+    return [m.uuid, { ...m, label }];
+  }));
 });
 
 /** Entries whose text contains every word of the query; first word at the start of `name` first, then alphabetical. */
@@ -101,6 +121,8 @@ export interface RefineInfo {
 export interface PickableBatch {
   batch: Batch;
   material: string;
+  // A ship component (also when its catalog entry is retired)
+  component: boolean;
   location: string;
   // The owner's name in an org it is shared in (null while unshared)
   holderName: string | null;
@@ -160,8 +182,8 @@ export async function findStock(db: Db, guildId: string, userId: string, subject
 
 /** Batches matching `where` (alias `b`) with display names, ordered by material, then quality (best first). */
 async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBatch[]> {
-  const found = await rows<Batch & { holderName: string | null; sharedIn: string[]; refine: RefineInfo }>(db, sql`
-    SELECT b.id::int AS id, b.owner_user_id AS "ownerUserId", b.kind,
+  const found = await rows<Batch & { holderName: string | null; sharedIn: string[]; refine: RefineInfo; component: boolean }>(db, sql`
+    SELECT b.id::int AS id, b.owner_user_id AS "ownerUserId", b.kind, ${componentItemSql('b.item_uuid')} AS component,
       b.resource_uuid AS "resourceUuid", b.item_uuid AS "itemUuid", b.location_uuid AS "locationUuid", b.state, b.quality,
       b.quantity::text AS quantity, b.lot,
       coalesce((SELECT array_agg(s.guild_id ORDER BY s.guild_id) FROM app.stock_share s WHERE s.batch_id = b.id), '{}') AS "sharedIn",
@@ -175,11 +197,12 @@ async function loadBatches(db: Db, where: SQL, lang: string): Promise<PickableBa
   const fallbackNames = await missingNames(db, lang, found.filter((b) => !materials.has(b.resourceUuid ?? b.itemUuid!)).map((b) => b.resourceUuid ?? b.itemUuid!),
     found.filter((b) => !locations.has(b.locationUuid)).map((b) => b.locationUuid));
   return found
-    .map(({ holderName, sharedIn: shares, refine, ...batch }) => {
+    .map(({ holderName, sharedIn: shares, refine, component, ...batch }) => {
       const subject = batch.resourceUuid ?? batch.itemUuid!;
       return {
         batch,
         material: materials.get(subject)?.name ?? fallbackNames.get(subject) ?? subject,
+        component,
         location: locations.get(batch.locationUuid)?.short ?? fallbackNames.get(batch.locationUuid) ?? batch.locationUuid,
         holderName,
         sharedIn: shares,
