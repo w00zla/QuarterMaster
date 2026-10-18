@@ -129,10 +129,23 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     const startX = e.clientX;
     const startWidth = widths.value[key];
     if (startWidth === undefined) return;
-    // At most what keeps every column in view: a wider column would push the right ones out
-    const max = room.value === null ? Infinity : Math.max(startWidth, room.value - (minWidth.value - startWidth));
+    // Growing first takes the free room (the filler down to its minimum), then, like Excel, narrows the
+    // resizable columns to its right, the nearest first, down to MIN_WIDTH: every column stays in view.
+    // Computed from the widths at the start, so dragging back gives the neighbours their width again.
+    const free = room.value === null ? Infinity : Math.max(0, room.value - minWidth.value);
+    const index = cols.value.findIndex((c) => c.key === key);
+    const neighbours = cols.value.slice(index + 1).filter((c) => !c.fixed && c.key !== filler.value)
+      .map((c) => ({ key: c.key, start: widths.value[c.key]! }));
+    const spare = neighbours.reduce((s, n) => s + Math.max(0, n.start - MIN_WIDTH), 0);
     const move = (ev: MouseEvent) => {
-      widths.value[key] = Math.min(max, Math.max(MIN_WIDTH, Math.round(startWidth + ev.clientX - startX)));
+      const width = Math.min(startWidth + free + spare, Math.max(MIN_WIDTH, Math.round(startWidth + ev.clientX - startX)));
+      let take = Math.max(0, width - startWidth - free);
+      for (const n of neighbours) {
+        const cut = Math.min(take, Math.max(0, n.start - MIN_WIDTH));
+        widths.value[n.key] = n.start - cut;
+        take -= cut;
+      }
+      widths.value[key] = width;
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
