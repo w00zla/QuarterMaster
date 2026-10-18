@@ -1,19 +1,31 @@
 <script lang="ts">
+import type { InjectionKey } from "vue";
+
 export interface PickerOption {
   value: string;
   label: string;
   // Dim second text in the suggestion (searched too)
   hint?: string;
 }
+
+/** The picker's own texts, provided by the app (the web app's from its i18n; the companion app
+ * provides its own: this component has no i18n of its own so that both can import it). */
+export interface PickerLabels {
+  clear: string;
+  noMatch: string;
+}
+
+export const PICKER_LABELS: InjectionKey<PickerLabels> = Symbol("pickerLabels");
 </script>
 
 <script setup lang="ts">
 // A searchable picker (combobox): type to filter, up/down/enter/escape, every match listed (the list scrolls).
 // All typed words must match; entries whose label starts with the first word come first, otherwise the
 // caller's order stays. Text that was not picked is dropped on blur: only listed values get through.
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, inject, nextTick, ref, watch } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { t } from "../i18n";
+
+const labels = inject(PICKER_LABELS, { clear: "Clear", noMatch: "No match" });
 
 const props = withDefaults(
   defineProps<{ modelValue: string | null; options: PickerOption[]; placeholder?: string; disabled?: boolean }>(),
@@ -123,7 +135,7 @@ function onKey(e: KeyboardEvent) {
       @blur="close"
       @keydown="onKey"
     />
-    <button v-if="selected && !disabled" type="button" class="clear" :title="t('pick.clear')" tabindex="-1" @mousedown.prevent @click="clear">
+    <button v-if="selected && !disabled" type="button" class="clear" :title="labels.clear" tabindex="-1" @mousedown.prevent @click="clear">
       <Icon name="close" :size="12" />
     </button>
     <div v-if="open" ref="list" class="picker-menu" role="listbox">
@@ -142,7 +154,7 @@ function onKey(e: KeyboardEvent) {
         <span class="label">{{ o.label }}</span>
         <span v-if="o.hint" class="hint">{{ o.hint }}</span>
       </button>
-      <div v-if="!matches.length" class="none">{{ t("common.noMatch") }}</div>
+      <div v-if="!matches.length" class="none">{{ labels.noMatch }}</div>
     </div>
   </div>
 </template>

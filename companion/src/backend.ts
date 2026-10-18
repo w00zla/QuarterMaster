@@ -9,6 +9,8 @@ export interface Config {
   // The user's API token (web app profile)
   token: string;
   gameDir: string;
+  // The UI language: "de", "en" or "" = the system's
+  language: string;
 }
 
 export interface Unlock {
@@ -45,8 +47,15 @@ export const scanBackups = () => call<{ found: number; failed: number }>("scan_b
 export const appInfo = () => call<{ version: string; platform: CompanionPlatform }>("app_info");
 export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });
 export const openWebapp = () => call<void>("open_webapp");
-export const getDetect = () => call<boolean>("get_detect");
-export const setDetect = (on: boolean) => call<void>("set_detect", { on });
+// The scan session: what the OCR reads from the screen capture, started and stopped by the user
+export type ScanMode = "off" | "inventory" | "refinery";
+export const getScan = () => call<ScanMode>("get_scan");
+export const setScan = (mode: ScanMode) => call<void>("set_scan", { mode });
+// The inventory debug window: frames with the reads, the last reads kept for an export (a folder below dir; its path)
+export const setDebug = (on: boolean) => call<void>("set_debug", { on });
+export const exportInventoryDebug = (dir: string) => call<string>("export_inventory_debug", { dir });
+// The debug window (debug.html), opened or focused
+export const openDebugWindow = () => call<void>("open_debug_window");
 export const getGameSeen = () => call<boolean>("get_game_seen");
 // Texts of these loc keys (lower case) in the player's active language pack (global.ini); missing keys are left out
 export const gameNames = (keys: string[]) => call<Record<string, string>>("game_names", { keys });

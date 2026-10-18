@@ -1,15 +1,16 @@
 //! Quartermaster Companion: follows SC's `Game.log` for blueprint unlocks and
 //! books them, once the user confirms, through the Quartermaster web app's API
 //! with the user's API token. Structure after BindSight (`config.rs`, `logwatch.rs`).
-//! Reads the refinery terminal from frames (`ocr.rs`, `refinery.rs`, `ocrwatch.rs`) in the
-//! player's game language (`locale.rs`); the frames come from the screen capture (`capture.rs`,
-//! Windows only so far).
+//! Reads the inventory terminals (`inventory.rs`) and the refinery terminal (`refinery.rs`) from
+//! frames during a scan session the user starts (`ocr.rs`, `ocrwatch.rs`), in the player's game
+//! language (`locale.rs`); the frames come from the screen capture (`capture.rs`, Windows only so far).
 
 #[cfg(windows)]
 mod capture;
 mod config;
 mod gamelog;
-mod locale;
+pub mod inventory;
+pub mod locale;
 mod logwatch;
 pub mod ocr;
 mod ocrwatch;
@@ -33,6 +34,15 @@ const LOG_CHANGED: &str = "log-changed";
 const SCAN_PROGRESS: &str = "scan-progress";
 // Update download progress: { done, total } (bytes; total null when unknown)
 const DOWNLOAD_PROGRESS: &str = "download-progress";
+// The scan session changed: its mode name
+const SCAN_CHANGED: &str = "scan-changed";
+// The config was saved (the debug window re-reads the language)
+const CONFIG_CHANGED: &str = "config-changed";
+/// The debug window's label (capabilities/default.json lists it)
+const DEBUG_WINDOW: &str = "debug";
+/// The main window's WebView2 arguments (tauri.conf.json `additionalBrowserArgs`), for every further window
+#[cfg(windows)]
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
 
 struct AppData {
     config: Config,
@@ -114,14 +124,19 @@ fn get_config(state: State) -> Config {
     state.lock().unwrap().config.clone()
 }
 
-/// Saves token and game folder; the server stays as loaded (only the config file changes it).
+/// Saves token, game folder and language; the server stays as loaded (only the config file changes
+/// it). Every window hears about it (`config-changed`).
 #[tauri::command]
 fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config, String> {
     config.server = state.lock().unwrap().config.server.clone();
     config.token = config.token.trim().to_string();
     config.game_dir = config.game_dir.trim().to_string();
+    if !matches!(config.language.as_str(), "de" | "en") {
+        config.language = String::new();
+    }
     config::save(&app, &config)?;
     state.lock().unwrap().config = config.clone();
+    let _ = app.emit(CONFIG_CHANGED, ());
     Ok(config)
 }
 
@@ -230,17 +245,70 @@ fn game_names(app: AppHandle, keys: Vec<String>) -> std::collections::HashMap<St
     locale::read_values(&locale::ini_path(std::path::Path::new(&game_dir)), &keys)
 }
 
-/// Whether the refinery detection is on.
+/// The running scan session: "off", "inventory" or "refinery".
 #[tauri::command]
-fn get_detect(detect: tauri::State<ocrwatch::Detect>) -> bool {
-    detect.load(std::sync::atomic::Ordering::Relaxed)
+fn get_scan(detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>) -> &'static str {
+    if detect.load(std::sync::atomic::Ordering::Relaxed) { scan.get() } else { ocrwatch::ScanMode::Off }.name()
 }
 
-/// Turns the refinery detection on or off.
+/// Starts a scan session ("inventory", "refinery") or stops it ("off"); the capture runs only during
+/// one. Every window hears about it (`scan-changed`).
 #[tauri::command]
-fn set_detect(detect: tauri::State<ocrwatch::Detect>, on: bool) {
-    detect.store(on, std::sync::atomic::Ordering::Relaxed);
-    log::info!("refinery detection {}", if on { "on" } else { "off" });
+fn set_scan(app: AppHandle, detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>, mode: String) -> Result<(), String> {
+    let mode = ocrwatch::ScanMode::parse(&mode).ok_or("invalid")?;
+    scan.set(mode);
+    detect.store(mode != ocrwatch::ScanMode::Off, std::sync::atomic::Ordering::Relaxed);
+    log::info!("scan {}", mode.name());
+    let _ = app.emit(SCAN_CHANGED, mode.name());
+    Ok(())
+}
+
+/// Opens the debug window (debug.html), or brings it to the front; closing it turns the debug flag
+/// off. Async: the window is built off the main thread (a sync command runs on it, and building a
+/// window waits for it). The webview gets the main window's browser arguments: WebView2 shares one
+/// browser process per app, a second webview with other arguments does not come up.
+#[tauri::command]
+async fn open_debug_window(app: AppHandle, debug: tauri::State<'_, ocrwatch::Debug>, store: tauri::State<'_, ocrwatch::DebugStore>) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(DEBUG_WINDOW) {
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    let builder = tauri::WebviewWindowBuilder::new(&app, DEBUG_WINDOW, tauri::WebviewUrl::App("debug.html".into()))
+        .title("Quartermaster Companion – Debug")
+        .inner_size(960.0, 760.0)
+        .min_inner_size(640.0, 400.0);
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(BROWSER_ARGS);
+    let window = builder.build().map_err(|e| e.to_string())?;
+    let (debug, store) = (debug.inner().clone(), store.inner().clone());
+    window.on_window_event(move |e| {
+        if let tauri::WindowEvent::Destroyed = e {
+            debug.0.store(false, std::sync::atomic::Ordering::Relaxed);
+            store.0.lock().unwrap().clear();
+            log::info!("inventory debug window closed");
+        }
+    });
+    Ok(())
+}
+
+/// Turns the inventory debug mode on or off (frames with the events, the last reads kept); off drops
+/// the kept reads. The debug window sets it when it opens; its destruction clears it.
+#[tauri::command]
+fn set_debug(debug: tauri::State<ocrwatch::Debug>, store: tauri::State<ocrwatch::DebugStore>, on: bool) {
+    debug.0.store(on, std::sync::atomic::Ordering::Relaxed);
+    if !on {
+        store.0.lock().unwrap().clear();
+    }
+    log::info!("inventory debug {}", if on { "on" } else { "off" });
+}
+
+/// Writes the kept inventory reads (frames as PNG, reads as JSON, an info file) into a new folder
+/// below `dir`; its path.
+#[tauri::command]
+fn export_inventory_debug(app: AppHandle, store: tauri::State<ocrwatch::DebugStore>, dir: String) -> Result<String, String> {
+    let game_dir = app.state::<Mutex<AppData>>().lock().unwrap().config.game_dir.clone();
+    let folder = store.export(std::path::Path::new(&dir), &game_dir)?;
+    log::info!("inventory debug exported to {}", folder.display());
+    Ok(folder.display().to_string())
 }
 
 /// Whether the screen capture sees Star Citizen running (changes come as `game-seen`).
@@ -291,16 +359,33 @@ pub fn run() {
             app.manage(Mutex::new(AppData { config, log_found: false, unlocks: Vec::new() }));
             app.manage(server::client());
             spawn_game_log_watch(app.handle().clone());
-            // The frame channel for the screen capture (Windows so far); QM_OCR_FRAMES feeds test images
-            // Detection is on at every start (the capture only runs while the game is in front)
-            let detect = ocrwatch::Detect::new(std::sync::atomic::AtomicBool::new(true));
-            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone());
+            // The frame channel for the screen capture (Windows so far); QM_OCR_FRAMES feeds test images.
+            // No scan session at start: the user starts one (the capture only runs during a session while
+            // the game is in front)
+            let detect = ocrwatch::Detect::new(std::sync::atomic::AtomicBool::new(false));
+            let scan = ocrwatch::Scan::default();
+            let debug = ocrwatch::Debug::default();
+            let store = ocrwatch::DebugStore::default();
+            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone());
             let seen = ocrwatch::GameSeen::default();
             #[cfg(windows)]
             capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone());
             app.manage(Mutex::new(frames));
             app.manage(detect);
+            app.manage(scan);
+            app.manage(debug);
+            app.manage(store);
             app.manage(seen);
+            // Closing the main window ends the app, the debug window included (else it would keep
+            // the process alive)
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                main.on_window_event(move |e| {
+                    if let tauri::WindowEvent::Destroyed = e {
+                        handle.exit(0);
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -312,8 +397,11 @@ pub fn run() {
             app_info,
             download_update,
             open_webapp,
-            get_detect,
-            set_detect,
+            get_scan,
+            set_scan,
+            set_debug,
+            export_inventory_debug,
+            open_debug_window,
             get_game_seen,
             game_names,
         ])

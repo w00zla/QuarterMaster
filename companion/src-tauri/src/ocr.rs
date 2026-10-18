@@ -1,5 +1,7 @@
-//! Text detection and recognition with PaddleOCR's PP-OCRv5 models (ONNX, Apache-2.0, as converted by
-//! RapidOCR) on ONNX Runtime. Pre- and post-processing follow RapidOCR (`rapidocr` 3.x): the detector
+//! Text detection and recognition with PaddleOCR's PP-OCRv6 "small" models (ONNX, Apache-2.0, as
+//! converted by RapidOCR; multi-language with one dictionary of 18708 characters, since 2026-10-18,
+//! PP-OCRv5 mobile/latin before) on ONNX Runtime. Pre- and post-processing follow RapidOCR
+//! (`rapidocr` 3.x, the same for v5 and v6): the detector
 //! sees the image in BGR scaled to `(x/255 - 0.5) / 0.5`, its probability map is thresholded at 0.3,
 //! dilated, split into connected regions (box score ≥ 0.5) and each region's box is grown by
 //! `area * 1.6 / perimeter` ("unclip"); the recognizer sees one text line at height 48 and is
@@ -26,7 +28,7 @@ const REC_WIDTH: u32 = 320;
 const REC_BATCH: usize = 6;
 
 /// An axis-aligned box in image pixels (x1, y1 exclusive).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub struct Rect {
     pub x0: f32,
     pub y0: f32,
@@ -50,7 +52,7 @@ impl Rect {
 }
 
 /// A recognized text line.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TextBox {
     pub rect: Rect,
     pub text: String,
@@ -122,6 +124,12 @@ impl Ocr {
     /// The text of every rect (in their order), read in batches of lines of similar shape.
     pub fn recognize_all(&mut self, img: &RgbImage, rects: &[Rect]) -> Result<Vec<(String, f32)>, String> {
         let crops: Vec<RgbImage> = rects.iter().map(|r| crop(img, *r)).collect();
+        self.recognize_images(&crops)
+    }
+
+    /// The text of every image (one text line each, in their order), read in batches of lines of
+    /// similar shape.
+    pub fn recognize_images(&mut self, crops: &[RgbImage]) -> Result<Vec<(String, f32)>, String> {
         let ratio = |c: &RgbImage| c.width() as f32 / c.height() as f32;
         // Similar widths in one batch: the narrow lines are padded less
         let mut order: Vec<usize> = (0..crops.len()).collect();
@@ -149,6 +157,9 @@ impl Ocr {
             let outputs = self.rec.run(ort::inputs![input]).map_err(|e| e.to_string())?;
             let (shape, probs) = outputs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
             let (steps, classes) = (shape[1] as usize, shape[2] as usize);
+            if classes != self.chars.len() {
+                return Err(format!("rec model has {classes} classes, the dictionary {}: wrong dictionary", self.chars.len()));
+            }
             for (n, &i) in batch.iter().enumerate() {
                 out[i] = ctc_decode(&probs[n * steps * classes..(n + 1) * steps * classes], steps, classes, &self.chars);
             }

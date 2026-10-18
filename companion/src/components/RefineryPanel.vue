@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The refinery sync's proposals (refinerySync.ts; the detection is switched in the state row): one card
+// The refinery sync's proposals (refinerySync.ts; its scan session is not offered yet: the Scan
+// button in the head is disabled until the read is checked with the current OCR model): one card
 // each with station and state, the time left as the terminal shows it next to the end, and the materials. A new running job: Register (the time left as its
 // duration, so the end stays the game's) or Discard; "Register all" in the head after a confirmation.
 // A finished job: Store (the terminal's yields). A job no read of the station showed: Remove (after a
@@ -8,7 +9,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { lang, t } from "../i18n";
+import { langRef, t } from "../i18n";
 import { cscuToScu, type Proposal } from "../refinery";
 import { accept, dismiss, materialName, proposals, stationName } from "../refinerySync";
 import { connected } from "../state";
@@ -22,7 +23,7 @@ const setBusy = (id: string, on: boolean) => {
   busy.value = next;
 };
 
-const time = (ms: number) => new Date(ms).toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+const time = (ms: number) => new Date(ms).toLocaleTimeString(langRef.value, { hour: "2-digit", minute: "2-digit" });
 
 // The time left counts down like on the terminal
 const now = ref(Date.now());
@@ -116,6 +117,11 @@ async function registerAll(value: string) {
     <div class="head">
       <Icon name="drop" :size="16" />
       <span class="head-title">{{ t("refinery.title") }}</span>
+      <Tooltip :text="t('refinery.scanSoon')">
+        <button type="button" class="btn small outline" disabled>
+          <Icon name="eye" :size="14" /> {{ t("scan.start") }}
+        </button>
+      </Tooltip>
       <Tooltip :text="lockTip">
         <button type="button" class="btn small primary" :disabled="!connected || !newOnes.length || busyAll" @click="confirming = true">
           <Icon name="check" :size="14" /> {{ t("refinery.addAll") }}

@@ -30,7 +30,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetForegroundWindow, GetWindowThreadProcessId, IsIconic};
+use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic};
 
 use crate::ocrwatch::{Detect, Frame, GameSeen, Pixels, GAME_SEEN};
 
@@ -58,9 +58,9 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen) 
                 continue;
             };
             match grab(&mut dup, hwnd) {
-                Ok(Some(pixels)) => {
+                Ok(Some((pixels, cursor))) => {
                     last_error.clear();
-                    if tx.send(Frame { at_ms: now_ms(), pixels, live: true }).is_err() {
+                    if tx.send(Frame { at_ms: now_ms(), pixels, live: true, cursor }).is_err() {
                         return;
                     }
                 }
@@ -167,8 +167,10 @@ fn crop(client: RECT, desktop: RECT) -> Option<Crop> {
     })
 }
 
-/// One frame of the game window's client area; None when the desktop did not change.
-fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<Pixels>, String> {
+/// One frame of the game window's client area with the mouse cursor's position in it (None when
+/// outside: the duplicated image has no pointer, the inventory read needs it for the hovered tile);
+/// None when the desktop did not change.
+fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<(Pixels, Option<(f32, f32)>)>, String> {
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
     if slot.as_ref().is_none_or(|d| d.monitor != monitor) {
         *slot = None;
@@ -181,7 +183,16 @@ fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<Pixels>, St
     let Some(crop) = crop(client_rect(hwnd)?, d.desktop) else {
         return Ok(None);
     };
-    d.frame(&crop)
+    let Some(pixels) = d.frame(&crop)? else { return Ok(None) };
+    // The cursor relative to the frame's top left (screen position of the crop)
+    let cursor = unsafe {
+        let mut p = POINT::default();
+        GetCursorPos(&mut p).ok().and_then(|_| {
+            let (x, y) = (p.x - d.desktop.left - crop.x as i32, p.y - d.desktop.top - crop.y as i32);
+            (x >= 0 && y >= 0 && (x as u32) < crop.width && (y as u32) < crop.height).then_some((x as f32, y as f32))
+        })
+    };
+    Ok(Some((pixels, cursor)))
 }
 
 fn client_rect(hwnd: HWND) -> Result<RECT, String> {

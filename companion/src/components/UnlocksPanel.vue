@@ -10,7 +10,7 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { scanBackups } from "../backend";
-import { lang, t, type Key } from "../i18n";
+import { langRef, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
 import { api, connected, loadLog, log } from "../state";
 import { toast, toastError } from "../toasts";
@@ -40,7 +40,7 @@ const confirming = ref(false);
 async function loadCatalog() {
   if (!connected.value) return;
   try {
-    const langs = lang === "de" ? (["de", "en"] as const) : (["en", "de"] as const);
+    const langs = langRef.value === "de" ? (["de", "en"] as const) : (["en", "de"] as const);
     const catalogs: CatalogBlueprint[][] = [];
     for (const l of langs) catalogs.push((await api<CatalogResponse>("GET", `/catalog?lang=${l}`)).blueprints);
     index.value = buildIndex(catalogs);

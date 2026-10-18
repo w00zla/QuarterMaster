@@ -38,11 +38,14 @@ pub struct Config {
     /// The channel folder holding `Game.log` and `logbackups` (e.g. `…/LIVE`).
     #[serde(default = "default_game_dir")]
     pub game_dir: String,
+    /// The UI language: "de", "en", or empty = the system's.
+    #[serde(default)]
+    pub language: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { server: default_server(), token: String::new(), game_dir: default_game_dir() }
+        Self { server: default_server(), token: String::new(), game_dir: default_game_dir(), language: String::new() }
     }
 }
 
@@ -121,7 +124,7 @@ mod tests {
 
     #[test]
     fn saving_keeps_the_files_server_entry() {
-        let c = Config { server: DEFAULT_SERVER.into(), token: "qmt_x".into(), game_dir: "D:/SC/LIVE".into() };
+        let c = Config { server: DEFAULT_SERVER.into(), token: "qmt_x".into(), game_dir: "D:/SC/LIVE".into(), language: "de".into() };
         // No file or no entry: none written (the default stays a default)
         for current in [None, Some("{}"), Some("not json")] {
             let saved: serde_json::Value = serde_json::from_str(&to_file(&c, current).unwrap()).unwrap();

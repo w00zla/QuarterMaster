@@ -8,7 +8,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { CompanionOutdated } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { downloadUpdate } from "../backend";
-import { lang, t } from "../i18n";
+import { langRef, t } from "../i18n";
 import { errorText, toast } from "../toasts";
 
 const props = defineProps<{ outdated: CompanionOutdated; current: string; url: string | null }>();
@@ -16,7 +16,7 @@ const props = defineProps<{ outdated: CompanionOutdated; current: string; url: s
 const downloading = ref(false);
 const progress = ref<{ done: number; total: number | null } | null>(null);
 const pct = computed(() => (progress.value?.total ? (progress.value.done / progress.value.total) * 100 : 0));
-const mb = (bytes: number) => (bytes / 1048576).toLocaleString(lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const mb = (bytes: number) => (bytes / 1048576).toLocaleString(langRef.value, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const amount = computed(() => {
   if (!progress.value) return "";
   const { done, total } = progress.value;

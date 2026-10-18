@@ -4,7 +4,7 @@ import { computed, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import type { MeResponse } from "../../src/webapp/api-types";
 import { api as backendApi, getConfig, isConnectionError, logState, outdated, type Config, type LogState } from "./backend";
-import { t } from "./i18n";
+import { applyLangSetting, t } from "./i18n";
 import { errorText, toastError } from "./toasts";
 
 // Re-check interval while not connected
@@ -16,6 +16,8 @@ export const connected = ref(false);
 // The token's user (Discord name and avatar as of the login that created the token), null while unknown
 export const meName = ref<string | null>(null);
 export const meAvatar = ref<string | null>(null);
+// The user's active orgs (the inventory scan offers to share registered stacks in them)
+export const meOrgs = ref<MeResponse["orgs"]>([]);
 // Why the connection is down (error code), null when connected or nothing checked yet
 export const connectError = ref<unknown>(null);
 // The followed Game.log and its unlocks
@@ -25,8 +27,14 @@ export const log = ref<LogState | null>(null);
 export const connectionText = computed(() => (connected.value ? t("conn.ok")
   : connectError.value ? errorText(connectError.value) : t("conn.off")));
 
+/** Takes a config in (loaded or saved) and applies its language. */
+export function applyConfig(c: Config) {
+  config.value = c;
+  applyLangSetting(c.language);
+}
+
 export async function loadConfig() {
-  config.value = await getConfig();
+  applyConfig(await getConfig());
 }
 
 /** One web app API call; a refusal of the connection itself (server, token, version) marks it down. */
@@ -55,6 +63,7 @@ export async function refreshConnection() {
     const me = await api<MeResponse>("GET", "/me");
     meName.value = me.name;
     meAvatar.value = me.avatarUrl;
+    meOrgs.value = me.orgs;
     connectError.value = null;
     outdated.value = null;
     connected.value = true;
