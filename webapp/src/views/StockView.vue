@@ -239,7 +239,7 @@ function open(batch: StockBatch, action: BatchAction) {
       <div v-if="showAdd" class="add-area">
         <div class="head">
           <Icon name="plus" :size="16" />
-          <span class="head-title">{{ scope === "all" ? t("stock.addTitle") : t("stock.addTo", { scope: scopeName(scope) }) }}</span>
+          <span class="head-title">{{ t(components ? "components.addTitle" : "stock.addTitle") }}</span>
         </div>
         <StockAddForm :target="scope === 'all' ? undefined : scope === 'personal' ? null : scope" :components="components" @done="added" />
       </div>
