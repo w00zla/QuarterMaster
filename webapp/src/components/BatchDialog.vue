@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Changes one of your batches: share (the whole batch, in any of your orgs, or taken back), split
 // (unshared batches: a part of its own, e.g. to share apart), merge (a part back into its main batch),
-// move, adjust or remove (finishing a
+// move, adjust (a component's stats too) or remove (finishing a
 // refinery job: RefineryDoneDialog). Moving covers the place and giving it to a member of one of your
 // orgs, who gets it unshared. Two steps: the inputs, then a summary of the change to confirm (every
 // change of existing stock is confirmed). `expected` is the quantity shown, so a batch that changed
@@ -12,8 +12,8 @@ import type {
 } from "../../../src/webapp/api-types";
 import type { IconName } from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
-import { locationOptions, locations } from "../catalog";
-import { amountOf, ownerText, qty, qualityPrefix, sharedText, withQuality } from "../format";
+import { locationOptions, locations, materials } from "../catalog";
+import { amountOf, ownerText, qty, qualityPrefix, sharedText, statsText, withQuality } from "../format";
 import { t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
 import { me } from "../session";
@@ -21,6 +21,7 @@ import { toast, toastError } from "../toasts";
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import AmountStepper from "./AmountStepper.vue";
 import Picker from "./Picker.vue";
+import StatSliders, { statsOf, valuesOf } from "./StatSliders.vue";
 
 export type BatchAction = "share" | "split" | "merge" | "move" | "adjust" | "remove";
 
@@ -33,8 +34,17 @@ const busy = ref(false);
 
 // "Everything" is the default for remove and move
 const all = ref(props.action === "remove" || props.action === "move");
-const amount = ref("");
+// Adjust starts at the batch's amount (so a component's stats can change alone)
+const amount = ref(props.action === "adjust" ? b.quantity : "");
 const location = ref<string | null>(b.locationUuid);
+
+// Adjust of a component: its stats too, the sliders starting at the batch's
+const statDefs = computed(() => (props.action === "adjust" && b.component ? materials.value.get(b.subjectUuid)?.stats ?? [] : []));
+const statValues = ref(valuesOf(b.stats));
+const newStats = computed(() => statsOf(statDefs.value, statValues.value));
+const sortedJson = (s: Record<string, string> | null) => JSON.stringify(Object.entries(s ?? {}).sort());
+const statsChange = computed(() => statDefs.value.length > 0 && sortedJson(newStats.value) !== sortedJson(b.stats));
+const statsLine = (s: Record<string, string> | null) => statsText(b.subjectUuid, s && Object.keys(s).length ? s : null) || t("stock.noStats");
 // "me" or "<guildId>:<userId>": a member of an org you may give in
 const recipient = ref<string | null>("me");
 
@@ -77,7 +87,8 @@ const valid = computed(() => {
   switch (props.action) {
     case "remove": return all.value || !!amt.value;
     // "0" empties the batch: allowed here, unlike everywhere else
-    case "adjust": return amount.value.trim() !== "" && (!!amt.value || /^0+([.,]0*)?$/.test(amount.value.trim()));
+    case "adjust": return amount.value.trim() !== "" && (!!amt.value || /^0+([.,]0*)?$/.test(amount.value.trim()))
+      && (Number(counted.value) !== Number(b.quantity) || statsChange.value);
     case "move": return (all.value || !!amt.value) && !!location.value && !!recipient.value && moveChanges.value;
     // A part, not all of it (the server checks exactly)
     case "split": return !!amt.value && Number(amt.value) < Number(b.quantity);
@@ -145,8 +156,10 @@ async function book() {
       toast(t("stock.removed", { what: `−${amountText.value} ${what} · ${ownerText(b)}` }));
     } else if (props.action === "adjust") {
       const body: StockAdjustRequest = { batchId: b.id, amount: typed, expected: b.quantity };
+      if (statsChange.value) body.stats = newStats.value;
       await api<OkResponse>("/stock/adjust", { method: "POST", body });
-      toast(t("stock.adjusted", { what: `${b.quantity} → ${qty(counted.value, b.unit)} ${what}` }));
+      const stats = statsChange.value ? ` · ${statsLine(newStats.value)}` : "";
+      toast(t("stock.adjusted", { what: `${b.quantity} → ${qty(counted.value, b.unit)} ${what}${stats}` }));
     } else if (props.action === "share") {
       const body: StockShareRequest = { batchId: b.id, guildIds: sharedNow.value };
       await api<OkResponse>("/stock/share", { method: "POST", body });
@@ -209,6 +222,7 @@ async function book() {
         {{ t("field.counted") }}
         <AmountStepper v-model="amount" :unit="b.unit" :min="0" :label="t('field.counted')" />
       </div>
+      <StatSliders v-if="statDefs.length" v-model="statValues" :defs="statDefs" />
       <template v-if="action === 'move'">
         <label class="field">
           {{ t("field.location") }}
@@ -236,7 +250,12 @@ async function book() {
       </template>
       <template v-else-if="action === 'adjust'">
         <span class="big">{{ qty(b.quantity, b.unit) }} → {{ qty(counted, b.unit) }} {{ b.material }}</span>
-        <span class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}</span>
+        <template v-if="statsChange">
+          <span class="dim">{{ b.location }} · {{ ownerText(b) }}</span>
+          <span><span class="dim">{{ t("stock.from") }}:</span> {{ statsLine(b.stats) }}</span>
+          <span><span class="dim">{{ t("stock.to") }}:</span> {{ statsLine(newStats) }}</span>
+        </template>
+        <span v-else class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}</span>
       </template>
       <template v-else-if="action === 'share'">
         <span class="big">{{ qty(b.quantity, b.unit) }} {{ withQuality(b) }}</span>

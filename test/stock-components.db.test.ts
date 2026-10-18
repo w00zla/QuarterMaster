@@ -12,7 +12,7 @@ import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { formatAmount } from '../src/stock/amount.ts';
 import { materialCatalog, stockList } from '../src/stock/lookup.ts';
 import { orgMetrics } from '../src/stock/org-summary.ts';
-import { add, COMPONENT_QUALITY, StockError, type Actor } from '../src/stock/service.ts';
+import { add, adjust, COMPONENT_QUALITY, StockError, type Actor } from '../src/stock/service.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -111,5 +111,38 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     assert.deepEqual(m.items, { kinds: 1, pieces: '3', locations: 1 });
     // The shared batch without stats (2 + 2 later); the ones with stats are unshared
     assert.deepEqual(m.components, { kinds: 1, pieces: '4', locations: 1 });
+  });
+
+  it('adjust changes the stats: a new key keeps the shares, an existing one merges', async () => {
+    const own = async () => (await stockList(db, { scope: { personalOf: MIA } }, 'en')).filter((p) => p.component);
+    const of = async (stats: Record<string, string> | null) => (await own()).find((p) => JSON.stringify(p.batch.stats) === JSON.stringify(stats));
+    // The shared batch without stats (4) gets stats it has nowhere else: it keeps its shares
+    const plain = (await of(null))!;
+    const changed = await adjust(db, mia, { batchId: plain.batch.id, amount: '4', expected: plain.batch.quantity, stats: { [U.property]: '7.5' } });
+    assert.deepEqual(changed.batch!.stats, { [U.property]: '7.5' });
+    assert.deepEqual(changed.journal.map((j) => [j.action, formatAmount(j.delta), j.stats]),
+      [['move_out', '-4', null], ['move_in', '4', { [U.property]: '7.5' }]]);
+    assert.deepEqual((await of({ [U.property]: '7.5' }))!.sharedIn, [G]);
+    assert.equal(await of(null), undefined);
+    const [row] = await db.execute<{ details: Record<string, unknown> }>(sql`
+      SELECT details FROM app.history WHERE action = 'adjust' AND target_uuid = ${U.output} ORDER BY id DESC LIMIT 1`);
+    assert.deepEqual([row!.details.stats, row!.details.statsFrom, row!.details.amount, row!.details.from],
+      [{ [U.property]: '7.5' }, {}, '4', changed.batch!.quantity]);
+    // Counted and changed at once, into the existing +5 % batch (2): it keeps its own (no) shares
+    const moved = (await of({ [U.property]: '7.5' }))!;
+    const merged = await adjust(db, mia, { batchId: moved.batch.id, amount: '3', expected: moved.batch.quantity, stats: { [U.property]: '5' } });
+    assert.equal(formatAmount(merged.batch!.quantity), '5');
+    assert.deepEqual(merged.journal.map((j) => j.action), ['adjust', 'move_out', 'move_in']);
+    assert.deepEqual((await of({ [U.property]: '5' }))!.sharedIn, []);
+    // Back to none ({}), nothing new, stats on other materials
+    const five = (await of({ [U.property]: '5' }))!;
+    await adjust(db, mia, { batchId: five.batch.id, amount: '5', expected: five.batch.quantity, stats: {} });
+    assert.equal(formatAmount((await of(null))!.batch.quantity), '5');
+    const none = (await of(null))!;
+    await assert.rejects(adjust(db, mia, { batchId: none.batch.id, amount: '5', expected: none.batch.quantity, stats: {} }),
+      (e: unknown) => e instanceof StockError && e.code === 'noChange');
+    const gem = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).find((p) => p.batch.itemUuid === U.gem)!;
+    await assert.rejects(adjust(db, mia, { batchId: gem.batch.id, amount: '3', expected: gem.batch.quantity, stats: { [U.property]: '5' } }),
+      (e: unknown) => e instanceof StockError && e.code === 'invalidStats');
   });
 });

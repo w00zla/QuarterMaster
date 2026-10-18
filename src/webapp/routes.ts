@@ -46,14 +46,15 @@ const snowflake = z.string().regex(SNOWFLAKE);
 const quality = z.number().int();
 // As typed; the stock service validates the number
 const amount = z.string().max(32);
+// A component's stats as typed; the stock service checks them against the blueprint
+const stats = z.record(uuid, z.string().max(20)).refine((s) => Object.keys(s).length <= 20);
 
 const schemas = {
   add: z.object({
-    subjectUuid: uuid, locationUuid: uuid, quality, amount, guildIds: z.array(snowflake).max(25).optional(),
-    stats: z.record(uuid, z.string().max(20)).refine((s) => Object.keys(s).length <= 20).optional(),
+    subjectUuid: uuid, locationUuid: uuid, quality, amount, guildIds: z.array(snowflake).max(25).optional(), stats: stats.optional(),
   }).strict(),
   remove: z.object({ batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount }).strict(),
-  adjust: z.object({ batchId: z.number().int().positive(), amount, expected: amount }).strict(),
+  adjust: z.object({ batchId: z.number().int().positive(), amount, expected: amount, stats: stats.optional() }).strict(),
   move: z.object({
     batchId: z.number().int().positive(), amount: amount.nullable(), expected: amount, guildId: snowflake.optional(),
     toLocationUuid: uuid.optional(), toOwnerUserId: snowflake.optional(),
@@ -252,7 +253,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
   api.post('/stock/adjust', async (c) => {
     const input = await body(c, schemas.adjust);
     const actor = await actorFor(c, db, c.get('session').userId, undefined);
-    return book(c, () => stock.adjust(db, actor, { batchId: input.batchId, amount: input.amount, expected: input.expected }));
+    return book(c, () => stock.adjust(db, actor, { batchId: input.batchId, amount: input.amount, expected: input.expected, stats: input.stats }));
   });
 
   api.post('/stock/move', async (c) => {

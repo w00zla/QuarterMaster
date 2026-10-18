@@ -548,19 +548,47 @@ export async function remove(db: Db, actor: Actor, input: { batchId: number; amo
   });
 }
 
-/** Sets a batch to a counted amount ("0" empties it). */
-export async function adjust(db: Db, actor: Actor, input: { batchId: number; amount: string; expected?: string }) {
+/**
+ * Sets a batch to a counted amount ("0" empties it); a component's stats too (`stats`: the whole new set
+ * as for add, omitted = unchanged). Other stats are another merge key: the batch moves there (journal
+ * move_out/move_in), into an existing batch with those stats (which keeps its shares) or as a new one
+ * (which takes this one's).
+ */
+export async function adjust(db: Db, actor: Actor, input: { batchId: number; amount: string; expected?: string; stats?: Record<string, string> }) {
   return db.transaction(async (tx): Promise<StockResult> => {
     const batch = await lockBatch(tx, actor, input.batchId, input.expected);
     const target = /^\s*0+(?:[.,]0+)?\s*$/.test(input.amount) ? '0' : parse(input.amount, batch.kind);
     const delta = (await one<{ d: string }>(tx, sql`SELECT (${target}::numeric - ${batch.quantity}::numeric)::text AS d`))!.d;
-    if (Number(delta) === 0) throw new StockError('noChange');
+    let stats = batch.stats;
+    if (input.stats !== undefined) {
+      const component = batch.itemUuid !== null
+        && !!(await one<{ c: boolean }>(tx, sql`SELECT ${componentItemSql()} AS c FROM catalog.item i WHERE i.uuid = ${batch.itemUuid}`))?.c;
+      if (!component) throw new StockError('invalidStats');
+      stats = await checkStats(tx, batch.itemUuid!, input.stats);
+    }
+    // Emptied: the stats do not matter any more
+    const restat = target !== '0' && JSON.stringify(stats) !== JSON.stringify(batch.stats);
+    if (Number(delta) === 0 && !restat) throw new StockError('noChange');
     const sharedIn = await sharesOf(tx, batch.id);
+    const entries: JournalEntry[] = [];
+    if (Number(delta) !== 0) entries.push(await journal(tx, actor, 'adjust', keyOf(batch), delta));
     let left: Batch | null = null;
     if (target === '0') await tx.execute(sql`DELETE FROM app.stock_batch WHERE id = ${batch.id}`);
     else left = await one<Batch>(tx, sql`UPDATE app.stock_batch SET quantity = ${target}::numeric, updated_at = now() WHERE id = ${batch.id} RETURNING ${BATCH_COLUMNS}`);
-    await history(tx, actor, categoryOf(batch), 'adjust', keyOf(batch), { amount: target, from: batch.quantity, ...offered(sharedIn) });
-    return { journal: [await journal(tx, actor, 'adjust', keyOf(batch), delta)], batch: left };
+    const key: BatchKey = { ...keyOf(batch), stats };
+    if (restat) {
+      const group = randomUUID();
+      entries.push(await journal(tx, actor, 'move_out', keyOf(batch), negate(target), group));
+      await decrease(tx, left!, target);
+      const { created, ...moved } = await upsert(tx, key, target);
+      if (created) await addShares(tx, moved.id, sharedIn);
+      entries.push(await journal(tx, actor, 'move_in', key, target, group));
+      left = moved;
+    }
+    await history(tx, actor, categoryOf(batch), 'adjust', key, {
+      amount: target, from: batch.quantity, ...(restat ? { statsFrom: batch.stats ?? {} } : {}), ...offered(sharedIn),
+    });
+    return { journal: entries, batch: left };
   });
 }
 

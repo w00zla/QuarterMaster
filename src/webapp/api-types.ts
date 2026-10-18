@@ -191,6 +191,9 @@ export interface StockAdjustRequest {
   // Counted amount ("0" empties the batch)
   amount: string;
   expected: string;
+  // Components only: the whole new set of stats as in StockAddRequest ({} = none; omitted = unchanged).
+  // Other stats move the batch to that key (merged into a batch with the same stats, if any)
+  stats?: Record<string, string>;
 }
 
 export interface StockMoveRequest {

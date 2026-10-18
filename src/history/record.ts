@@ -14,6 +14,8 @@ export interface HistoryDetails {
   quality?: number;
   // Ship components: the batch's stats ({crafted property UUID: decimal text}), if any
   stats?: Record<string, string>;
+  // Adjust that changed a component's stats: the ones before ({} = none)
+  statsFrom?: Record<string, string>;
   locationUuid?: string;
   designation?: 'personal' | 'org';
   // Move: where it went
