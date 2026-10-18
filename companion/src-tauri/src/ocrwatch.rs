@@ -9,7 +9,7 @@
 //! (`inventory.rs`: the tiles, the tooltip, the layout). Refinery: the session is a visit
 //! (`refinery-visit` true) and each work order overview goes out as `refinery-overview`; a minute
 //! without frames ends the visit. The OCR is dropped as soon as the session stops (its memory arena
-//! keeps the full reads' peak), and after 5 minutes without any read; the next read loads it again.
+//! keeps the full reads' peak); the next session loads it again.
 //!
 //! The former automatic refinery detection (idle: the cheap check `terminal_in_view` on every view that
 //! came to rest, a hit starting the visit, a few reads without the terminal ending it) is kept behind
@@ -68,8 +68,6 @@ const INVENTORY_REREAD_MS: u64 = 0;
 const LEAVE_AFTER: u32 = 3;
 // A visit also ends without any frame for this long (the game not in front)
 const VISIT_GAP: Duration = Duration::from_secs(60);
-// The OCR is dropped after this long without a read
-const UNLOAD_AFTER: Duration = Duration::from_secs(300);
 
 /// A captured image: the capture's BGRA rows (converted only when read) or a test image.
 pub enum Pixels {
@@ -409,7 +407,6 @@ struct Worker {
     debug: Debug,
     store: DebugStore,
     ocr: Option<Ocr>,
-    last_used: Instant,
     gate: Gate,
     labels: LabelSource,
     visit: Option<Visit>,
@@ -433,7 +430,7 @@ fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
 
 impl Worker {
     fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Self {
-        Self { app, detect, scan, debug, store, ocr: None, last_used: Instant::now(), gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None }
+        Self { app, detect, scan, debug, store, ocr: None, gate: Gate::default(), labels: LabelSource::default(), visit: None, last_pitch: None }
     }
 
     fn run(mut self, rx: Receiver<Frame>) {
@@ -441,10 +438,6 @@ impl Worker {
             let Ok(frame) = next_frame(&rx, Duration::from_secs(5)) else { return };
             if self.visit.as_ref().is_some_and(|v| v.last_frame.elapsed() > VISIT_GAP) {
                 self.end_visit("no frames");
-            }
-            if self.ocr.is_some() && self.visit.is_none() && self.last_used.elapsed() > UNLOAD_AFTER {
-                self.ocr = None;
-                log::info!("OCR unloaded (unused)");
             }
             let Some(frame) = frame else { continue };
             let mode = if self.detect.load(Ordering::Relaxed) { self.scan.get() } else { ScanMode::Off };
@@ -456,7 +449,7 @@ impl Worker {
                 // The next session may see the terminal from elsewhere
                 self.last_pitch = None;
                 // No session: the OCR's memory goes right away (the next start loads it again in
-                // well under a second)
+                // well under a second); while a session runs it stays, read or not
                 if self.ocr.take().is_some() {
                     log::info!("OCR unloaded (scan stopped)");
                 }
@@ -478,7 +471,6 @@ impl Worker {
             }
             // A session reads again every REREAD_MS, not only when the view moved
             self.gate.read(true);
-            self.last_used = Instant::now();
         }
     }
 
