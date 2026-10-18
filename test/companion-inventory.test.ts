@@ -122,7 +122,7 @@ describe('amounts', () => {
 
 describe('proposals', () => {
   const batch = (subjectUuid: string, quality: number, quantity: string, locationUuid = LOC, extra: Partial<StockBatch> = {}): StockBatch => ({
-    id: 1, sharedIn: [], part: false, kind: 'resource', subjectUuid, material: '', locationUuid, location: '', state: 'stored',
+    id: 1, sharedIn: [], part: false, kind: 'resource', component: false, subjectUuid, material: '', locationUuid, location: '', state: 'stored',
     quality, quantity, unit: 'SCU', holderUserId: 'u', holderName: null, canChange: true, refine: null, ...extra,
   });
   const cat = catalog();
