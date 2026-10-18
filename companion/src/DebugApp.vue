@@ -47,7 +47,7 @@ const viewBox = computed(() => (read.value ? `0 0 ${read.value.width} ${read.val
 const stroke = computed(() => (read.value ? Math.max(2, Math.round(read.value.height / 400)) : 2));
 const rectAttrs = (r: ReadRect) => ({ x: r.x0, y: r.y0, width: Math.max(1, r.x1 - r.x0), height: Math.max(1, r.y1 - r.y0) });
 const time = (ms: number) => new Date(ms).toLocaleTimeString();
-const PROBLEM = { unknownMaterial: "inventory.unknown", noQuality: "inventory.noQuality", noAmount: "inventory.noAmount" } as const;
+const PROBLEM = { unknownMaterial: "inventory.unknown", component: "inventory.component", noQuality: "inventory.noQuality", noAmount: "inventory.noAmount" } as const;
 const amount = (s: Sighting) => (s.amount === null ? "–" : s.unit === "SCU" ? `${s.amount} SCU` : t("inventory.pieces", { n: s.amount })) + (s.amountUncertain ? "?" : "");
 
 async function exportReads() {

@@ -92,7 +92,8 @@ export interface InventoryReadEvent {
 
 export type Unit = "SCU" | "pcs";
 
-export type SightingProblem = "unknownMaterial" | "noQuality" | "noAmount";
+// "component": a ship component, which only the components scan (the character inventory) books
+export type SightingProblem = "unknownMaterial" | "component" | "noQuality" | "noAmount";
 
 export interface Sighting {
   // col | material (or normalized name) | quality | amount
@@ -122,6 +123,8 @@ export interface InventoryCatalog {
   materials: MaterialNames;
   // Material UUID -> its unit
   units: Map<string, Unit>;
+  // The ship components among them (never booked from the warehouse)
+  components: Set<string>;
 }
 
 /** The sighting in a read: the tooltip's item at the hovered tile; null without both. */
@@ -135,7 +138,7 @@ export function sightingOf(e: InventoryReadEvent, cat: InventoryCatalog): Sighti
   const unit: Unit = (materialUuid && cat.units.get(materialUuid)) || "pcs";
   const quality = tip.quality ?? tile.quality;
   const amount = unit === "SCU" ? tip.scu : tile.count === null ? null : String(tile.count);
-  const problem: SightingProblem | null = !materialUuid ? "unknownMaterial" : quality === null ? "noQuality" : amount === null ? "noAmount" : null;
+  const problem: SightingProblem | null = !materialUuid ? "unknownMaterial" : cat.components.has(materialUuid) ? "component" : quality === null ? "noQuality" : amount === null ? "noAmount" : null;
   const amountUncertain = unit === "pcs" && tile.countUncertain;
   return {
     key: sightingKey(tile.col, materialUuid ?? tip.name.trim().toUpperCase(), quality, amount),

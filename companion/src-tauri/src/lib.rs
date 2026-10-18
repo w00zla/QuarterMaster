@@ -7,6 +7,7 @@
 
 #[cfg(windows)]
 mod capture;
+pub mod components;
 mod config;
 mod gamelog;
 pub mod inventory;
@@ -245,13 +246,13 @@ fn game_names(app: AppHandle, keys: Vec<String>) -> std::collections::HashMap<St
     locale::read_values(&locale::ini_path(std::path::Path::new(&game_dir)), &keys)
 }
 
-/// The running scan session: "off", "inventory" or "refinery".
+/// The running scan session: "off", "inventory", "components" or "refinery".
 #[tauri::command]
 fn get_scan(detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>) -> &'static str {
     if detect.load(std::sync::atomic::Ordering::Relaxed) { scan.get() } else { ocrwatch::ScanMode::Off }.name()
 }
 
-/// Starts a scan session ("inventory", "refinery") or stops it ("off"); the capture runs only during
+/// Starts a scan session ("inventory", "components", "refinery") or stops it ("off"); the capture runs only during
 /// one. Every window hears about it (`scan-changed`).
 #[tauri::command]
 fn set_scan(app: AppHandle, detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>, mode: String) -> Result<(), String> {

@@ -48,7 +48,8 @@ export const appInfo = () => call<{ version: string; platform: CompanionPlatform
 export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });
 export const openWebapp = () => call<void>("open_webapp");
 // The scan session: what the OCR reads from the screen capture, started and stopped by the user
-export type ScanMode = "off" | "inventory" | "refinery";
+// "inventory" = the freight manager's warehouse (materials, items), "components" = the character inventory's storage pane (ship components)
+export type ScanMode = "off" | "inventory" | "components" | "refinery";
 export const getScan = () => call<ScanMode>("get_scan");
 export const setScan = (mode: ScanMode) => call<void>("set_scan", { mode });
 // The inventory debug window: frames with the reads, the last reads kept for an export (a folder below dir; its path)

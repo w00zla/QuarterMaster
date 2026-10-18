@@ -13,6 +13,7 @@ import {
 const APHORITE = '00000000-0000-4000-8000-000000000001';
 const SILICON = '00000000-0000-4000-8000-000000000002';
 const HEPH = '00000000-0000-4000-8000-000000000003';
+const COOLER = '00000000-0000-4000-8000-000000000004';
 const LOC = '00000000-0000-4000-8000-0000000000c1';
 const OTHER = '00000000-0000-4000-8000-0000000000c2';
 
@@ -23,7 +24,8 @@ function catalog(): InventoryCatalog {
   addName(materials, 'Silicon', SILICON);
   addName(materials, 'Silizium', SILICON);
   addName(materials, 'Hephaestanite', HEPH);
-  return { materials, units: new Map([[APHORITE, 'pcs'], [SILICON, 'SCU'], [HEPH, 'SCU']]) };
+  addName(materials, 'Blizzard', COOLER);
+  return { materials, units: new Map([[APHORITE, 'pcs'], [SILICON, 'SCU'], [HEPH, 'SCU'], [COOLER, 'pcs']]), components: new Set([COOLER]) };
 }
 
 const rect = { x0: 0, y0: 0, x1: 10, y1: 10 };
@@ -37,6 +39,11 @@ describe('sightings', () => {
   it('an SCU material: the amount from the tooltip', () => {
     const s = sightingOf(read(1, [tile(0, 0, 572, 1, true), tile(0, 1, 310, 1)], tooltip('Hephaestanite', 572, '0.263')), catalog());
     assert.deepEqual([s?.materialUuid, s?.quality, s?.amount, s?.unit, s?.row, s?.col, s?.problem], [HEPH, 572, '0.263', 'SCU', 0, 0, null]);
+  });
+
+  it('a ship component stays a sighting: the components scan books those', () => {
+    const s = sightingOf(read(1, [tile(0, 0, null, 1, true)], tooltip('Blizzard', null, null)), catalog());
+    assert.deepEqual([s?.materialUuid, s?.problem], [COOLER, 'component']);
   });
 
   it('an item material: the count from the badge, the quality from the chip', () => {

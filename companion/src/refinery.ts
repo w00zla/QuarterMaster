@@ -11,6 +11,7 @@
 // showed it the same (OCR misreads do not book anything).
 import { addName, emptyNames, findMaterial, norm, type MaterialNames } from "../../src/stock/material-names.ts";
 import type { CatalogResponse, StockBatch } from "../../src/webapp/api-types.ts";
+import { buildComponentCatalog, statNameKeys, type ComponentCatalog } from "./components.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------
 
@@ -70,11 +71,13 @@ export interface SyncCatalog {
   materialNames: Map<string, string>;
   // Every selectable location for the inventory's location picker (the first language's labels)
   locations: { uuid: string; label: string; short: string }[];
+  // The ship components with their stats (the components scan)
+  components: ComponentCatalog;
 }
 
-/** The loc keys whose texts the player's language pack may change (materials, refinery stations). */
+/** The loc keys whose texts the player's language pack may change (materials, refinery stations, stat names). */
 export function gameNameKeys(responses: CatalogResponse[]): string[] {
-  const keys = new Set<string>();
+  const keys = new Set<string>(statNameKeys(responses));
   for (const r of responses) {
     for (const m of r.materials) if (m.nameKey) keys.add(m.nameKey);
     for (const l of r.locations) if (l.refinery && l.nameKey) keys.add(l.nameKey);
@@ -86,6 +89,7 @@ export function gameNameKeys(responses: CatalogResponse[]): string[] {
 export function buildCatalog(responses: CatalogResponse[], gameNames: Record<string, string>): SyncCatalog {
   const cat: SyncCatalog = {
     materials: emptyNames(), allMaterials: emptyNames(), units: new Map(), stations: new Map(), stationNames: new Map(), materialNames: new Map(), locations: [],
+    components: buildComponentCatalog(responses, gameNames),
   };
   for (const r of responses) {
     for (const m of r.materials) {

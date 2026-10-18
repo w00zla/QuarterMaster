@@ -41,6 +41,10 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     await db.execute(sql`UPDATE catalog.blueprint_slot SET modifiers = CASE WHEN slot_index = 0 AND tier_index = 0
         THEN ${JSON.stringify([{ propertyUuid: U.property, ranges }])}::jsonb ELSE '[]'::jsonb END
       WHERE blueprint_uuid IN (SELECT uuid FROM catalog.blueprint WHERE output_item_uuid = ${U.output})`);
+    // Its property stands for Integrity, whose base value sits in the record's health component
+    await db.execute(sql`UPDATE catalog.crafted_property SET key = 'GPP_Health_MaxHealth' WHERE uuid = ${U.property}`);
+    await db.execute(sql`UPDATE catalog.raw_record SET data = jsonb_set(data, '{Components}', data->'Components' || '[{"_Type_": "SHealthComponentParams", "Health": 110}]'::jsonb)
+      WHERE uuid = ${U.output}`);
     await ensureGuild(db, G, 'Component Org');
     const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
     await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
@@ -70,8 +74,8 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
 
   it('offers the stats of the component blueprint with their bounds, nothing for other materials', async () => {
     const materials = await materialCatalog(db, 'en');
-    assert.deepEqual(materials.get(U.output)!.stats.map(({ uuid, kind, min, max }) => ({ uuid, kind, min, max })),
-      [{ uuid: U.property, kind: 'multiplier', min: 0, max: 20 }]);
+    assert.deepEqual(materials.get(U.output)!.stats.map(({ uuid, kind, min, max, nameKey, base }) => ({ uuid, kind, min, max, nameKey, base })),
+      [{ uuid: U.property, kind: 'multiplier', min: 0, max: 20, nameKey: 'statname_gpp_test', base: 110 }]);
     assert.deepEqual(materials.get(U.gem)!.stats, []);
   });
 

@@ -63,11 +63,16 @@ export interface CatalogStat {
   uuid: string;
   // As the game names it ("Coolant Rating")
   name: string;
+  // The game's localization key of that name (lower case): the companion looks it up in the player's language pack
+  nameKey: string | null;
   // What the blueprint can make of it, like the crafting check shows it: a multiplier as its change in
   // percent (min/max e.g. -19.3/20.8, one decimal), additive steps as whole numbers (power pips, e.g. -2/2)
   kind: 'multiplier' | 'additive';
   min: number;
   max: number;
+  // The unmodified value as the game's tooltip shows it ("Coolant Rating: 60.00" -> 60); null when the
+  // app does not know where the record keeps it (the companion then reads no stats off such a tooltip)
+  base: number | null;
 }
 
 export interface CatalogLocation {

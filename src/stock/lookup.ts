@@ -7,6 +7,7 @@ import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { itemClassText, locText, rows } from '../db/query.ts';
 import type { SubjectKind } from './amount.ts';
+import { BASE_PATHS, baseValue } from './component-base.ts';
 import type { StatBounds } from './component-stats.ts';
 import { componentItemSql, componentStats, selectableLocationSql, type Actor, type Batch } from './service.ts';
 
@@ -76,6 +77,31 @@ export interface ComponentStat extends StatBounds {
   uuid: string;
   // As the game names it ("Coolant Rating")
   name: string;
+  // The game's localization key of that name (lower case): the companion looks it up in the player's language pack
+  nameKey: string | null;
+  // The unmodified value as the game's tooltip shows it (from the item's raw record, `component-base.ts`); null when unknown
+  base: number | null;
+}
+
+/** Item UUID -> crafted property UUID -> the unmodified stat value, for every ship component whose record holds one. */
+async function componentBaseValues(db: Db): Promise<Map<string, Map<string, number>>> {
+  const paths = sql.join(Object.entries(BASE_PATHS).map(([key, p]) => sql`(${key}, ${p.path}::jsonpath)`), sql`, `);
+  const found = await rows<{ item: string; property: string; key: string; raw: string | null }>(db, sql`
+    SELECT i.uuid AS item, cp.uuid AS property, cp.key, jsonb_path_query_first(rr.data, p.path) #>> '{}' AS raw
+    FROM catalog.item i
+    JOIN catalog.raw_record rr ON rr.uuid = i.uuid
+    CROSS JOIN (VALUES ${paths}) AS p(key, path)
+    JOIN catalog.crafted_property cp ON cp.key = p.key
+    WHERE i.retired_at IS NULL AND ${componentItemSql()}`);
+  const bases = new Map<string, Map<string, number>>();
+  for (const r of found) {
+    const value = baseValue(r.key, r.raw);
+    if (value === null) continue;
+    const item = bases.get(r.item) ?? new Map<string, number>();
+    item.set(r.property, value);
+    bases.set(r.item, item);
+  }
+  return bases;
 }
 
 /** What can be booked: recipe resources and items, and ship components (same rules as the stock service; never ores). */
@@ -101,11 +127,15 @@ export const materialCatalog = importCache(async (db, lang): Promise<Map<string,
   found.forEach((m, i) => m.component && counts.set(labels[i]!, (counts.get(labels[i]!) ?? 0) + 1));
   // The stats each component can carry with their bounds, in the tooltip's order (Integrity last)
   const bounds = await componentStats(db, sql`i.retired_at IS NULL`);
-  const properties = new Map((await rows<{ uuid: string; key: string; name: string }>(db, sql`
-    SELECT cp.uuid, cp.key, coalesce(${locText(lang, sql`cp.name_key`)}, cp.key) AS name FROM catalog.crafted_property cp`))
+  const bases = await componentBaseValues(db);
+  const properties = new Map((await rows<{ uuid: string; key: string; name: string; nameKey: string | null }>(db, sql`
+    SELECT cp.uuid, cp.key, coalesce(${locText(lang, sql`cp.name_key`)}, cp.key) AS name, lower(cp.name_key) AS "nameKey" FROM catalog.crafted_property cp`))
     .map((p) => [p.uuid, p]));
   const statsOf = (item: string): ComponentStat[] => [...(bounds.get(item) ?? [])]
-    .map(([uuid, b]) => ({ uuid, name: properties.get(uuid)?.name ?? uuid, key: properties.get(uuid)?.key ?? uuid, ...b }))
+    .map(([uuid, b]) => ({
+      uuid, name: properties.get(uuid)?.name ?? uuid, key: properties.get(uuid)?.key ?? uuid, nameKey: properties.get(uuid)?.nameKey ?? null,
+      base: bases.get(item)?.get(uuid) ?? null, ...b,
+    }))
     .sort((a, b) => Number(a.key === 'GPP_Health_MaxHealth') - Number(b.key === 'GPP_Health_MaxHealth') || a.key.localeCompare(b.key))
     .map(({ key: _k, ...s }) => s);
   // Component labels that still collide get the class name

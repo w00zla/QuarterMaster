@@ -2,11 +2,13 @@
 //! from a source — the screen capture (`capture.rs`, Windows so far) or, for tests, a folder of images
 //! (`QM_OCR_FRAMES=<dir>`: every image put there is read once, its modification time as the frame time).
 //!
-//! Reading is a **scan session** the user starts and stops (`Scan`: off, inventory or refinery; off at
-//! every start). A live frame is read once the view came to rest after it moved, during a session also
-//! every 2 s (the `Gate`, a 96×40 grey thumbnail: the game's scene changes a little all the time,
-//! checking every changed frame took ~5 % CPU). Inventory: each read goes out as `inventory-read`
-//! (`inventory.rs`: the tiles, the tooltip, the layout). Refinery: the session is a visit
+//! Reading is a **scan session** the user starts and stops (`Scan`: off, inventory, components or
+//! refinery; off at every start). A live frame is read once the view came to rest after it moved,
+//! during a session also every 2 s (the `Gate`, a 96×40 grey thumbnail: the game's scene changes a
+//! little all the time, checking every changed frame took ~5 % CPU). Inventory: each read goes out as
+//! `inventory-read` (`inventory.rs`: the tiles, the tooltip, the layout). Components: each read of the
+//! character inventory goes out as `components-read` (`components.rs`: the hovered item's tooltip
+//! lines, the page, the cursor's cell). Refinery: the session is a visit
 //! (`refinery-visit` true) and each work order overview goes out as `refinery-overview`; a minute
 //! without frames ends the visit. The OCR is dropped as soon as the session stops (its memory arena
 //! keeps the full reads' peak); the next session loads it again.
@@ -33,6 +35,7 @@ use image::{GrayImage, ImageFormat, RgbImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::components::{read_components, ComponentRead};
 use crate::inventory::{read_grid, Grid};
 use crate::locale::LabelSource;
 use crate::ocr::{Ocr, TextBox};
@@ -41,6 +44,7 @@ use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
 pub const REFINERY_VISIT: &str = "refinery-visit";
 pub const INVENTORY_READ: &str = "inventory-read";
+pub const COMPONENTS_READ: &str = "components-read";
 /// Whether a refinery session waits for the terminal's titles before reading (the former automatic
 /// detection); off: the session reads right away
 const AUTO_REFINERY: bool = false;
@@ -166,6 +170,21 @@ struct InventoryEvent {
     boxes: Vec<TextBox>,
     /// While debugging: the frame as a JPEG data URL, DEBUG_FRAME_WIDTH wide
     frame: Option<String>,
+}
+
+/// A read of the inventory screen during a components session (`components.rs`).
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ComponentsEvent {
+    at_ms: u64,
+    /// The read's duration
+    ms: u64,
+    width: u32,
+    height: u32,
+    #[serde(flatten)]
+    read: ComponentRead,
+    /// The mouse cursor in frame pixels, if known
+    cursor: Option<(f32, f32)>,
 }
 
 /// One inventory read kept for the debug export.
@@ -314,8 +333,11 @@ pub type Detect = Arc<AtomicBool>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanMode {
     Off,
+    /// The freight manager's warehouse (materials and items)
     Inventory,
     Refinery,
+    /// The character inventory's storage pane (ship components)
+    Components,
 }
 
 impl ScanMode {
@@ -324,6 +346,7 @@ impl ScanMode {
             ScanMode::Off => "off",
             ScanMode::Inventory => "inventory",
             ScanMode::Refinery => "refinery",
+            ScanMode::Components => "components",
         }
     }
 
@@ -332,6 +355,7 @@ impl ScanMode {
             "off" => Some(ScanMode::Off),
             "inventory" => Some(ScanMode::Inventory),
             "refinery" => Some(ScanMode::Refinery),
+            "components" => Some(ScanMode::Components),
             _ => None,
         }
     }
@@ -340,6 +364,7 @@ impl ScanMode {
         match v {
             1 => ScanMode::Inventory,
             2 => ScanMode::Refinery,
+            3 => ScanMode::Components,
             _ => ScanMode::Off,
         }
     }
@@ -458,12 +483,13 @@ impl Worker {
             if let Some(v) = &mut self.visit {
                 v.last_frame = Instant::now();
             }
-            self.gate.reread_ms = if mode == ScanMode::Inventory { INVENTORY_REREAD_MS } else { REREAD_MS };
+            self.gate.reread_ms = if mode == ScanMode::Refinery { REREAD_MS } else { INVENTORY_REREAD_MS };
             if frame.live && !self.gate.pass(frame.pixels.thumb(), frame.at_ms) {
                 continue;
             }
             let result = match mode {
                 ScanMode::Inventory => self.look_inventory(frame),
+                ScanMode::Components => self.look_components(frame),
                 _ => self.look(frame),
             };
             if let Err(e) = result {
@@ -506,6 +532,24 @@ impl Worker {
             reads.push_back(DebugRead { at_ms: frame.at_ms, ms, width, height, grid: grid.clone(), boxes: boxes.clone(), png });
         }
         let _ = self.app.emit(INVENTORY_READ, InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, boxes, frame: frame_url });
+        Ok(())
+    }
+
+    /// Reads the hovered item's tooltip, the page and the cursor's cell in a frame of the character
+    /// inventory (the components session; only the tooltip's and the page number's areas go through
+    /// the OCR).
+    fn look_components(&mut self, frame: Frame) -> Result<(), String> {
+        let ocr = ensure_ocr(&mut self.ocr)?;
+        let image = frame.pixels.into_rgb();
+        let (width, height) = image.dimensions();
+        let started = Instant::now();
+        let read = read_components(ocr, &image, frame.cursor)?;
+        let ms = started.elapsed().as_millis() as u64;
+        match &read.tooltip {
+            Some(t) => log::info!("components read in {ms} ms: {:?} with {} lines, page {:?}, cursor {:?} in cell {:?}", t.title, t.lines.len(), read.page, frame.cursor, read.cell),
+            None => log::debug!("no tooltip ({ms} ms), page {:?}, cell {:?}", read.page, read.cell),
+        }
+        let _ = self.app.emit(COMPONENTS_READ, ComponentsEvent { at_ms: frame.at_ms, ms, width, height, read, cursor: frame.cursor });
         Ok(())
     }
 

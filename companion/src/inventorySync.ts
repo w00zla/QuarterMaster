@@ -52,7 +52,7 @@ function onRead(e: InventoryReadEvent) {
     if (!connected.value) return;
     await ensureCatalog();
     const cat = syncCatalog.value!;
-    if (scan.feed(e, { materials: cat.allMaterials, units: cat.units })) publish();
+    if (scan.feed(e, { materials: cat.allMaterials, units: cat.units, components: new Set(cat.components.components.map((c) => c.uuid)) })) publish();
   });
 }
 

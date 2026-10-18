@@ -19,6 +19,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../src/stock/material-names.ts", "../adminapp/src/components/Icon.vue", "../adminapp/src/components/Dropdown.vue", "../adminapp/src/components/Tooltip.vue", "../webapp/src/components/ConfirmDialog.vue", "../webapp/src/components/Picker.vue"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../src/stock/material-names.ts", "../src/stock/component-stats.ts","../adminapp/src/components/Icon.vue", "../adminapp/src/components/Dropdown.vue", "../adminapp/src/components/Tooltip.vue", "../webapp/src/components/ConfirmDialog.vue", "../webapp/src/components/Picker.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

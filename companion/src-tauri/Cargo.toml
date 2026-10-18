@@ -15,7 +15,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# image-ico/png: without them the bundle icons are not decoded and the windows get no icon (taskbar, Alt-Tab)
+tauri = { version = "2", features = ["image-ico", "image-png"] }
 # File dialogs via xdg-desktop-portal on Linux (the host's native dialog; the
 # plugin's default is rfd's own GTK3 dialog). Windows is unaffected.
 tauri-plugin-dialog = { version = "2.7.3", default-features = false, features = ["xdg-portal"] }

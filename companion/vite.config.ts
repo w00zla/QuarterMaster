@@ -17,6 +17,6 @@ export default defineConfig(() => ({
     hmr: host ? { protocol: "ws", host, port: 1431 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
     // Only what the app imports (styles and components shared with the web apps)
-    fs: { allow: [".", "../adminapp/src", "../webapp/src/styles.css", "../webapp/src/components/ConfirmDialog.vue", "../webapp/src/components/Picker.vue", "../src/webapp/api-types.ts", "../src/stock/material-names.ts"] },
+    fs: { allow: [".", "../adminapp/src", "../webapp/src/styles.css", "../webapp/src/components/ConfirmDialog.vue", "../webapp/src/components/Picker.vue", "../src/webapp/api-types.ts", "../src/stock/material-names.ts", "../src/stock/component-stats.ts"] },
   },
 }));
