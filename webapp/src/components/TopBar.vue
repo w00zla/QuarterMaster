@@ -15,8 +15,8 @@ const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
   { to: "/", label: "nav.home", icon: "overview" },
   { to: "/stock", label: "nav.stock", icon: "type-crate" },
   { to: "/components", label: "nav.components", icon: "type-module" },
-  { to: "/refinery", label: "nav.refinery", icon: "drop" },
   { to: "/blueprints", label: "nav.blueprints", icon: "blueprint" },
+  { to: "/refinery", label: "nav.refinery", icon: "drop" },
 ];
 // Tools, after a divider (as in the admin UI)
 const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [{ to: "/crafting", label: "nav.crafting", icon: "crafter" }];
