@@ -26,7 +26,7 @@ Where things are described (read the matching file before working in an area):
 **Status:** catalog pipeline, admin web UI, the bot with all its commands, logs channel and org board, the
 stock service, UEX pull and the user web app are built. In production since 2026-10-05 (Docker Compose on a
 VM behind Caddy), not live for users yet: the production DB holds no real data, the user web app is not
-deployed, **regular backups are not set up yet** (`docs/deploy.md` § 6). In progress: the companion app
+deployed, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6). In progress: the companion app
 (Windows capture only): blueprint unlocks from `Game.log`; warehouse and character inventory scans and the
 scan overlay, used in game since 2026-10-18; since 2026-10-19 one scan for every screen (refinery included);
 the refinery read is checked against screenshots and recordings (1080p and 3840×1600), its sync untested in game.
@@ -86,7 +86,7 @@ Deployment (`compose.yaml`, run on the VM from the checkout; `.env` there holds 
 
 ```sh
 scripts/deploy.sh                                       # on the VM, after a push (scripts/push-deploy.sh runs it): pg_dump to backups/ -> tag :previous -> build --pull, pull db -> stop bot/admin/ext/webapp -> migrate (fails: back to :previous) -> DB roles -> up
-scripts/backup.sh <rsync target>                        # pg_dump, copy to the target, delete local dumps > KEEP_DAYS (14); daily via deploy/quartermaster-backup.{service,timer}
+scripts/backup.sh [rsync target]                        # pg_dump to backups/, copy to the target if given, delete local dumps > KEEP_DAYS (14); daily via deploy/quartermaster-backup.{service,timer}
 docker compose run --rm bot node src/bot/register.ts    # after command changes
 ```
 

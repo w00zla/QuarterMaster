@@ -111,13 +111,13 @@ Then:
 
 ## 6. Backups
 
-> **⚠️ Not set up yet (open TODO).** Until then only `deploy.sh` dumps, and only locally on the VM: losing the VM or its host loses the data. A backup target is still to be prepared (NAS via SSH/rsync, a mounted share as a plain path, or an external Storage Box on SSH port 23); never on the same hardware as the VM, ideally with a copy outside the house.
+> **⚠️ Local only for now (open TODO).** The daily dumps stay on the VM (`backups/`): they cover Docker mishaps (a deleted volume, a broken migration), but losing the VM or its host loses the data. A remote target is still to be prepared (NAS via SSH/rsync, a mounted share as a plain path, or an external Storage Box on SSH port 23); never on the same hardware as the VM, ideally with a copy outside the house.
 
-`scripts/backup.sh <target>` dumps, copies to the target (anything rsync accepts, e.g. `backup@host:quartermaster/`) and then deletes local dumps older than `KEEP_DAYS` (14). Nothing is deleted on the target.
+`scripts/backup.sh [target]` dumps into `backups/`, copies to the target if one is given (anything rsync accepts, e.g. `backup@host:quartermaster/`) and then deletes local dumps older than `KEEP_DAYS` (14). Nothing is deleted on the target.
 
 ```sh
 sudo cp deploy/quartermaster-backup.{service,timer} /etc/systemd/system/
-# in the .service: User=w00zla, WorkingDirectory, the target in ExecStart (e.g. qm-backup:, see below)
+# in the .service: User=w00zla, WorkingDirectory, ExecStart (local only: no target; later e.g. qm-backup:, see below)
 sudo systemctl daemon-reload
 sudo systemctl enable --now quartermaster-backup.timer
 ```
@@ -140,7 +140,7 @@ sudo systemctl enable --now quartermaster-backup.timer
   ```
   With `rrsync`, target paths are relative to that directory: target `qm-backup:` (untested, check with the manual run below).
 - The host key must already be known: connect once by hand (`ssh qm-backup`; with `rrsync` the login itself is refused, but the host key is stored), otherwise the first timer run waits for the host key prompt.
-- Test: `sudo systemctl start quartermaster-backup.service && journalctl -u quartermaster-backup -n 20`, and check the file at the target.
+- Test: `sudo systemctl start quartermaster-backup.service && journalctl -u quartermaster-backup -n 20`, and check the file in `backups/` (and at the target).
 - `scripts/deploy.sh` also dumps before every update (local only, `backups/`).
 - Do not deploy around 04:00: the dump names have second resolution.
 
