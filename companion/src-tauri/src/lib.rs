@@ -306,10 +306,13 @@ async fn open_debug_window(app: AppHandle, debug: tauri::State<'_, ocrwatch::Deb
     let builder = tauri::WebviewWindowBuilder::new(&app, DEBUG_WINDOW, tauri::WebviewUrl::App("debug.html".into()))
         .title("Quartermaster Companion – Debug")
         .inner_size(960.0, 760.0)
-        .min_inner_size(640.0, 400.0);
+        .min_inner_size(640.0, 400.0)
+        .visible(false);
     #[cfg(windows)]
     let builder = builder.additional_browser_args(BROWSER_ARGS);
+    // Shown once the window state plugin placed it, like the main window
     let window = builder.build().map_err(|e| e.to_string())?;
+    let _ = window.show();
     let (debug, store) = (debug.inner().clone(), store.inner().clone());
     window.on_window_event(move |e| {
         if let tauri::WindowEvent::Destroyed = e {
@@ -459,8 +462,10 @@ pub fn run() {
                 overlay::spawn_hotkeys(app.handle().clone());
             }
             // Closing the main window ends the app, the debug window included (else it would keep
-            // the process alive)
+            // the process alive). It starts hidden and shows only now, after the window state plugin
+            // moved it to its saved place (else it pops up at the default place first)
             if let Some(main) = app.get_webview_window("main") {
+                let _ = main.show();
                 let handle = app.handle().clone();
                 main.on_window_event(move |e| {
                     if let tauri::WindowEvent::Destroyed = e {

@@ -267,3 +267,11 @@ onMounted(async () => {
   font-variant-numeric: tabular-nums;
 }
 </style>
+
+<style>
+/* Dialogs (teleported next to #app) sit near the top instead of 10vh down: the settings fit into the
+   800 px minimum height. The id beats ConfirmDialog's scoped rule */
+#app ~ .backdrop {
+  padding-top: 16px;
+}
+</style>

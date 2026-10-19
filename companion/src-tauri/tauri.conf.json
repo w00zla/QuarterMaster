@@ -13,10 +13,11 @@
       {
         "title": "Quartermaster Companion",
         "width": 640,
-        "height": 760,
+        "height": 800,
         "minWidth": 640,
-        "minHeight": 560,
+        "minHeight": 800,
         "decorations": false,
+        "visible": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu"
       }
     ],

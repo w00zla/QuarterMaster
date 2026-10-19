@@ -166,7 +166,7 @@ function toggleScan() {
       <span class="filter-label">{{ t("inventory.scanned") }}</span>
       <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="[tagClass[k], { active: kinds.has(k) }]" :aria-pressed="kinds.has(k)" @click="toggleKind(k)">
         <Icon :name="kindIcon[k]" :size="12" /> {{ t(`inventory.kind.${k}`) }}
-        <Icon v-if="kinds.has(k)" name="check" :size="12" />
+        <Icon :name="kinds.has(k) ? 'check' : 'close'" :size="12" />
       </button>
     </div>
     <div v-if="!rows.length" class="empty-line">
@@ -249,15 +249,20 @@ function toggleScan() {
   max-width: 260px;
 }
 
-/* The auto location toggle: a plain icon (dim), on = accent with a faint backdrop */
+/* The auto location toggle: off = dashed and dimmed (like the kind filter's chips), on = accent frame
+   and backdrop */
 .auto {
   width: 20px;
   height: 20px;
   border-radius: var(--radius-control);
+  border-style: dashed;
+  color: var(--text-3);
 }
 
 .auto.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-style: solid;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent);
 }
 
@@ -276,7 +281,7 @@ function toggleScan() {
   letter-spacing: 0.04em;
 }
 
-/* Toggles: on = the kind's badge colour with a check, off = dashed and dimmed */
+/* Toggles: on = the kind's badge colour with a check, off = dashed and dimmed with an x */
 .filter .chip {
   --kind: var(--text-2);
   height: 22px;

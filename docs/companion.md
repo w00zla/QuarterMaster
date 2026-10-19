@@ -84,9 +84,10 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - `App.vue`, `components/TopBar.vue`, `WindowEdges.vue`, `state.ts`: no native frame
   (`decorations: false`), the title bar after BindSight's (drag region, minimize/maximize/close; window
   permissions in `capabilities/default.json`, which lists the windows `main`, `debug`, `overlay`),
-  invisible resize edges. The window stays narrow (640 px, also its minimum); main and debug window open
-  where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the overlay
-  is excluded, it places itself).
+  invisible resize edges. The window stays narrow (640 px, also its minimum), 800 px high at least (the
+  settings dialog fits; dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
+  open where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the
+  overlay is excluded, it places itself), created hidden and shown once placed.
 - Below the title bar a row of fixed height: on the left the game log state ("Log available" as a
   `.tag ok`, or "Log not found" as a chip with the path in the tooltip) and the scan session's state
   (`scan.ts`/`overlay.ts` `scanState`: "Scan off" / "Preparing…" / "Scanning inventory|refinery" with the
@@ -230,7 +231,7 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 
 ## Inventory panel, locations, registering
 
-- Head: title with count, the auto location toggle (a plain `icon-btn` with `locate`, 20 px, dim; on = accent with a faint backdrop; kept in
+- Head: title with count, the auto location toggle (an `icon-btn` with `locate`, 20 px; off = dashed and dimmed, on = accent frame and backdrop; kept in
   localStorage `qm.companion.inventory.autoLocation`; its tooltip says what it does, or while on what
   Game.log named: the location, "not selectable" with the key, or nothing logged yet), the location picker
   (`Picker`, kept in localStorage `qm.companion.inventory.location`), Scan / Stop, "Register all". With the
@@ -238,7 +239,7 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   place and once the catalog is loaded; a key that is no selectable location clears the pick (nothing is
   booked at the place before: reads without a location are dropped); a pick by hand holds until the log
   names another place. Below: the kind filter, toggle chips
-  Materials / Items / Components (on = the kind's badge colour with a check, off = dashed and dimmed; what
+  Materials / Items / Components (on = the kind's badge colour with a check, off = dashed and dimmed with an x; what
   the scan detects from then on; localStorage `qm.companion.inventory.kinds`). Then one compact row per
   proposal: an icon badge for the kind (its name as tooltip), resource (a component with its stats after
   the name, "Coolant Rating +12.5 % · Integrity ±0.0 %"), location, quality, amount, Register / Discard.
