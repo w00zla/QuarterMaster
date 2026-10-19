@@ -14,6 +14,17 @@
 //! text. Ship components carry a class/size/grade prefix (`Ind/1/B Guardian`);
 //! it stays in the name, the matching against the catalog handles it.
 //!
+//! The player's location: SC logs the location inventory it asks for at spawn,
+//! on arriving at a location and on every opening of the freight manager's
+//! warehouse (not for the character inventory), named by the star map record's
+//! key (`catalog.location.key`, case aside):
+//!
+//! ```text
+//! <2026-10-18T09:35:43.161Z> [Notice] <RequestLocationInventory> Player[w00zla] requested inventory for Location[RR_P3_LEO] [Team_CoreGameplayFeatures][Inventory]
+//! ```
+//!
+//! Leaving a location is not logged reliably: the last one is "last seen".
+//!
 //! The format is SC-internal and may change with a patch: unknown lines are
 //! skipped, nothing panics.
 
@@ -23,6 +34,10 @@ use serde::Serialize;
 
 const MARKER: &str = "Added notification \"Received Blueprint: ";
 const END: &str = ": \" [";
+const LOCATION_MARKER: &str = "<RequestLocationInventory> ";
+const LOCATION_START: &str = "Location[";
+/// Logged when the game has no location for the player
+const NO_LOCATION: &str = "INVALID_LOCATION_ID";
 
 /// One logged unlock: the line's timestamp (as logged, UTC) and the name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -45,6 +60,19 @@ pub fn unlock(line: &str) -> Option<Unlock> {
 /// Every unlock in a chunk of log text, in log order.
 pub fn unlocks(text: &str) -> Vec<Unlock> {
     text.lines().filter_map(unlock).collect()
+}
+
+/// The location key in a log line, if it names one (`INVALID_LOCATION_ID` does not).
+pub fn location(line: &str) -> Option<&str> {
+    let rest = &line[line.find(LOCATION_MARKER)? + LOCATION_MARKER.len()..];
+    let rest = &rest[rest.find(LOCATION_START)? + LOCATION_START.len()..];
+    let key = rest[..rest.find(']')?].trim();
+    (!key.is_empty() && key != NO_LOCATION).then_some(key)
+}
+
+/// The last location named in a chunk of log text.
+pub fn last_location(text: &str) -> Option<&str> {
+    text.lines().rev().find_map(location)
 }
 
 /// The `<...>` timestamp a log line starts with, if any.
@@ -162,6 +190,21 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_last_location() {
+        // Verbatim shapes from the user's Windows Game.log (4.x)
+        let log = r#"<2026-10-18T08:53:57.879Z> [Notice] <RequestLocationInventory> Player[w00zla] requested inventory for Location[Nyx_Levski] [Team_CoreGameplayFeatures][Inventory]
+<2026-10-18T09:00:27.149Z> [Notice] <Update Inventory Location> Player [w00zla] is changing location. Landing [3723364946] -> [3978634644]. Location [48919369] -> [3978634644]. Pending [0] [Team_CoreGameplayFeatures][Inventory]
+<2026-10-18T09:00:27.150Z> [Notice] <RequestLocationInventory> Player[w00zla] requested inventory for Location[RR_JP_NyxPyro] [Team_CoreGameplayFeatures][Inventory]
+<2026-10-18T09:01:00.000Z> [Notice] <RequestLocationInventory> Player[w00zla] requested inventory for Location[INVALID_LOCATION_ID] [Team_CoreGameplayFeatures][Inventory]
+"#;
+        assert_eq!(location(log.lines().next().unwrap()), Some("Nyx_Levski"));
+        assert_eq!(location(log.lines().nth(1).unwrap()), None);
+        assert_eq!(location(log.lines().nth(3).unwrap()), None);
+        assert_eq!(last_location(log), Some("RR_JP_NyxPyro"));
+        assert_eq!(last_location("<t> nothing here\n"), None);
+    }
+
+    #[test]
     fn never_panics_on_garbage() {
         for input in [
             "\0\0\0",
@@ -172,6 +215,9 @@ mod tests {
         ] {
             let _ = unlocks(input);
             let _ = unlocks_in_bytes(input.as_bytes());
+        }
+        for input in ["<RequestLocationInventory> ", "<RequestLocationInventory> Location[", "<RequestLocationInventory> Location[]", "<RequestLocationInventory> Location[Grüße"] {
+            assert_eq!(location(input), None);
         }
         assert_eq!(unlocks("<t> Added notification \"Received Blueprint: Grüße \"Ü\": \" [1]")[0].name, "Grüße \"Ü\"");
     }

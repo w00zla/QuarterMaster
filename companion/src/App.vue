@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // The title bar, a row with the game log state (a small tag while found) and the scan session's (a
 // tag: off, running without the game, running with the game; started and stopped in the panels), the
-// user (avatar, name) or why the connection is down (chip only then) with a button that opens the web
+// "Loading…" tag while an API call takes a while (state.ts loadingTexts), the
+// user (avatar, name) or why the connection is down (chip only then) with a refresh button (reloads
+// user, catalog, stock, jobs and blueprints: state.ts refreshAll) and a button that opens the web
 // app, then a tab bar (icons like the debug window's) with the panels: warehouse, refinery, unlocks
 // (the tab is the scan overlay's mode, overlay.ts).
 // The chips open the settings; the settings also open by themselves while the app is not connected
@@ -20,7 +22,9 @@ import UpdatePanel from "./components/UpdatePanel.vue";
 import WindowEdges from "./components/WindowEdges.vue";
 import { AppError, appInfo, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
-import { config, connectError, connected, connectionText, loadConfig, log, meAvatar, meName, refreshConnection, watchConnection, watchLog } from "./state";
+import {
+  config, connectError, connected, connectionText, loadConfig, loadingTexts, log, meAvatar, meName, refreshAll, refreshConnection, refreshing, watchConnection, watchLog,
+} from "./state";
 import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
 import { pickTab, scanState, tab, tabCounts, watchOverlay } from "./overlay";
@@ -82,6 +86,10 @@ onMounted(async () => {
         </button>
       </Tooltip>
       <span class="tag" :class="scanState.cls"><Icon :name="scanState.icon" :size="12" /> {{ scanState.text }}</span>
+      <!-- Calls that take a while (thin line): what is loading in the tooltip -->
+      <Tooltip v-if="loadingTexts.length" :text="loadingTexts.join(' · ')">
+        <span class="tag spinning"><Icon name="refresh" :size="12" /> {{ t("load.tag") }}</span>
+      </Tooltip>
       <div class="spacer" />
       <Tooltip v-if="!connected && connectError" :text="serverTip">
         <button type="button" class="tag err problem" @click="settingsOpen = true">
@@ -94,6 +102,11 @@ onMounted(async () => {
           <span class="name">{{ meName }}</span>
         </span>
         <span class="divider" />
+        <Tooltip :text="t('refresh.tip')">
+          <button type="button" class="icon-btn" :class="{ spinning: refreshing }" :disabled="refreshing" @click="refreshAll">
+            <Icon name="refresh" :size="14" />
+          </button>
+        </Tooltip>
         <Tooltip :text="t('webapp.open')">
           <button type="button" class="icon-btn" @click="openWebapp().catch(toastError)">
             <Icon name="external" :size="14" />
@@ -165,6 +178,17 @@ onMounted(async () => {
   width: 1px;
   height: 20px;
   background: var(--border-dim);
+}
+
+/* The refresh button while it reloads and the loading tag: the icon turns */
+.spinning svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .avatar {

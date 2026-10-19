@@ -13,12 +13,14 @@ import {
   buildCatalog, doneRequest, gameNameKeys, jobsOf, RefinerySync, removeRequest, startRequest,
   type Job, type OverviewEvent, type Proposal, type SyncCatalog, type Update, type VisitEvent,
 } from "./refinery";
-import { api, config, connected } from "./state";
+import { api, config, connected, onRefresh } from "./state";
 import { toast, toastError } from "./toasts";
 
 const sync = new RefinerySync();
 export const proposals = ref<Proposal[]>([]);
 export const syncCatalog = shallowRef<SyncCatalog | null>(null);
+// The catalog as the web app answered it, per language (the unlocks panel's blueprints): fetched once with syncCatalog
+export const catalogResponses = shallowRef<Record<"de" | "en", CatalogResponse> | null>(null);
 // The catalog and the player's language pack are being loaded (the state row shows it)
 export const preparing = ref(false);
 let jobs: Job[] = [];
@@ -26,12 +28,15 @@ let jobs: Job[] = [];
 const publish = () => (proposals.value = [...sync.proposals]);
 
 /** The catalog lookups plus the player's language pack texts: once at the start (when connected) and again when
- * the game folder changes. */
+ * the game folder changes. The only place the companion fetches the catalog. */
 async function loadCatalog() {
   preparing.value = true;
   try {
-    const responses: CatalogResponse[] = [];
-    for (const l of ["de", "en"]) responses.push(await api<CatalogResponse>("GET", `/catalog?lang=${l}`));
+    // Kept on disk and revalidated by its ETag: an unchanged catalog costs no transfer
+    const de = await api<CatalogResponse>("GET", "/catalog?lang=de", undefined, true);
+    const en = await api<CatalogResponse>("GET", "/catalog?lang=en", undefined, true);
+    const responses = [de, en];
+    catalogResponses.value = { de, en };
     let own: Record<string, string> = {};
     try {
       own = await gameNames(gameNameKeys(responses));
@@ -119,6 +124,15 @@ export async function watchRefinery() {
     loadedFor = dir;
     serial(loadCatalog);
   }, { immediate: true });
+  // The refresh button: catalog with the language pack, then the jobs (in the queue, after a running event)
+  onRefresh(() => new Promise<void>((done) => serial(async () => {
+    try {
+      await loadCatalog();
+      await loadJobs();
+    } finally {
+      done();
+    }
+  })));
 }
 
 // --- the user's answers to proposals ---------------------------------------------------------------

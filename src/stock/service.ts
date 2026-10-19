@@ -87,12 +87,27 @@ export class StockError extends Error {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// The star map amenity "Commodity Trading - Freight Elevator" (starmapamenitytypes.json): the place has a
+// freight elevator, so a location inventory; read from the record's `amenities` in catalog.raw_record
+const FREIGHT_ELEVATOR_AMENITY = 'a783bfb9-0f0a-491f-864b-945a49ef5da4';
+// Places with a freight elevator whose record lacks the amenity: the freight manager's Warehouse was opened
+// there per Game.log (checked 2026-10-19); keys lower case. Nyx_Kaboos is hidden in the starmap.
+const FREIGHT_ELEVATOR_KEYS = [
+  'thecollectorasteroid_stanton1', 'thecollectorasteroid_stanton2', 'thecollectorasteroid_stanton4',
+  'stanton1_junksite_reclamationanddisposalorinth', 'stanton2b_junksite_briosbreakeryard', 'stanton3b_junksite_samsonsonssalvagecenter',
+  'nyx_kaboos', 'stanton4a_shubin_smca_6', 'stanton4a_shubin_smca_8', 'outpost_olp_stanton1b_vivere',
+];
+
 /**
- * Locations stock can be booked at (`l` = catalog.location): stations and landing zones with an English
- * name; not jump points (types Anomaly, PointOfInterest) and not unfinished objects ("WIP …", the game uses
- * a no-break space there, so the word boundary `\M` instead of a plain space).
+ * Locations stock can be booked at (`l` = catalog.location): stations and landing zones, and every other
+ * place with a freight elevator (by amenity or FREIGHT_ELEVATOR_KEYS), not hidden in the starmap (the
+ * Onyx facilities are) unless listed; each with an English name; not jump points (types Anomaly,
+ * PointOfInterest) and not unfinished objects ("WIP …", the game uses a no-break space there, so the word
+ * boundary `\M` instead of a plain space).
  */
-export const selectableLocationSql = (l = 'l') => sql.raw(`(${l}.nav_icon IN ('Station', 'LandingZone') AND NOT ${l}.hide_in_starmap
+export const selectableLocationSql = (l = 'l') => sql.raw(`((NOT ${l}.hide_in_starmap AND (${l}.nav_icon IN ('Station', 'LandingZone')
+    OR EXISTS (SELECT 1 FROM catalog.raw_record r WHERE r.uuid = ${l}.uuid AND r.data -> 'amenities' @> '[{"_RecordId_": "${FREIGHT_ELEVATOR_AMENITY}"}]'))
+    OR lower(${l}.key) IN (${FREIGHT_ELEVATOR_KEYS.map((k) => `'${k}'`).join(', ')}))
   AND coalesce(${l}.type, '') NOT IN ('Anomaly', 'PointOfInterest')
   AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);
 

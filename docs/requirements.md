@@ -78,7 +78,7 @@ Only the structure is fixed for now; individual settings are added when a featur
 - **Lists:** `/qm-stock list` groups by material (location in every line; scopes personal, this org, all); `find` searches what is shared in the org plus the caller's own stock, best quality first.
 - **Display:** every batch shows whether it is shared (bot results "shared in Org A, Org B", autocomplete "Org (owner)"; the web app: "Shared · Org A, Org B") or not ("personal"/"Pers."); a give leaves this out (the recipient gets it unshared anyway). Results after a booking: see "Bot interaction"; list headers show the material total.
 - **Quality is mandatory** on every booking of a material (crafting depends on it). Different quality = different batch. Components have none.
-- **Locations are mandatory** and come from the game data (`StarMapObject` records: stations and landing zones with a name; not jump points, not unfinished "WIP" objects). No ships as locations. Shown as "Name · planet/moon · system".
+- **Locations are mandatory** and come from the game data (`StarMapObject` records: stations, landing zones and every other place with a freight elevator, i.e. a location inventory, each with a name; not jump points, not unfinished "WIP" objects; decided 2026-10-19, rule in `docs/catalog-sources.md`). No ships as locations. Shown as "Name · planet/moon · system".
 - A batch has a **state**: `stored` or `refining`.
   - **Refinery jobs are always personal and unshared** (each player manages their own jobs); the refined result can be shared afterwards.
   - A `refining` batch is a refined material with its **expected yield** as quantity. It is **not stock yet** (a game patch may still take it): totals, the crafting check and the org board count `stored` batches only.

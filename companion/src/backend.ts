@@ -29,6 +29,8 @@ export interface LogState {
   path: string;
   found: boolean;
   unlocks: Unlock[];
+  // The last location key Game.log named ("RR_CRU_LEO"), null when none yet
+  location: string | null;
 }
 
 /** A refusal: an error code (translated by the UI) or a message. */
@@ -73,9 +75,10 @@ export const gameNames = (keys: string[]) => call<Record<string, string>>("game_
 // Set when the server refused this version (426): the app does no work until updated
 export const outdated = ref<CompanionOutdated | null>(null);
 
-/** One web app API call as the token's user; refusals throw their error code. */
-export async function api<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
-  const res = await call<{ status: number; body: unknown }>("api", { method, path: `/api${path}`, body: body ?? null });
+/** One web app API call as the token's user; refusals throw their error code. `cache`: a GET kept on disk and
+ * revalidated by its ETag (Rust `server::cached_api`; the catalog). */
+export async function api<T>(method: "GET" | "POST", path: string, body?: unknown, cache = false): Promise<T> {
+  const res = await call<{ status: number; body: unknown }>("api", { method, path: `/api${path}`, body: body ?? null, cache });
   if (res.status === 426) {
     outdated.value = res.body as CompanionOutdated;
     throw new AppError("companionOutdated");

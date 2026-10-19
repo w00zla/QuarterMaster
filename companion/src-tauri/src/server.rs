@@ -10,14 +10,18 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use reqwest::header::{ETAG, IF_NONE_MATCH};
 use reqwest::{Client, Method, StatusCode, Url};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The HTTP client, shared by all commands.
+/// The HTTP client, shared by all commands. No total timeout: on a thin line the catalog (~1 MB per
+/// language) takes longer than any fixed limit; the connection must come up within 10 s and the answer
+/// may stall for 30 s at most.
 pub fn client() -> Client {
     Client::builder()
-        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10))
+        .read_timeout(Duration::from_secs(30))
         .user_agent(concat!("QuartermasterCompanion/", env!("CARGO_PKG_VERSION")))
         .build()
         .expect("HTTP client")
@@ -43,10 +47,14 @@ pub fn origin(server: &str) -> Result<String, String> {
 pub struct ApiResponse {
     pub status: u16,
     pub body: Value,
+    /// The answer's ETag, if it has one
+    #[serde(skip)]
+    pub etag: Option<String>,
 }
 
-/// One call to the web app's `/api/…` as the token's user.
-pub async fn api(client: &Client, origin: &str, token: &str, method: &str, path: &str, body: Option<Value>) -> Result<ApiResponse, String> {
+/// One call to the web app's `/api/…` as the token's user; `if_none_match` = the ETag of a kept answer
+/// (an unchanged one comes back as 304 without a body).
+pub async fn api(client: &Client, origin: &str, token: &str, method: &str, path: &str, body: Option<Value>, if_none_match: Option<&str>) -> Result<ApiResponse, String> {
     if !path.starts_with("/api/") || path.contains("..") {
         return Err("invalidPath".into());
     }
@@ -65,6 +73,9 @@ pub async fn api(client: &Client, origin: &str, token: &str, method: &str, path:
     if let Some(body) = body {
         req = req.json(&body);
     }
+    if let Some(tag) = if_none_match {
+        req = req.header(IF_NONE_MATCH, tag);
+    }
     let res = req.send().await.map_err(|e| {
         log::warn!("request failed: {e}");
         "network".to_string()
@@ -73,8 +84,47 @@ pub async fn api(client: &Client, origin: &str, token: &str, method: &str, path:
     if status == StatusCode::UNAUTHORIZED {
         return Err("invalidToken".into());
     }
+    let etag = res.headers().get(ETAG).and_then(|v| v.to_str().ok()).map(str::to_string);
     let body = res.json::<Value>().await.unwrap_or(Value::Null);
-    Ok(ApiResponse { status: status.as_u16(), body })
+    Ok(ApiResponse { status: status.as_u16(), body, etag })
+}
+
+/// A GET answer kept on disk with its ETag.
+#[derive(Serialize, Deserialize)]
+struct Kept {
+    etag: String,
+    body: Value,
+}
+
+/// The file an API path's answer is kept in below `dir` (one per path and query).
+fn kept_file(dir: &Path, path: &str) -> PathBuf {
+    let name: String = path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    dir.join(format!("{name}.json"))
+}
+
+/// A GET whose answer is kept in `dir` with its ETag (the catalog: ~1 MB per language): sent with
+/// `If-None-Match`, a 304 answers the kept body as 200. The ETag hashes the content, so another server or
+/// user can never get a wrong kept answer. A broken or unwritable file only costs the transfer.
+pub async fn cached_api(client: &Client, origin: &str, token: &str, path: &str, dir: &Path) -> Result<ApiResponse, String> {
+    let file = kept_file(dir, path);
+    let kept: Option<Kept> = std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let mut res = api(client, origin, token, "GET", path, None, kept.as_ref().map(|k| k.etag.as_str())).await?;
+    match (res.status, kept) {
+        (304, Some(kept)) => {
+            res.status = 200;
+            res.body = kept.body;
+        }
+        (200, _) => {
+            if let Some(etag) = res.etag.clone() {
+                let bytes = serde_json::to_vec(&Kept { etag, body: res.body.clone() }).map_err(|e| e.to_string())?;
+                if let Err(e) = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&file, bytes)) {
+                    log::warn!("{}: {e}", file.display());
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(res)
 }
 
 /// Downloads an update file of the server (`url` below its `/downloads/`)
@@ -143,5 +193,12 @@ mod tests {
         assert_eq!(origin("ftp://qm.example.com").unwrap_err(), "invalidServer");
         assert_eq!(origin("qm.example.com").unwrap_err(), "invalidServer");
         assert_eq!(origin("").unwrap_err(), "invalidServer");
+    }
+
+    #[test]
+    fn kept_files_per_path_and_query() {
+        let dir = Path::new("cache");
+        assert_eq!(kept_file(dir, "/api/catalog?lang=de"), dir.join("_api_catalog_lang_de.json"));
+        assert_ne!(kept_file(dir, "/api/catalog?lang=de"), kept_file(dir, "/api/catalog?lang=en"));
     }
 }

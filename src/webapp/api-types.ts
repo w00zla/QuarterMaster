@@ -77,6 +77,8 @@ export interface CatalogStat {
 
 export interface CatalogLocation {
   uuid: string;
+  // The star map record's key ("RR_CRU_LEO"), as Game.log names the player's location (the companion)
+  key: string;
   // "Area18 · ArcCorp · Stanton"
   label: string;
   // "Area18", plus the system where the name alone is ambiguous

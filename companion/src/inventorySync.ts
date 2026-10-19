@@ -6,20 +6,23 @@
 // registers or dismisses it. The kind filter (Mats / Items / Comps, kept in localStorage) decides
 // what is detected at all. Every location collects its own sightings: the location picked (kept,
 // changeable while scanning: the player walks from one warehouse to the next) is where a read
-// belongs, and a proposal is registered at its own location. Starting a session clears the sightings
-// of the one before. The catalog (names in both languages plus the player's language pack) is the
-// refinery sync's.
+// belongs, and a proposal is registered at its own location. With the auto toggle on (kept) the
+// location follows Game.log's last one (Rust `log_state`): a key that is no selectable location
+// clears the pick, so nothing is booked at the place before; a pick by hand holds until the log names
+// another place. Starting a session clears the sightings of the one before. The catalog (names in both
+// languages plus the player's language pack) is the refinery sync's.
 import { emit, listen } from "@tauri-apps/api/event";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { OkResponse, StockBatch, StockListResponse } from "../../src/webapp/api-types";
 import { addRequest as componentRequest, ComponentScan, proposalsOf as componentProposalsOf, type ComponentProposal, type ComponentSighting } from "./components";
 import { addRequest, InventoryScan, proposalsOf, type InventoryReadEvent, type Proposal, type Sighting } from "./inventory";
 import { ensureCatalog, syncCatalog } from "./refinerySync";
 import { startScan, stopScan } from "./scan";
-import { api, connected } from "./state";
+import { api, connected, log, onRefresh } from "./state";
 import { toastError } from "./toasts";
 
 const LOCATION_KEY = "qm.companion.inventory.location";
+const AUTO_LOCATION_KEY = "qm.companion.inventory.autoLocation";
 const KINDS_KEY = "qm.companion.inventory.kinds";
 
 export type Kind = "mats" | "items" | "comps";
@@ -82,6 +85,25 @@ export function setLocation(uuid: string | null) {
   if (uuid) localStorage.setItem(LOCATION_KEY, uuid);
   else localStorage.removeItem(LOCATION_KEY);
 }
+
+// The location from Game.log: on or off (kept), the key it named last and its selectable location (null: none or not selectable)
+export const autoLocation = ref(localStorage.getItem(AUTO_LOCATION_KEY) === "1");
+export const loggedLocation = computed(() => log.value?.location ?? null);
+export const loggedLocationUuid = computed(() => {
+  const key = loggedLocation.value?.toLowerCase();
+  return key ? syncCatalog.value?.locations.find((l) => l.key.toLowerCase() === key)?.uuid ?? null : null;
+});
+
+export function toggleAutoLocation() {
+  autoLocation.value = !autoLocation.value;
+  localStorage.setItem(AUTO_LOCATION_KEY, autoLocation.value ? "1" : "0");
+}
+
+// Applied when turned on, when the log names another place and once the catalog is there (not on a reload of it)
+const catalogReady = computed(() => !!syncCatalog.value);
+watch([autoLocation, loggedLocation, catalogReady], () => {
+  if (autoLocation.value && loggedLocation.value && syncCatalog.value) setLocation(loggedLocationUuid.value);
+});
 
 const open = (id: string) => !dismissed.value.has(id) && !registered.value.has(id);
 const locationsOf = (list: { locationUuid: string }[]) => [...new Set(list.map((s) => s.locationUuid))];
@@ -169,6 +191,8 @@ export const stopInventoryScan = () => stopScan();
 export async function watchInventory() {
   await listen<InventoryReadEvent>("inventory-read", (e) => onRead(e.payload));
   await listen("inventory-sightings-request", () => publish());
+  // The refresh button: the stored stock the proposals are checked against
+  onRefresh(loadStock);
 }
 
 // The orgs the user shares registered stacks in (the dialog's switches; kept for the session)

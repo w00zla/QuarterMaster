@@ -69,8 +69,8 @@ export interface SyncCatalog {
   stationNames: Map<string, string>;
   // Material UUID -> display name (resources and items; the first language's)
   materialNames: Map<string, string>;
-  // Every selectable location for the inventory's location picker (the first language's labels)
-  locations: { uuid: string; label: string; short: string }[];
+  // Every selectable location for the inventory's location picker (the first language's labels; key = the star map key Game.log names)
+  locations: { uuid: string; key: string; label: string; short: string }[];
   // The ship components with their stats (the components scan)
   components: ComponentCatalog;
 }
@@ -102,7 +102,7 @@ export function buildCatalog(responses: CatalogResponse[], gameNames: Record<str
       addName(cat.materials, m.name, m.uuid);
       if (own) addName(cat.materials, own, m.uuid);
     }
-    if (!cat.locations.length) cat.locations = r.locations.map((l) => ({ uuid: l.uuid, label: l.label, short: l.short }));
+    if (!cat.locations.length) cat.locations = r.locations.map((l) => ({ uuid: l.uuid, key: l.key, label: l.label, short: l.short }));
     for (const l of r.locations) {
       if (!l.refinery) continue;
       // The location's own name: the label's first part ("Name · planet · system")

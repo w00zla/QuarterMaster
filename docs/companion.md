@@ -31,6 +31,13 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   read at start, then what the game appends. "Full scan" reads every `logbackups/*.log` (GBs: `memmem`
   search, off the main thread; progress per file as the `scan-progress` event, shown as a bar in place of
   the panel title). The list keeps the first unlock per name.
+- The player's location (`gamelog::location`): `<RequestLocationInventory> Player[…] requested inventory
+  for Location[<key>]`, the star map key (`catalog.location.key`, case aside; `INVALID_LOCATION_ID`
+  ignored). SC logs it at spawn, on arriving at a location (also without a landing) and on every opening of
+  the freight manager's Warehouse tab, never for the character inventory; leaving is not logged reliably,
+  so it is the last one seen (`log_state.location`, cleared with a new log file; logged as "location
+  <key>"). Checked over all 1709 logs of the user on 2026-10-19 (40 of 40 warehouse openings, 0 of 481
+  character inventory openings).
 - Matching (`match.ts`): names against the catalog's blueprint output names in de and en (community
   translations), ship component prefix (`Ind/1/B Guardian`) stripped and used to narrow by size/grade;
   several candidates = the user picks; default blueprints are never registered. Checked against all 78
@@ -48,7 +55,21 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   Saving keeps the file's `server` entry as it is: the default is never written, a hand edit while the app
   runs is not overwritten.
 - Every API call goes through the Rust `api` command (only `/api/…`, GET/POST; no CORS) with
-  `X-QM-Companion` = the Cargo version. A 426 makes the app show only the update panel (`UpdatePanel.vue`:
+  `X-QM-Companion` = the Cargo version. With `cache` (only the catalog) a GET's answer is kept with its
+  ETag in the app cache dir (`%LOCALAPPDATA%\com.w00zla.quartermaster.companion\api\<path>.json`,
+  `server::cached_api`) and sent with `If-None-Match`; a 304 answers the kept body (the ETag hashes the
+  content: another server or user never gets a wrong one; a broken file only costs the transfer).
+- The refresh button in the state row (right, before the web app button; its icon turns while running;
+  `refreshAll` in `state.ts`): the connection with user and orgs (`/me`), then every registered reload
+  (`onRefresh`): catalog with the language pack and the refinery jobs (`refinerySync.ts`, in its event
+  queue), the stored stock (`inventorySync.ts`), the registered blueprints (`UnlocksPanel.vue`). A failing
+  reload is toasted, the others still run. No toast on success.
+- Thin lines: every API call that runs longer than 400 ms shows a "Loading…" tag in the state row (after
+  the scan tag, icon turning; the tooltip names what: catalog per language, stock, blueprints, connection,
+  saving; `loadingTexts` in `state.ts`). While connected without the catalog, the inventory's location
+  picker and Scan are disabled ("Catalog is loading…") and the unlocks list shows that state instead of
+  "Not in catalog". The HTTP client has no total timeout (the catalog is ~1 MB per language): 10 s to
+  connect, 30 s without data at most (`server::client`); the update download keeps its 30 min. A 426 makes the app show only the update panel (`UpdatePanel.vue`:
   installed and required version, the download for its platform): Rust `download_update` fetches it with
   the token (only URLs below the configured origin's `/downloads/`, `<dest>.part` renamed when complete,
   the file left as downloaded: no permission changes) to a path picked in a save dialog, progress as the
@@ -101,7 +122,9 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - The worker reads the newest frame when it falls behind. The `Ocr` is loaded by a session's first read
   (well under a second) and dropped as soon as the session stops (memory back; the memory arena stays on:
   off made reads 30 % slower). "Preparing…" while the sync loads the catalog and the player's language
-  pack. `StarCitizen.exe` running comes from `capture.rs` (`game-seen` / `get_game_seen`).
+  pack (`refinerySync.ts` `loadCatalog`: the companion's only `/api/catalog` fetch, de and en, once
+  connected, again when the game folder changes and on the refresh button; kept in memory and on disk
+  (ETag), the unlocks panel uses its responses). `StarCitizen.exe` running comes from `capture.rs` (`game-seen` / `get_game_seen`).
   `QM_OCR_FRAMES=<dir>` feeds every image in a folder once (tests without capture; the session must still
   be started in the UI).
 - Inventory sessions emit `inventory-read` per read (`grid` for the warehouse, `components` for the
@@ -207,8 +230,14 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 
 ## Inventory panel, locations, registering
 
-- Head: title with count, the location picker (`Picker`, kept in localStorage
-  `qm.companion.inventory.location`), Scan / Stop, "Register all". Below: the kind filter, toggle chips
+- Head: title with count, the auto location toggle (icon button `locate`, on = accent; kept in
+  localStorage `qm.companion.inventory.autoLocation`; its tooltip says what it does, or while on what
+  Game.log named: the location, "not selectable" with the key, or nothing logged yet), the location picker
+  (`Picker`, kept in localStorage `qm.companion.inventory.location`), Scan / Stop, "Register all". With the
+  toggle on the pick follows Game.log's last location when it is turned on, when the log names another
+  place and once the catalog is loaded; a key that is no selectable location clears the pick (nothing is
+  booked at the place before: reads without a location are dropped); a pick by hand holds until the log
+  names another place. Below: the kind filter, toggle chips
   Materials / Items / Components (on = the kind's badge colour with a check, off = dashed and dimmed; what
   the scan detects from then on; localStorage `qm.companion.inventory.kinds`). Then one compact row per
   proposal: an icon badge for the kind (its name as tooltip), resource (a component with its stats after

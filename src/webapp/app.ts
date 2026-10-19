@@ -104,9 +104,10 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     return next();
   });
 
+  // Unless the route sets its own (the catalog: revalidated by its ETag)
   const noStore: MiddlewareHandler = async (c, next) => {
     await next();
-    c.header('Cache-Control', 'no-store');
+    if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
   };
   app.use('/auth/*', noStore);
   app.use('/api/*', noStore);

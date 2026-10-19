@@ -96,16 +96,20 @@ StarMapObject (_RecordId_ = location UUID)
 ├ navIcon                      Station | LandingZone | Outpost | Moon | Planet | Star | Default
 ├ hideInStarmap                hidden objects (jump points, internal stations, …)
 ├ respawnLocationType          None | Hospital | Other | Prison | …
+├ amenities[]                  references to StarMapAmenityTypeEntry (starmapamenitytypes.json, not extracted:
+│                              only the UUIDs are in the record), e.g. "Commodity Trading - Freight Elevator"
+│                              a783bfb9-…, "- Loading Dock" 02905cad-…, "Refinery" 7618a59c-…, Hospital, Garage,
+│                              Landing Pad S–XL, Hangar S–XL
 └ assetManagerLocationParams   preview images of the asset manager; NOT a storage flag
 ```
 
 - Hierarchy: system star → planet/moon → landing zone/outpost; orbital and Lagrange stations hang directly below the star (`HUR-L1 Green Glade Station · Stanton`). Stanton, Pyro and Nyx are included.
-- **Selection rule for storage locations** (applied by the app, the DB keeps everything): `navIcon` `Station` or `LandingZone`, not `hideInStarmap`, name resolved. Build 12660092: 79 candidates, 76 with an English name, 37 with a German game text.
+- **Selection rule for storage locations** (applied by the app, the DB keeps everything; `selectableLocationSql` in `src/stock/service.ts`): `navIcon` `Station` or `LandingZone`, or the freight elevator amenity (a location inventory), not `hideInStarmap` (the Onyx facilities `*_ASD_Delve_Facility_*` are hidden and stay out), plus a fixed key list; an English name. Build 12913470: 152 (69 stations/landing zones, 73 outposts by amenity, 10 by the list). The amenity is incomplete: 10 places where Game.log shows the freight manager's warehouse opened lack it (Wikelo Emporium ×3, the 3 junk sites, QV Logistics Station `Nyx_Kaboos` (hidden), Shubin SMCa-6/-8, Vivere OLP; checked 2026-10-19), hence the list. Build 12660092 (stations/landing zones only): 79 candidates, 76 with an English name, 37 with a German game text.
 - Quirks:
   - Duplicate names in different systems: `Stanton Gateway`, `Pyro Gateway`, `Nyx Gateway` exist twice each → labels need the system/parent.
   - Names without any text: `@RR_P1_L4`, `@RR_P3_L2`, `@RR_P6_L1` (Pyro stations) → fallback to the key.
   - `@LOC_UNINITIALIZED` (text `<= UNINITIALIZED =>`) on 60 names → treated as a sentinel (`NULL`).
-  - **No refinery flag in the DataCore.** Refinery terminals are entities (`EntityClassDefinition.Refinery` with `EntityComponentRefineryParams`) placed in the level object containers (socpak), not referenced from star map records. Only 6 Stanton station descriptions mention refining (incomplete). `starmap/pu/station/refinery/refinery_0001` is a WIP placeholder. Refining methods: `refiningprocess/*` (`RefiningProcess`) carry only `refiningSpeed` (Fast/Normal/Slow), `refiningQuality` (Careful/Normal/Wasteful) and the name key (9 methods; the record `RefineNormal` is Normal/Wasteful = Cormack); no factors, times or costs. `EntityComponentRefineryParams` is empty. Yields, times, costs and location bonuses are server-side: the app takes refinery locations and yield bonuses from UEX (`ext` schema, see `docs/ext.md`).
+  - **No refinery flag in the DataCore** (except the star map amenity "Refinery", found 2026-10-19, not used). Refinery terminals are entities (`EntityClassDefinition.Refinery` with `EntityComponentRefineryParams`) placed in the level object containers (socpak), not referenced from star map records. Only 6 Stanton station descriptions mention refining (incomplete). `starmap/pu/station/refinery/refinery_0001` is a WIP placeholder. Refining methods: `refiningprocess/*` (`RefiningProcess`) carry only `refiningSpeed` (Fast/Normal/Slow), `refiningQuality` (Careful/Normal/Wasteful) and the name key (9 methods; the record `RefineNormal` is Normal/Wasteful = Cormack); no factors, times or costs. `EntityComponentRefineryParams` is empty. Yields, times, costs and location bonuses are server-side: the app takes refinery locations and yield bonuses from UEX (`ext` schema, see `docs/ext.md`).
   - `assetManagerLocationParams` is set on 117 objects, Stanton only, including Lagrange points and moons → unusable as "has storage".
 
 ---
@@ -161,7 +165,7 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 - Entities `manufacturer`, `item`, `resource`, `blueprint_category`, `crafted_property`, `quality_quantization`, `blueprint`, `location`, `raw_record`: UUID primary key plus `content_hash`, `first_seen_import_id`, `last_seen_import_id`, `retired_at`. **Never deleted**; missing entries get `retired_at` (cross-checked against the diff), reappearing ones are revived. Guild data references catalog UUIDs and survives retirement.
 - `raw_record` keeps every extracted DataCore record as `jsonb`, so new game data can be normalized later without re-extracting (the component base values are read from it, `src/stock/component-base.ts`).
 - Quantities are `NUMERIC` and passed to Postgres as strings.
-- Storage locations are selected by the app (`nav_icon` Station/LandingZone, not `hide_in_starmap`, name resolved).
+- Storage locations are selected by the app (stations, landing zones and places with a freight elevator, see "Selection rule for storage locations"; the amenity is read from `raw_record`).
 - `location`: every `StarMapObject` with `parent_uuid` (no foreign key: rows of one import reference each other in any order; the integrity check ensures every parent is in the snapshot), `type`, `nav_icon`, `hide_in_starmap`, `respawn_location_type`. Names via `name_key`.
 - Recipe tables `blueprint_tier` (incl. `required_slots` for "N of M slots"), `blueprint_slot` (modifiers as `jsonb`), `blueprint_input` (`kind` resource/item, `quantity` as `NUMERIC`): replaced as a whole when their blueprint changes.
 - Localization:

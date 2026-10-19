@@ -5,7 +5,7 @@
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { BlueprintListResponse, CatalogBlueprint, CatalogResponse, OkResponse } from "../../../src/webapp/api-types";
+import type { BlueprintListResponse, OkResponse } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
@@ -13,10 +13,11 @@ import { scanBackups } from "../backend";
 import { langRef, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
 import { overlayRows, tabCounts } from "../overlay";
-import { api, connected, loadLog, log } from "../state";
+import { catalogResponses } from "../refinerySync";
+import { api, connected, loadLog, log, onRefresh } from "../state";
 import { toast, toastError } from "../toasts";
 
-type RowState = "owned" | "default" | "unknown" | "new" | "pick";
+type RowState = "loading" | "owned" | "default" | "unknown" | "new" | "pick";
 interface Row {
   name: string;
   at: string;
@@ -24,9 +25,14 @@ interface Row {
   candidates: CatalogEntry[];
 }
 
-const index = ref(new Map<string, CatalogEntry[]>());
+// The shared catalog's blueprints (refinerySync.ts), the UI language first
+const catalogs = computed(() => {
+  const r = catalogResponses.value;
+  return r ? (langRef.value === "de" ? [r.de, r.en] : [r.en, r.de]).map((c) => c.blueprints) : [];
+});
+const index = computed(() => buildIndex(catalogs.value));
 // Labels in the UI language ("Name · S3 · B Industrial · CHCO")
-const labels = ref(new Map<string, string>());
+const labels = computed(() => new Map((catalogs.value[0] ?? []).map((b) => [b.uuid, b.label])));
 const owned = ref(new Set<string>());
 // Picked candidates of ambiguous rows, rows being registered one by one (by logged name)
 const picked = ref<Record<string, string>>({});
@@ -38,20 +44,6 @@ const progress = ref<{ done: number; total: number } | null>(null);
 const progressPct = computed(() => (progress.value?.total ? (progress.value.done / progress.value.total) * 100 : 0));
 const confirming = ref(false);
 
-async function loadCatalog() {
-  if (!connected.value) return;
-  try {
-    const langs = langRef.value === "de" ? (["de", "en"] as const) : (["en", "de"] as const);
-    const catalogs: CatalogBlueprint[][] = [];
-    for (const l of langs) catalogs.push((await api<CatalogResponse>("GET", `/catalog?lang=${l}`)).blueprints);
-    index.value = buildIndex(catalogs);
-    labels.value = new Map(catalogs[0]!.map((b) => [b.uuid, b.label]));
-    await loadOwned();
-  } catch (e) {
-    toastError(e);
-  }
-}
-
 async function loadOwned() {
   owned.value = new Set((await api<BlueprintListResponse>("GET", "/blueprints")).uuids);
 }
@@ -61,7 +53,9 @@ const rows = computed<Row[]>(() => (log.value?.unlocks ?? [])
     const all = matchUnlock(u.name, index.value);
     // Default blueprints are never registered (everyone has them)
     const candidates = all.filter((c) => !c.isDefault);
-    const state: RowState = !all.length ? "unknown"
+    // Without the catalog yet (thin line) nothing is "not in catalog"
+    const state: RowState = !catalogResponses.value ? "loading"
+      : !all.length ? "unknown"
       : all.some((c) => owned.value.has(c.uuid)) ? "owned"
       : !candidates.length ? "default"
       : candidates.length === 1 ? "new" : "pick";
@@ -168,7 +162,7 @@ async function measureStatus() {
   if (!ctx) return;
   const family = getComputedStyle(document.body).fontFamily;
   ctx.font = `13px ${family}`;
-  const texts = (["owned", "default", "unknown"] as const).map((s) => ctx.measureText(t(stateKey(s))).width);
+  const texts = (["loading", "owned", "default", "unknown"] as const).map((s) => ctx.measureText(t(stateKey(s))).width);
   const pick = ctx.measureText(t("unlocks.pick")).width + SELECT_EXTRA + ICON_BUTTON;
   ctx.font = `600 12px ${family}`;
   const button = ctx.measureText(t("unlocks.add")).width + BUTTON_EXTRA;
@@ -179,13 +173,20 @@ async function measureStatus() {
 const cols = computed(() => ({ "--cols": `minmax(0, 1fr) 170px ${statusWidth.value}px` }));
 
 let unlisten: UnlistenFn | undefined;
+// The refresh button reloads the registered blueprints
+const dropRefresh = onRefresh(loadOwned);
 onMounted(async () => {
   unlisten = await listen<{ done: number; total: number }>("scan-progress", (e) => (progress.value = e.payload));
   void measureStatus();
-  await loadCatalog();
 });
-onUnmounted(() => unlisten?.());
-watch(connected, () => void loadCatalog());
+onUnmounted(() => {
+  unlisten?.();
+  dropRefresh();
+});
+// The registered blueprints: once connected (again)
+watch(connected, (c) => {
+  if (c) loadOwned().catch(toastError);
+}, { immediate: true });
 </script>
 
 <template>

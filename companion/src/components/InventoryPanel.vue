@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The inventory scan (inventorySync.ts): in the head the location the warehouse or the inventory's
 // storage belongs to (a searchable picker, kept, changeable while scanning: each location collects
-// its own), the Scan button (start/stop the session; the user then hovers every stack in the freight
+// its own; the toggle left of it makes it follow Game.log, its tooltip names what was detected), the Scan button (start/stop the session; the user then hovers every stack in the freight
 // manager's warehouse and every component in the character inventory's storage pane) and "Register
 // all"; below it the kind filter (what the scan detects), then the proposals of every location as a
 // compact table, one per stack or component (kind, resource, location, quality, amount; a
@@ -19,8 +19,8 @@ import type { ComponentProposal } from "../components";
 import { t } from "../i18n";
 import type { Proposal } from "../inventory";
 import {
-  accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, KINDS, kinds, locationUuid, proposals, setLocation, shareGuildIds, sightings, startInventoryScan,
-  stopInventoryScan, toggleKind,
+  accept, acceptComponent, autoLocation, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, KINDS, kinds, locationUuid, loggedLocation, loggedLocationUuid, proposals,
+  setLocation, shareGuildIds, sightings, startInventoryScan, stopInventoryScan, toggleAutoLocation, toggleKind,
   type Kind, type Located,
 } from "../inventorySync";
 import { overlayOn, overlayRows, tabCounts } from "../overlay";
@@ -45,6 +45,8 @@ interface Row {
 }
 
 const scanning = computed(() => scanMode.value === "inventory");
+// Connected, but the catalog is not there yet (thin line): picker and Scan wait for it
+const catalogPending = computed(() => connected.value && !syncCatalog.value);
 const locationOptions = computed(() => (syncCatalog.value?.locations ?? []).map((l) => ({ value: l.uuid, label: l.short })));
 const locationName = (uuid: string) => syncCatalog.value?.locations.find((l) => l.uuid === uuid)?.short ?? "?";
 
@@ -120,6 +122,15 @@ async function onRegister(value: string) {
 
 const lockTip = computed(() => (connected.value ? null : t("conn.off")));
 
+// The auto toggle's tooltip: what it does, or while on what Game.log named last
+const autoTip = computed(() => {
+  if (!autoLocation.value) return t("inventory.autoLocation");
+  if (!loggedLocation.value) return t("inventory.autoLocationNone");
+  return loggedLocationUuid.value
+    ? t("inventory.autoLocationOn", { name: locationName(loggedLocationUuid.value) })
+    : t("inventory.autoLocationOther", { key: loggedLocation.value });
+});
+
 function toggleScan() {
   if (scanning.value) void stopInventoryScan();
   else void startInventoryScan();
@@ -130,9 +141,17 @@ function toggleScan() {
   <section class="panel inventory">
     <div class="head">
       <span class="head-title">{{ t("inventory.title") }} <span class="head-count">{{ rows.length }}</span></span>
-      <Picker class="location" :model-value="locationUuid" :options="locationOptions" :placeholder="t('inventory.location')" @update:model-value="setLocation" />
-      <Tooltip :text="overlayOn ? t('overlay.controls') : !locationUuid ? t('inventory.pickLocation') : null">
-        <button type="button" class="btn small outline" :disabled="!locationUuid || !connected || overlayOn" @click="toggleScan">
+      <Tooltip :text="autoTip">
+        <button type="button" class="btn small outline square auto" :class="{ active: autoLocation }" :aria-pressed="autoLocation" @click="toggleAutoLocation">
+          <Icon name="locate" :size="14" />
+        </button>
+      </Tooltip>
+      <Picker
+        class="location" :model-value="locationUuid" :options="locationOptions" :disabled="catalogPending"
+        :placeholder="t(catalogPending ? 'load.catalogPending' : 'inventory.location')" @update:model-value="setLocation"
+      />
+      <Tooltip :text="overlayOn ? t('overlay.controls') : catalogPending ? t('load.catalogPending') : !locationUuid ? t('inventory.pickLocation') : null">
+        <button type="button" class="btn small outline" :disabled="!locationUuid || !connected || overlayOn || catalogPending" @click="toggleScan">
           <Icon :name="scanning ? 'eye-off' : 'eye'" :size="14" /> {{ t(scanning ? "scan.stop" : "scan.start") }}
         </button>
       </Tooltip>
@@ -228,6 +247,13 @@ function toggleScan() {
   flex: 1;
   min-width: 140px;
   max-width: 260px;
+}
+
+/* The auto location toggle: on = accent like the kind chips */
+.auto.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 
 /* The kind filter below the head: a label, then compact chips with an icon */

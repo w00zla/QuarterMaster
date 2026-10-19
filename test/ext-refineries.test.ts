@@ -5,7 +5,7 @@ import type { LocationEntry } from '../src/stock/lookup.ts';
 import { matchRefineries, matchYields, oreKey, uexTerminals } from '../src/ext/refineries.ts';
 
 const loc = (uuid: string, name: string, system: string | null): LocationEntry =>
-  ({ uuid, name, nameEn: name, body: null, system, label: name, short: name, nameKey: null });
+  ({ uuid, key: name, name, nameEn: name, body: null, system, label: name, short: name, nameKey: null });
 
 const row = (id: number, system: string, station: string | null, city: string | null = null) => ({
   id_terminal: id, terminal_name: `Refinery ${id}`, star_system_name: system, space_station_name: station, city_name: city,

@@ -18,6 +18,9 @@ const G = '930000000000000001';
 const MEMBER_ROLE = '931000000000000001';
 const [MIA, OLGA] = ['932000000000000001', '932000000000000002'];
 const JUMP = '10000000-0000-0000-0000-0000000000bb';
+// Outposts: with the freight elevator amenity, without it, hidden with it (like the Onyx facilities), hidden but listed by key
+const [OUTPOST_FE, OUTPOST, HIDDEN_FE, LISTED] = ['10000000-0000-0000-0000-0000000000bc', '10000000-0000-0000-0000-0000000000bd', '10000000-0000-0000-0000-0000000000be', '10000000-0000-0000-0000-0000000000bf'];
+const FE_AMENITY = { _RecordId_: 'a783bfb9-0f0a-491f-864b-945a49ef5da4', _RecordName_: 'StarMapAmenityTypeEntry.a783bfb9-0f0a-491f-864b-945a49ef5da4' };
 const mia: Actor = { userId: MIA, guildId: G, source: 'bot' };
 const olga: Actor = { userId: OLGA, guildId: G, source: 'bot' };
 
@@ -33,6 +36,14 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     // A named jump point: a station by nav icon, but never a place to store things
     await db.execute(sql`INSERT INTO catalog.location (uuid, key, name_key, type, nav_icon, hide_in_starmap, content_hash, first_seen_import_id, last_seen_import_id)
       VALUES (${JUMP}, 'JumpPoint_Test', 'test_station', 'Anomaly', 'Station', false, 'x', 1, 1)`);
+    for (const [uuid, key, hidden, amenities] of [
+      [OUTPOST_FE, 'Test_Outpost_FE', false, [FE_AMENITY]], [OUTPOST, 'Test_Outpost', false, []], [HIDDEN_FE, 'Test_Hidden_FE', true, [FE_AMENITY]], [LISTED, 'Nyx_Kaboos', true, []],
+    ] as const) {
+      await db.execute(sql`INSERT INTO catalog.location (uuid, key, name_key, type, nav_icon, hide_in_starmap, content_hash, first_seen_import_id, last_seen_import_id)
+        VALUES (${uuid}, ${key}, 'test_station', 'Outpost', 'Outpost', ${hidden}, 'x', 1, 1)`);
+      await db.execute(sql`INSERT INTO catalog.raw_record (uuid, name, type, path, data, content_hash, first_seen_import_id, last_seen_import_id)
+        VALUES (${uuid}, ${`StarMapObject.${key}`}, 'StarMapObject', ${`starmap/test/${key}.json`}, ${JSON.stringify({ _Type_: 'StarMapObject', amenities })}::jsonb, 'x', 1, 1)`);
+    }
     await ensureGuild(db, G, 'Lookup Org');
     const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
     await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
@@ -49,9 +60,11 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
 
   it('offers selectable locations only, labelled with their place in the star map', async () => {
     const locations = await locationCatalog(db, 'en');
-    assert.deepEqual([...locations.keys()], [U.station]);
+    // Stations, places with a freight elevator (amenity or listed key); not jump points, not hidden or plain outposts
+    assert.deepEqual([...locations.keys()].sort(), [U.station, OUTPOST_FE, LISTED].sort());
     assert.equal(locations.get(U.station)!.label, 'Test Station');
-    assert.deepEqual(await locationChoices(db, 'en', 'test'), [{ name: 'Test Station', value: U.station }]);
+    assert.equal(locations.get(LISTED)!.key, 'Nyx_Kaboos');
+    assert.deepEqual((await locationChoices(db, 'en', 'test')).map((c) => c.value).sort(), [U.station, OUTPOST_FE, LISTED].sort());
   });
 
   it('offers recipe materials with their unit and ship components by type, never ores', async () => {

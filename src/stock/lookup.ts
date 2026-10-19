@@ -13,6 +13,8 @@ import { componentItemSql, componentStats, selectableLocationSql, type Actor, ty
 
 export interface LocationEntry {
   uuid: string;
+  // The star map record's key ("RR_CRU_LEO"; the game logs it, e.g. in Game.log)
+  key: string;
   name: string;
   nameEn: string;
   // Nearest planet or moon above it, if any
@@ -28,8 +30,8 @@ export interface LocationEntry {
 
 export const locationCatalog = importCache(async (db, lang): Promise<Map<string, LocationEntry>> => {
   // The whole star map is small (~2k rows): walk the parents in memory
-  const all = await rows<{ uuid: string; parent: string | null; nav: string | null; name: string | null; nameEn: string | null; nameKey: string | null; selectable: boolean }>(db, sql`
-    SELECT l.uuid, l.parent_uuid AS parent, l.nav_icon AS nav, lower(l.name_key) AS "nameKey", ${locText(lang, sql`l.name_key`)} AS name,
+  const all = await rows<{ uuid: string; key: string; parent: string | null; nav: string | null; name: string | null; nameEn: string | null; nameKey: string | null; selectable: boolean }>(db, sql`
+    SELECT l.uuid, l.key, l.parent_uuid AS parent, l.nav_icon AS nav, lower(l.name_key) AS "nameKey", ${locText(lang, sql`l.name_key`)} AS name,
       ${locText('en', sql`l.name_key`)} AS "nameEn", (${selectableLocationSql()} AND l.retired_at IS NULL) AS selectable
     FROM catalog.location l`);
   const byUuid = new Map(all.map((l) => [l.uuid, l]));
@@ -46,7 +48,7 @@ export const locationCatalog = importCache(async (db, lang): Promise<Map<string,
     const body = chain.find((a) => a.nav === 'Planet' || a.nav === 'Moon')?.name ?? null;
     const system = chain.find((a) => a.nav === 'Star')?.name ?? null;
     const name = l.name ?? l.nameEn!;
-    return { uuid: l.uuid, name, nameEn: l.nameEn!, body, system, label: [name, body, system].filter(Boolean).join(' · '), short: name, nameKey: l.nameKey };
+    return { uuid: l.uuid, key: l.key, name, nameEn: l.nameEn!, body, system, label: [name, body, system].filter(Boolean).join(' · '), short: name, nameKey: l.nameKey };
   });
   const counts = new Map<string, number>();
   for (const e of entries) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);

@@ -88,6 +88,21 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.ok(body.blueprints.some((b) => b.uuid === U.blueprint && b.isDefault && typeof b.name === 'string'));
   });
 
+  it('catalog: an ETag, revalidated (304 while unchanged); other routes stay no-store', async () => {
+    const first = await app.request('/api/catalog?lang=en', { headers: headers(SOLO) });
+    const tag = first.headers.get('etag');
+    assert.equal(first.status, 200);
+    assert.ok(tag);
+    assert.equal(first.headers.get('cache-control'), 'private, no-cache');
+    const again = await app.request('/api/catalog?lang=en', { headers: { ...headers(SOLO), 'if-none-match': tag } });
+    assert.equal(again.status, 304);
+    assert.equal(again.headers.get('cache-control'), 'private, no-cache');
+    assert.equal(again.headers.get('etag'), tag);
+    // Another language is another body
+    assert.notEqual((await app.request('/api/catalog?lang=de', { headers: headers(SOLO) })).headers.get('etag'), tag);
+    assert.equal((await app.request('/api/me', { headers: headers(SOLO) })).headers.get('cache-control'), 'no-store');
+  });
+
   it('a user without any org: personal stock, refinery, blueprints, profile', async () => {
     assert.equal((await post(SOLO, '/stock/add', { ...metal, quality: 700, amount: '12,5' })).status, 200);
     let list = await personal(SOLO);

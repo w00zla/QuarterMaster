@@ -19,7 +19,9 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   via `app.request`.
 - Middleware order: `secureHeaders` (strict CSP, no HSTS: Caddy sets it), own same-origin check for every
   non-GET (`Sec-Fetch-Site`, else `Origin` = `WEBAPP_ORIGIN`; Hono's `csrf()` only covers form content
-  types), `no-store` on `/auth/*` and `/api/*`, `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
+  types), `no-store` on `/auth/*` and `/api/*` unless the route sets its own (only `/api/catalog`: `private,
+  no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~1 MB per language
+  spared; the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
   per session), then for `/api/*` the session check (401 for every route, unknown ones too), JSON-only
   writes (415) and a 16 KB body limit.
 - Client IP: socket address, or the last `X-Forwarded-For` entry with `WEBAPP_TRUST_PROXY=1` (Caddy drops
@@ -53,8 +55,8 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 ### Features (`routes.ts`; the contract with all paths and shapes in `api-types.ts`)
 
 - `GET /api/catalog?lang`: bookable materials with unit, the `component` flag, `label`, size, grade letter
-  and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag and
-  yield bonuses; blueprints; each material and location with its loc `nameKey` (the companion looks it up in
+  and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag,
+  yield bonuses and the star map `key` (as Game.log names it, for the companion); blueprints; each material and location with its loc `nameKey` (the companion looks it up in
   the player's language pack). From the shared in-memory catalogs; no ores, no refining methods.
 - Stock: `/api/stock` personal = everything you own incl. shared, org = what its active members shared (with
   an owner filter), or `all` = both; writes `add`/`remove`/`adjust`/`move` (+ split, merge, share).
@@ -221,7 +223,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
 | Access control / IDOR | `Actor` only from the session + roster; a `guildId` from the request only with an active member row there; reads through functions that take the `Actor`, never "load by ID"; writes through the stock service only. DB tests cover other users' stock, other orgs, inactive members. |
 | Missing auth | Auth middleware on everything except `/auth/*` and static files; a test asserts 401 for every route without a session. |
 | Injection | Parameterized `sql` templates, Zod for every body/query/param, 16 KB body limit, amounts via `parseAmount`. |
-| Session theft | HttpOnly, Secure, HSTS (Caddy), hashed tokens, no Discord tokens stored, `Referrer-Policy: no-referrer`, `no-store` on API responses. |
+| Session theft | HttpOnly, Secure, HSTS (Caddy), hashed tokens, no Discord tokens stored, `Referrer-Policy: no-referrer`, `no-store` on API responses (the catalog, game data only: `private, no-cache`). |
 | Abuse | Rate limits in memory (one process): `/auth/*` per IP, `/api/*` per session. |
 | DB privileges | Own role `qm_web` (see `docs/deploy.md` "DB roles"): no writes to `app.org`/`app.member` (role IDs, roster), no access to schema `bot`. |
 | Leaks | Generic errors, stack traces in the log only; logs never hold cookies, codes or tokens. |

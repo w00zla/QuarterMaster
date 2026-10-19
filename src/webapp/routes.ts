@@ -4,6 +4,7 @@
 // Personal stock and blueprints work without any org.
 import { sql } from 'drizzle-orm';
 import type { Context, Hono } from 'hono';
+import { etag } from 'hono/etag';
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
@@ -189,6 +190,13 @@ function listResponse(found: PickableBatch[], viewer: string, viewerOrgs: Set<st
 
 export function registerRoutes(api: Hono<Env>, db: Db) {
   // --- catalog ------------------------------------------------------------------------------
+  // The same for everyone until the next import or UEX change, ~1 MB per language: the ETag (a hash of the
+  // body) answers an unchanged catalog with 304; the browser and the companion keep it and revalidate.
+  // The header is set outside etag(): its 304 drops the route's headers.
+  api.use('/catalog', async (c, next) => {
+    await next();
+    c.header('Cache-Control', 'private, no-cache');
+  }, etag());
   api.get('/catalog', async (c) => {
     const lang = langOf(c);
     const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
@@ -201,7 +209,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
-        uuid: l.uuid, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
+        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
         yields: Object.fromEntries(refineries?.yields.get(l.uuid) ?? []),
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),

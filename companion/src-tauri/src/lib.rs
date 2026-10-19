@@ -31,7 +31,7 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use config::Config;
 use gamelog::Unlock;
 
-/// Event to the frontend: the log state (file found, unlocks) changed; it
+/// Event to the frontend: the log state (file found, unlocks, location) changed; it
 /// fetches `log_state` again.
 const LOG_CHANGED: &str = "log-changed";
 // Full scan progress: { done, total } (log files)
@@ -55,6 +55,8 @@ struct AppData {
     /// Every unlock seen since the app started (live log and scanned
     /// backups), the first per name, oldest first
     unlocks: Vec<Unlock>,
+    /// The last location key the current `Game.log` named (`gamelog::location`)
+    location: Option<String>,
 }
 
 type State<'a> = tauri::State<'a, Mutex<AppData>>;
@@ -65,6 +67,7 @@ struct LogState {
     path: String,
     found: bool,
     unlocks: Vec<Unlock>,
+    location: Option<String>,
 }
 
 /// Adds unlocks to the list (first per name); whether the list changed.
@@ -80,8 +83,9 @@ fn merge_unlocks(data: &mut AppData, found: Vec<Unlock>) -> bool {
 }
 
 /// Follows `Game.log` from its start: the whole current file at the first
-/// poll (unlocks earlier in this game session count too), then what the game
-/// appends; a new file (game restart) or another folder starts over.
+/// poll (unlocks and the location earlier in this game session count too), then
+/// what the game appends; a new file (game restart) or another folder starts
+/// over (the location with it).
 fn spawn_game_log_watch(app: AppHandle) {
     std::thread::spawn(move || {
         let mut path = PathBuf::new();
@@ -91,9 +95,12 @@ fn spawn_game_log_watch(app: AppHandle) {
             let state = app.state::<Mutex<AppData>>();
             let now_path = state.lock().unwrap().config.game_log();
             let stamp = logwatch::stamp(&now_path);
+            let mut moved = false;
             if now_path != path || logwatch::is_new_file(last, stamp) {
                 tail.reset();
                 path = now_path;
+                let mut data = state.lock().unwrap();
+                moved = data.location.take().is_some();
             }
             last = stamp;
             let text = match stamp {
@@ -104,6 +111,7 @@ fn spawn_game_log_watch(app: AppHandle) {
                 None => String::new(),
             };
             let found = gamelog::unlocks(&text);
+            let location = gamelog::last_location(&text);
             let changed = {
                 let mut data = state.lock().unwrap();
                 let flipped = data.log_found != stamp.is_some();
@@ -111,7 +119,12 @@ fn spawn_game_log_watch(app: AppHandle) {
                 if !found.is_empty() {
                     log::info!("{} blueprint unlock(s) in {}", found.len(), path.display());
                 }
-                merge_unlocks(&mut data, found) || flipped
+                if let Some(key) = location.filter(|key| data.location.as_deref() != Some(*key)) {
+                    log::info!("location {key}");
+                    data.location = Some(key.to_string());
+                    moved = true;
+                }
+                merge_unlocks(&mut data, found) || flipped || moved
             };
             if changed {
                 let _ = app.emit(LOG_CHANGED, ());
@@ -154,7 +167,7 @@ fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config
 #[tauri::command]
 fn log_state(state: State) -> LogState {
     let data = state.lock().unwrap();
-    LogState { path: data.config.game_log().display().to_string(), found: data.log_found, unlocks: data.unlocks.clone() }
+    LogState { path: data.config.game_log().display().to_string(), found: data.log_found, unlocks: data.unlocks.clone(), location: data.location.clone() }
 }
 
 #[derive(Serialize)]
@@ -197,7 +210,8 @@ async fn scan_backups(app: AppHandle) -> Result<ScanResult, String> {
     Ok(ScanResult { found: count, failed })
 }
 
-/// One web app API call with the configured server and token.
+/// One web app API call with the configured server and token; `cache`: a GET whose answer is kept in the
+/// app's cache dir and revalidated by its ETag (`server::cached_api`).
 #[tauri::command]
 async fn api(
     app: AppHandle,
@@ -205,12 +219,18 @@ async fn api(
     method: String,
     path: String,
     body: Option<serde_json::Value>,
+    cache: Option<bool>,
 ) -> Result<server::ApiResponse, String> {
     let config = app.state::<Mutex<AppData>>().lock().unwrap().config.clone();
     if config.server.is_empty() {
         return Err("noServer".into());
     }
-    server::api(&http, &server::origin(&config.server)?, &config.token, &method, &path, body).await
+    let origin = server::origin(&config.server)?;
+    if cache == Some(true) && method == "GET" {
+        let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("api");
+        return server::cached_api(&http, &origin, &config.token, &path, &dir).await;
+    }
+    server::api(&http, &origin, &config.token, &method, &path, body, None).await
 }
 
 #[derive(Serialize)]
@@ -402,7 +422,7 @@ pub fn run() {
             std::panic::set_hook(Box::new(|info| log::error!("panic: {info}")));
             let config = config::load(app.handle());
             log::info!("Companion {} started, game folder {}", env!("CARGO_PKG_VERSION"), config.game_dir);
-            app.manage(Mutex::new(AppData { config, log_found: false, unlocks: Vec::new() }));
+            app.manage(Mutex::new(AppData { config, log_found: false, unlocks: Vec::new(), location: None }));
             app.manage(server::client());
             spawn_game_log_watch(app.handle().clone());
             // The frame channel for the screen capture (Windows so far); QM_OCR_FRAMES feeds test images.
