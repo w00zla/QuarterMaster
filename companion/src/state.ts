@@ -4,7 +4,7 @@
 import { computed, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import type { MeResponse } from "../../src/webapp/api-types";
-import { api as backendApi, getConfig, isConnectionError, logState, outdated, type Config, type LogState } from "./backend";
+import { api as backendApi, getConfig, isConnectionError, logState, outdated, setUnlockScan, type Config, type LogState } from "./backend";
 import { applyLangSetting, t } from "./i18n";
 import { errorText, toastError } from "./toasts";
 
@@ -122,8 +122,20 @@ export async function loadLog() {
   }
 }
 
+// The blueprints panel's filter "Unlocks": whether Game.log's unlocks are read (kept in localStorage; on
+// by default; the Rust side starts on and gets the stored choice here)
+const UNLOCKS_KEY = "qm.companion.unlocks";
+export const unlocksOn = ref(localStorage.getItem(UNLOCKS_KEY) !== "0");
+
+export async function toggleUnlocks() {
+  unlocksOn.value = !unlocksOn.value;
+  localStorage.setItem(UNLOCKS_KEY, unlocksOn.value ? "1" : "0");
+  await setUnlockScan(unlocksOn.value).catch(toastError);
+}
+
 /** Follows the Rust side's log changes (new unlocks, Game.log found or gone). */
 export async function watchLog() {
   await listen("log-changed", () => void loadLog());
+  if (!unlocksOn.value) await setUnlockScan(false);
   await loadLog();
 }

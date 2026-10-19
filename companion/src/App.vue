@@ -14,6 +14,7 @@ import InventoryPanel from "./components/InventoryPanel.vue";
 import ScanBar from "./components/ScanBar.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import Toasts from "./components/Toasts.vue";
+import ClipTip from "./components/ClipTip.vue";
 import TopBar from "./components/TopBar.vue";
 import UnlocksPanel from "./components/UnlocksPanel.vue";
 import UpdatePanel from "./components/UpdatePanel.vue";
@@ -25,6 +26,7 @@ import {
 } from "./state";
 import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
+import { watchDebugReport } from "./debugReport";
 import { pickTab, tab, tabCounts, watchOverlay } from "./overlay";
 import { watchScan } from "./scan";
 import RefineryPanel from "./components/RefineryPanel.vue";
@@ -63,6 +65,7 @@ onMounted(async () => {
   await watchScan().catch(toastError);
   await watchRefinery().catch(toastError);
   await watchInventory().catch(toastError);
+  await watchDebugReport().catch(toastError);
   await watchOverlay().catch(toastError);
   ready.value = true;
   if (!connected.value && !outdated.value) settingsOpen.value = true;
@@ -109,7 +112,7 @@ onMounted(async () => {
     </template>
     <SettingsDialog v-if="settingsOpen" @close="settingsOpen = false" />
     <Toasts />
-    <WindowEdges />
+    <ClipTip />    <WindowEdges />
   </div>
 </template>
 
@@ -212,7 +215,7 @@ onMounted(async () => {
 
 <style>
 /* Dialogs (teleported next to #app) sit near the top instead of 10vh down: the settings fit into the
-   800 px minimum height. The id beats ConfirmDialog's scoped rule */
+   780 px minimum height. The id beats ConfirmDialog's scoped rule */
 #app ~ .backdrop {
   padding-top: 16px;
 }

@@ -163,9 +163,7 @@ async function registerAll(value: string) {
       <div v-for="p in proposals" :key="p.id" class="job">
         <!-- 1: the job badge, the station, the actions -->
         <div class="job-head">
-          <Tooltip :text="t('refinery.jobs')">
-            <span class="tag app kind"><Icon name="drop" :size="11" /></span>
-          </Tooltip>
+          <span class="tag app kind"><Icon name="drop" :size="11" /></span>
           <span class="job-title">{{ stationName(p.locationUuid) }}</span>
           <button
             type="button"

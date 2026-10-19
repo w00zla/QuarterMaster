@@ -115,12 +115,16 @@ export const componentProposals = computed<Located<ComponentProposal>[]>(() =>
   ).filter((p) => open(p.id)),
 );
 
-/** What the debug window shows: the sightings of both scans and which of them were registered or discarded. */
+/** What the debug window shows: the sightings of both scans, which of them were registered or discarded and their locations' names. */
 export interface SightingsReport {
-  materials: Sighting[];
-  components: ComponentSighting[];
+  materials: Located<Sighting>[];
+  components: Located<ComponentSighting>[];
   registered: string[];
   dismissed: string[];
+  // Location UUID -> short name (the debug window has no catalog)
+  locations: Record<string, string>;
+  // Every stat name the component scan matches tooltip lines against (normalized, every language)
+  statNames: string[];
 }
 
 const newestFirst = (a: { atMs: number }, b: { atMs: number }) => b.atMs - a.atMs;
@@ -129,7 +133,10 @@ const newestFirst = (a: { atMs: number }, b: { atMs: number }) => b.atMs - a.atM
 const publish = () => {
   sightings.value = [...scans].flatMap(([location, at]) => located(location, at.stacks.list())).sort(newestFirst);
   componentSightings.value = [...scans].flatMap(([location, at]) => located(location, at.components.list())).sort(newestFirst);
-  const report: SightingsReport = { materials: sightings.value, components: componentSightings.value, registered: [...registered.value], dismissed: [...dismissed.value] };
+  const used = new Set(scans.keys());
+  const locations = Object.fromEntries((syncCatalog.value?.locations ?? []).filter((l) => used.has(l.uuid)).map((l) => [l.uuid, l.short]));
+  const statNames = [...new Set([...(syncCatalog.value?.components.statNames.values() ?? [])].flatMap((names) => [...names]))];
+  const report: SightingsReport = { materials: sightings.value, components: componentSightings.value, registered: [...registered.value], dismissed: [...dismissed.value], locations, statNames };
   void emit("inventory-sightings", report).catch(() => undefined);
 };
 

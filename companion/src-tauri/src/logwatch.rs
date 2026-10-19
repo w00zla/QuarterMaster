@@ -23,12 +23,14 @@ pub struct FileStamp {
     /// The OS creation time where the file system has one.
     pub created: Option<SystemTime>,
     pub len: u64,
+    /// The last write (the debug window shows it; not part of telling files apart)
+    pub modified: Option<SystemTime>,
 }
 
 /// The file's current stamp, `None` when it does not exist (or is unreadable).
 pub fn stamp(path: &Path) -> Option<FileStamp> {
     let meta = std::fs::metadata(path).ok()?;
-    Some(FileStamp { created: meta.created().ok(), len: meta.len() })
+    Some(FileStamp { created: meta.created().ok(), len: meta.len(), modified: meta.modified().ok() })
 }
 
 /// Whether the file seen now is another one than the file seen last:
@@ -53,6 +55,11 @@ impl Tail {
     /// Forget the file: the next read starts from its beginning.
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// How far the file is read (bytes).
+    pub fn pos(&self) -> u64 {
+        self.pos
     }
 
     /// The complete lines the file gained since the last read (lossy UTF-8:
@@ -83,7 +90,7 @@ mod tests {
     use std::io::Write;
 
     fn st(created: u64, len: u64) -> Option<FileStamp> {
-        Some(FileStamp { created: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(created)), len })
+        Some(FileStamp { created: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(created)), len, modified: None })
     }
 
     #[test]
@@ -94,6 +101,8 @@ mod tests {
         assert!(is_new_file(st(1, 100), None), "vanished");
         assert!(is_new_file(None, st(1, 1)), "appeared");
         assert!(!is_new_file(None, None));
+        let written = Some(FileStamp { modified: Some(SystemTime::now()), ..st(1, 100).unwrap() });
+        assert!(!is_new_file(st(1, 100), written), "only written to");
     }
 
     #[test]
@@ -107,6 +116,8 @@ mod tests {
         std::fs::write(&path, "<t> first line\n<t> sec").unwrap();
         let mut tail = Tail::default();
         assert_eq!(tail.read(&path).unwrap(), "<t> first line\n");
+        // Read up to the end, the unfinished line included
+        assert_eq!(tail.pos(), 22);
         // Nothing new: nothing read, nothing doubled
         assert_eq!(tail.read(&path).unwrap(), "");
 

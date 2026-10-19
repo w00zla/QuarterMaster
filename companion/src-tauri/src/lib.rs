@@ -29,10 +29,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 use config::Config;
-use gamelog::Unlock;
+use gamelog::{LocationLine, Unlock};
 
-/// Event to the frontend: the log state (file found, unlocks, location) changed; it
-/// fetches `log_state` again.
+/// Event to the frontend: the log state (file found, unlocks, location lines) changed; it
+/// fetches `log_state` again (not for the file's size and times alone: the game writes all the time).
 const LOG_CHANGED: &str = "log-changed";
 // Full scan progress: { done, total } (log files)
 const SCAN_PROGRESS: &str = "scan-progress";
@@ -55,11 +55,29 @@ struct AppData {
     /// Every unlock seen since the app started (live log and scanned
     /// backups), the first per name, oldest first
     unlocks: Vec<Unlock>,
-    /// The last location key the current `Game.log` named (`gamelog::location`)
-    location: Option<String>,
+    /// Every location line of the current `Game.log` (`gamelog::location`), oldest first
+    locations: Vec<LocationLine>,
+    /// The current `Game.log` as last polled, `None` while not found
+    file: Option<LogFile>,
+    /// Blueprint unlocks are read (the blueprints panel's "Unlocks" filter; on at start, the frontend
+    /// sends its stored choice); the location lines are read either way
+    unlocks_on: bool,
+    /// Read the current log again from its start (unlocks switched on)
+    reread: bool,
 }
 
 type State<'a> = tauri::State<'a, Mutex<AppData>>;
+
+/// The followed file on disk (the debug window shows it).
+#[derive(Serialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+struct LogFile {
+    created_ms: Option<u64>,
+    modified_ms: Option<u64>,
+    size: u64,
+    /// How far it is read (bytes)
+    read_to: u64,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,7 +85,21 @@ struct LogState {
     path: String,
     found: bool,
     unlocks: Vec<Unlock>,
+    /// The last location key the current `Game.log` named
     location: Option<String>,
+    locations: Vec<LocationLine>,
+    file: Option<LogFile>,
+}
+
+fn log_state_of(data: &AppData) -> LogState {
+    LogState {
+        path: data.config.game_log().display().to_string(),
+        found: data.log_found,
+        unlocks: data.unlocks.clone(),
+        location: data.locations.last().map(|l| l.key.clone()),
+        locations: data.locations.clone(),
+        file: data.file,
+    }
 }
 
 /// Adds unlocks to the list (first per name); whether the list changed.
@@ -85,7 +117,7 @@ fn merge_unlocks(data: &mut AppData, found: Vec<Unlock>) -> bool {
 /// Follows `Game.log` from its start: the whole current file at the first
 /// poll (unlocks and the location earlier in this game session count too), then
 /// what the game appends; a new file (game restart) or another folder starts
-/// over (the location with it).
+/// over (the location lines with it).
 fn spawn_game_log_watch(app: AppHandle) {
     std::thread::spawn(move || {
         let mut path = PathBuf::new();
@@ -96,11 +128,11 @@ fn spawn_game_log_watch(app: AppHandle) {
             let now_path = state.lock().unwrap().config.game_log();
             let stamp = logwatch::stamp(&now_path);
             let mut moved = false;
-            if now_path != path || logwatch::is_new_file(last, stamp) {
+            let reread = std::mem::take(&mut state.lock().unwrap().reread);
+            if reread || now_path != path || logwatch::is_new_file(last, stamp) {
                 tail.reset();
                 path = now_path;
-                let mut data = state.lock().unwrap();
-                moved = data.location.take().is_some();
+                moved = !std::mem::take(&mut state.lock().unwrap().locations).is_empty();
             }
             last = stamp;
             let text = match stamp {
@@ -110,20 +142,26 @@ fn spawn_game_log_watch(app: AppHandle) {
                 }),
                 None => String::new(),
             };
-            let found = gamelog::unlocks(&text);
-            let location = gamelog::last_location(&text);
+            let lines = gamelog::location_lines(&text);
             let changed = {
                 let mut data = state.lock().unwrap();
+                let found = if data.unlocks_on { gamelog::unlocks(&text) } else { Vec::new() };
                 let flipped = data.log_found != stamp.is_some();
                 data.log_found = stamp.is_some();
+                data.file = stamp.map(|s| LogFile {
+                    created_ms: s.created.map(ocrwatch::unix_ms),
+                    modified_ms: s.modified.map(ocrwatch::unix_ms),
+                    size: s.len,
+                    read_to: tail.pos(),
+                });
                 if !found.is_empty() {
                     log::info!("{} blueprint unlock(s) in {}", found.len(), path.display());
                 }
-                if let Some(key) = location.filter(|key| data.location.as_deref() != Some(*key)) {
-                    log::info!("location {key}");
-                    data.location = Some(key.to_string());
-                    moved = true;
+                if let Some(last) = lines.last().filter(|l| data.locations.last().map(|d| &d.key) != Some(&l.key)) {
+                    log::info!("location {}", last.key);
                 }
+                moved |= !lines.is_empty();
+                data.locations.extend(lines);
                 merge_unlocks(&mut data, found) || flipped || moved
             };
             if changed {
@@ -166,8 +204,49 @@ fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config
 
 #[tauri::command]
 fn log_state(state: State) -> LogState {
-    let data = state.lock().unwrap();
-    LogState { path: data.config.game_log().display().to_string(), found: data.log_found, unlocks: data.unlocks.clone(), location: data.location.clone() }
+    log_state_of(&state.lock().unwrap())
+}
+
+/// Switches reading the blueprint unlocks from `Game.log` on or off: off drops the list, on reads the
+/// current log again from its start (what came while off counts too).
+#[tauri::command]
+fn set_unlock_scan(app: AppHandle, state: State, on: bool) {
+    let mut data = state.lock().unwrap();
+    if data.unlocks_on == on {
+        return;
+    }
+    data.unlocks_on = on;
+    if on {
+        data.reread = true;
+    } else {
+        data.unlocks.clear();
+    }
+    drop(data);
+    log::info!("unlock scan {}", if on { "on" } else { "off" });
+    let _ = app.emit(LOG_CHANGED, ());
+}
+
+/// Writes the Game.log export `qm-gamelog-debug-<unix s>.json` into `dir`: this build, the log state and
+/// what the main window made of it (`report`: blueprint matches, locations); the file's path.
+#[tauri::command]
+fn export_log_debug(state: State, dir: String, report: serde_json::Value) -> Result<String, String> {
+    let (logged, game_dir) = {
+        let data = state.lock().unwrap();
+        (log_state_of(&data), data.config.game_dir.clone())
+    };
+    let now = ocrwatch::unix_ms(std::time::SystemTime::now());
+    let export = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "platform": if cfg!(windows) { "windows" } else { "linux" },
+        "exportedAtMs": now,
+        "gameDir": game_dir,
+        "log": logged,
+        "report": report,
+    });
+    let path = std::path::Path::new(&dir).join(format!("qm-gamelog-debug-{}.json", now / 1000));
+    std::fs::write(&path, serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?).map_err(|e| format!("{}: {e}", path.display()))?;
+    log::info!("Game.log debug export to {}", path.display());
+    Ok(path.display().to_string())
 }
 
 #[derive(Serialize)]
@@ -427,7 +506,7 @@ pub fn run() {
             std::panic::set_hook(Box::new(|info| log::error!("panic: {info}")));
             let config = config::load(app.handle());
             log::info!("Companion {} started, game folder {}", env!("CARGO_PKG_VERSION"), config.game_dir);
-            app.manage(Mutex::new(AppData { config, log_found: false, unlocks: Vec::new(), location: None }));
+            app.manage(Mutex::new(AppData { config, log_found: false, unlocks: Vec::new(), locations: Vec::new(), file: None, unlocks_on: true, reread: false }));
             app.manage(server::client());
             spawn_game_log_watch(app.handle().clone());
             // The frame channel for the screen capture (Windows so far); QM_OCR_FRAMES feeds test images.
@@ -482,6 +561,8 @@ pub fn run() {
             get_config,
             set_config,
             log_state,
+            export_log_debug,
+            set_unlock_scan,
             scan_backups,
             api,
             app_info,

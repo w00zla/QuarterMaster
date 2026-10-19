@@ -15,6 +15,8 @@ export interface Config {
   overlayPosition: OverlayPosition;
   hotkeyOverlay: string;
   hotkeyMode: string;
+  // The tab (= the overlay's mode) switches by itself: with the screen the scan sees, with a new blueprint unlock
+  autoTab: boolean;
 }
 
 export type OverlayPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
@@ -23,6 +25,14 @@ export interface Unlock {
   // As logged (UTC, ISO)
   at: string;
   name: string;
+  // Found in an old log (logbackups), not in the current Game.log
+  backup: boolean;
+}
+
+export interface LocationLine {
+  // As logged (UTC, ISO)
+  at: string;
+  key: string;
 }
 
 export interface LogState {
@@ -31,6 +41,10 @@ export interface LogState {
   unlocks: Unlock[];
   // The last location key Game.log named ("RR_CRU_LEO"), null when none yet
   location: string | null;
+  // Every location line of the current Game.log, oldest first
+  locations: LocationLine[];
+  // The file as last polled (sizes in bytes); null while not found
+  file: { createdMs: number | null; modifiedMs: number | null; size: number; readTo: number } | null;
 }
 
 /** A refusal: an error code (translated by the UI) or a message. */
@@ -51,6 +65,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 export const getConfig = () => call<Config>("get_config");
 export const setConfig = (config: Config) => call<Config>("set_config", { config });
 export const logState = () => call<LogState>("log_state");
+// Reading the blueprint unlocks from Game.log on or off (off drops them, on reads the log again)
+export const setUnlockScan = (on: boolean) => call<void>("set_unlock_scan", { on });
+// Writes the debug window's Game.log export (the log state plus the main window's report) into dir; the file's path
+export const exportLogDebug = (dir: string, report: unknown) => call<string>("export_log_debug", { dir, report });
 export const scanBackups = () => call<{ found: number; failed: number }>("scan_backups");
 export const appInfo = () => call<{ version: string; platform: CompanionPlatform }>("app_info");
 export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });

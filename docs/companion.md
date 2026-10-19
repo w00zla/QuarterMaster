@@ -30,14 +30,21 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   (names may hold quotes; the `UpdateNotificationItem` repeats are skipped). The whole current log is
   read at start, then what the game appends. "Scan old logs" reads every `logbackups/*.log` (GBs: `memmem`
   search, off the main thread; progress per file as the `scan-progress` event, shown as a bar in place of
-  the panel title). The list keeps the first unlock per name; the panel lists only the unregistered ones
-  (registered and default blueprints hidden), newest first.
+  the panel title). The list keeps the first unlock per name, each marked whether it came from an old log
+  (`backup`); the panel lists only the unregistered ones (registered and default blueprints hidden, the
+  debug window shows them), newest first, each with an icon-only badge. Below the panel's head the filter
+  "Unlocks" ("Freischaltungen", like the other panels' "Scanned:" chips; localStorage `qm.companion.unlocks`,
+  on by default, like every scan filter kept across starts): off, the Rust side reads no unlocks
+  (`set_unlock_scan`, the list emptied, "Scan old logs" disabled, the overlay's mode warns); on again, it
+  reads the current log from its start. The location lines are read either way. `log_state` also holds the file as last polled (created,
+  modified, size, read up to; changes of these alone send no `log-changed`: the game writes all the time).
 - The player's location (`gamelog::location`): `<RequestLocationInventory> Player[…] requested inventory
   for Location[<key>]`, the star map key (`catalog.location.key`, case aside; `INVALID_LOCATION_ID`
   ignored). SC logs it at spawn, on arriving at a location (also without a landing) and on every opening of
   the freight manager's Warehouse tab, never for the character inventory; leaving is not logged reliably,
-  so it is the last one seen (`log_state.location`, cleared with a new log file; logged as "location
-  <key>"). Checked over all 1709 logs of the user on 2026-10-19 (40 of 40 warehouse openings, 0 of 481
+  so it is the last one seen (`log_state.location`; every line of the current log with its time in
+  `log_state.locations` for the debug window, cleared with a new log file; a change of key logged as
+  "location <key>"). Checked over all 1709 logs of the user on 2026-10-19 (40 of 40 warehouse openings, 0 of 481
   character inventory openings).
 - Matching (`match.ts`): names against the catalog's blueprint output names in de and en (community
   translations), ship component prefix (`Ind/1/B Guardian`) stripped and used to narrow by size/grade;
@@ -79,11 +86,15 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 
 ## Window, tabs and state
 
+- Clipped texts ("…") show their full text after ~0.45 s of hovering (`ClipTip.vue`, one per window, main
+  and debug: any element with `text-overflow: ellipsis` wider than its box, unless it has a title or a
+  Tooltip of its own). Buttons whose icon or text changes with a state keep their width (the scan button's
+  icon in a fixed 14 px place, the debug recording button as wide as its longer text).
 - `App.vue`, `components/TopBar.vue`, `WindowEdges.vue`, `state.ts`: no native frame
   (`decorations: false`), the title bar after BindSight's (drag region, minimize/maximize/close; window
   permissions in `capabilities/default.json`, which lists the windows `main`, `debug`, `overlay`),
-  invisible resize edges. The window stays narrow (640 px, also its minimum), 800 px high at least (the
-  settings dialog fits; dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
+  invisible resize edges. The window stays narrow (640 px, also its minimum), 800 px high at start and
+  780 px at least (the settings dialog fits; dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
   open where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the
   overlay is excluded, it places itself), created hidden and shown once placed.
 - The title bar holds, before the settings button, the user (Discord avatar from `/api/me`, the name in
@@ -98,7 +109,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   inventory without a location) / "Warehouse|Inventory|Refinery detected"), the "Loading…" tag; on the
   right "Log not found" (a chip only then, the path in its tooltip: the blueprints and the auto location
   need the log), the auto location toggle and the location picker (see "Inventory panel"; its tooltip the picked
-  location's full name, the field clips it, else what it is for). Problem chips
+  location's full name, the field clips it, else what it is for; a fixed 240 px: the tags to its left
+  change without moving it, the state tag clips when room runs out). Problem chips
   open the settings.
 - `state.ts` holds config, connection and log state; every API call goes through its `api()`; connection
   refusals (`noServer`, `noToken`, `invalidServer`, `insecureServer`, `invalidToken`, `network`, 426) mark
@@ -111,11 +123,12 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   Inventory (`InventoryPanel.vue`), Refinery (`RefineryPanel.vue`) and Blueprints (`UnlocksPanel.vue`), all
   three kept mounted (`v-show`); panel heads carry no icon. Inventory and Refinery fill the window and
   scroll only their rows (head, filter and column titles stay).
-- Settings dialog (`SettingsDialog.vue`): Access Key, language, game folder, the "Scan overlay" group
+- Settings dialog (`SettingsDialog.vue`): Access Key, language, the automatic tab switch (a switch), game folder, the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
-  place as tooltip; the hotkeys "Hotkey Overlay an/aus" and "… Ansicht wechseln"), below the groups one
-  quiet line with a small button for the debug window (secondary for the user). Labels left, controls
-  right like BindSight's settings.
+  place as tooltip; the hotkeys "Hotkey Overlay an/aus" and "… Modus wechseln"; the UI says "Modus" for tab and overlay view alike), in the head's right end
+  a small "Debug" button for the debug window (secondary for the user; what it does as tooltip; the dialog
+  closes once the window is open; `ConfirmDialog`'s `head` slot). Labels left, controls right like
+  BindSight's settings.
 - Refinery panel cards (`RefineryPanel.vue`), three lines: the icon-only job badge (live colour), the
   station and the actions (registering blue, storing a crate on green, removing outlined); the state tag
   (new blue, finished green, not at the terminal yellow), an icon-only link badge (accent: registered as a
@@ -278,8 +291,12 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 - Head: title with count, "Register all". Below: the kind filter, toggle chips
   Materials / Items / Components (on = the kind's badge colour with a check, off = dashed and dimmed with an x; what
   the scan detects from then on, all may be off; localStorage `qm.companion.inventory.kinds`). Then one compact row per
-  proposal: an icon badge for the kind (its name as tooltip), resource (a component with its stats after
-  the name, "Coolant Rating +12.5 % · Integrity ±0.0 %"), location, quality, amount, Register / Discard.
+  proposal: an icon-only badge for the kind (no tooltip, like every panel's kind badge), name, type, size, grade (from the catalog in
+  the UI language, where it has them: components, items), a component's stats ("Coolant Rating +12.5 % ·
+  Integrity ±0.0 %"), quality, amount, location last, Register / Discard. The columns are resizable like the
+  web app's (`useTableColumns` + `ColumnHead` from `adminapp/src`, the rows' gap passed in; widths kept in
+  localStorage `qm.companion.inventory.columns`; no sorting: the newest first; the location takes the room
+  left).
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a
   `ComponentScan` per location, keys and ids prefixed with the location): a read belongs to the location
   picked at that moment (changeable while scanning: the player walks from one warehouse to the next); the
@@ -293,15 +310,34 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 - `debug.html` + `DebugApp.vue`, opened from the settings (Rust `open_debug_window`, async, with the main
   window's WebView2 browser arguments: another set hangs WebView2; no JS close handler: `destroy` would
   need a permission); closing the main window ends the app, the debug window with it.
-- Two tabs: the last read (first the frame as a JPEG data URL, 1280 px wide, CSP `img-src data:`, in a box
-  of the frame's aspect that stays while the facts below change, with SVG
-  overlays: OCR boxes, read cells, tiles, hovered tile, tooltip, or the character inventory's tooltip lines
-  and the cursor's tile; facts; a refinery read's station and work orders with their rows; collapsible
-  tooltip lines, cells and OCR boxes) and the main window's
-  sightings of both scans in one table (event `inventory-sightings` on every change,
-  `inventory-sightings-request` on open; own kind filter; columns source (FE = warehouse, INV = character
-  inventory), name, quality, amount or stats, page and cell, state = the reason it is no proposal, or
-  Proposal / Registered / Discarded).
+- Two tabs (`DebugApp.vue`, both stay mounted; the shared table, panel and key/value styles sit unscoped
+  there), the layout after the concept artifact https://claude.ai/artifact/WrWSMUa9T48WVDZCt4WLJL:
+  - **OCR scan** (`DebugScan.vue`), two views and "Record data" in its row. "Last read": first the frame (a
+    JPEG data URL, 1280 px wide, CSP `img-src data:`, in a box of the frame's aspect that stays while what
+    follows changes; its height can be dragged, the image then fits in centred) with SVG overlays (OCR boxes, read cells, tiles, hovered tile, tooltip, or the
+    character inventory's tooltip lines and the cursor's tile) and a legend of the overlays this screen
+    draws; then a row of key figures (time, duration, frame, screen, then tiles / page / station and work
+    orders, OCR boxes); per screen the grid and tooltip with a table of every tile (hovered one marked,
+    uncertain values "?"), the cursor and tooltip with every tooltip line marked as title, stat (its label
+    one of the catalog's stat names: the sightings report carries them), field ("Label: value") or text
+    (`parseField`), or every work order with its
+    rows; the read cells and OCR boxes (scores below 0.6 in warn colour). Every table is collapsible
+    (the last two start collapsed; open or closed is kept across reads). No header of its own: the tabs
+    sit at the top, the window's title names it.
+    "Detections" ("Erkennungen"): the main window's sightings of both scans in one table (event
+    `inventory-sightings` on every change, `inventory-sightings-request` on open, with the locations' short
+    names: the window has no catalog; own kind filter; columns source (FE = warehouse, INV = character
+    inventory), name, quality, amount or stats, location, page and cell, state (Proposal / Registered /
+    Discarded, or Problem with the reason), time).
+  - **Game.log** (`DebugGamelog.vue`): the file (path, created, modified, size, read up to: `log_state`'s
+    `file`, re-read every 2 s besides `log-changed`), every blueprint unlock (current log and old logs,
+    registered and default ones included; time, logged name, matched catalog labels, state with a filter
+    per state, source Game.log / logbackups), then the location (the last logged key, what it resolves to
+    and whether it is selectable, the auto location, the pick, every location line of the current log,
+    newest first). The matching comes from the main window (`debugReport.ts`: event `gamelog-report` on
+    every change, `gamelog-report-request` on open; the unlocks panel hands over its rows before hiding
+    registered and default ones). "Export" writes `qm-gamelog-debug-<unix s>.json` into a folder the user
+    picks (Rust `export_log_debug`: version, platform, game folder, the log state and that report).
 - While it is open (`set_debug`) every read goes with its frame to the **debug writer** thread
   (`spawn_debug_writer`), which encodes it, keeps the last 3 reads in RAM and emits the event: on the worker,
   encoding and writing stretched the reads' interval from 1.05 to 1.8 s. The refinery's reads go there too
@@ -393,12 +429,14 @@ FP16 and a tone map would be the fix); rotated monitors untested.
 game since.
 
 - A frameless, transparent, click-through, non-focusable window holding the mode's panel as a
-  compact fixed-size read-only tile (310×190 logical px, slightly see-through; layout "A" of 2026-10-19, no
-  space wasted): one 24 px head line with the picked location after its icon in every mode (mono face,
-  clipped at its end; "No location picked" in warn colour) and the three modes as small chips with icon and
-  count (the shown one highlighted; a warning instead of the count when its filters are all off or the
-  log is missing), then the newest rows at 20 px without lines between (the inventory's kind badges as
-  small icons), 8 fit; more than that: the last one fades out. No hint texts: without rows only the head.
+  compact fixed-size read-only tile (340×190 logical px, slightly see-through; layout "C" of the concept
+  https://claude.ai/artifact/1CK7QBiMpLcj7n4efMeybn with the rail on the right, 2026-10-20): a narrow rail
+  on the right with the three modes top down, each its icon above its count, exactly as wide as "999"
+  (`3ch`, tabular digits; the shown one highlighted; a warning instead of the count when its filters are
+  all off or the log is missing); next to it a 22 px line (a line below it) with the picked location after its icon in every
+  mode (mono face, clipped at its end; "No location picked" in warn colour), then the newest rows at 20 px
+  without lines between (the inventory's kind badges as small icons), 8 fit; more than that: the last one
+  fades out. No hint texts: without rows only the location line.
 - A thread puts it every 250 ms at the configured place (`overlayPosition`: top-left (default), top-center,
   top-right, bottom-left, bottom-center, bottom-right, six buttons in the settings laid out where they are;
   24 px margin, scaled with the game monitor's DPI) of the game window's client area as `HWND_TOPMOST`,
@@ -408,9 +446,13 @@ game since.
   it layered (a layered window refuses it with error 8; a failure is logged: the OCR would read it).
 - On/off is not stored (off at every start); switched in the scan row or by hotkey (the settings hold
   only position and hotkeys). Showing it switches the scan on (locked in the scan row while it is shown), hiding it switches
-  the scan off only if it started it. The mode starts as the main window's tab, then follows the screen the
-  scan sees (warehouse or inventory: Inventory, terminal: Refinery; nothing in view: it stays); the mode
-  hotkey steps through the three modes by hand (Blueprints only that way), the main window's tab stays.
+  the scan off only if it started it. The mode is the main window's tab, one and the same (since
+  2026-10-20; before, the overlay had its own and the two drifted apart). By itself: the screen the scan
+  sees (warehouse or inventory: Inventory, terminal: Refinery; nothing in view: it stays) and a blueprint
+  unlock Game.log adds while the app runs that is still to register (new or ambiguous, once matched:
+  Blueprints; the log's unlocks at its first state and the old logs' do not switch); both can be turned
+  off in the settings ("Modus automatisch wechseln", config `autoTab`, on by default). By hand: a click on a
+  tab, the mode hotkey stepping through the three. Also with the overlay off. A component row shows its name and stats only, a stack its name, quality and amount.
 - Each panel writes its rows into `overlayRows`; `overlay.ts` sends the view as texts (`overlay-view`, on
   every change and on `overlay-request`).
 - Hotkeys (`hotkeyOverlay`/`hotkeyMode`, accelerators with the browser's physical key code, default

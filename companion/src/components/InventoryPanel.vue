@@ -3,26 +3,27 @@
 // ScanBar.vue: the user hovers every stack in the freight manager's warehouse and every component in
 // the character inventory's storage pane): "Register all" in the head; below it the kind filter (what
 // the scan detects; all off: the warehouse and the inventory are not read), then the proposals of
-// every location as a compact table, one per stack or component (kind, resource, location, quality,
-// amount; a component's stats after its name: Register / Discard). Registering (one or all, each at
+// every location as a compact table with resizable columns, one row per stack or component (kind, name,
+// type, size, grade, a component's stats, quality, amount, location: Register / Discard). Registering (one or all, each at
 // its own location) asks first, with a switch per org to share right away. The overlay shows the
 // current location's only. The sightings behind the proposals, also the incomplete ones, are in the
-// debug window (settings).
+// debug window (settings). Without proposals: one line, how to get them as a quiet hint below.
 import { computed, ref, watchEffect } from "vue";
+import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { statValueText } from "../../../src/stock/component-stats";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import type { ComponentProposal } from "../components";
-import { t } from "../i18n";
+import { langRef, t } from "../i18n";
 import type { Proposal } from "../inventory";
 import {
   accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, KINDS, kinds, locationUuid, proposals,
   shareGuildIds, sightings, toggleKind, type Kind, type Located,
 } from "../inventorySync";
 import { overlayRows, tabCounts } from "../overlay";
-import { materialName, syncCatalog } from "../refinerySync";
-import { scanOn } from "../scan";
+import { catalogResponses, materialName, syncCatalog } from "../refinerySync";
 import { connected, meOrgs } from "../state";
 import { toast } from "../toasts";
 
@@ -31,6 +32,10 @@ interface Row {
   kind: Kind;
   id: string;
   name: string;
+  // From the catalog where it has them (components, items): "Cooler", "S3", "A"
+  type: string;
+  size: string;
+  grade: string;
   // A component's stats ("Coolant Rating +12.5 %"), or "no stats"
   detail: string | null;
   locationUuid: string;
@@ -51,16 +56,44 @@ function statsText(p: ComponentProposal): string {
   const parts = defs.filter((s) => p.readStats.includes(s.uuid) || s.uuid in p.stats).map((s) => `${s.name} ${statValueText(s.kind, p.stats[s.uuid] ?? "0")}`);
   return parts.length ? parts.join(" · ") : t("components.noStats");
 }
+// The catalog's materials in the UI language (name, type, size, grade of components and items)
+const catalogMaterials = computed(() => {
+  const r = catalogResponses.value;
+  return new Map((r ? (langRef.value === "de" ? r.de : r.en).materials : []).map((m) => [m.uuid, m]));
+});
+function described(uuid: string) {
+  const m = catalogMaterials.value.get(uuid);
+  return { type: m?.typeLabel ?? "", size: m?.size ? `S${m.size}` : "", grade: m?.gradeLetter ?? "" };
+}
 const rows = computed<Row[]>(() => [
   ...proposals.value.map((p): Row => ({
-    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), detail: null, locationUuid: p.locationUuid, location: locationName(p.locationUuid),
-    quality: String(p.quality), amount: amount(p.amount, p.unit), stack: p, component: null,
+    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), ...described(p.materialUuid), detail: null,
+    locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: String(p.quality), amount: amount(p.amount, p.unit), stack: p, component: null,
   })),
   ...componentProposals.value.map((p): Row => ({
-    kind: "comps", id: p.id, name: p.label, detail: statsText(p), locationUuid: p.locationUuid, location: locationName(p.locationUuid),
-    quality: "–", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
+    kind: "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), detail: statsText(p),
+    locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "–", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
   })),
 ]);
+
+// The table's columns (widths kept per table; no sorting: the newest come first); the location last,
+// it takes the room left
+const columns = computed<ColumnSpec[]>(() => [
+  { key: "kind", label: "", width: 20, fixed: true, sortable: false },
+  { key: "name", label: t("debug.col.name"), width: 120, sortable: false },
+  { key: "type", label: t("col.type"), width: 70, sortable: false },
+  { key: "size", label: t("col.size"), width: 40, sortable: false },
+  { key: "grade", label: t("col.grade"), width: 40, sortable: false },
+  { key: "stats", label: t("col.stats"), width: 120, sortable: false },
+  { key: "quality", label: t("col.quality"), width: 40, sortable: false },
+  { key: "amount", label: t("col.amount"), width: 60, sortable: false },
+  { key: "location", label: t("col.location"), width: 80, sortable: false },
+  { key: "register", label: "", width: 24, fixed: true, sortable: false },
+  { key: "drop", label: "", width: 24, fixed: true, sortable: false },
+]);
+// The rows' column gap (.row below)
+const ROW_GAP = 8;
+const cols = useTableColumns("qm.companion.inventory.columns", columns, { key: "name", dir: "asc" }, ROW_GAP);
 const what = (r: Row) => [r.name, r.detail ?? r.quality, r.amount].join(" · ");
 const tagClass: Record<Kind, string> = KIND_CLASS;
 const kindIcon = KIND_ICON;
@@ -70,7 +103,8 @@ watchEffect(() => {
   overlayRows.inventory = rows.value
     .filter((r) => r.locationUuid === locationUuid.value)
     .sort((a, b) => (seen.get(b.id) ?? 0) - (seen.get(a.id) ?? 0))
-    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: [r.quality, r.amount] }));
+    // A component: its name and stats; a stack: its name, quality and amount
+    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: r.component ? [] : [r.quality, r.amount] }));
   tabCounts.inventory = rows.value.length;
 });
 
@@ -135,28 +169,23 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
       </button>
     </div>
     <div v-if="!rows.length" class="empty-line">
-      {{ t(scanOn ? "inventory.hover" : "inventory.empty") }}
+      {{ t("inventory.empty") }}
+      <div class="empty-hint">{{ t("inventory.emptyHint") }}</div>
     </div>
-    <template v-else>
-      <div class="row table-head">
-        <span />
-        <span>{{ t("col.material") }}</span>
-        <span>{{ t("col.location") }}</span>
-        <span class="num">{{ t("col.quality") }}</span>
-        <span class="num">{{ t("col.amount") }}</span>
-        <span />
-        <span />
-      </div>
+    <div v-else :ref="cols.observe" class="table" :style="{ '--cols': cols.template.value }">
+      <ColumnHead class="table-head" :columns="columns" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth" />
       <!-- Only the rows scroll: head, filter and column titles stay -->
       <div class="rows">
         <div v-for="r in rows" :key="r.id" class="row">
-          <Tooltip :text="t(`inventory.kind.${r.kind}`)">
-            <span class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
-          </Tooltip>
-          <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
-          <span class="row-place">{{ r.location }}</span>
+          <span class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
+          <span class="cell row-name">{{ r.name }}</span>
+          <span class="cell">{{ r.type }}</span>
+          <span class="cell">{{ r.size }}</span>
+          <span class="cell">{{ r.grade }}</span>
+          <span class="cell">{{ r.detail }}</span>
           <span class="num">{{ r.quality }}</span>
           <span class="num">{{ r.amount }}</span>
+          <span class="cell">{{ r.location }}</span>
           <Tooltip :text="t('inventory.register')">
             <button type="button" class="icon-btn" :disabled="!connected || busy" @click="registering = [r]"><Icon name="check" :size="14" /></button>
           </Tooltip>
@@ -165,7 +194,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
           </Tooltip>
         </div>
       </div>
-    </template>
+    </div>
     <ConfirmDialog
       v-if="registering"
       :title="registeringTitle"
@@ -175,8 +204,8 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
     >
       <div class="confirm">
         <div v-for="r in registering" :key="r.id" class="confirm-row">
-          <span class="row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
-          <span class="row-place">{{ r.location }}</span>
+          <span class="cell row-name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+          <span class="cell">{{ r.location }}</span>
           <span class="num">{{ r.quality }}</span>
           <span class="num">{{ r.amount }}</span>
         </div>
@@ -193,6 +222,14 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
 </template>
 
 <style scoped>
+/* Below the empty text: how to get proposals, small and quiet */
+.empty-hint {
+  max-width: 420px;
+  margin: 6px auto 0;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
 /* Fills the main area, only its rows scroll */
 .inventory {
   flex: 1;
@@ -248,10 +285,19 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   color: var(--kind);
 }
 
-/* One compact row per stack or component, like the refinery's rows: kind badge, resource, quality, amount, two icon buttons */
+/* The column titles and the rows: the rows scroll */
+.table {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* One compact row per stack or component, like the refinery's rows; the columns from useTableColumns
+   (--cols), the gap as ROW_GAP */
 .row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) minmax(0, 110px) 40px 88px 24px 24px;
+  grid-template-columns: var(--cols);
   align-items: center;
   gap: 8px;
   min-height: 28px;
@@ -268,7 +314,9 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
 .table-head {
   min-height: 22px;
   padding-top: 6px;
+  padding-bottom: 2px;
   border-top: 1px solid var(--border-dim);
+  border-bottom: none;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -279,15 +327,15 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   justify-self: start;
 }
 
-/* The kind badge: its icon only (the tooltip names it) */
-/* The kind as a small icon-only badge */
+/* The kind as a small icon-only badge, hardly wider than its icon (no tooltip: the filter chips name the icons) */
 .tag.kind {
   height: 16px;
-  padding: 0 2px;
+  padding: 0 1px;
 }
 
-.row-name,
-.row-place {
+/* Every text cell clips at its end (the full text shows after a moment on hover) */
+.cell {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -297,12 +345,15 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   color: var(--text);
 }
 
-/* A component's stats after its name */
+/* A component's stats after its name (the register dialog) */
 .detail {
   color: var(--text-2);
 }
 
 .num {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

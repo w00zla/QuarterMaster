@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // The scan overlay's page (Rust: overlay.rs; the main window's side: overlay.ts): a compact fixed-size
-// tile on a transparent window, read-only (the window ignores the mouse): one head line with the
-// location (clipped at its end) and the three modes as small chips with their count (the shown one
-// highlighted; a warning instead of the count when its filters are all off or the log is missing),
-// then the newest rows, 20 px each, as many as fit (more than that: the last one fades out). No hint
-// texts: without rows only the head shows.
+// tile on a transparent window, read-only (the window ignores the mouse): on the right a narrow rail
+// with the three modes, each its icon above its count (as wide as "999"; the shown one highlighted; a
+// warning instead of the count when its filters are all off or the log is missing); next to it the
+// location line (clipped at its end), then the newest rows, 20 px each, as many as fit (more than that:
+// the last one fades out). No hint texts: without rows only the location shows.
 // Everything comes as text in the UI language from the main window ("overlay-view", on every change
 // and when this page asks).
 import { onMounted, ref } from "vue";
@@ -22,24 +22,26 @@ onMounted(async () => {
 
 <template>
   <section v-if="view" class="tile">
-    <div class="head">
-      <span class="place" :class="{ missing: view.placeMissing }">
+    <div class="main">
+      <div class="place" :class="{ missing: view.placeMissing }">
         <Icon :name="view.placeMissing ? 'warning' : 'locate'" :size="12" />
         <span>{{ view.place }}</span>
-      </span>
+      </div>
+      <!-- More rows than fit: the last one fades out -->
+      <div class="rows" :class="{ more: view.more }">
+        <div v-for="(r, i) in view.rows" :key="i" class="row">
+          <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="10" />{{ r.tag }}</span>
+          <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+          <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="rail">
       <span v-for="(x, i) in view.tabs" :key="i" class="mode" :class="{ active: x.active, warn: x.warn }">
         <Icon :name="x.icon" :size="10" />
         <Icon v-if="x.warn" name="warning" :size="10" />
-        <template v-else>{{ x.count }}</template>
+        <span v-else>{{ x.count }}</span>
       </span>
-    </div>
-    <!-- More rows than fit: the last one fades out -->
-    <div class="rows" :class="{ more: view.more }">
-      <div v-for="(r, i) in view.rows" :key="i" class="row">
-        <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="10" />{{ r.tag }}</span>
-        <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
-        <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
-      </div>
     </div>
   </section>
 </template>
@@ -60,7 +62,6 @@ body,
 /* Slightly see-through: the game stays visible behind the tile */
 .tile {
   display: flex;
-  flex-direction: column;
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;
@@ -71,24 +72,23 @@ body,
   line-height: 1.35;
 }
 
-/* One line: the location, then the modes */
-.head {
+/* The location line and the rows below it */
+.main {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  flex-shrink: 0;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--border-dim);
+  flex-direction: column;
 }
 
 /* The location in the mono face after its icon, clipped only at its end */
 .place {
-  flex: 1;
-  min-width: 0;
   display: flex;
   align-items: center;
   gap: 5px;
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border-dim);
   font-family: var(--font-mono);
   color: var(--text);
 }
@@ -110,17 +110,29 @@ body,
   color: var(--warn);
 }
 
+/* The modes on the right, top down */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 4px 3px;
+  border-left: 1px solid var(--border-dim);
+}
+
+/* Icon above the count; exactly as wide as three digits ("999") */
 .mode {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  height: 18px;
-  padding: 0 5px;
+  width: 3ch;
+  padding: 2px 2px;
   border-radius: var(--radius-control);
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
 .mode.active {

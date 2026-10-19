@@ -2,7 +2,8 @@
 // The blueprint unlocks from Game.log (and, on request, the old logs), matched to the catalog and
 // compared with the user's registered blueprints; only the unregistered ones are listed (registered and
 // default ones hidden), newest first. New ones are registered one by one right away
-// (ambiguous ones after picking the variant) or all at once after a confirmation.
+// (ambiguous ones after picking the variant) or all at once after a confirmation. Below the head the
+// filter "Unlocks" (off: Game.log's unlocks are not read, state.ts), each row with the same icon-only badge.
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -11,19 +12,23 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { scanBackups } from "../backend";
+import { unlockRows, type UnlockState } from "../debugReport";
 import { langRef, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
 import { overlayRows, tabCounts } from "../overlay";
 import { catalogResponses } from "../refinerySync";
-import { api, connected, loadLog, log } from "../state";
+import { api, connected, loadLog, log, toggleUnlocks, unlocksOn } from "../state";
 import { toast, toastError } from "../toasts";
 
-type RowState = "loading" | "owned" | "default" | "unknown" | "new" | "pick";
+type RowState = UnlockState;
 interface Row {
   name: string;
   at: string;
+  backup: boolean;
   state: RowState;
   candidates: CatalogEntry[];
+  // Every catalog match, default ones included (the debug window lists them)
+  matches: CatalogEntry[];
 }
 
 // The shared catalog's blueprints (refinerySync.ts), the UI language first
@@ -49,7 +54,7 @@ async function loadOwned() {
   owned.value = new Set((await api<BlueprintListResponse>("GET", "/blueprints")).uuids);
 }
 
-const rows = computed<Row[]>(() => (log.value?.unlocks ?? [])
+const allRows = computed<Row[]>(() => (log.value?.unlocks ?? [])
   .map((u) => {
     const all = matchUnlock(u.name, index.value);
     // Default blueprints are never registered (everyone has them)
@@ -60,11 +65,11 @@ const rows = computed<Row[]>(() => (log.value?.unlocks ?? [])
       : all.some((c) => owned.value.has(c.uuid)) ? "owned"
       : !candidates.length ? "default"
       : candidates.length === 1 ? "new" : "pick";
-    return { name: u.name, at: u.at, state, candidates };
+    return { name: u.name, at: u.at, backup: u.backup, state, candidates, matches: all };
   })
-  // Only what is not registered: registered and default blueprints are hidden
-  .filter((r) => r.state !== "owned" && r.state !== "default")
   .sort((a, b) => b.at.localeCompare(a.at)));
+// Only what is not registered: registered and default blueprints are hidden
+const rows = computed(() => allRows.value.filter((r) => r.state !== "owned" && r.state !== "default"));
 
 // The scan overlay shows the rows still to register (new, ambiguous), newest first
 watchEffect(() => {
@@ -149,6 +154,10 @@ function when(at: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 const label = (c: CatalogEntry) => labels.value.get(c.uuid) ?? c.name;
+// The debug window lists every unlock
+watchEffect(() => {
+  unlockRows.value = allRows.value.map((r) => ({ name: r.name, at: r.at, backup: r.backup, state: r.state, labels: r.matches.map(label) }));
+});
 // Why registering is locked (on the disabled controls)
 const lockTip = computed(() => (connected.value ? null : t("conn.off")));
 
@@ -173,7 +182,7 @@ async function measureStatus() {
   const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1;
   statusWidth.value = Math.ceil(Math.max(...texts, pick, button, head));
 }
-const cols = computed(() => ({ "--cols": `minmax(0, 1fr) 170px ${statusWidth.value}px` }));
+const cols = computed(() => ({ "--cols": `16px minmax(0, 1fr) 170px ${statusWidth.value}px` }));
 
 let unlisten: UnlistenFn | undefined;
 onMounted(async () => {
@@ -197,7 +206,7 @@ watch(connected, (c) => {
         <div class="bar"><div class="fill" :style="{ width: `${progressPct}%` }" /></div>
       </div>
       <span v-else class="head-title">{{ t("unlocks.title") }} <span class="head-count">{{ rows.length }}</span></span>
-      <button type="button" class="btn small outline" :disabled="scanning" @click="scan">
+      <button type="button" class="btn small outline" :disabled="scanning || !unlocksOn" @click="scan">
         <Icon name="history" :size="14" /> {{ t("unlocks.scan") }}
       </button>
       <Tooltip :text="lockTip">
@@ -206,14 +215,24 @@ watch(connected, (c) => {
         </button>
       </Tooltip>
     </div>
+    <!-- What the scan detects: off, Game.log's unlocks are not read -->
+    <div class="chips filter">
+      <span class="filter-label">{{ t("inventory.scanned") }}</span>
+      <button type="button" class="chip" :class="{ active: unlocksOn }" :aria-pressed="unlocksOn" @click="toggleUnlocks">
+        <Icon name="blueprint" :size="12" /> {{ t("unlocks.kind") }}
+        <Icon :name="unlocksOn ? 'check' : 'close'" :size="12" />
+      </button>
+    </div>
     <div v-if="!rows.length" class="empty-line">{{ t("unlocks.empty") }}</div>
     <div v-else class="table" :style="cols">
       <div class="row cols-head">
+        <span />
         <span>{{ t("col.blueprint") }}</span>
         <span>{{ t("col.at") }}</span>
         <span>{{ t("col.state") }}</span>
       </div>
       <div v-for="row in rows" :key="row.name" class="row item" :class="{ done: row.state !== 'new' && row.state !== 'pick' }">
+        <span class="tag kind"><Icon name="blueprint" :size="11" /></span>
         <span class="name" :title="row.candidates.length === 1 ? label(row.candidates[0]!) : row.name">{{ row.name }}</span>
         <span class="faint">{{ when(row.at) }}</span>
         <span class="state-cell">
@@ -257,6 +276,44 @@ watch(connected, (c) => {
 <style scoped>
 .unlocks {
   flex: 1;
+}
+
+/* The filter below the head, like the inventory's: one chip, on = solid with a check, off = dashed and
+   dimmed with an x */
+.filter {
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px 8px;
+  font-size: 11px;
+}
+
+.filter-label {
+  color: var(--text-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter .chip {
+  height: 22px;
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-style: dashed;
+  color: var(--text-3);
+}
+
+.filter .chip.active {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--text-2) 45%, transparent);
+  background: color-mix(in srgb, var(--text-2) 14%, transparent);
+  color: var(--text-2);
+}
+
+/* The row's icon-only badge, hardly wider than its icon */
+.tag.kind {
+  height: 16px;
+  padding: 0 1px;
 }
 
 .table {

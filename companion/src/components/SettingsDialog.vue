@@ -1,9 +1,10 @@
 <script setup lang="ts">
-// API token (created in the web app's Companion dialog and pasted here), game folder and the UI
-// language; saving checks the connection and reloads the log state (the path may have changed). The
+// API token (created in the web app's Companion dialog and pasted here), game folder, the UI
+// language and the automatic tab switch (overlay.ts); saving checks the connection and reloads the log state (the path may have changed). The
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor) and hotkeys, saved (on/off is the scan row's
-// toggle and the hotkey). Below the groups, quiet (secondary for the user): the debug window.
+// toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes the
+// dialog).
 import { computed, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
@@ -21,6 +22,7 @@ const emit = defineEmits<{ close: [] }>();
 const token = ref(config.value?.token ?? "");
 const gameDir = ref(config.value?.gameDir ?? "");
 const language = ref(config.value?.language ?? "");
+const autoTab = ref(config.value?.autoTab ?? true);
 const overlayPosition = ref<OverlayPosition>(config.value?.overlayPosition ?? "top-left");
 const hotkeyOverlay = ref(config.value?.hotkeyOverlay ?? "");
 const hotkeyMode = ref(config.value?.hotkeyMode ?? "");
@@ -39,6 +41,7 @@ const POSITIONS: OverlayPosition[] = ["top-left", "top-center", "top-right", "bo
 const changed = computed(() => token.value.trim() !== (config.value?.token ?? "")
   || gameDir.value.trim() !== (config.value?.gameDir ?? "")
   || language.value !== (config.value?.language ?? "")
+  || autoTab.value !== (config.value?.autoTab ?? true)
   || overlayPosition.value !== config.value?.overlayPosition
   || hotkeyOverlay.value !== config.value?.hotkeyOverlay
   || hotkeyMode.value !== config.value?.hotkeyMode);
@@ -59,6 +62,7 @@ async function save() {
       overlayPosition: overlayPosition.value,
       hotkeyOverlay: hotkeyOverlay.value,
       hotkeyMode: hotkeyMode.value,
+      autoTab: autoTab.value,
     }));
     await Promise.all([refreshConnection(), loadLog()]);
     toast(t("settings.saved"));
@@ -70,6 +74,15 @@ async function save() {
   }
 }
 
+async function openDebug() {
+  try {
+    await openDebugWindow();
+    emit("close");
+  } catch (e) {
+    toastError(e);
+  }
+}
+
 async function pickFolder() {
   const picked = await open({ directory: true, defaultPath: gameDir.value || undefined });
   if (typeof picked === "string") gameDir.value = picked;
@@ -78,6 +91,13 @@ async function pickFolder() {
 
 <template>
   <ConfirmDialog :title="t('settings.title')" icon="settings" :buttons="buttons" @choose="emit('close')">
+    <template #head>
+      <Tooltip :text="t('settings.debugHint')">
+        <button type="button" class="btn small outline" @click="openDebug">
+          <Icon name="log" :size="12" /> {{ t("debug.open") }}
+        </button>
+      </Tooltip>
+    </template>
     <form id="settings" class="form single flush groups" @submit.prevent="save">
       <section class="group">
         <div class="group-title">{{ t("settings.app") }}</div>
@@ -89,6 +109,10 @@ async function pickFolder() {
           <span class="label">{{ t("settings.language") }}</span>
           <Dropdown v-model="language" :options="languageOptions" variant="outline" />
         </div>
+        <label class="line between">
+          <span class="label">{{ t("settings.autoTab") }}</span>
+          <input v-model="autoTab" class="switch" type="checkbox" />
+        </label>
       </section>
       <section class="group">
         <div class="group-title">Star Citizen</div>
@@ -123,13 +147,6 @@ async function pickFolder() {
           <HotkeyInput v-model="hotkeyMode" class="hotkey-field" />
         </div>
       </section>
-      <!-- Secondary: no tile of its own, one quiet line -->
-      <div class="line debug">
-        <span class="hint">{{ t("settings.debugHint") }}</span>
-        <button type="button" class="btn small outline" @click="openDebugWindow().catch(toastError)">
-          <Icon name="log" :size="12" /> {{ t("debug.open") }}
-        </button>
-      </div>
     </form>
   </ConfirmDialog>
 </template>
@@ -177,17 +194,6 @@ async function pickFolder() {
   min-width: 0;
 }
 
-/* Hints quieter than the labels: smaller and dimmed */
-.hint {
-  font-size: 11px;
-  color: var(--text-3);
-}
-
-.line .hint {
-  flex: 1;
-  min-width: 0;
-}
-
 /* A setting's name in a row: like a field's label above its control */
 .label {
   font-size: 12px;
@@ -213,10 +219,10 @@ async function pickFolder() {
   grid-template-columns: repeat(3, 1fr);
   align-content: space-between;
   justify-items: center;
-  width: 176px;
-  height: 99px;
+  width: 144px;
+  height: 81px;
   box-sizing: border-box;
-  padding: 7px;
+  padding: 6px;
   border: 2px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--bg-base);
@@ -231,8 +237,8 @@ async function pickFolder() {
 }
 
 .stand {
-  width: 44px;
-  height: 7px;
+  width: 36px;
+  height: 6px;
   border: 2px solid var(--border);
   border-top: none;
   border-radius: 0 0 var(--radius-control) var(--radius-control);
@@ -240,8 +246,8 @@ async function pickFolder() {
 
 .place {
   display: block;
-  width: 30px;
-  height: 18px;
+  width: 24px;
+  height: 14px;
   padding: 0;
   border: 1px dashed var(--border);
   border-radius: 3px;
@@ -256,11 +262,6 @@ async function pickFolder() {
 .place.active {
   border: 1px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-
-/* The debug window: secondary, a quiet line below the groups */
-.line.debug {
-  padding: 0 4px;
 }
 
 .hotkey-field {

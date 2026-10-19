@@ -2,7 +2,7 @@
 //! `%APPDATA%\com.w00zla.quartermaster.companion\config.json` on Windows,
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
 //! Quartermaster server, the user's API token, the SC channel folder whose
-//! `Game.log` is followed, the UI language and the scan overlay's position and hotkeys. The server is fixed in the app; only a `server` entry
+//! `Game.log` is followed, the UI language, the automatic tab switch and the scan overlay's position and hotkeys. The server is fixed in the app; only a `server` entry
 //! in the file changes it (e.g. a dev server, read at start), the settings UI
 //! does not show it and saving never writes or overwrites that entry.
 
@@ -50,6 +50,10 @@ pub struct Config {
     pub hotkey_overlay: String,
     #[serde(default)]
     pub hotkey_mode: String,
+    /// The main window's tab (= the overlay's mode) switches by itself: with the screen the scan sees
+    /// and with a new blueprint unlock (the frontend's `overlay.ts`).
+    #[serde(default = "default_true")]
+    pub auto_tab: bool,
 }
 
 pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
@@ -62,6 +66,10 @@ fn default_hotkey_overlay() -> String {
     "Ctrl+Shift+KeyQ".into()
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -72,6 +80,7 @@ impl Default for Config {
             overlay_position: default_overlay_position(),
             hotkey_overlay: default_hotkey_overlay(),
             hotkey_mode: String::new(),
+            auto_tab: true,
         }
     }
 }
@@ -147,6 +156,8 @@ mod tests {
         let c = parse(r#"{"server":"https://qm.test"}"#).unwrap();
         assert_eq!(c.server, "https://qm.test");
         assert_eq!(c.game_dir, DEFAULT_GAME_DIR);
+        // Missing in files written before it existed: on
+        assert!(c.auto_tab);
     }
 
     #[test]

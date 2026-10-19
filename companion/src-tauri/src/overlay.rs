@@ -24,9 +24,10 @@ use crate::capture;
 
 /// The overlay window's label (capabilities/default.json lists it)
 pub const LABEL: &str = "overlay";
-// The tile's fixed size and its distance to the game window's edges (logical pixels): a 24 px head
-// and 8 rows of 20 px (OverlayApp.vue, overlay.ts MAX_ROWS) with the border and padding
-const WIDTH: f64 = 310.0;
+// The tile's fixed size and its distance to the game window's edges (logical pixels): a 22 px location
+// line and 8 rows of 20 px (OverlayApp.vue, overlay.ts MAX_ROWS) with the border and padding, the
+// ~28 px mode rail on the right
+const WIDTH: f64 = 340.0;
 const HEIGHT: f64 = 190.0;
 const MARGIN: f64 = 24.0;
 // How often the place and the foreground window are checked
@@ -300,14 +301,14 @@ mod tests {
     #[test]
     fn placed_in_a_corner_or_centred() {
         let game = rect(1000, 0, 4840, 1600);
-        assert_eq!(place(game, 1.0, "top-left"), rect(1024, 24, 1334, 214));
-        assert_eq!(place(game, 1.0, "top-right"), rect(4506, 24, 4816, 214));
-        assert_eq!(place(game, 1.0, "bottom-left"), rect(1024, 1386, 1334, 1576));
-        assert_eq!(place(game, 1.0, "bottom-right"), rect(4506, 1386, 4816, 1576));
-        assert_eq!(place(game, 1.0, "top-center"), rect(2765, 24, 3075, 214));
-        assert_eq!(place(game, 1.0, "bottom-center"), rect(2765, 1386, 3075, 1576));
+        assert_eq!(place(game, 1.0, "top-left"), rect(1024, 24, 1364, 214));
+        assert_eq!(place(game, 1.0, "top-right"), rect(4476, 24, 4816, 214));
+        assert_eq!(place(game, 1.0, "bottom-left"), rect(1024, 1386, 1364, 1576));
+        assert_eq!(place(game, 1.0, "bottom-right"), rect(4476, 1386, 4816, 1576));
+        assert_eq!(place(game, 1.0, "top-center"), rect(2750, 24, 3090, 214));
+        assert_eq!(place(game, 1.0, "bottom-center"), rect(2750, 1386, 3090, 1576));
         // Unknown: top left; scaled with the monitor
-        assert_eq!(place(game, 1.5, "?"), rect(1036, 36, 1501, 321));
+        assert_eq!(place(game, 1.5, "?"), rect(1036, 36, 1546, 321));
     }
 
     #[test]

@@ -49,9 +49,11 @@ const logTip = computed(() => (log.value ? t("log.notFound", { path: log.value.p
         type="button" class="btn small outline scan-btn" :class="{ on: scanOn }" :aria-pressed="scanOn"
         :disabled="overlayOn || !connected || catalogPending" @click="setScanOn(!scanOn)"
       >
-        <Icon v-if="overlayOn" name="lock" :size="12" />
-        <span v-else-if="scanOn" class="pulse" />
-        <Icon v-else name="eye" :size="14" />
+        <span class="state-icon">
+          <Icon v-if="overlayOn" name="lock" :size="12" />
+          <span v-else-if="scanOn" class="pulse" />
+          <Icon v-else name="eye" :size="14" />
+        </span>
         {{ t("scan.start") }}
       </button>
     </Tooltip>
@@ -117,6 +119,15 @@ const logTip = computed(() => (log.value ? t("log.notFound", { path: log.value.p
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
+/* The state's icon (lock, dot, eye) in one fixed place: the button keeps its width */
+.state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
 .pulse {
   width: 7px;
   height: 7px;
@@ -165,10 +176,11 @@ const logTip = computed(() => (log.value ? t("log.notFound", { path: log.value.p
   cursor: pointer;
 }
 
+/* A fixed width: the state and loading tags to the left change their width without moving it (the
+   state tag clips when room runs out) */
 .location {
-  flex: 1;
-  min-width: 170px;
-  max-width: 300px;
+  flex: none;
+  width: 240px;
 }
 
 /* The tooltip's anchor and the picker fill the place */

@@ -63,6 +63,8 @@ onUnmounted(() => {
             <span class="title">{{ title }}</span>
             <span v-if="subtitle" class="subtitle">{{ subtitle }}</span>
           </div>
+          <!-- Optional controls at the head's right end -->
+          <slot name="head" />
         </div>
         <div v-if="$slots.default" class="body">
           <slot />

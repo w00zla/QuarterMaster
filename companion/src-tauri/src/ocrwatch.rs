@@ -568,7 +568,7 @@ struct Worker {
     ui_scale: Option<f32>,
 }
 
-fn unix_ms(t: SystemTime) -> u64 {
+pub(crate) fn unix_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 

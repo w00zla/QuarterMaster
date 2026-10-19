@@ -57,8 +57,9 @@ export function fillerKey(columns: ColumnSpec[]): string | undefined {
 }
 
 // `columns` may be reactive (a getter or ref): columns that appear later
-// start at their default width, or the stored one if the key was seen before.
-export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<ColumnSpec[]>, defaultSort: SortState) {
+// start at their default width, or the stored one if the key was seen before. `gap`: the rows' column
+// gap where it differs from ui.css's (the companion's compact rows).
+export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<ColumnSpec[]>, defaultSort: SortState, gap = GAP) {
   const stored = load(storageKey);
   const widths = ref<Record<string, number>>({});
   const cols = computed(() => toValue(columns));
@@ -102,7 +103,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     const out: Record<string, number> = {};
     for (const c of list) out[c.key] = c.key === filler.value ? c.width : (widths.value[c.key] ?? c.width);
     if (room.value === null) return out;
-    const over = list.reduce((sum, c) => sum + out[c.key]!, 0) + GAP * (list.length - 1) - room.value;
+    const over = list.reduce((sum, c) => sum + out[c.key]!, 0) + gap * (list.length - 1) - room.value;
     const resizable = list.filter((c) => !c.fixed && c.key !== filler.value);
     const sum = resizable.reduce((s, c) => s + out[c.key]!, 0);
     if (over <= 0 || !sum) return out;
@@ -116,7 +117,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   // All columns (the filler at its minimum) plus gaps: the row width below which the table scrolls
   // horizontally (only when even the smallest widths do not fit).
   const minWidth = computed(
-    () => cols.value.reduce((sum, c) => sum + shown.value[c.key]!, 0) + GAP * (cols.value.length - 1),
+    () => cols.value.reduce((sum, c) => sum + shown.value[c.key]!, 0) + gap * (cols.value.length - 1),
   );
 
   function toggleSort(key: string) {

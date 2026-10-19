@@ -39,11 +39,20 @@ const LOCATION_START: &str = "Location[";
 /// Logged when the game has no location for the player
 const NO_LOCATION: &str = "INVALID_LOCATION_ID";
 
-/// One logged unlock: the line's timestamp (as logged, UTC) and the name.
+/// One logged unlock: the line's timestamp (as logged, UTC), the name and whether it came from an
+/// old log (`logbackups`) rather than the current `Game.log`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Unlock {
     pub at: String,
     pub name: String,
+    pub backup: bool,
+}
+
+/// One logged location line: its timestamp (as logged, UTC) and the location key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LocationLine {
+    pub at: String,
+    pub key: String,
 }
 
 /// The unlock in a log line, if it is one.
@@ -54,7 +63,7 @@ pub fn unlock(line: &str) -> Option<Unlock> {
     if name.is_empty() {
         return None;
     }
-    Some(Unlock { at: line_timestamp(line).unwrap_or_default().to_string(), name: name.to_string() })
+    Some(Unlock { at: line_timestamp(line).unwrap_or_default().to_string(), name: name.to_string(), backup: false })
 }
 
 /// Every unlock in a chunk of log text, in log order.
@@ -70,9 +79,11 @@ pub fn location(line: &str) -> Option<&str> {
     (!key.is_empty() && key != NO_LOCATION).then_some(key)
 }
 
-/// The last location named in a chunk of log text.
-pub fn last_location(text: &str) -> Option<&str> {
-    text.lines().rev().find_map(location)
+/// Every location line in a chunk of log text, in log order.
+pub fn location_lines(text: &str) -> Vec<LocationLine> {
+    text.lines()
+        .filter_map(|line| Some(LocationLine { at: line_timestamp(line).unwrap_or_default().to_string(), key: location(line)?.to_string() }))
+        .collect()
 }
 
 /// The `<...>` timestamp a log line starts with, if any.
@@ -108,7 +119,7 @@ pub fn scan_folder(dir: &Path, mut progress: impl FnMut(usize, usize)) -> Result
     let mut failed = 0;
     for (i, path) in paths.iter().enumerate() {
         match std::fs::read(path) {
-            Ok(bytes) => all.extend(unlocks_in_bytes(&bytes)),
+            Ok(bytes) => all.extend(unlocks_in_bytes(&bytes).into_iter().map(|u| Unlock { backup: true, ..u })),
             Err(e) => {
                 log::warn!("{}: {e}", path.display());
                 failed += 1;
@@ -146,9 +157,9 @@ mod tests {
         assert_eq!(
             found,
             vec![
-                Unlock { at: "2026-03-26T20:06:07.838Z".into(), name: "Arclight Pistol Battery (30 cap)".into() },
-                Unlock { at: "2026-03-29T11:35:27.679Z".into(), name: "Arclight \"Stormfall\" Pistol".into() },
-                Unlock { at: "2026-04-03T20:18:49.256Z".into(), name: "Ind/1/B Guardian".into() },
+                Unlock { at: "2026-03-26T20:06:07.838Z".into(), name: "Arclight Pistol Battery (30 cap)".into(), backup: false },
+                Unlock { at: "2026-03-29T11:35:27.679Z".into(), name: "Arclight \"Stormfall\" Pistol".into(), backup: false },
+                Unlock { at: "2026-04-03T20:18:49.256Z".into(), name: "Ind/1/B Guardian".into(), backup: false },
             ]
         );
     }
@@ -168,7 +179,7 @@ mod tests {
 
     #[test]
     fn first_unlock_per_name_in_time_order() {
-        let u = |at: &str, name: &str| Unlock { at: at.into(), name: name.into() };
+        let u = |at: &str, name: &str| Unlock { at: at.into(), name: name.into(), backup: false };
         let all = vec![u("2026-05-02", "B"), u("2026-05-01", "A"), u("2026-04-01", "B")];
         assert_eq!(first_per_name(all), vec![u("2026-04-01", "B"), u("2026-05-01", "A")]);
     }
@@ -183,14 +194,15 @@ mod tests {
         let mut calls = Vec::new();
         let (found, failed) = scan_folder(&dir, |done, total| calls.push((done, total))).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(found, unlocks(LOG));
+        // Marked as found in an old log
+        assert_eq!(found, unlocks(LOG).into_iter().map(|u| Unlock { backup: true, ..u }).collect::<Vec<_>>());
         assert_eq!(failed, 0);
         assert_eq!(calls, vec![(1, 2), (2, 2)]);
         assert!(scan_folder(Path::new("/definitely/not/here"), |_, _| {}).is_err());
     }
 
     #[test]
-    fn reads_the_last_location() {
+    fn reads_the_location_lines() {
         // Verbatim shapes from the user's Windows Game.log (4.x)
         let log = r#"<2026-10-18T08:53:57.879Z> [Notice] <RequestLocationInventory> Player[w00zla] requested inventory for Location[Nyx_Levski] [Team_CoreGameplayFeatures][Inventory]
 <2026-10-18T09:00:27.149Z> [Notice] <Update Inventory Location> Player [w00zla] is changing location. Landing [3723364946] -> [3978634644]. Location [48919369] -> [3978634644]. Pending [0] [Team_CoreGameplayFeatures][Inventory]
@@ -200,8 +212,9 @@ mod tests {
         assert_eq!(location(log.lines().next().unwrap()), Some("Nyx_Levski"));
         assert_eq!(location(log.lines().nth(1).unwrap()), None);
         assert_eq!(location(log.lines().nth(3).unwrap()), None);
-        assert_eq!(last_location(log), Some("RR_JP_NyxPyro"));
-        assert_eq!(last_location("<t> nothing here\n"), None);
+        let l = |at: &str, key: &str| LocationLine { at: at.into(), key: key.into() };
+        assert_eq!(location_lines(log), vec![l("2026-10-18T08:53:57.879Z", "Nyx_Levski"), l("2026-10-18T09:00:27.150Z", "RR_JP_NyxPyro")]);
+        assert_eq!(location_lines("<t> nothing here\n"), vec![]);
     }
 
     #[test]

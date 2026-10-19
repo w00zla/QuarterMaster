@@ -1,19 +1,22 @@
 // The scan overlay in the main window (Rust: overlay.rs; its page: OverlayApp.vue). Turning it on
 // switches the scan on (scan.ts), turning it off switches it off again if the overlay started it. Its
-// mode is one of the main window's tabs, apart from the tab shown there: it starts with that tab, then
-// follows the screen the scan sees (warehouse or character inventory: inventory; refinery terminal:
-// refinery); the mode hotkey steps through the modes by hand (blueprints only that way). Each panel
+// mode is the main window's tab, one and the same. It switches by itself with the screen the scan sees
+// (warehouse or character inventory: inventory; refinery terminal: refinery) and with a blueprint unlock
+// Game.log adds while the app runs that is still to register (new or ambiguous: blueprints), unless the
+// settings turned that off (`autoTab`); by hand with
+// a click on a tab or the mode hotkey, stepping through them. Each panel
 // puts its rows into `overlayRows`; the overlay gets them as one read-only view (texts in the UI
 // language) on every change and when it asks. Off at every start.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, reactive, ref, watch } from "vue";
 import type { IconName } from "../../adminapp/src/components/Icon.vue";
 import { setOverlayWindow } from "./backend";
+import { unlockRows } from "./debugReport";
 import { t } from "./i18n";
 import { kinds, locationUuid } from "./inventorySync";
 import { jobsOn, syncCatalog } from "./refinerySync";
 import { scanOn, screenTab, setScanOn } from "./scan";
-import { log } from "./state";
+import { config, log, unlocksOn } from "./state";
 import { toastError } from "./toasts";
 
 // The main window's tabs (= the overlay's modes) in the order the mode hotkey steps through them;
@@ -30,8 +33,8 @@ export function pickTab(id: Tab) {
 }
 
 export const overlayOn = ref(false);
-// What the overlay shows
-const mode = ref<Tab>(tab.value);
+// The automatic switches are on (settings; on by default)
+const autoTab = () => config.value?.autoTab !== false;
 // The overlay switched the scan on (and switches it off with itself)
 let startedScan = false;
 
@@ -70,14 +73,14 @@ export interface OverlayView {
 export const overlayRows = reactive<Record<Tab, OverlayRow[]>>({ inventory: [], refinery: [], unlocks: [] });
 // How many rows each panel's table lists (shown in its tab)
 export const tabCounts = reactive<Record<Tab, number>>({ inventory: 0, refinery: 0, unlocks: 0 });
-// As many as the overlay's fixed tile shows below its head (overlay.rs: 24 px head + 8 × 20 px)
+// As many as the overlay's fixed tile shows below its location line (overlay.rs: 22 px line + 8 × 20 px)
 const MAX_ROWS = 8;
 
 const ICONS: Record<Tab, IconName> = { inventory: "item", refinery: "drop", unlocks: "blueprint" };
 
 const view = computed<OverlayView>(() => {
-  const m = mode.value;
-  const cannot: Record<Tab, boolean> = { inventory: !kinds.value.size, refinery: !jobsOn.value, unlocks: !!log.value && !log.value.found };
+  const m = tab.value;
+  const cannot: Record<Tab, boolean> = { inventory: !kinds.value.size, refinery: !jobsOn.value, unlocks: !unlocksOn.value || (!!log.value && !log.value.found) };
   const tabs = TAB_ORDER.map((x) => ({ icon: ICONS[x], count: tabCounts[x], active: x === m, warn: cannot[x] }));
   // The location in every mode
   const placeMissing = !locationUuid.value;
@@ -102,7 +105,7 @@ export async function setOverlay(on: boolean) {
     await setOverlayWindow(on);
     if (!on) return;
     overlayOn.value = true;
-    mode.value = screenTab.value ?? tab.value;
+    if (screenTab.value && autoTab()) pickTab(screenTab.value);
     // The page may have asked before this was on
     publish();
     if (!scanOn.value) {
@@ -116,9 +119,23 @@ export async function setOverlay(on: boolean) {
 
 export async function watchOverlay() {
   watch(view, publish);
-  // The mode follows the screen the scan sees (nothing in view: it stays)
+  // The tab follows the screen the scan sees (nothing in view: it stays)
   watch(screenTab, (s) => {
-    if (s) mode.value = s;
+    if (s && autoTab()) pickTab(s);
+  });
+  // A new unlock still to register picks the blueprints tab: only what Game.log adds while the app runs
+  // (the log's unlocks at its first state count as known, the old logs' too), once matched to the catalog
+  let known: Set<string> | null = null;
+  watch(log, (l) => {
+    if (l && !known) known = new Set(l.unlocks.map((u) => u.name));
+  }, { immediate: true });
+  watch(unlockRows, (rows) => {
+    if (!known) return;
+    for (const r of rows) {
+      if (known.has(r.name) || r.state === "loading") continue;
+      known.add(r.name);
+      if (!r.backup && (r.state === "new" || r.state === "pick") && autoTab()) pickTab("unlocks");
+    }
   });
   // The scan stopped another way (it cannot while the overlay is on, but the overlay must not switch it off later)
   watch(scanOn, (on) => {
@@ -127,6 +144,6 @@ export async function watchOverlay() {
   await listen("overlay-request", publish);
   await listen<"toggle" | "mode">("overlay-hotkey", (e) => {
     if (e.payload === "toggle") void setOverlay(!overlayOn.value);
-    else mode.value = TAB_ORDER[(TAB_ORDER.indexOf(mode.value) + 1) % TAB_ORDER.length]!;
+    else pickTab(TAB_ORDER[(TAB_ORDER.indexOf(tab.value) + 1) % TAB_ORDER.length]!);
   });
 }
