@@ -142,8 +142,8 @@ function toggleScan() {
     <div class="head">
       <span class="head-title">{{ t("inventory.title") }} <span class="head-count">{{ rows.length }}</span></span>
       <Tooltip :text="autoTip">
-        <button type="button" class="btn small outline square auto" :class="{ active: autoLocation }" :aria-pressed="autoLocation" @click="toggleAutoLocation">
-          <Icon name="locate" :size="14" />
+        <button type="button" class="icon-btn auto" :class="{ active: autoLocation }" :aria-pressed="autoLocation" @click="toggleAutoLocation">
+          <Icon name="locate" :size="13" />
         </button>
       </Tooltip>
       <Picker
@@ -249,10 +249,15 @@ function toggleScan() {
   max-width: 260px;
 }
 
-/* The auto location toggle: on = accent like the kind chips */
+/* The auto location toggle: a plain icon (dim), on = accent with a faint backdrop */
+.auto {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-control);
+}
+
 .auto.active {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
 }
 

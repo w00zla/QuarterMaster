@@ -230,7 +230,7 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 
 ## Inventory panel, locations, registering
 
-- Head: title with count, the auto location toggle (icon button `locate`, on = accent; kept in
+- Head: title with count, the auto location toggle (a plain `icon-btn` with `locate`, 20 px, dim; on = accent with a faint backdrop; kept in
   localStorage `qm.companion.inventory.autoLocation`; its tooltip says what it does, or while on what
   Game.log named: the location, "not selectable" with the key, or nothing logged yet), the location picker
   (`Picker`, kept in localStorage `qm.companion.inventory.location`), Scan / Stop, "Register all". With the
