@@ -178,9 +178,9 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
       `📕 ${olga} removed blueprint **${en}**`,
     ]);
     assert.deepEqual(sent.get(CHANNEL_H)!.join('\n').split('\n'), [
-      `📘 ${olga} trägt Blueprint ein: **${de}**`,
+      `📘 ${olga} trägt Bauplan ein: **${de}**`,
       `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** Q950 · Test Station`,
-      `📕 ${olga} trägt Blueprint aus: **${de}**`,
+      `📕 ${olga} trägt Bauplan aus: **${de}**`,
     ]);
   });
 });

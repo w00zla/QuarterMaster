@@ -102,7 +102,7 @@ describe('/qm-bp list page', () => {
   });
 
   it('says so when nothing is registered and escapes names', () => {
-    assert.equal(text(listPage([], 'Ha_ns', '1', 0, 'de', LINK)), 'Ha\\_ns hat noch keine Blueprints registriert.');
+    assert.equal(text(listPage([], 'Ha_ns', '1', 0, 'de', LINK)), 'Ha\\_ns hat noch keine Baupläne eingetragen.');
   });
 });
 

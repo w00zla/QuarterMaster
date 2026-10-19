@@ -65,7 +65,7 @@ describe('/qm-setup', () => {
     assert.deepEqual((lang!.options as { value: string; default: boolean }[]).filter((o) => o.default).map((o) => o.value), ['de']);
     assert.deepEqual((level!.options as { label: string; value: string }[]).map((o) => [o.value, o.label]), [
       ['off', 'Logs: Aus'], ['stock', 'Logs: Geteilter Bestand: Freigaben, Übergaben, Buchungen'],
-      ['blueprints', 'Logs: Blueprints: eingetragen, ausgetragen'], ['all', 'Logs: Geteilter Bestand und Blueprints'],
+      ['blueprints', 'Logs: Baupläne: eingetragen, ausgetragen'], ['all', 'Logs: Geteilter Bestand und Baupläne'],
     ]);
   });
 
