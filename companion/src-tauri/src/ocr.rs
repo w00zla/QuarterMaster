@@ -233,11 +233,16 @@ fn db_boxes(prob: &[f32], w: usize, h: usize) -> Vec<Rect> {
         if !mask[start] || seen[start] {
             continue;
         }
-        // One 8-connected region: its bounding box and mean probability
+        // One 8-connected region: its bounding box and the mean probability of its own pixels (not of
+        // the box: a tilted line, as on a terminal in the world, fills its axis-aligned box only partly,
+        // and the box's mean fell below the threshold for whole tooltips)
         let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+        let (mut sum, mut count) = (0f32, 0usize);
         seen[start] = true;
         stack.push(start);
         while let Some(i) = stack.pop() {
+            sum += prob[i];
+            count += 1;
             let (x, y) = (i % w, i / w);
             x0 = x0.min(x);
             y0 = y0.min(y);
@@ -261,11 +266,7 @@ fn db_boxes(prob: &[f32], w: usize, h: usize) -> Vec<Rect> {
         if bw.min(bh) < DET_MIN_SIZE {
             continue;
         }
-        let mut sum = 0f32;
-        for y in y0..=y1 {
-            sum += prob[y * w + x0..=y * w + x1].iter().sum::<f32>();
-        }
-        if sum / (((x1 - x0 + 1) * (y1 - y0 + 1)) as f32) < DET_BOX_THRESH {
+        if sum / (count as f32) < DET_BOX_THRESH {
             continue;
         }
         let d = bw * bh * DET_UNCLIP / (2.0 * (bw + bh));

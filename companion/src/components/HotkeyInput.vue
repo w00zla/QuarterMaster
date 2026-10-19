@@ -1,9 +1,11 @@
 <script setup lang="ts">
 // A global hotkey, stored as Tauri's accelerator ("Ctrl+Shift+KeyO", the physical key's code): a
 // click starts recording, the next combination is taken; Escape cancels, Backspace or Delete clears
-// it. A key needs Ctrl, Alt or Shift (a bare key would be taken from every app), function keys
-// excepted. Shown with the UI language's key names ("Strg+Umschalt+O").
+// it, as does the × inside the field while one is set. A key needs Ctrl, Alt or Shift (a bare key
+// would be taken from every app), function keys excepted. Shown with the UI language's key names
+// ("Strg+Umschalt+O").
 import { ref } from "vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
 import { langRef, t } from "../i18n";
 
 const model = defineModel<string>({ required: true });
@@ -36,17 +38,48 @@ function display(accel: string): string {
 </script>
 
 <template>
-  <button type="button" class="input hotkey" :class="{ recording, empty: !model }" @click="recording = !recording" @keydown="onKey" @blur="recording = false">
-    {{ recording ? t("hotkey.press") : model ? display(model) : t("hotkey.none") }}
-  </button>
+  <span class="hotkey-input">
+    <button type="button" class="input hotkey" :class="{ recording, empty: !model }" @click="recording = !recording" @keydown="onKey" @blur="recording = false">
+      {{ recording ? t("hotkey.press") : model ? display(model) : t("hotkey.none") }}
+    </button>
+    <!-- Clears it (also Backspace/Delete while recording); only with a hotkey set -->
+    <button v-if="model && !recording" type="button" class="clear" :title="t('hotkey.clear')" :aria-label="t('hotkey.clear')" @click="model = ''">
+      <Icon name="close" :size="12" />
+    </button>
+  </span>
 </template>
 
 <style scoped>
+/* The field with the clear button inside at its right */
+.hotkey-input {
+  position: relative;
+  display: inline-flex;
+}
+
 .hotkey {
+  width: 100%;
+  padding-right: 28px;
   text-align: left;
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
+}
+
+.clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: flex;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.clear:hover {
+  color: var(--text);
 }
 
 /* No hotkey: "None" dimmed like a placeholder */

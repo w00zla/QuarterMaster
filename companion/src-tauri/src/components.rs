@@ -9,13 +9,15 @@
 //! Everything is read as text lines; what they mean is decided in the frontend (`components.ts`: the
 //! title against the catalog, the stat lines against the stat names in the player's language).
 //!
-//! The UI scales with the frame height and sits around the frame's centre, so every position is a
-//! share of the height, horizontally from the centre. Only the tooltip's area and the page number's
-//! are run through the OCR; the page number read (`read_page`, ~30 ms) also tells this screen from
+//! The screen is a panel in perspective around the frame's centre: the FOV and the aspect ratio scale
+//! it as a whole about the centre. Every position is measured on 3840×1600 (the user's FOV) as a share
+//! of the height from the centre and scaled by the frame's `Ui::k` (1080p 16:9: ~1.05), which the page
+//! number's place tells (`read_page`: its x and y must agree on it). Only the tooltip's area and the
+//! page number's are run through the OCR; the page number read (~30 ms) also tells this screen from
 //! the freight manager's terminal (`ocrwatch`). The hovered tile (`hovered_tile`): under the mouse
 //! cursor (the capture passes it), its units from the lit frame the game draws around it, its row in
 //! the page's content from the scrollbar thumb's place, so a tile keeps its place when the pane
-//! scrolls and equal tiles stay apart. Verified on 3840×1600 only.
+//! scrolls and equal tiles stay apart. Verified on 3840×1600 and 1920×1080.
 //!
 //! Anything unexpected yields `None` fields, never a panic.
 
@@ -34,12 +36,20 @@ const TIP_BOTTOM: f32 = 0.76;
 /// The tooltip's texts are small (~0.012 of the height): its crop is scaled up to what this frame
 /// height would show
 const TIP_SCALE_HEIGHT: f32 = 1800.0;
-/// The page number ("2/3") below the storage grid
+/// The page number ("2/3") below the storage grid: where it is looked for once the scale is known, and
+/// its centre (from the frame's centre) the scale is taken from
 const PAGE_LEFT: f32 = 0.50;
 const PAGE_RIGHT: f32 = 0.70;
 const PAGE_TOP: f32 = 0.81;
 const PAGE_BOTTOM: f32 = 0.87;
 const PAGE_SCALE: u32 = 2;
+const PAGE_CX: f32 = 0.597;
+const PAGE_CY: f32 = 0.340;
+/// The scales looked for without a known one (the whole range of FOVs and aspect ratios), and how far
+/// the page's x and y may disagree on it (a tile's "40/40" ammo count elsewhere does not fit both)
+const K_MIN: f32 = 0.75;
+const K_MAX: f32 = 1.4;
+const K_AGREE: f32 = 0.06;
 /// The storage grid: left edge and top of its first row (unscrolled), unit width and row pitch, the
 /// units per row and the rows in view. A tile spans 1 unit (coolers, missiles) or 2 (weapons).
 const GRID_LEFT: f32 = 0.400;
@@ -58,11 +68,11 @@ const SCROLL_VIEW: f32 = 0.5675;
 /// A thumb is at least this long; a scroll this close to whole rows is taken as whole rows
 const MIN_THUMB: f32 = 0.03;
 const ROW_SNAP: f32 = 0.15;
-/// The hovered tile's light frame: searched this far around a unit edge (tiles leave a gap of ~9 px
-/// between them, their frames sit up to ~11 px off the edge at 1600 px height), lit when this share
-/// of a column of pixels in the row's middle band has its colour
-const EDGE_SEARCH: f32 = 0.008;
-const EDGE_SHARE: f32 = 0.6;
+/// The hovered tile's light frame: a column (row) of pixels near the cursor is one of its sides when
+/// it holds a run of its colour this long (a share of the row pitch, or of the tile's width; the
+/// corners are rounded)
+const EDGE_SIDE: f32 = 0.4;
+const LINE_SLANT: u32 = 2;
 /// Boxes below this confidence are noise (the character shows through the tooltip's panel)
 const MIN_SCORE: f32 = 0.3;
 /// A tooltip has at least this many lines below its title (a real one has 10 and more: volume,
@@ -123,6 +133,35 @@ pub struct ComponentRead {
     pub cell: Option<Cell>,
 }
 
+/// Where the screen's parts are in a frame: the measured shares (x from the centre, y from the top,
+/// lengths) scaled by `k` about the frame's centre.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ui {
+    cx: f32,
+    cy: f32,
+    s: f32,
+    pub k: f32,
+}
+
+impl Ui {
+    pub fn new(frame: &RgbImage, k: f32) -> Self {
+        let (w, h) = frame.dimensions();
+        Self { cx: w as f32 / 2.0, cy: h as f32 / 2.0, s: h as f32, k }
+    }
+
+    fn x(&self, share: f32) -> f32 {
+        self.cx + self.k * share * self.s
+    }
+
+    fn y(&self, share: f32) -> f32 {
+        self.cy + self.k * (share - 0.5) * self.s
+    }
+
+    fn len(&self, share: f32) -> f32 {
+        self.k * share * self.s
+    }
+}
+
 fn union(a: Rect, b: Rect) -> Rect {
     Rect { x0: a.x0.min(b.x0), y0: a.y0.min(b.y0), x1: a.x1.max(b.x1), y1: a.y1.max(b.y1) }
 }
@@ -133,21 +172,21 @@ fn is_thumb(p: &image::Rgb<u8>) -> bool {
     g > 150 && g > r + 80 && g > b + 40
 }
 
-/// The hovered tile's light cyan frame (icons are neutral grey or white, the thumb green)
+/// The hovered tile's light cyan frame (icons are neutral grey or white, the thumb green; at 1080p its
+/// 1 px lines read as dim as 138/167/175)
 fn is_frame(p: &image::Rgb<u8>) -> bool {
     let [r, g, b] = p.0.map(i32::from);
-    g >= 150 && b >= 150 && g - r >= 25 && b - r >= 30
+    g >= 130 && b >= 130 && g - r >= 20 && b - r >= 25
 }
 
 /// The scrollbar thumb (top, length in frame pixels): the longest green run in the columns around
 /// the scrollbar; None when the page's content fits (no thumb).
-fn find_thumb(frame: &RgbImage) -> Option<(f32, f32)> {
+fn find_thumb(frame: &RgbImage, ui: Ui) -> Option<(f32, f32)> {
     let (w, h) = frame.dimensions();
-    let (cx, s) = (w as f32 / 2.0, h as f32);
-    let (y0, y1) = ((TRACK_TOP * s - 2.0).max(0.0) as u32, ((TRACK_BOTTOM * s + 2.0) as u32).min(h));
-    let x_mid = cx + SCROLL_X * s;
+    let (y0, y1) = ((ui.y(TRACK_TOP) - 2.0).max(0.0) as u32, ((ui.y(TRACK_BOTTOM) + 2.0) as u32).min(h));
+    let x_mid = ui.x(SCROLL_X);
     let mut best: Option<(u32, u32)> = None;
-    for x in (x_mid - SCROLL_SEARCH * s).max(0.0) as u32..((x_mid + SCROLL_SEARCH * s) as u32).min(w) {
+    for x in (x_mid - ui.len(SCROLL_SEARCH)).max(0.0) as u32..((x_mid + ui.len(SCROLL_SEARCH)) as u32).min(w) {
         let mut run: Option<(u32, u32)> = None;
         for y in y0..y1 {
             if is_thumb(frame.get_pixel(x, y)) {
@@ -161,59 +200,74 @@ fn find_thumb(frame: &RgbImage) -> Option<(f32, f32)> {
             }
         }
     }
-    best.filter(|&(_, len)| len as f32 >= MIN_THUMB * s).map(|(top, len)| (top as f32, len as f32))
+    best.filter(|&(_, len)| len as f32 >= ui.len(MIN_THUMB)).map(|(top, len)| (top as f32, len as f32))
 }
 
 /// How far the pane is scrolled (content pixels) for a thumb (top, length); 0 without one. Close to
 /// whole rows it is whole rows (the pane snaps to them; between them it animates).
-fn scroll_of(thumb: Option<(f32, f32)>, s: f32) -> f32 {
+fn scroll_of(thumb: Option<(f32, f32)>, ui: Ui) -> f32 {
     let Some((top, len)) = thumb else { return 0.0 };
-    let rows = ((top - TRACK_TOP * s).max(0.0) * SCROLL_VIEW * s / len) / (CELL_H * s);
+    let rows = ((top - ui.y(TRACK_TOP)).max(0.0) * ui.len(SCROLL_VIEW) / len) / ui.len(CELL_H);
     let whole = rows.round();
-    (if (rows - whole).abs() <= ROW_SNAP { whole } else { rows }) * CELL_H * s
+    (if (rows - whole).abs() <= ROW_SNAP { whole } else { rows }) * ui.len(CELL_H)
 }
 
-/// The units a tile spans around the cursor's unit, from which unit edges (0–4) are lit: the nearest
-/// lit edge at or left of it and the nearest right of it; None when one is missing.
-fn span_of(unit: u32, lit: [bool; 5]) -> Option<(u32, u32)> {
-    let left = (0..=unit).rev().find(|&k| lit[k as usize])?;
-    let right = (unit + 1..=GRID_COLS).find(|&k| lit[k as usize])?;
-    Some((left, right - left))
-}
-
-/// Whether a lit tile frame runs down near `x` between `y0` and `y1` (a column of pixels that mostly
-/// has the frame's colour).
-fn frame_edge_at(frame: &RgbImage, x: f32, y0: f32, y1: f32) -> bool {
+/// The longest run of the lit frame's colour along a column (`vertical`, at `at`, from `from` to `to`)
+/// or a row, a pixel counting as lit when it or one up to LINE_SLANT pixels across the line is: the
+/// panel's perspective slants the 1 px lines (2 px over a tile's width at 1080p).
+fn lit_run(frame: &RgbImage, vertical: bool, at: u32, from: u32, to: u32) -> f32 {
     let (w, h) = frame.dimensions();
-    let s = h as f32;
-    let (y0, y1) = (y0.max(0.0) as u32, (y1 as u32).min(h));
-    if y1 <= y0 {
-        return false;
+    let (mut run, mut best) = (0usize, 0usize);
+    for i in from..=to {
+        let lit = (at.saturating_sub(LINE_SLANT)..=at + LINE_SLANT).any(|a| {
+            let (x, y) = if vertical { (a, i) } else { (i, a) };
+            x < w && y < h && is_frame(frame.get_pixel(x, y))
+        });
+        run = if lit { run + 1 } else { 0 };
+        best = best.max(run);
     }
-    let (x0, x1) = ((x - EDGE_SEARCH * s).max(0.0) as u32, ((x + EDGE_SEARCH * s) as u32).min(w.saturating_sub(1)));
-    (x0..=x1).any(|x| (y0..y1).filter(|&y| is_frame(frame.get_pixel(x, y))).count() as f32 >= EDGE_SHARE * (y1 - y0) as f32)
+    best as f32
 }
 
-/// The tile under the cursor (frame pixels): its row in the content (the pane's scroll from the
-/// scrollbar thumb), and its units from the lit frame the game draws around the hovered tile, which
-/// sits on unit edges. None outside the grid or without a lit tile there.
-pub fn hovered_tile(frame: &RgbImage, cursor: (f32, f32)) -> Option<Cell> {
+/// The first coordinate from `from` stepping by `step` (at most `max` steps) where `lit(c)` holds.
+fn first_lit(from: f32, step: i32, max: f32, lit: impl Fn(u32) -> bool) -> Option<f32> {
+    (0..max as i32).map(|d| from as i32 + step * d).take_while(|&c| c >= 0).find(|&c| lit(c as u32)).map(|c| c as f32)
+}
+
+/// The tile under the cursor (frame pixels): the lit frame the game draws around the hovered tile,
+/// found from the cursor outwards (left, right, then up and down between them; the panel's
+/// perspective puts it some pixels off the measured grid), its units and its row in the content (the
+/// pane's scroll from the scrollbar thumb) rounded on the scaled grid. None outside the grid or
+/// without a lit frame around the cursor.
+pub fn hovered_tile(frame: &RgbImage, ui: Ui, cursor: (f32, f32)) -> Option<Cell> {
     let (w, h) = frame.dimensions();
-    let (cx, s) = (w as f32 / 2.0, h as f32);
-    let (x, y) = ((cursor.0 - cx) / s, cursor.1 / s);
-    let fx = (x - GRID_LEFT) / CELL_W;
-    if fx < 0.0 || fx >= GRID_COLS as f32 || y < GRID_TOP || y >= GRID_TOP + GRID_ROWS as f32 * CELL_H {
+    let (cell_w, cell_h, grid_left, grid_top) = (ui.len(CELL_W), ui.len(CELL_H), ui.x(GRID_LEFT), ui.y(GRID_TOP));
+    let (cx, cy) = cursor;
+    // With some room: the scaled grid can sit a few pixels off (the lit frame decides)
+    let (mx, my) = (0.3 * cell_w, 0.3 * cell_h);
+    if cx < grid_left - mx || cx >= grid_left + GRID_COLS as f32 * cell_w + mx || cy < grid_top - my || cy >= grid_top + GRID_ROWS as f32 * cell_h + my || cx >= w as f32 || cy >= h as f32 {
         return None;
     }
-    let scroll = scroll_of(find_thumb(frame), s);
-    let row = ((cursor.1 - GRID_TOP * s + scroll) / (CELL_H * s)) as u32;
-    // The row's top in the frame, and its middle band (clear of the frame's corners)
-    let top = GRID_TOP * s + row as f32 * CELL_H * s - scroll;
-    let (band0, band1) = (top + 0.3 * CELL_H * s, top + 0.7 * CELL_H * s);
-    let edge_x = |k: u32| cx + (GRID_LEFT + k as f32 * CELL_W) * s;
-    let lit: [bool; 5] = std::array::from_fn(|k| frame_edge_at(frame, edge_x(k as u32), band0, band1));
-    let (col, span) = span_of(fx as u32, lit)?;
-    Some(Cell { row, col, span, rect: Rect { x0: edge_x(col), y0: top, x1: edge_x(col + span), y1: top + CELL_H * s } })
+    // Left and right: columns with a long lit run in a band around the cursor's height (wherever the
+    // cursor is in the tile, its sides run through the band; a tile is at most 2 units wide)
+    let (b0, b1) = ((cy - 0.6 * cell_h).max(0.0) as u32, ((cy + 0.6 * cell_h) as u32).min(h - 1));
+    let column = |x: u32| x < w && lit_run(frame, true, x, b0, b1) >= EDGE_SIDE * cell_h;
+    // The other side at least half a unit away: the cursor may sit on the frame's line itself
+    let half = 0.5 * cell_w;
+    let (left, right) = first_lit(cx, -1, 2.2 * cell_w, column)
+        .and_then(|l| Some((l, first_lit(l + half, 1, 2.2 * cell_w - half, column)?)))
+        .filter(|&(_, r)| r >= cx)
+        .or_else(|| first_lit(cx, 1, 2.2 * cell_w, column).and_then(|r| Some((first_lit(r - half, -1, 2.2 * cell_w - half, column)?, r))))?;
+    // Top and bottom: rows with a long lit run between them
+    let (a0, a1) = (left as u32, (right as u32).min(w - 1));
+    let row_lit = |y: u32| y < h && lit_run(frame, false, y, a0, a1) >= EDGE_SIDE * (right - left);
+    let top = first_lit(cy, -1, 1.2 * cell_h, row_lit)?;
+    let bottom = first_lit(cy, 1, 1.2 * cell_h, row_lit)?;
+    let span = ((right - left) / cell_w).round().clamp(1.0, GRID_COLS as f32) as u32;
+    let col = ((left - grid_left) / cell_w).round().clamp(0.0, (GRID_COLS - span) as f32) as u32;
+    let scroll = scroll_of(find_thumb(frame, ui), ui);
+    let row = ((top - grid_top + scroll) / cell_h).round().max(0.0) as u32;
+    Some(Cell { row, col, span, rect: Rect { x0: left, y0: top, x1: right, y1: bottom } })
 }
 
 /// "2/3" (also "2 / 3", "2/ 3") -> (2, 3); at most 99 pages (an SCU text like "10/5000" is none).
@@ -291,35 +345,61 @@ fn read_area(ocr: &mut Ocr, frame: &RgbImage, rect: Rect, scale: f32) -> Result<
     Ok(boxes)
 }
 
-/// Reads the storage pane's page number ("2/3"): cheap (a small area), and present only on the
-/// inventory screen. The boxes read, in frame pixels.
-pub fn read_page(ocr: &mut Ocr, frame: &RgbImage) -> Result<(Option<Page>, Vec<TextBox>), String> {
-    let (w, h) = frame.dimensions();
-    let (s, cx) = (h as f32, w as f32 / 2.0);
-    let page_area = Rect { x0: cx + PAGE_LEFT * s, y0: PAGE_TOP * s, x1: cx + PAGE_RIGHT * s, y1: PAGE_BOTTOM * s };
-    let boxes = read_area(ocr, frame, page_area, PAGE_SCALE as f32)?;
-    let page = boxes.iter().find_map(|b| parse_page(&b.text));
-    Ok((page, boxes))
+/// The page number among `boxes` and the scale its place tells: its centre's x and y (from the
+/// frame's centre) against the measured place, both within K_MIN–K_MAX and agreeing within K_AGREE;
+/// of several the best agreeing.
+fn page_and_scale(boxes: &[TextBox], frame: &RgbImage) -> Option<(Page, f32)> {
+    let ui = Ui::new(frame, 1.0);
+    boxes
+        .iter()
+        .filter_map(|b| {
+            let page = parse_page(&b.text)?;
+            let kx = (b.rect.cx() - ui.cx) / (PAGE_CX * ui.s);
+            let ky = (b.rect.cy() - ui.cy) / (PAGE_CY * ui.s);
+            let off = (kx - ky).abs() / ky;
+            ((K_MIN..=K_MAX).contains(&ky) && off <= K_AGREE).then_some((page, (kx + ky) / 2.0, off))
+        })
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(page, k, _)| (page, k))
+}
+
+/// Reads the storage pane's page number ("2/3"), present only on the inventory screen, and the scale
+/// its place tells. With a known scale (`hint`) only around where the page should be (cheap, ~30 ms),
+/// else over every place it can have. The boxes read, in frame pixels.
+pub fn read_page(ocr: &mut Ocr, frame: &RgbImage, hint: Option<f32>) -> Result<(Option<(Page, f32)>, Vec<TextBox>), String> {
+    let area = match hint {
+        Some(k) => {
+            let ui = Ui::new(frame, k);
+            Rect { x0: ui.x(PAGE_LEFT), y0: ui.y(PAGE_TOP), x1: ui.x(PAGE_RIGHT), y1: ui.y(PAGE_BOTTOM) }
+        }
+        None => {
+            let (lo, hi) = (Ui::new(frame, K_MIN), Ui::new(frame, K_MAX));
+            let pad = |ui: Ui| ui.len(0.05);
+            Rect { x0: lo.x(PAGE_CX) - pad(lo), y0: lo.y(0.5 + PAGE_CY) - pad(lo), x1: hi.x(PAGE_CX) + pad(hi), y1: hi.y(0.5 + PAGE_CY) + pad(hi) }
+        }
+    };
+    let boxes = read_area(ocr, frame, area, PAGE_SCALE as f32)?;
+    Ok((page_and_scale(&boxes, frame), boxes))
 }
 
 /// Reads the hovered item's tooltip in its fixed area. The boxes read, in frame pixels.
-pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage) -> Result<(Option<Tooltip>, Vec<TextBox>), String> {
-    let (w, h) = frame.dimensions();
-    let (s, cx) = (h as f32, w as f32 / 2.0);
-    let tip_area = Rect { x0: cx + TIP_LEFT * s, y0: TIP_TOP * s, x1: cx + TIP_RIGHT * s, y1: TIP_BOTTOM * s };
-    let boxes = read_area(ocr, frame, tip_area, (TIP_SCALE_HEIGHT / s).max(1.0))?;
-    let tooltip = tooltip_of(lines_of(&boxes, s));
+pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage, ui: Ui) -> Result<(Option<Tooltip>, Vec<TextBox>), String> {
+    let tip_area = Rect { x0: ui.x(TIP_LEFT), y0: ui.y(TIP_TOP), x1: ui.x(TIP_RIGHT), y1: ui.y(TIP_BOTTOM) };
+    let boxes = read_area(ocr, frame, tip_area, (TIP_SCALE_HEIGHT / ui.len(1.0)).max(1.0))?;
+    let tooltip = tooltip_of(lines_of(&boxes, ui.len(1.0)));
     Ok((tooltip, boxes))
 }
 
-/// Reads the hovered item's tooltip, the storage pane's page number and the tile under the `cursor`
-/// (frame pixels) in a frame of the inventory screen. The boxes read, in frame pixels.
+/// Reads the storage pane's page number (and so the scale; without one the measured place, k = 1),
+/// the hovered item's tooltip and the tile under the `cursor` (frame pixels) in a frame of the
+/// inventory screen. The boxes read, in frame pixels.
 pub fn read_components(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>) -> Result<(ComponentRead, Vec<TextBox>), String> {
-    let (tooltip, mut boxes) = read_tooltip(ocr, frame)?;
-    let (page, page_boxes) = read_page(ocr, frame)?;
-    boxes.extend(page_boxes);
-    let cell = cursor.and_then(|c| hovered_tile(frame, c));
-    Ok((ComponentRead { tooltip, page, cell }, boxes))
+    let (page, mut boxes) = read_page(ocr, frame, None)?;
+    let ui = Ui::new(frame, page.map_or(1.0, |p| p.1));
+    let (tooltip, tip_boxes) = read_tooltip(ocr, frame, ui)?;
+    boxes.extend(tip_boxes);
+    let cell = cursor.and_then(|c| hovered_tile(frame, ui, c));
+    Ok((ComponentRead { tooltip, page: page.map(|p| p.0), cell }, boxes))
 }
 
 #[cfg(test)]
@@ -344,27 +424,15 @@ mod tests {
     fn scroll_from_the_thumb() {
         // 3840×1600 (the recording of 2026-10-18): the thumb is 373 px long, at 376 when not scrolled,
         // 621 four rows down, 740 six (or nearly), 930 nine rows down
-        let rows = |top: f32| scroll_of(Some((top, 373.0)), 1600.0) / (CELL_H * 1600.0);
+        let ui = Ui { cx: 1920.0, cy: 800.0, s: 1600.0, k: 1.0 };
+        let rows = |top: f32| scroll_of(Some((top, 373.0)), ui) / (CELL_H * 1600.0);
         assert_eq!(rows(376.0), 0.0);
         assert_eq!(rows(621.0), 4.0);
         assert_eq!(rows(740.0), 6.0);
         assert_eq!(rows(930.0), 9.0);
         // Halfway between rows (the scroll animation): as it is
         assert!((rows(715.0) - 5.5).abs() < 0.1, "{}", rows(715.0));
-        assert_eq!(scroll_of(None, 1600.0), 0.0, "no thumb: the page fits");
-    }
-
-    #[test]
-    fn spans_from_the_lit_edges() {
-        // A wide tile over units 1–2 (edges 1 and 3 lit), the cursor in either of its units
-        let wide = [false, true, false, true, false];
-        assert_eq!(span_of(1, wide), Some((1, 2)));
-        assert_eq!(span_of(2, wide), Some((1, 2)));
-        // A single tile at the left edge
-        assert_eq!(span_of(0, [true, true, false, false, false]), Some((0, 1)));
-        // No lit frame around the cursor
-        assert_eq!(span_of(3, wide), None);
-        assert_eq!(span_of(0, [false; 5]), None);
+        assert_eq!(scroll_of(None, ui), 0.0, "no thumb: the page fits");
     }
 
     #[test]
@@ -377,22 +445,43 @@ mod tests {
                 frame.put_pixel(x, y, image::Rgb([58, 233, 140]));
             }
         }
-        let (top, bottom) = (540u32, 690u32);
-        for y in top..bottom {
+        let lit = image::Rgb([183, 226, 233]);
+        let (top, bottom) = (545u32, 688u32);
+        for y in top..=bottom {
             for x in [2716u32, 2717, 3029, 3030] {
-                frame.put_pixel(x, y, image::Rgb([183, 226, 233]));
+                frame.put_pixel(x, y, lit);
+            }
+        }
+        for x in 2716..=3030u32 {
+            for y in [top, top + 1, bottom - 1, bottom] {
+                frame.put_pixel(x, y, lit);
             }
         }
         // An icon's white inside the tile is no edge
         for y in 580..640 {
             frame.put_pixel(2873, y, image::Rgb([230, 230, 230]));
         }
-        let tile = hovered_tile(&frame, (2950.0, 600.0)).expect("a tile");
+        let ui = Ui::new(&frame, 1.0);
+        let tile = hovered_tile(&frame, ui, (2950.0, 600.0)).expect("a tile");
         assert_eq!((tile.row, tile.col, tile.span), (5, 1, 2), "content row 4 + 1");
-        assert!((tile.rect.x0 - 2716.8).abs() < 1.0 && (tile.rect.x1 - 3030.4).abs() < 1.0, "{:?}", tile.rect);
-        assert_eq!(hovered_tile(&frame, (2600.0, 600.0)), None, "unit 0: no lit frame");
-        assert_eq!(hovered_tile(&frame, (2400.0, 600.0)), None, "left of the grid");
-        assert_eq!(hovered_tile(&frame, (2950.0, 1400.0)), None, "below the grid");
+        // Within the slant window (LINE_SLANT) of the lines
+        assert!((tile.rect.x0 - 2717.0).abs() <= 3.0 && (tile.rect.x1 - 3029.0).abs() <= 3.0, "{:?}", tile.rect);
+        // The same tile seen ~5 % larger (another FOV): found from the cursor all the same
+        assert_eq!(hovered_tile(&frame, Ui::new(&frame, 1.05), (2950.0, 600.0)).map(|t| (t.col, t.span)), Some((1, 2)));
+        assert_eq!(hovered_tile(&frame, ui, (2600.0, 600.0)), None, "unit 0: no lit frame");
+        assert_eq!(hovered_tile(&frame, ui, (2400.0, 600.0)), None, "left of the grid");
+        assert_eq!(hovered_tile(&frame, ui, (2950.0, 1400.0)), None, "below the grid");
+    }
+
+    #[test]
+    fn the_scale_from_the_page_numbers_place() {
+        let frame = RgbImage::new(1920, 1080);
+        // 1080p 16:9 (2026-10-19): "1/3" centred at (1633, 927)
+        let (page, k) = page_and_scale(&[tb(1617.0, 916.0, 33.0, 22.0, "1/3")], &frame).expect("page");
+        assert_eq!((page.index, page.total), (1, 3));
+        assert!((k - 1.05).abs() < 0.01, "{k}");
+        // A tile's ammo count in the bottom row's first unit: x and y disagree on the scale
+        assert_eq!(page_and_scale(&[tb(1430.0, 870.0, 40.0, 20.0, "40/40")], &frame), None);
     }
 
     #[test]

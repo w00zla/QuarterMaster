@@ -1,9 +1,12 @@
 <script setup lang="ts">
-// The scan overlay's page (Rust: overlay.rs; the main window's side: overlay.ts): the active tab's
-// panel as a fixed-size rounded tile on a transparent window, read-only (the window ignores the
-// mouse): title with its tags (the inventory's detected kinds, else the state), the newest rows,
-// "+n more". Everything comes as text in the UI
-// language from the main window ("overlay-view", on every change and when this page asks).
+// The scan overlay's page (Rust: overlay.rs; the main window's side: overlay.ts): a compact fixed-size
+// tile on a transparent window, read-only (the window ignores the mouse): one head line with the
+// location (clipped at its end) and the three modes as small chips with their count (the shown one
+// highlighted; a warning instead of the count when its filters are all off or the log is missing),
+// then the newest rows, 20 px each, as many as fit (more than that: the last one fades out). No hint
+// texts: without rows only the head shows.
+// Everything comes as text in the UI language from the main window ("overlay-view", on every change
+// and when this page asks).
 import { onMounted, ref } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import Icon from "../../adminapp/src/components/Icon.vue";
@@ -18,21 +21,26 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section v-if="view" class="panel tile">
+  <section v-if="view" class="tile">
     <div class="head">
-      <span class="head-title">{{ view.title }} <span class="count">{{ view.count }}</span><template v-if="view.place"> · {{ view.place }}</template></span>
-      <span v-for="(x, i) in view.tags" :key="i" class="tag" :class="[x.cls, { icon: !x.text }]"><Icon :name="x.icon" :size="12" /> {{ x.text }}</span>
+      <span class="place" :class="{ missing: view.placeMissing }">
+        <Icon :name="view.placeMissing ? 'warning' : 'locate'" :size="12" />
+        <span>{{ view.place }}</span>
+      </span>
+      <span v-for="(x, i) in view.tabs" :key="i" class="mode" :class="{ active: x.active, warn: x.warn }">
+        <Icon :name="x.icon" :size="10" />
+        <Icon v-if="x.warn" name="warning" :size="10" />
+        <template v-else>{{ x.count }}</template>
+      </span>
     </div>
-    <!-- The rows take what is left and clip there: the tile's bottom padding stays free -->
-    <div class="body">
-      <div v-if="!view.rows.length" class="empty">{{ view.empty }}</div>
+    <!-- More rows than fit: the last one fades out -->
+    <div class="rows" :class="{ more: view.more }">
       <div v-for="(r, i) in view.rows" :key="i" class="row">
-        <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="12" />{{ r.tag }}</span>
+        <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="10" />{{ r.tag }}</span>
         <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
         <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
       </div>
     </div>
-    <div v-if="view.more" class="more">{{ view.more }}</div>
   </section>
 </template>
 
@@ -51,65 +59,110 @@ body,
 <style scoped>
 /* Slightly see-through: the game stays visible behind the tile */
 .tile {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   box-sizing: border-box;
+  overflow: hidden;
   border: 1px solid var(--border-dim);
+  border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
-  padding-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
+/* One line: the location, then the modes */
 .head {
-  flex-wrap: nowrap;
-  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border-dim);
 }
 
-.head-title {
+/* The location in the mono face after its icon, clipped only at its end */
+.place {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.place > svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.place > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.body {
+.place.missing,
+.place.missing > svg {
+  color: var(--warn);
+}
+
+.mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-control);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mode.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.mode.warn {
+  color: var(--warn);
+}
+
+.rows {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  padding: 2px 0;
 }
 
-/* The row count after the title, kept quiet */
-.count {
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--text-3);
+.rows.more {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
 }
 
-.empty {
-  padding: 16px 12px;
-  font-size: 12px;
-  color: var(--text-2);
-}
-
-/* Like the main window's compact rows: tag, name with its detail, right-aligned columns */
+/* Tag, name with its detail, right-aligned columns; no lines between */
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 26px;
-  padding: 2px 12px;
-  font-size: 12px;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
   color: var(--text-2);
-}
-
-.row + .row {
-  border-top: 1px solid var(--border-dim);
 }
 
 .row .tag {
   flex-shrink: 0;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
 }
 
 /* An icon-only badge (the inventory's kinds) */
 .tag.icon {
-  padding: 0 5px;
+  padding: 0 2px;
 }
 
 .name {
@@ -130,12 +183,5 @@ body,
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.more {
-  margin-top: auto;
-  padding: 4px 12px 6px;
-  font-size: 11px;
-  color: var(--text-2);
 }
 </style>

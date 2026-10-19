@@ -7,8 +7,8 @@ user web app's API with the user's API token ("Access Key"):
 - scans the freight manager's warehouse for material stacks and the character inventory for ship
   components with their stats (OCR of the hovered tile's tooltip on a screen capture) and proposes them
   as stock;
-- syncs the refinery jobs of a station with the terminal's work order overview (same OCR; its scan is
-  disabled until re-checked with the current OCR model);
+- syncs the refinery jobs of a station with the terminal's work order overview (same OCR; checked against
+  screenshots and recordings, the sync untested in game);
 - shows what it detects in a scan overlay over the game.
 
 Linux and Windows; the screen capture and so every scan and the overlay are Windows only so far.
@@ -28,9 +28,10 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   NTFS tunneling), a tail that hands out complete lines (lossy UTF-8: Windows SC writes the ANSI code
   page). Read: blueprint unlocks only, the `Added notification "Received Blueprint: <name>: " [n]` line
   (names may hold quotes; the `UpdateNotificationItem` repeats are skipped). The whole current log is
-  read at start, then what the game appends. "Full scan" reads every `logbackups/*.log` (GBs: `memmem`
+  read at start, then what the game appends. "Scan old logs" reads every `logbackups/*.log` (GBs: `memmem`
   search, off the main thread; progress per file as the `scan-progress` event, shown as a bar in place of
-  the panel title). The list keeps the first unlock per name.
+  the panel title). The list keeps the first unlock per name; the panel lists only the unregistered ones
+  (registered and default blueprints hidden), newest first.
 - The player's location (`gamelog::location`): `<RequestLocationInventory> Player[…] requested inventory
   for Location[<key>]`, the star map key (`catalog.location.key`, case aside; `INVALID_LOCATION_ID`
   ignored). SC logs it at spawn, on arriving at a location (also without a landing) and on every opening of
@@ -59,15 +60,12 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   ETag in the app cache dir (`%LOCALAPPDATA%\com.w00zla.quartermaster.companion\api\<path>.json`,
   `server::cached_api`) and sent with `If-None-Match`; a 304 answers the kept body (the ETag hashes the
   content: another server or user never gets a wrong one; a broken file only costs the transfer).
-- The refresh button in the state row (right, before the web app button; its icon turns while running;
-  `refreshAll` in `state.ts`): the connection with user and orgs (`/me`), then every registered reload
-  (`onRefresh`): catalog with the language pack and the refinery jobs (`refinerySync.ts`, in its event
-  queue), the stored stock (`inventorySync.ts`), the registered blueprints (`UnlocksPanel.vue`). A failing
-  reload is toasted, the others still run. No toast on success.
-- Thin lines: every API call that runs longer than 400 ms shows a "Loading…" tag in the state row (after
-  the scan tag, icon turning; the tooltip names what: catalog per language, stock, blueprints, connection,
-  saving; `loadingTexts` in `state.ts`). While connected without the catalog, the inventory's location
-  picker and Scan are disabled ("Catalog is loading…") and the unlocks list shows that state instead of
+- No reload button (removed 2026-10-19): a restart of the app loads catalog, stock, jobs and blueprints
+  afresh.
+- Thin lines: every API call that runs longer than 400 ms shows a "Loading…" tag in the scan row (after
+  the scan's tag, icon turning; the tooltip names what: catalog per language, stock, blueprints, connection,
+  saving; `loadingTexts` in `state.ts`). While connected without the catalog, the location picker and Scan
+  are disabled ("Catalog is loading…") and the unlocks list shows that state instead of
   "Not in catalog". The HTTP client has no total timeout (the catalog is ~1 MB per language): 10 s to
   connect, 30 s without data at most (`server::client`); the update download keeps its 30 min. A 426 makes the app show only the update panel (`UpdatePanel.vue`:
   installed and required version, the download for its platform): Rust `download_update` fetches it with
@@ -88,52 +86,74 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   settings dialog fits; dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
   open where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the
   overlay is excluded, it places itself), created hidden and shown once placed.
-- Below the title bar a row of fixed height: on the left the game log state ("Log available" as a
-  `.tag ok`, or "Log not found" as a chip with the path in the tooltip) and the scan session's state
-  (`scan.ts`/`overlay.ts` `scanState`: "Scan off" / "Preparing…" / "Scanning inventory|refinery" with the
-  game seen / "Game not detected"); on the right the user (Discord avatar and name from `/api/me`; CSP
-  `img-src` allows `cdn.discordapp.com`) and, after a divider, an icon button opening the web app in the
-  browser (Rust `open_webapp`: the configured origin only), or the connection's short reason as a chip
-  when down. Problem chips open the settings.
+- The title bar holds, before the settings button, the user (Discord avatar from `/api/me`, the name in
+  its tooltip: a 640 px bar has no room for it; CSP `img-src` allows `cdn.discordapp.com`) and,
+  after it, an icon button opening the web app in the browser (Rust `open_webapp`: the configured origin
+  only), or the connection's short reason as a chip when down.
+- Below it the **scan row** (`ScanBar.vue`, fixed height, decided 2026-10-19): the Scan toggle (off =
+  outline with an eye, on = accent with a pulsing dot, locked with a lock icon while the overlay runs it),
+  the overlay toggle (Windows; a desktop icon, off = dashed and dimmed, on = accent), one tag that always
+  says what the scan does (`scan.ts` `scanState`: "Scan off" / "Preparing…" / "Game not detected" /
+  "Nothing to scan" (every filter off) / "Waiting for a terminal" / "Location missing" (warehouse or
+  inventory without a location) / "Warehouse|Inventory|Refinery detected"), the "Loading…" tag; on the
+  right "Log not found" (a chip only then, the path in its tooltip: the blueprints and the auto location
+  need the log), the auto location toggle and the location picker (see "Inventory panel"; its tooltip the picked
+  location's full name, the field clips it, else what it is for). Problem chips
+  open the settings.
 - `state.ts` holds config, connection and log state; every API call goes through its `api()`; connection
   refusals (`noServer`, `noToken`, `invalidServer`, `insecureServer`, `invalidToken`, `network`, 426) mark
   the connection down and are not toasted (`isConnectionError`); a down connection is re-checked every
   30 s, any connection on window focus; a successful check clears the update hint. Toasts are for events
   only.
 - A tab bar (icons; each tab and panel title with its table's row count, `tabCounts` in `overlay.ts`; the
-  last tab kept in localStorage `qm.companion.tab`, one state with the overlay's mode) with the panels
+  last tab kept in localStorage `qm.companion.tab`; it never switches by itself: the scan row's tag names
+  the screen) with the panels
   Inventory (`InventoryPanel.vue`), Refinery (`RefineryPanel.vue`) and Blueprints (`UnlocksPanel.vue`), all
   three kept mounted (`v-show`); panel heads carry no icon. Inventory and Refinery fill the window and
   scroll only their rows (head, filter and column titles stay).
 - Settings dialog (`SettingsDialog.vue`): Access Key, language, game folder, the "Scan overlay" group
-  (Windows only, see below), Diagnostics (opens the debug window). Labels left, controls right like
-  BindSight's settings.
+  (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
+  place as tooltip; the hotkeys "Hotkey Overlay an/aus" and "… Ansicht wechseln"), below the groups one
+  quiet line with a small button for the debug window (secondary for the user). Labels left, controls
+  right like BindSight's settings.
+- Refinery panel cards (`RefineryPanel.vue`), three lines: the icon-only job badge (live colour), the
+  station and the actions (registering blue, storing a crate on green, removing outlined); the state tag
+  (new blue, finished green, not at the terminal yellow), an icon-only link badge (accent: registered as a
+  job, dimmed: not yet), the time left and the end, the total yield in SCU at the right; the materials
+  as compact rows like the inventory's table (quality 40 px, amount 88 px). German "Eintragen" for
+  registering everywhere.
 
-## Scan session
+## Scan
 
-- `ocrwatch.rs`, Rust `get_scan`/`set_scan` (`off`, `inventory`, `refinery`), `scan.ts`: the user starts a
-  scan from a panel's head (Scan / Stop) or by showing the overlay; one session at a time; off at every
-  start; the capture runs only during a session. Manual scanning stays (decided 2026-10-18; the former
-  automatic refinery detection, the cheap `terminal_in_view` check on every still view, is kept behind
-  `AUTO_REFINERY = false`).
-- A refinery session reads a live frame once the view came to rest after it moved and every 2 s (`Gate`:
+- **One scan** for the warehouse, the character inventory and the refinery terminal (decided
+  2026-10-19; before: one session per terminal kind, started in its panel). `ocrwatch.rs`, Rust
+  `get_scan`/`set_scan` (`on` plus the scope `warehouse`/`inventory`/`refinery`), `scan.ts`: switched in
+  the scan row or by showing the overlay (which switches it off again only if it started it); off at every
+  start; the capture runs only while it is on. Starting clears the inventory's sightings and loads catalog
+  and stored stock. The **scope** follows the filters: warehouse = Materials or Items, inventory =
+  Components, refinery = Jobs; a screen out of scope is neither looked for nor read (all off: "Nothing to
+  scan"); a filter change applies to the next frame.
+- **Which screen** (`Screen` in `ocrwatch.rs`, sent as `scan-screen`: `none`, `warehouse`, `inventory`,
+  `refinery`): without one the worker probes every 2 s (`PROBE_MS`): the refinery's big titles first
+  (`terminal_in_view`, 30–110 ms), then the cheap page number read (~30 ms, `read_page`; only "n/m" with
+  m ≤ 99) for the character inventory, else the grid read for the warehouse, and a frame with neither is
+  tried as the inventory too. The decision stands until the reader found nothing 3 reads in a row
+  (`SCREEN_MISSES`, the refinery's `LEAVE_AFTER`: a switch takes the player seconds), a minute without
+  frames, the scan's stop or the screen's filter going off.
+- The refinery screen reads a live frame once the view came to rest after it moved and every 2 s (`Gate`:
   a 96×40 grey thumbnail sampled from the frame; checking every changed frame took ~5 % CPU in the verse).
-  An inventory session reads every delivered frame (1/s) without the gate: the world behind the
+  Warehouse and inventory read every delivered frame (1/s, the character inventory up to 2/s, paced by the read time) without the gate: the world behind the
   translucent inventory screen never comes to rest (the gate delayed reads by 3–6 s in the first test).
-- The worker reads the newest frame when it falls behind. The `Ocr` is loaded by a session's first read
-  (well under a second) and dropped as soon as the session stops (memory back; the memory arena stays on:
+- The worker reads the newest frame when it falls behind. The `Ocr` is loaded by the first read
+  (well under a second) and dropped within 5 s of the stop (memory back; the memory arena stays on:
   off made reads 30 % slower). "Preparing…" while the sync loads the catalog and the player's language
   pack (`refinerySync.ts` `loadCatalog`: the companion's only `/api/catalog` fetch, de and en, once
-  connected, again when the game folder changes and on the refresh button; kept in memory and on disk
+  connected, again when the game folder changes; kept in memory and on disk
   (ETag), the unlocks panel uses its responses). `StarCitizen.exe` running comes from `capture.rs` (`game-seen` / `get_game_seen`).
-  `QM_OCR_FRAMES=<dir>` feeds every image in a folder once (tests without capture; the session must still
-  be started in the UI).
-- Inventory sessions emit `inventory-read` per read (`grid` for the warehouse, `components` for the
-  character inventory, never both). Which screen: `Screen` in `ocrwatch.rs`, unknown at first; the cheap
-  page number read (~30 ms, `read_page`; only "n/m" with m ≤ 99) marks the character inventory, else the
-  grid read the warehouse, and a frame with neither is tried as the inventory too; the decision stands
-  until the reader found nothing 3 reads in a row (`SCREEN_MISSES`: a switch takes the player seconds);
-  without a known screen the session probes every 2 s only (`PROBE_MS`).
+  `QM_OCR_FRAMES=<dir>` feeds every image in a folder once (tests without capture; the scan must still
+  be switched on in the UI).
+- Warehouse and inventory reads go out as `inventory-read` (`grid` for the warehouse, `components` for the
+  character inventory, never both); the refinery's as `refinery-visit` and `refinery-overview` (below).
 
 ## Warehouse scan (freight manager)
 
@@ -148,10 +168,12 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 ### The read (Rust)
 
 - Only the pane right of the screen centre is read, at native height (the elevator pane is ignored; also
-  halves the detector's memory).
-- The terminal is a screen in the world: the grid's pitch changes with the player's position (260–290 px at
-  1600 px height), so the grid is **fitted per frame** from the detected badge boxes and quality texts
-  (anchors with weights, the pitch and phase most agree on per axis, the four consecutive columns with the
+  halves the detector's memory), and only 0.25–0.95 of the height (the grid with room, below it a bottom
+  row's tooltip; the search, filter and capacity rows above cost ~25 % of the read time on 3840×1600).
+- The terminal is a screen in the world: the grid's pitch changes with the player's position, resolution
+  and FOV (260–290 px at 1600 px height, ~140 px at 1080p 16:9: pitch candidates 0.10–0.20 of the height),
+  so the grid is **fitted per frame** from the detected badge boxes and quality texts (only with their Q,
+  "526Q"/"5260": a bare "526" is the tooltip chip's and pulled the columns off; anchors with weights, the pitch and phase most agree on per axis, the four consecutive columns with the
   most anchors, rows within 0.3–0.84 of the height; at least anchor weight 3). The first strong fit of a
   session (anchor weight ≥ `STRONG_FIT_WEIGHT` on the weaker axis) locks the pitch, weaker fits keep it and
   fit only the phase (reset when the session stops); the row pitch is bounded to 0.85–1.05 of the column
@@ -167,7 +189,9 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   covers over 5 % of the area: it opens at the cursor, near the tile's top over its own badge. The
   recordings of 2026-10-19: the hovered tile's count in 115 of 120 and 52 of 55 frames (34 and 69 before).
 - Tooltip (`tooltip_from_boxes`): titles are Title Case texts with ≥ 3 letters (the panel's capitals and
-  icon texts are none). The tooltip is see-through: a tile's quality behind it shows in the title's row
+  icon texts are none), no SCU amount (the capacity line "Capacity: 1.00mSCU", also misread, when the
+  title went unread), up to 0.06 of the height high (a slanted line's box grows: 53 px for a 12 px text at
+  1080p). The tooltip is see-through: a tile's quality behind it shows in the title's row
   ("Janalite 360" over a 360Q neighbour), so the quality is the number right of the name's repeat in the
   chip row, else any number below the title row, never one in it.
 - The **hovered tile** is the one under the mouse cursor, which the capture passes with every frame
@@ -187,7 +211,9 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   OCR glitch in one read books nothing, and the previous tile's tooltip the game still shows right after a
   move (one read so far) disagrees with the next read.
 - A ship component hovered here stays a sighting "Component: scan the inventory" (no proposal); unresolved
-  names, missing qualities and amounts stay sightings without a proposal, listed in the debug window.
+  names, missing qualities and amounts stay sightings without a proposal, listed in the debug window; so
+  does a stack confirmed with two counts, one a digit short of the other ("X1"/"X10", same column,
+  material and quality: "Count read differently").
 - **One proposal per stack**, nothing summed up, with what the user's stored stock at that location already
   holds of that material and quality.
 
@@ -198,21 +224,29 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 
 - The storage pane on the right: a grid 4 units wide, a tile 1 unit (coolers, missiles) or 2 (weapons)
   wide, rows mixed like 2+2 or 1+2+1, 6 rows in view, scrolled row by row with a green thumb on its right,
-  pages "2/3" below it. The UI is a screen-space overlay around the frame's centre, scaling with the height:
-  every position is a share of the height, horizontally from the centre (constants measured on 3840×1600
-  only). The left (personal) pane is not read.
+  pages "2/3" below it. The UI is a panel in perspective around the frame's centre: the in-game FOV and the
+  aspect ratio scale it as a whole about the centre. Every position is measured on 3840×1600 (the user's
+  FOV) as a share of the height from the centre and scaled per frame by `Ui::k` (1080p 16:9: ~1.05), which
+  the page number's place tells (`read_page`: its centre at 0.597/0.340 at k = 1; x and y must agree
+  within 6 %, which a tile's "40/40" elsewhere does not). Probing reads the page over every place k
+  0.75–1.4 allows, the screen once known only where the last k puts it (cheap); k is kept until the scan
+  stops. The left (personal) pane is not read.
 - The tooltip opens at a **fixed place** right of the character (not at the cursor); only that area (right of
   the centre, 0.22–0.76 of the height, scaled up to 1800 px height for the small texts) and the page
-  number's go through the OCR, ~0.25–0.4 s per read on 3840×1600, and only while the cursor is on a lit tile.
+  number's go through the OCR, ~0.25–0.4 s per read on 3840×1600 (~0.2–0.3 s at 1080p), and only while the
+  cursor is on a lit tile.
   A tooltip needs ≥ 4 body lines and 3 letters in the title (real ones have 13–17 lines, stray reads of the
   scene 1–3); the Rust side emits the title and the body lines as texts (also into the log).
-- The **hovered tile** (`hovered_tile`, pixel checks, no OCR): its row in the page's content = the cursor's
-  row plus the pane's scroll, taken from the thumb's place (`scroll_of`: the thumb moves ~61.6 px per 150 px
-  row at 1600 px height, snapped to whole rows within 0.15); its units from the light cyan frame the game
-  draws around the hovered tile, looked for at the 5 unit edges in the row's middle band (±0.008 of the
-  height: tiles leave ~9 px gaps, frames sit up to ~11 px off the edge), the nearest lit edge left and right
-  of the cursor (`span_of`). Checked against the recording of 2026-10-18 (195 frames): every tile with a
-  tooltip found, the misses only while the cursor moved on.
+- The **hovered tile** (`hovered_tile`, pixel checks, no OCR): the light cyan frame the game draws around
+  it, found from the cursor outwards: left and right the nearest columns with a lit run of ≥ 0.4 of the row
+  pitch in a band of ±0.6 pitches around the cursor's height (the other side at least half a unit away:
+  the cursor may sit on the line), then top and bottom the nearest rows lit over ≥ 0.4 of the tile's width
+  (the corners are rounded; at 1080p the frames sat up to 12 px off the scaled unit edges, the panel's
+  perspective). Units and span rounded on the scaled grid; the row in the page's content = the frame's top
+  plus the pane's scroll, taken from the thumb's place (`scroll_of`: the thumb moves ~61.6 px per 150 px
+  row at 1600 px height, snapped to whole rows within 0.15). The cursor may be 0.3 units outside the
+  scaled grid. Checked against the recording of 2026-10-19 (1080p, 56 frames with the cursor): every tile
+  under a tooltip found where the cursor was on it.
 - Frontend: the title ("Mil/3/A Blizzard") against the catalog's component names in de/en plus the language
   pack, the prefix narrowing size and grade (`findComponents`; among same-name variants the craftable one;
   the catalog lists only the plain part of a variant group, see `docs/stock.md`). Stat lines ("Coolant
@@ -227,20 +261,23 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   stayed on its tile for a read, then two agreeing reads in a row (≥ 3 reads per tile). One proposal per
   sighting (one piece, quality 0, the stats if any).
 - Screenshot tests over `local/screenshots/inventory 3`; `cargo run --release --example components_dump --
-  <dir>…` prints the title and lines per image.
+  <dir>…` prints page, the tile under the stored cursor, title and lines per image (a recording's
+  frames with their cursor).
 
 ## Inventory panel, locations, registering
 
-- Head: title with count, the auto location toggle (an `icon-btn` with `locate`, 20 px; off = dashed and dimmed, on = accent frame and backdrop; kept in
-  localStorage `qm.companion.inventory.autoLocation`; its tooltip says what it does, or while on what
-  Game.log named: the location, "not selectable" with the key, or nothing logged yet), the location picker
-  (`Picker`, kept in localStorage `qm.companion.inventory.location`), Scan / Stop, "Register all". With the
-  toggle on the pick follows Game.log's last location when it is turned on, when the log names another
-  place and once the catalog is loaded; a key that is no selectable location clears the pick (nothing is
-  booked at the place before: reads without a location are dropped); a pick by hand holds until the log
-  names another place. Below: the kind filter, toggle chips
+- The location sits in the scan row (`ScanBar.vue`, it belongs to every warehouse and inventory read):
+  the auto location toggle (an `icon-btn` with `locate`, 20 px; off = dashed and dimmed, on = accent with
+  a faint backdrop; on by default, kept in localStorage `qm.companion.inventory.autoLocation`; its tooltip
+  says what it does, or while on what Game.log named: the location, "not selectable" with the key, or
+  nothing logged yet) and the location picker (`Picker`, kept in localStorage
+  `qm.companion.inventory.location`). With the toggle on the pick follows Game.log's last location when it
+  is turned on, when the log names another place and once the catalog is loaded; a key that is no
+  selectable location clears the pick (nothing is booked at the place before: reads without a location
+  are dropped); a pick by hand holds until the log names another place.
+- Head: title with count, "Register all". Below: the kind filter, toggle chips
   Materials / Items / Components (on = the kind's badge colour with a check, off = dashed and dimmed with an x; what
-  the scan detects from then on; localStorage `qm.companion.inventory.kinds`). Then one compact row per
+  the scan detects from then on, all may be off; localStorage `qm.companion.inventory.kinds`). Then one compact row per
   proposal: an icon badge for the kind (its name as tooltip), resource (a component with its stats after
   the name, "Coolant Rating +12.5 % · Integrity ±0.0 %"), location, quality, amount, Register / Discard.
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a
@@ -256,20 +293,25 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 - `debug.html` + `DebugApp.vue`, opened from the settings (Rust `open_debug_window`, async, with the main
   window's WebView2 browser arguments: another set hangs WebView2; no JS close handler: `destroy` would
   need a permission); closing the main window ends the app, the debug window with it.
-- Two tabs: the last read (the frame as a JPEG data URL, 1280 px wide, CSP `img-src data:`, with SVG
+- Two tabs: the last read (first the frame as a JPEG data URL, 1280 px wide, CSP `img-src data:`, in a box
+  of the frame's aspect that stays while the facts below change, with SVG
   overlays: OCR boxes, read cells, tiles, hovered tile, tooltip, or the character inventory's tooltip lines
-  and the cursor's tile; facts; collapsible tooltip lines, cells and OCR boxes) and the main window's
+  and the cursor's tile; facts; a refinery read's station and work orders with their rows; collapsible
+  tooltip lines, cells and OCR boxes) and the main window's
   sightings of both scans in one table (event `inventory-sightings` on every change,
   `inventory-sightings-request` on open; own kind filter; columns source (FE = warehouse, INV = character
   inventory), name, quality, amount or stats, page and cell, state = the reason it is no proposal, or
   Proposal / Registered / Discarded).
 - While it is open (`set_debug`) every read goes with its frame to the **debug writer** thread
   (`spawn_debug_writer`), which encodes it, keeps the last 3 reads in RAM and emits the event: on the worker,
-  encoding and writing stretched the reads' interval from 1.05 to 1.8 s.
+  encoding and writing stretched the reads' interval from 1.05 to 1.8 s. The refinery's reads go there too
+  (as `inventory-read` with a `refinery` part: overview, terminal or nothing; the inventory sync ignores
+  them).
 - "Record data" asks for a folder and writes a session folder `qm-inventory-debug-<unix s>`: the 3 kept
-  reads, then every read while it runs (frame as JPEG quality 90, ~0.6 MB, + JSON with grid, components part
-  and boxes; `info.json` with the count), until stopped or the window closes. The folders replay through
-  `inventory_dump` and `components_dump`.
+  reads, then every read while it runs (frame as JPEG quality 90, ~0.6 MB, + JSON with grid, components
+  part, refinery part, the cursor and boxes; `info.json` with the count), until stopped or the window
+  closes. The folders replay through `inventory_dump` and `components_dump` (both pass the stored cursor;
+  recordings before 2026-10-19 have none).
 
 ## OCR
 
@@ -277,7 +319,10 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   dictionary of 18708 characters; ONNX, Apache-2.0, as converted by RapidOCR, fetched by
   `scripts/fetch-ocr-models.mjs` with pinned SHA-256 and compiled in with `include_bytes!`: the Windows
   release is a bare exe, ~31 MB of models) on ONNX Runtime via `ort` (prebuilt, static); pre/post-processing
-  after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar shape (~8 % faster).
+  after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar shape (~8 % faster). A
+  detected region is kept by the mean probability of its own pixels (like PaddleOCR's polygon score), not
+  of its axis-aligned box: the terminals hang tilted in the world, and the box mean dropped whole tooltips
+  below the threshold (2026-10-19: FE tooltips at 1080p and component stat lines at 3840×1600).
   `recognize_images_only` restricts the CTC decoding to given characters (the probability taken among
   them).
 - Frames are scaled by **height** (the game's UI scales with it: 16:9 like ultrawide). Read times on
@@ -290,33 +335,50 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 
 ## Refinery
 
-- Read (`refinery.rs`): only the terminal's **work order overview**: the station from the title, then every
+- Read (`refinery.rs`): only the terminal's **work order overview**: the station from the title (never a
+  `// …` label like "// REFINERY SYSTEM C47.02": the slanted terminal makes its box as tall), then every
   work order panel side by side (found by its table head "MATERIALS YIELDED"; header PROCESSING or
-  COMPLETED; columns by the head's words; rows by the names ending at the summary lines or a `// …` section
-  label; a row without a quality is dropped; a cell the full pass missed is recognized on its own):
+  COMPLETED; columns by the head's words; rows by the names, starting after the material's icon within 0.35
+  of the head's width, ending at the summary lines or a `// …` section label; a row without a quality is
+  dropped; a value cell the full pass missed or read as no number is recognized on its own, upscaled 3×
+  as digits only: a lone thin "1" went missing):
   processing orders with quality, yield (cSCU) and time remaining, completed ones with quality and yield. A
   panel cut by the edge is left out (the terminal scrolls sideways). Full read at 800 px height,
   anchor-first; `terminal_in_view` is the cheap check (320 px height, the big titles: 30–110 ms). Checked
-  against the screenshots of 2026-10-07/08 (`local/screenshots/refinery flow`, `… 2`, `… 3`) with the v5
-  model; with v6 two of those tests fail, and the panel's Scan button stays disabled until fixed.
-- Session: a **visit** (`refinery-visit` `{atMs, active}`), each overview as `refinery-overview`; 60 s
-  without frames end the visit.
+  against the screenshots of 2026-10-07/08 (`local/screenshots/refinery flow`, `… 2`, `… 3`, all tests pass
+  with v6 since 2026-10-19) and the recordings of 2026-10-19 (1080p and 3840×1600: station, rows and time
+  left as the terminal shows them). Names go through `findMaterial`, which also takes a name without its
+  accents (the OCR read "HEPHAESTÁNITE").
+- The refinery screen is a **visit** (`refinery-visit` `{atMs, active}`), each overview as
+  `refinery-overview`; 3 reads in a row without the terminal or 60 s without frames end it. The panel's
+  filter "Jobs" (one chip below the head, the live colour; localStorage `qm.companion.refinery.jobs`, on by
+  default) decides whether the scan reads the terminal at all.
 - Sync (`refinery.ts`, store `refinerySync.ts`, `RefineryPanel.vue`): names via `findMaterial` (shared with
   the bot) over the catalog's de/en names plus the pack texts; the station by its title against refinery
   locations; unresolved rows are skipped. An order counts once read the same twice in a row (time left
-  ignored); it matches a running job at that station by the set of (material, quality) (several: the
+  ignored); a running order whose rows are only part of a registered job's or of another new order's at
+  that station is no order of its own (right after accepting, "Work Order Accepted" hides rows for a few
+  reads; the fuller order replaces the short one); it matches a running job at that station by the set of (material, quality) (several: the
   closest end). Matched processing orders update the job **by themselves** (yield per row via
   `/api/stock/adjust`, time left via `/api/refinery/duration` when off by over 120 s; a toast says so).
   Proposals, nothing booked without a click: unmatched processing order = new job, matched completed order =
-  store it (`/api/refinery/done` with the terminal's yields), at the visit's end every job of a read station
+  store it (`/api/refinery/done` with the terminal's yields), completed order without a job (never
+  registered) = store its materials as stock (`/api/stock/add` per row at the station, unshared; a retry
+  after a failed row adds only the rest), at the visit's end every job of a read station
   no order matched = missing (Remove after a confirm, or Keep). Dismissed proposals stay away for the app
-  session.
+  session. A stored completed order (materials, qualities and yields at its station: `completedKey`) is
+  remembered for 30 days (localStorage `qm.companion.refinery.stored`): the terminal shows it until it is
+  collected in the game, and it must not be proposed again (also not as one without a job once its job is
+  stored).
 
 ## Screen capture (Windows)
 
 `capture.rs`: while a scan session runs and the foreground window belongs to `StarCitizen.exe` (not
 minimized), or the companion itself is in front and the game window seen before is still up, one frame per
-second through DXGI Desktop Duplication (`windows` crate, the version Tauri uses): the game's monitor
+second (while the character inventory is in view faster, paced by the read time: `FastCapture`, set by
+the worker to 1.5 × its last read there within 0.5–1 s, so the OCR works at most ~2/3 of the time also
+on slower machines; a component needs three reads of its tile: ~1.8 s at 0.4 s per read instead of ~3 s)
+through DXGI Desktop Duplication (`windows` crate, the version Tauri uses): the game's monitor
 duplicated on the adapter driving it, cut to the window's client area (physical pixels: the process is
 per-monitor DPI aware), with the cursor's position in frame pixels (`GetCursorPos`), into a staging texture
 kept while the size stays, sent as BGRA (converted to RGB only for frames that are read). Chosen over
@@ -330,11 +392,13 @@ FP16 and a tone map would be the fix); rotated monitors untested.
 `overlay.rs`; main window side `overlay.ts`; page `overlay.html` + `OverlayApp.vue`. Built 2026-10-18, used in
 game since.
 
-- A frameless, transparent, click-through, non-focusable window holding the active tab's panel as a
-  fixed-size read-only tile (400×236 logical px, slightly see-through): the mode's name with the row count
-  quietly after it, the inventory's location; tags (the inventory's detected kinds as icons, else the
-  state); the 6 most recently seen rows (the inventory's kind badges as icons), "+n more"; the rows clipped
-  above the tile's bottom padding.
+- A frameless, transparent, click-through, non-focusable window holding the mode's panel as a
+  compact fixed-size read-only tile (310×190 logical px, slightly see-through; layout "A" of 2026-10-19, no
+  space wasted): one 24 px head line with the picked location after its icon in every mode (mono face,
+  clipped at its end; "No location picked" in warn colour) and the three modes as small chips with icon and
+  count (the shown one highlighted; a warning instead of the count when its filters are all off or the
+  log is missing), then the newest rows at 20 px without lines between (the inventory's kind badges as
+  small icons), 8 fit; more than that: the last one fades out. No hint texts: without rows only the head.
 - A thread puts it every 250 ms at the configured place (`overlayPosition`: top-left (default), top-center,
   top-right, bottom-left, bottom-center, bottom-right, six buttons in the settings laid out where they are;
   24 px margin, scaled with the game monitor's DPI) of the game window's client area as `HWND_TOPMOST`,
@@ -342,15 +406,16 @@ game since.
   hides it). SC must run borderless/windowed.
 - `WDA_EXCLUDEFROMCAPTURE` keeps it out of the desktop duplication, set **before** the click-through makes
   it layered (a layered window refuses it with error 8; a failure is logged: the OCR would read it).
-- On/off is not stored (off at every start); switched in the settings (at once) or by hotkey. The mode is
-  the main window's tab: while on, the inventory tab runs the inventory scan (once a location is picked;
-  turning it on starts a fresh session, switching back to the tab resumes), refinery and blueprints run none;
-  the panels' Scan buttons are locked; hiding it always stops the scan.
+- On/off is not stored (off at every start); switched in the scan row or by hotkey (the settings hold
+  only position and hotkeys). Showing it switches the scan on (locked in the scan row while it is shown), hiding it switches
+  the scan off only if it started it. The mode starts as the main window's tab, then follows the screen the
+  scan sees (warehouse or inventory: Inventory, terminal: Refinery; nothing in view: it stays); the mode
+  hotkey steps through the three modes by hand (Blueprints only that way), the main window's tab stays.
 - Each panel writes its rows into `overlayRows`; `overlay.ts` sends the view as texts (`overlay-view`, on
   every change and on `overlay-request`).
 - Hotkeys (`hotkeyOverlay`/`hotkeyMode`, accelerators with the browser's physical key code, default
   `Ctrl+Shift+KeyQ` for on/off and none for the mode; recorded in `HotkeyInput.vue`, a modifier or an F key
-  required) are **polled** (`GetAsyncKeyState` every 30 ms, exactly these modifiers; character keys by scan
+  required; cleared with Backspace/Delete while recording or the × inside the field) are **polled** (`GetAsyncKeyState` every 30 ms, exactly these modifiers; character keys by scan
   code, mapped with the current layout): `RegisterHotKey` never fired while SC was in front (its raw input
   keeps application hotkeys away). The keys reach the game too. A press emits `overlay-hotkey`
   `toggle`/`mode`; `set_config` refuses invalid ones (`hotkeyInvalid`, `hotkeySame`) and keeps the old.
@@ -367,14 +432,16 @@ GPU process should not compete with the game; not measured yet.
 - **Components in the character inventory, strictly apart** (2026-10-18): only that tooltip shows stats
   (absolute values). The stock keeps gains, so the server delivers each stat's base value from the item's
   `raw_record` (`CatalogStat.base`; chosen over storing absolute values or scanning without stats).
-- **One inventory scan, one panel**: the worker tells the screens apart.
+- **One scan for every screen** (2026-10-19; before: one inventory scan, and a refinery session of its
+  own): the worker tells warehouse, inventory and refinery terminal apart; the filters set its scope; the
+  overlay runs it in every tab; Scan and location in one row above the tabs.
 - **Every ship item of a component type is bookable**, crafted or not; of a group of same-named variants
   only the plain part (2026-10-19).
 - **Tooltip-driven**: the user shows every entry's tooltip briefly. Icon matching (DINOv2 ViT-S/14
   embeddings) was tried and dropped: the freight manager's icons look alike, the amount is only in the
   tooltip.
 - **PP-OCRv6 small** replaced v5 (2026-10-18); the refinery read is secondary.
-- **Manual scanning**; **one proposal per stack or component**, nothing summed up; registering asks with
+- **Manual scanning** (switched on by hand or with the overlay); **one proposal per stack or component**, nothing summed up; registering asks with
   a switch per org.
 - Identity history: per tile first, which double-counted after a scroll; then per column (equal components
   in a column collapsed, a wide tile counted twice); now the tile in the scrolled content (character

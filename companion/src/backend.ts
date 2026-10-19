@@ -55,11 +55,18 @@ export const scanBackups = () => call<{ found: number; failed: number }>("scan_b
 export const appInfo = () => call<{ version: string; platform: CompanionPlatform }>("app_info");
 export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });
 export const openWebapp = () => call<void>("open_webapp");
-// The scan session: what the OCR reads from the screen capture, started and stopped by the user
-// "inventory" = the freight manager's warehouse (materials, items) and the character inventory's storage pane (ship components)
-export type ScanMode = "off" | "inventory" | "refinery";
-export const getScan = () => call<ScanMode>("get_scan");
-export const setScan = (mode: ScanMode) => call<void>("set_scan", { mode });
+// The scan: what the OCR reads from the screen capture, switched on and off by the user or the overlay. The scope says
+// which screens it reads: the freight manager's warehouse (materials, items), the character inventory's storage pane
+// (ship components), the refinery terminal (jobs)
+export interface ScanScope {
+  warehouse: boolean;
+  inventory: boolean;
+  refinery: boolean;
+}
+export const getScan = () => call<boolean>("get_scan");
+export const setScan = (on: boolean, scope: ScanScope) => call<void>("set_scan", { on, ...scope });
+// The screen the scan sees (event "scan-screen")
+export type ScanScreen = "none" | "warehouse" | "inventory" | "refinery";
 // The inventory debug window: frames with the reads, the last reads kept; a recording writes every read into a new folder below dir (its path)
 export const setDebug = (on: boolean) => call<void>("set_debug", { on });
 export const startDebugRecording = (dir: string) => call<string>("start_debug_recording", { dir });

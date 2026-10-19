@@ -106,28 +106,6 @@ export async function refreshConnection() {
   }
 }
 
-// The refresh button: what each part of the app reloads (catalog, stock, jobs, blueprints), after the connection
-const refreshers = new Set<() => Promise<void>>();
-export const refreshing = ref(false);
-
-/** Adds a reload to the refresh button; returns its removal. */
-export function onRefresh(reload: () => Promise<void>) {
-  refreshers.add(reload);
-  return () => void refreshers.delete(reload);
-}
-
-/** Checks the connection (user, orgs), then runs every reload; a failing one is toasted, the rest still run. */
-export async function refreshAll() {
-  if (refreshing.value) return;
-  refreshing.value = true;
-  try {
-    await refreshConnection();
-    if (connected.value) for (const reload of refreshers) await reload().catch(toastError);
-  } finally {
-    refreshing.value = false;
-  }
-}
-
 /** Re-checks the connection every RETRY_MS while it is down, and whenever the window gets focus. */
 export function watchConnection() {
   setInterval(() => {

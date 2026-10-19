@@ -31,13 +31,21 @@ const PANE_LEFT: f32 = 0.45;
 /// the button bar below)
 const GRID_TOP: f32 = 0.3;
 const GRID_BOTTOM: f32 = 0.84;
+/// What the detector reads (shares of the height): the grid with some room, below it the tooltip of a
+/// bottom row tile
+const READ_TOP: f32 = 0.25;
+const READ_BOTTOM: f32 = 0.95;
 /// Height of a badge or quality text (shares of the frame height)
 const TEXT_MIN_H: f32 = 0.012;
 const TEXT_MAX_H: f32 = 0.032;
+/// A tooltip title's box may be taller: the terminal hangs tilted in the world, a long line's
+/// axis-aligned box grows with its slant (1080p: 53 px for a 12 px text)
+const TITLE_MAX_H: f32 = 0.06;
 /// Badge boxes at most this wide
 const BADGE_MAX_W: f32 = 0.06;
-/// Pitch candidates (shares of the frame height) and the step between them
-const PITCH_MIN: f32 = 0.13;
+/// Pitch candidates (shares of the frame height) and the step between them (1080p 16:9 with the
+/// terminal at arm's length: 0.13)
+const PITCH_MIN: f32 = 0.10;
 const PITCH_MAX: f32 = 0.20;
 const PITCH_STEP: f32 = 0.0015;
 /// Anchors within this share of the pitch agree on a phase
@@ -267,6 +275,13 @@ pub fn parse_scu(text: &str) -> Option<String> {
     ok.then_some(number)
 }
 
+/// Whether a text holds an SCU amount, also misread: a digit followed (a space and the milli's "m"
+/// aside) by "sc" ("1.00SCU", "1.00mSCU", "10scCUu", ".220scu").
+fn has_scu_amount(text: &str) -> bool {
+    let t: Vec<char> = text.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    t.windows(3).any(|w| w[0].is_ascii_digit() && w[1] == 's' && w[2] == 'c') || t.windows(4).any(|w| w[0].is_ascii_digit() && w[1] == 'm' && w[2] == 's' && w[3] == 'c')
+}
+
 fn is_text_sized(b: &TextBox, s: f32) -> bool {
     b.rect.h() >= TEXT_MIN_H * s && b.rect.h() <= TEXT_MAX_H * s
 }
@@ -279,15 +294,26 @@ fn is_quality_box(b: &TextBox, s: f32) -> bool {
     is_text_sized(b, s) && b.text.split_whitespace().next().and_then(parse_quality).is_some()
 }
 
+/// A tile's quality text as a fit anchor: with its Q, read as a letter or a fourth digit ("526Q",
+/// "5260"). A bare number ("526") is the tooltip chip's quality, which pulled the fit columns off.
+fn is_quality_anchor(b: &TextBox, s: f32) -> bool {
+    is_quality_box(b, s) && b.text.split_whitespace().next().is_some_and(|t| t.chars().count() >= 4)
+}
+
 /// Whether a detected box may be a tooltip's title: an item name (Title Case: at least three
 /// letters, one of them lower case), not a tile's own text (badge, quality, the info icon, the
-/// small labels) and not one of the panel's or an icon's capitals ("CLEAR", "CITIZENCON").
+/// small labels), not the tooltip's amount ("0.263 sCU") and not one of the panel's or an icon's
+/// capitals ("CLEAR", "CITIZENCON").
 fn is_title_box(b: &TextBox, s: f32) -> bool {
     let letters = b.text.chars().filter(|c| c.is_ascii_alphabetic()).count();
-    is_text_sized(b, s)
+    b.rect.h() >= TEXT_MIN_H * s
+        && b.rect.h() <= TITLE_MAX_H * s
         && letters >= 3
         && b.text.chars().any(|c| c.is_ascii_lowercase())
         && parse_badge(&b.text).is_none()
+        && parse_scu(&b.text).is_none()
+        // The capacity line ("Capacity: 1.00SCU", misread "Caacty,10scCUu") when the title went unread
+        && !has_scu_amount(&b.text)
         && !is_quality_box(b, s)
         && !norm(&b.text).is_empty()
 }
@@ -364,7 +390,7 @@ pub fn layout_from_boxes(boxes: &[TextBox], frame_w: f32, frame_h: f32, hint: Op
     let s = frame_h;
     let in_pane = |b: &TextBox| b.rect.x0 >= PANE_LEFT * frame_w && b.rect.y0 >= GRID_TOP * s && b.rect.y1 <= GRID_BOTTOM * s;
     let badges: Vec<&TextBox> = boxes.iter().filter(|b| in_pane(b) && is_badge_box(b, s)).collect();
-    let qualities: Vec<&TextBox> = boxes.iter().filter(|b| in_pane(b) && is_quality_box(b, s)).collect();
+    let qualities: Vec<&TextBox> = boxes.iter().filter(|b| in_pane(b) && is_quality_anchor(b, s)).collect();
     let xs: Vec<Anchor> = badges
         .iter()
         .map(|b| Anchor { base: b.rect.x1, factor: BADGE_RIGHT, weight: 1 })
@@ -420,7 +446,8 @@ fn tooltip_from_boxes(boxes: &[TextBox], tiles: &[Rect], frame_h: f32) -> Option
             let (cx, cy) = (b.rect.x0 - CURSOR_OFFSET * s, b.rect.y0 - CURSOR_OFFSET * s);
             tiles.iter().position(|t| contains(*t, cx, cy)).map(|i| (b, i))
         })?;
-    let line = title.rect.h().max(0.012 * s);
+    // A slanted title's box is taller than its line
+    let line = title.rect.h().clamp(TEXT_MIN_H * s, TEXT_MAX_H * s);
     let group: Vec<&TextBox> = boxes
         .iter()
         .filter(|b| b.rect.x0 > title.rect.x0 - 2.0 * line && b.rect.x0 < title.rect.x1 + 12.0 * line && b.rect.y0 >= title.rect.y0 && b.rect.y0 < title.rect.y1 + 6.0 * line)
@@ -483,11 +510,16 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
     let (w, h) = frame.dimensions();
     let s = h as f32;
     let x0 = (PANE_LEFT * w as f32) as u32;
-    let pane = imageops::crop_imm(frame, x0, 0, w - x0, h).to_image();
-    let mut boxes = ocr.read(&pane, h)?;
+    // Only the grid's height and the tooltips' room below it: the search, filter and capacity rows
+    // above cost recognition time (~1 s per read on 3840×1600 before)
+    let (y0, y1) = ((READ_TOP * s) as u32, ((READ_BOTTOM * s) as u32).min(h));
+    let pane = imageops::crop_imm(frame, x0, y0, w - x0, y1 - y0).to_image();
+    let mut boxes = ocr.read(&pane, pane.height())?;
     for b in &mut boxes {
         b.rect.x0 += x0 as f32;
         b.rect.x1 += x0 as f32;
+        b.rect.y0 += y0 as f32;
+        b.rect.y1 += y0 as f32;
     }
     let Some(layout) = layout_from_boxes(&boxes, w as f32, s, hint) else { return Ok((None, boxes)) };
     let positions: Vec<(usize, usize)> = (0..layout.rows.len()).flat_map(|r| (0..layout.cols.len()).map(move |c| (r, c))).collect();
@@ -589,6 +621,16 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scu_amounts_are_no_title() {
+        for t in ["Capacity: 1.00SCU", "Capacity: 1.00mSCU", "Caacty,10scCUu", "Capeciy .220scu", "0.263 sCU"] {
+            assert!(has_scu_amount(t), "{t}");
+        }
+        for t in ["Hephaestanite", "Mil/3/A Blizzard", "Year of the Rat Envelope", "Discord Scarf"] {
+            assert!(!has_scu_amount(t), "{t}");
+        }
+    }
 
     #[test]
     fn qualities() {

@@ -1,11 +1,8 @@
 <script setup lang="ts">
-// The title bar, a row with the game log state (a small tag while found) and the scan session's (a
-// tag: off, running without the game, running with the game; started and stopped in the panels), the
-// "Loading…" tag while an API call takes a while (state.ts loadingTexts), the
-// user (avatar, name) or why the connection is down (chip only then) with a refresh button (reloads
-// user, catalog, stock, jobs and blueprints: state.ts refreshAll) and a button that opens the web
-// app, then a tab bar (icons like the debug window's) with the panels: warehouse, refinery, unlocks
-// (the tab is the scan overlay's mode, overlay.ts).
+// The title bar with the user (avatar, the name in its tooltip) and a button that opens the web app,
+// or why the connection is down (chip only then; no reload button: a restart of the app reloads
+// everything); below it the scan row (ScanBar.vue), then a tab
+// bar (icons like the debug window's) with the panels: inventory, refinery, unlocks.
 // The chips open the settings; the settings also open by themselves while the app is not connected
 // (no server or token, or the token is refused). An app the server calls outdated shows only the
 // update hint (no work until updated).
@@ -14,6 +11,7 @@ import Icon from "../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../adminapp/src/components/Tooltip.vue";
 import { PICKER_LABELS } from "../../webapp/src/components/Picker.vue";
 import InventoryPanel from "./components/InventoryPanel.vue";
+import ScanBar from "./components/ScanBar.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import Toasts from "./components/Toasts.vue";
 import TopBar from "./components/TopBar.vue";
@@ -23,11 +21,11 @@ import WindowEdges from "./components/WindowEdges.vue";
 import { AppError, appInfo, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
 import {
-  config, connectError, connected, connectionText, loadConfig, loadingTexts, log, meAvatar, meName, refreshAll, refreshConnection, refreshing, watchConnection, watchLog,
+  config, connectError, connected, connectionText, loadConfig, meAvatar, meName, refreshConnection, watchConnection, watchLog,
 } from "./state";
 import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
-import { pickTab, scanState, tab, tabCounts, watchOverlay } from "./overlay";
+import { pickTab, tab, tabCounts, watchOverlay } from "./overlay";
 import { watchScan } from "./scan";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
@@ -51,8 +49,6 @@ const serverLabel = computed(() => {
   return isKey(key) ? t(key) : t("conn.off");
 });
 const serverTip = computed(() => [connectionText.value, config.value?.server].filter(Boolean).join(" · "));
-// Found: just the path; missing: where it was looked for
-const logTip = computed(() => (!log.value ? null : log.value.found ? log.value.path : t("log.notFound", { path: log.value.path })));
 
 onMounted(async () => {
   try {
@@ -75,45 +71,25 @@ onMounted(async () => {
 
 <template>
   <div class="app">
-    <TopBar @settings="settingsOpen = true" />
-    <div class="states">
-      <Tooltip v-if="log?.found" :text="logTip">
-        <span class="tag ok"><Icon name="check" :size="12" /> {{ t("log.found") }}</span>
-      </Tooltip>
-      <Tooltip v-else-if="log" :text="logTip">
-        <button type="button" class="tag warn problem" @click="settingsOpen = true">
-          <Icon name="warning" :size="12" /> {{ t("log.missing") }}
-        </button>
-      </Tooltip>
-      <span class="tag" :class="scanState.cls"><Icon :name="scanState.icon" :size="12" /> {{ scanState.text }}</span>
-      <!-- Calls that take a while (thin line): what is loading in the tooltip -->
-      <Tooltip v-if="loadingTexts.length" :text="loadingTexts.join(' · ')">
-        <span class="tag spinning"><Icon name="refresh" :size="12" /> {{ t("load.tag") }}</span>
-      </Tooltip>
-      <div class="spacer" />
+    <TopBar @settings="settingsOpen = true">
       <Tooltip v-if="!connected && connectError" :text="serverTip">
         <button type="button" class="tag err problem" @click="settingsOpen = true">
           <Icon name="warning" :size="12" /> {{ serverLabel }}
         </button>
       </Tooltip>
-      <template v-if="connected">
-        <span class="user">
+      <div v-if="connected" class="account">
+        <Tooltip :text="meName">
           <img v-if="meAvatar" class="avatar" :src="meAvatar" alt="" />
-          <span class="name">{{ meName }}</span>
-        </span>
-        <span class="divider" />
-        <Tooltip :text="t('refresh.tip')">
-          <button type="button" class="icon-btn" :class="{ spinning: refreshing }" :disabled="refreshing" @click="refreshAll">
-            <Icon name="refresh" :size="14" />
-          </button>
+          <span v-else class="avatar none"><Icon name="user" :size="14" /></span>
         </Tooltip>
         <Tooltip :text="t('webapp.open')">
           <button type="button" class="icon-btn" @click="openWebapp().catch(toastError)">
             <Icon name="external" :size="14" />
           </button>
         </Tooltip>
-      </template>
-    </div>
+      </div>
+    </TopBar>
+    <ScanBar @settings="settingsOpen = true" />
     <main v-if="ready && outdated" class="main">
       <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :url="downloadUrl" />
     </main>
@@ -144,53 +120,21 @@ onMounted(async () => {
   height: 100vh;
 }
 
-/* Below the title bar (keeps it free and the app narrow): the game log state on the left, the
-   connection (user or problem) on the right; the row keeps its height whatever it holds */
-.states {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  flex-shrink: 0;
-  padding: 0 16px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border-dim);
-}
-
-/* Problems (game log missing, connection down): a tag like "Data available", but a button (opens
-   the settings) */
+/* The connection down: a tag, but a button (opens the settings) */
 .problem {
   border: none;
   font-family: inherit;
   cursor: pointer;
 }
 
-/* The user like the web app's top bar: avatar and name */
-.user {
+/* The user and the web app button in the title bar, close together (the 640 px bar has little room) */
+.account {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--text);
+  gap: 4px;
 }
 
-.divider {
-  width: 1px;
-  height: 20px;
-  background: var(--border-dim);
-}
-
-/* The refresh button while it reloads and the loading tag: the icon turns */
-.spinning svg {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
+/* The user: the Discord avatar (the name in its tooltip: the bar has no room for it) */
 .avatar {
   width: 24px;
   height: 24px;
@@ -198,15 +142,13 @@ onMounted(async () => {
   display: block;
 }
 
-.name {
-  font-weight: 600;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.avatar.none {
+  display: grid;
+  place-items: center;
+  background: var(--bg-surface-2);
+  color: var(--text-2);
 }
-
-/* Only the main area scrolls: the title bar, the state row with the user and the tabs stay put */
+/* Only the main area scrolls: the title bar, the scan row and the tabs stay put */
 .main {
   flex: 1;
   min-height: 0;

@@ -28,8 +28,8 @@ stock service, UEX pull and the user web app are built. In production since 2026
 VM behind Caddy), not live for users yet: the production DB holds no real data, the user web app is not
 deployed, **regular backups are not set up yet** (`docs/deploy.md` § 6). In progress: the companion app
 (Windows capture only): blueprint unlocks from `Game.log`; warehouse and character inventory scans and the
-scan overlay, used in game since 2026-10-18; the refinery sync is untested in game and its scan disabled
-until re-checked with the current OCR model.
+scan overlay, used in game since 2026-10-18; since 2026-10-19 one scan for every screen (refinery included);
+the refinery read is checked against screenshots and recordings (1080p and 3840×1600), its sync untested in game.
 
 ## Commands
 
@@ -70,12 +70,12 @@ pnpm --filter sc-quartermaster-companion build:linux      # standalone AppImage 
 pnpm --filter sc-quartermaster-companion build:windows    # standalone exe (no bundle; zip it as …_x64-standalone.zip)
 pnpm --filter sc-quartermaster-companion typecheck        # companion SPA typecheck
 pnpm --filter sc-quartermaster-companion ocr:models      # once per checkout: OCR models (PP-OCRv6 small) into companion/src-tauri/resources/ocr (not in git; every Rust build needs them)
-cargo test --release --manifest-path companion/src-tauri/Cargo.toml # its Rust tests (the OCR tests read local/screenshots/… if present; 2 refinery screenshot tests fail since the v6 switch)
+cargo test --release --manifest-path companion/src-tauri/Cargo.toml # its Rust tests (the OCR tests read local/screenshots/… if present)
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]   # what the OCR reads in an image
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example inventory_dump -- <out dir> <screenshots dir>... [--height n]   # the warehouse read over screenshot folders or debug recordings
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example components_dump -- <dir>...   # the character inventory's tooltip title and lines per image
 # Companion log: %LOCALAPPDATA%\com.w00zla.quartermaster.companion\logs\companion.log (Linux: ~/.local/share/…/logs; 2 MB, 3 old files kept); every OCR read is logged
-#   ("scan inventory/refinery/off", "inventory read in … ms: 4×3 tiles at pitch …, cursor …, tooltip …, hovered …", "components read in … ms: page …, cursor … in tile (row, col, span), tooltip "<title>" with n lines: …", "inventory scan: left the Warehouse|Inventory screen", "refinery visit started/ended", "overlay on/off", "OCR loaded", "screen capture: …"):
+#   ("scan on/off", "scan screen none|warehouse|inventory|refinery (<why>)", "inventory read in … ms: 4×3 tiles at pitch …, cursor …, tooltip …, hovered …", "components read in … ms: page …, cursor … in tile (row, col, span), tooltip "<title>" with n lines: …", "refinery visit started/ended", "refinery overview read in …", "overlay on/off", "OCR loaded", "screen capture: …"):
 #   no read lines during a scan = the capture (game not in front) or the gate, reads without tiles = the layout, a tooltip without a hovered tile = the hover rule.
 #   Debug recordings (the debug window's "Record data", e.g. into local/stock_scan_debug/) hold every read's frame + JSON; check a series with a temporary example over the folder (keep it out of git).
 ```

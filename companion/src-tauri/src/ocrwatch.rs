@@ -2,20 +2,18 @@
 //! from a source — the screen capture (`capture.rs`, Windows so far) or, for tests, a folder of images
 //! (`QM_OCR_FRAMES=<dir>`: every image put there is read once, its modification time as the frame time).
 //!
-//! Reading is a **scan session** the user starts and stops (`Scan`: off, inventory, components or
-//! refinery; off at every start). A live frame is read once the view came to rest after it moved,
-//! during a session also every 2 s (the `Gate`, a 96×40 grey thumbnail: the game's scene changes a
-//! little all the time, checking every changed frame took ~5 % CPU). Inventory: each read goes out as
-//! `inventory-read` (`inventory.rs`: the tiles, the tooltip, the layout). Components: each read of the
-//! character inventory goes out as `components-read` (`components.rs`: the hovered item's tooltip
-//! lines, the page, the cursor's cell). Refinery: the session is a visit
-//! (`refinery-visit` true) and each work order overview goes out as `refinery-overview`; a minute
-//! without frames ends the visit. The OCR is dropped as soon as the session stops (its memory arena
-//! keeps the full reads' peak); the next session loads it again.
-//!
-//! The former automatic refinery detection (idle: the cheap check `terminal_in_view` on every view that
-//! came to rest, a hit starting the visit, a few reads without the terminal ending it) is kept behind
-//! `AUTO_REFINERY` for a possible return.
+//! Reading is **one scan** the user switches on and off (off at every start), with a `Scope`: which of
+//! the screens it reads (the frontend's filters). The worker finds the screen itself (`Screen`, sent as
+//! `scan-screen` on every change): without one it probes every `PROBE_MS` (the refinery's big titles,
+//! the character inventory's page number, the warehouse grid). Warehouse and character inventory: each
+//! read goes out as `inventory-read` (`inventory.rs`: the tiles, the tooltip, the layout;
+//! `components.rs`: the hovered item's tooltip lines, the page, the cursor's cell). Refinery: the
+//! screen is a visit (`refinery-visit` true) and each work order overview goes out as
+//! `refinery-overview`; a live frame is read once the view came to rest after it moved and every 2 s
+//! (the `Gate`, a 96×40 grey thumbnail: the game's scene changes a little all the time, checking every
+//! changed frame took ~5 % CPU); a few reads without the terminal or a minute without frames end the
+//! visit. The OCR is dropped as soon as the scan stops (its memory arena keeps the full reads' peak);
+//! the next start loads it again.
 //!
 //! Troubleshooting (`Debug`, the inventory panel's debug dialog): while on, every inventory event
 //! carries the frame as a JPEG (scaled to 1280 px wide) for the overlay view, and the last reads are
@@ -25,7 +23,7 @@
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -35,18 +33,16 @@ use image::{GrayImage, ImageFormat, RgbImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::components::{hovered_tile, read_page, read_tooltip, ComponentRead};
+use crate::components::{hovered_tile, read_page, read_tooltip, ComponentRead, Page, Ui};
 use crate::inventory::{read_grid, Grid};
-use crate::locale::LabelSource;
+use crate::locale::{LabelSource, Labels};
 use crate::ocr::{Ocr, TextBox};
 use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
 
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
 pub const REFINERY_VISIT: &str = "refinery-visit";
 pub const INVENTORY_READ: &str = "inventory-read";
-/// Whether a refinery session waits for the terminal's titles before reading (the former automatic
-/// detection); off: the session reads right away
-const AUTO_REFINERY: bool = false;
+pub const SCAN_SCREEN: &str = "scan-screen";
 /// Width of the frame sent with an inventory event while debugging
 const DEBUG_FRAME_WIDTH: u32 = 1280;
 /// Reads kept for the debug window and a recording (full frames as JPEG: ~0.6 MB each on 3840×1600)
@@ -65,9 +61,6 @@ const THUMB_SAMPLES: u32 = 16;
 const STILL: f32 = 3.0;
 const NEW: f32 = 1.5;
 const REREAD_MS: u64 = 2_000;
-// The inventory scan reads every frame the capture delivers (one per second, a read takes about as
-// long): a stack counts after two agreeing reads, the user waits for them
-const INVENTORY_REREAD_MS: u64 = 0;
 // Full reads in a row without the terminal that end a visit
 const LEAVE_AFTER: u32 = 3;
 // A visit also ends without any frame for this long (the game not in front)
@@ -175,22 +168,46 @@ struct InventoryEvent {
     boxes: Vec<TextBox>,
     /// While debugging: the frame as a JPEG data URL, DEBUG_FRAME_WIDTH wide
     frame: Option<String>,
+    /// A refinery read (sent only while debugging: the sync gets `refinery-overview`)
+    refinery: Option<RefineryRead>,
 }
 
-/// Which screen an inventory session is looking at: decided once (the page number marks the character
-/// inventory, a fitted grid the warehouse) and kept until the reader found nothing `SCREEN_MISSES`
-/// times in a row (a switch between the screens takes the player seconds).
+/// What a read of the refinery terminal found, for the debug view and a recording.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RefineryRead {
+    /// "overview", "terminal" (no work order panel) or "nothing"
+    kind: &'static str,
+    overview: Option<Overview>,
+}
+
+/// Which screen the scan is looking at: decided once (the refinery's titles, the page number of the
+/// character inventory, a fitted grid the warehouse) and kept until the reader found nothing
+/// `SCREEN_MISSES` (refinery: `LEAVE_AFTER`) times in a row (a switch between the screens takes the
+/// player seconds).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
     Unknown,
     Warehouse,
     Inventory,
+    Refinery,
+}
+
+impl Screen {
+    fn name(self) -> &'static str {
+        match self {
+            Screen::Unknown => "none",
+            Screen::Warehouse => "warehouse",
+            Screen::Inventory => "inventory",
+            Screen::Refinery => "refinery",
+        }
+    }
 }
 const SCREEN_MISSES: u32 = 3;
-/// How often an inventory session that knows no screen looks for one
+/// How often the scan looks for a screen while it knows none
 const PROBE_MS: u64 = 2_000;
 
-/// One inventory read kept for the debug export.
+/// One read kept for the debug export.
 pub struct DebugRead {
     pub at_ms: u64,
     pub ms: u64,
@@ -198,8 +215,9 @@ pub struct DebugRead {
     pub height: u32,
     pub grid: Option<Grid>,
     pub components: Option<ComponentRead>,
+    pub refinery: Option<RefineryRead>,
+    pub cursor: Option<(f32, f32)>,
     pub boxes: Vec<TextBox>,
-    /// The frame as PNG
     /// The frame as JPEG
     pub jpeg: Vec<u8>,
 }
@@ -242,6 +260,9 @@ struct ExportRead<'a> {
     height: u32,
     grid: &'a Option<Grid>,
     components: &'a Option<ComponentRead>,
+    refinery: &'a Option<RefineryRead>,
+    /// The mouse cursor in frame pixels (replays pass it to the reads)
+    cursor: Option<(f32, f32)>,
     boxes: &'a [TextBox],
 }
 
@@ -258,7 +279,17 @@ struct ExportInfo<'a> {
 /// Writes one read as `read-N.jpg` + `read-N.json` into `folder`.
 fn write_read(folder: &Path, n: usize, r: &DebugRead) -> Result<(), String> {
     std::fs::write(folder.join(format!("read-{n}.jpg")), &r.jpeg).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(&ExportRead { at_ms: r.at_ms, ms: r.ms, width: r.width, height: r.height, grid: &r.grid, components: &r.components, boxes: &r.boxes })
+    let json = serde_json::to_string_pretty(&ExportRead {
+        at_ms: r.at_ms,
+        ms: r.ms,
+        width: r.width,
+        height: r.height,
+        grid: &r.grid,
+        components: &r.components,
+        refinery: &r.refinery,
+        cursor: r.cursor,
+        boxes: &r.boxes,
+    })
         .map_err(|e| e.to_string())?;
     std::fs::write(folder.join(format!("read-{n}.json")), json).map_err(|e| e.to_string())
 }
@@ -318,6 +349,8 @@ fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> Sender<(RgbImage, In
                         height: event.height,
                         grid: event.grid.clone(),
                         components: event.components.clone(),
+                        refinery: event.refinery.clone(),
+                        cursor: event.cursor,
                         boxes: event.boxes.clone(),
                         jpeg,
                     };
@@ -416,59 +449,51 @@ impl Gate {
     }
 }
 
-/// Whether a scan session runs (the capture runs only then; off at start). Off: every frame is
-/// dropped unread.
+/// Whether the scan runs (the capture runs only then; off at start). Off: every frame is dropped
+/// unread.
 pub type Detect = Arc<AtomicBool>;
 
-/// What a scan session reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScanMode {
-    Off,
-    /// The freight manager's warehouse (materials and items) and the character inventory (ship
-    /// components): the worker tells the screens apart
-    Inventory,
-    Refinery,
+/// Which screens the scan reads (the frontend's filters): the freight manager's warehouse (materials,
+/// items), the character inventory (ship components), the refinery terminal (jobs). A screen out of
+/// scope is neither looked for nor read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Scope {
+    pub warehouse: bool,
+    pub inventory: bool,
+    pub refinery: bool,
 }
 
-impl ScanMode {
-    pub fn name(self) -> &'static str {
-        match self {
-            ScanMode::Off => "off",
-            ScanMode::Inventory => "inventory",
-            ScanMode::Refinery => "refinery",
-        }
+impl Scope {
+    fn bits(self) -> u8 {
+        self.warehouse as u8 | (self.inventory as u8) << 1 | (self.refinery as u8) << 2
     }
 
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "off" => Some(ScanMode::Off),
-            "inventory" => Some(ScanMode::Inventory),
-            "refinery" => Some(ScanMode::Refinery),
-            _ => None,
-        }
+    fn from_bits(v: u8) -> Self {
+        Self { warehouse: v & 1 != 0, inventory: v & 2 != 0, refinery: v & 4 != 0 }
     }
 
-    fn from_u8(v: u8) -> Self {
-        match v {
-            1 => ScanMode::Inventory,
-            2 => ScanMode::Refinery,
-            _ => ScanMode::Off,
+    fn allows(self, screen: Screen) -> bool {
+        match screen {
+            Screen::Unknown => true,
+            Screen::Warehouse => self.warehouse,
+            Screen::Inventory => self.inventory,
+            Screen::Refinery => self.refinery,
         }
     }
 }
 
-/// The session's mode, shared with the commands (`Detect` says whether one runs at all: the capture
-/// only looks at that). Its own type: Tauri keeps managed state by type.
+/// The scan's scope, shared with the commands (`Detect` says whether it runs at all: the capture only
+/// looks at that). Its own type: Tauri keeps managed state by type.
 #[derive(Default, Clone)]
 pub struct Scan(pub Arc<AtomicU8>);
 
 impl Scan {
-    pub fn get(&self) -> ScanMode {
-        ScanMode::from_u8(self.0.load(Ordering::Relaxed))
+    pub fn get(&self) -> Scope {
+        Scope::from_bits(self.0.load(Ordering::Relaxed))
     }
 
-    pub fn set(&self, mode: ScanMode) {
-        self.0.store(mode as u8, Ordering::Relaxed);
+    pub fn set(&self, scope: Scope) {
+        self.0.store(scope.bits(), Ordering::Relaxed);
     }
 }
 
@@ -477,12 +502,20 @@ impl Scan {
 /// like `Detect`: Tauri keeps managed state by type, a second `Arc<AtomicBool>` would be ignored.
 #[derive(Default, Clone)]
 pub struct GameSeen(pub Arc<AtomicBool>);
+
+/// How often the capture delivers a frame (ms; 0: the normal once a second). The worker sets it while
+/// the character inventory is in view (its tooltips need three reads of a tile): 1.5 × its last read
+/// there, within FAST_MIN_MS–FAST_MAX_MS, so it reads at most ~2/3 of the time on any machine.
+#[derive(Default, Clone)]
+pub struct FastCapture(pub Arc<AtomicU32>);
+const FAST_MIN_MS: u64 = 500;
+const FAST_MAX_MS: u64 = 1000;
 pub const GAME_SEEN: &str = "game-seen";
 
 /// Starts the OCR worker; frames sent to the returned channel are read in order while a session runs.
-pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Sender<Frame> {
+pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture) -> Sender<Frame> {
     let (tx, rx) = channel::<Frame>();
-    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store).run(rx));
+    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store, fast).run(rx));
     if let Some(dir) = std::env::var_os("QM_OCR_FRAMES") {
         spawn_folder_source(PathBuf::from(dir), tx.clone());
     }
@@ -508,7 +541,6 @@ fn next_frame(rx: &Receiver<Frame>, wait: Duration) -> Result<Option<Frame>, ()>
 }
 
 struct Visit {
-    misses: u32,
     last_frame: Instant,
 }
 
@@ -519,17 +551,21 @@ struct Worker {
     debug: Debug,
     /// While debugging, the reads go with their frame to the debug writer (`spawn_debug_writer`)
     debug_tx: Sender<(RgbImage, InventoryEvent)>,
+    /// Set while the character inventory is in view: the capture delivers frames faster
+    fast: FastCapture,
     ocr: Option<Ocr>,
     gate: Gate,
     labels: LabelSource,
     visit: Option<Visit>,
     /// The last inventory read's grid pitch: the next fit's prior
     last_pitch: Option<(f32, f32)>,
-    /// Which screen the inventory session looks at, and how many reads in a row found nothing there
+    /// Which screen the scan looks at, and how many reads in a row found nothing there
     screen: Screen,
     screen_misses: u32,
-    /// When an inventory session last read a frame (probing without a known screen is throttled)
+    /// When the scan last probed a frame for a screen (probing without a known screen is throttled)
     last_probe_ms: u64,
+    /// The character inventory's scale (`components::Ui`), from the last page number read
+    ui_scale: Option<f32>,
 }
 
 fn unix_ms(t: SystemTime) -> u64 {
@@ -547,13 +583,14 @@ fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
 }
 
 impl Worker {
-    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore) -> Self {
+    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture) -> Self {
         let debug_tx = spawn_debug_writer(app.clone(), store);
         Self {
             app,
             detect,
             scan,
             debug,
+            fast,
             debug_tx,
             ocr: None,
             gate: Gate::default(),
@@ -563,6 +600,7 @@ impl Worker {
             screen: Screen::Unknown,
             screen_misses: 0,
             last_probe_ms: 0,
+            ui_scale: None,
         }
     }
 
@@ -570,89 +608,136 @@ impl Worker {
         loop {
             let Ok(frame) = next_frame(&rx, Duration::from_secs(5)) else { return };
             if self.visit.as_ref().is_some_and(|v| v.last_frame.elapsed() > VISIT_GAP) {
-                self.end_visit("no frames");
+                self.set_screen(Screen::Unknown, "no frames");
             }
-            let Some(frame) = frame else { continue };
-            let mode = if self.detect.load(Ordering::Relaxed) { self.scan.get() } else { ScanMode::Off };
-            if mode != ScanMode::Refinery {
-                self.end_visit("scan stopped");
-            }
-            if mode == ScanMode::Off {
-                self.gate = Gate::default();
-                // The next session may see the terminal from elsewhere, or another screen
+            // Checked without a frame too: once off, the capture sends none
+            if !self.detect.load(Ordering::Relaxed) {
+                self.set_screen(Screen::Unknown, "scan stopped");
+                // The next start may see the terminal from elsewhere
                 self.last_pitch = None;
-                self.screen = Screen::Unknown;
-                self.screen_misses = 0;
-                // No session: the OCR's memory goes right away (the next start loads it again in
-                // well under a second); while a session runs it stays, read or not
+                self.ui_scale = None;
+                // Off: the OCR's memory goes right away (the next start loads it again in well under a
+                // second); while the scan runs it stays, read or not
                 if self.ocr.take().is_some() {
                     log::info!("OCR unloaded (scan stopped)");
                 }
                 continue;
             }
+            let Some(frame) = frame else { continue };
+            let scope = self.scan.get();
+            // A screen the filters left out is left (and not looked for again)
+            if !scope.allows(self.screen) {
+                self.set_screen(Screen::Unknown, "out of scope");
+            }
             if let Some(v) = &mut self.visit {
                 v.last_frame = Instant::now();
             }
-            self.gate.reread_ms = if mode == ScanMode::Refinery { REREAD_MS } else { INVENTORY_REREAD_MS };
-            // An inventory session reads every frame: the character and the world behind the
-            // translucent inventory screen never come to rest, and the user waits for each stack.
-            // While it does not know its screen (nothing in view: a menu, the verse) it probes
-            // every PROBE_MS only: a frame with neither screen costs the grid and the tooltip read
-            if frame.live && mode != ScanMode::Inventory && !self.gate.pass(frame.pixels.thumb(), frame.at_ms) {
-                continue;
-            }
-            if frame.live && mode == ScanMode::Inventory && self.screen == Screen::Unknown && frame.at_ms.saturating_sub(self.last_probe_ms) < PROBE_MS {
-                continue;
-            }
-            self.last_probe_ms = frame.at_ms;
-            let result = match mode {
-                ScanMode::Inventory => self.look_inventory(frame),
-                _ => self.look(frame),
+            let result = match self.screen {
+                // The terminal: once the view came to rest after it moved, and every REREAD_MS
+                Screen::Refinery => {
+                    if frame.live && !self.gate.pass(frame.pixels.thumb(), frame.at_ms) {
+                        continue;
+                    }
+                    self.look_refinery(frame.at_ms, frame.cursor, frame.pixels.into_rgb())
+                }
+                // Warehouse and character inventory: every frame (the character and the world behind
+                // the translucent inventory screen never come to rest, and the user waits for each stack)
+                Screen::Warehouse | Screen::Inventory => self.look_inventory(scope, frame.at_ms, frame.cursor, frame.pixels.into_rgb()),
+                // Nothing in view (a menu, the verse): a probe costs the reads, so every PROBE_MS only
+                Screen::Unknown => {
+                    if frame.live && frame.at_ms.saturating_sub(self.last_probe_ms) < PROBE_MS {
+                        continue;
+                    }
+                    self.last_probe_ms = frame.at_ms;
+                    self.probe(scope, frame)
+                }
             };
             if let Err(e) = result {
                 log::warn!("OCR: {e}");
             }
-            // A session reads again every REREAD_MS, not only when the view moved
-            self.gate.read(true);
         }
     }
 
-    /// Reads a frame of an inventory session: the warehouse grid and its tooltip (every tile's badge
-    /// only while debugging: the sightings need the hovered tile's), or the character inventory's
-    /// tooltip, page and cursor cell. Which one is decided by `Screen` (see there): unknown, the cheap
-    /// page read decides, else the grid read, and a frame with neither is tried as the inventory too.
-    fn look_inventory(&mut self, frame: Frame) -> Result<(), String> {
+    /// The labels in the player's language (re-read when the game's language or pack changes).
+    fn labels_now(&mut self) -> Labels {
+        let game_dir = PathBuf::from(&self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.game_dir);
+        self.labels.get(&game_dir).clone()
+    }
+
+    /// Switches the screen: the refinery's starts or ends a visit; the frontend hears of every change.
+    fn set_screen(&mut self, screen: Screen, why: &str) {
+        if screen == self.screen {
+            return;
+        }
+        let at_ms = unix_ms(SystemTime::now());
+        if self.screen == Screen::Refinery {
+            self.visit = None;
+            log::info!("refinery visit ended ({why})");
+            let _ = self.app.emit(REFINERY_VISIT, VisitEvent { at_ms, active: false });
+        }
+        if screen == Screen::Refinery {
+            self.visit = Some(Visit { last_frame: Instant::now() });
+            log::info!("refinery visit started");
+            let _ = self.app.emit(REFINERY_VISIT, VisitEvent { at_ms, active: true });
+        }
+        log::info!("scan screen {} ({why})", screen.name());
+        self.screen = screen;
+        self.screen_misses = 0;
+        self.gate = Gate::default();
+        self.fast.0.store(if screen == Screen::Inventory { FAST_MIN_MS as u32 } else { 0 }, Ordering::Relaxed);
+        let _ = self.app.emit(SCAN_SCREEN, screen.name());
+    }
+
+    /// Looks for a screen in a frame: the refinery's big titles first (cheap), then the inventory's
+    /// reads (the page number, else the warehouse grid; a frame with neither is tried as the
+    /// character inventory too), each only when in scope.
+    fn probe(&mut self, scope: Scope, frame: Frame) -> Result<(), String> {
+        let image = frame.pixels.into_rgb();
+        if scope.refinery {
+            let labels = self.labels_now();
+            let ocr = ensure_ocr(&mut self.ocr)?;
+            let started = Instant::now();
+            let found = terminal_in_view(ocr, &image, &labels)?;
+            log::debug!("terminal check in {:?}: {found}", started.elapsed());
+            if found {
+                self.set_screen(Screen::Refinery, "titles seen");
+                return self.look_refinery(frame.at_ms, frame.cursor, image);
+            }
+        }
+        if scope.warehouse || scope.inventory {
+            return self.look_inventory(scope, frame.at_ms, frame.cursor, image);
+        }
+        Ok(())
+    }
+
+    /// Reads a frame of the warehouse or the character inventory: the warehouse grid and its tooltip
+    /// (every tile's badge only while debugging: the sightings need the hovered tile's), or the
+    /// character inventory's tooltip, page and cursor cell. Which one is decided by `Screen` (see
+    /// there): unknown, the cheap page read decides, else the grid read, and a frame with neither is
+    /// tried as the inventory too; a screen out of `scope` is not read.
+    fn look_inventory(&mut self, scope: Scope, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
         let debug = self.debug.0.load(Ordering::Relaxed);
         let ocr = ensure_ocr(&mut self.ocr)?;
-        let image = frame.pixels.into_rgb();
         let (width, height) = image.dimensions();
         let started = Instant::now();
         let mut grid = None;
         let mut components = None;
         let mut boxes = Vec::new();
         let mut found = false;
-        // The storage grid's tile under the cursor (lit by the game); without one no tooltip can
-        // belong to a tile, so the tooltip read is skipped (the page read keeps the screen)
-        let cell = frame.cursor.and_then(|c| hovered_tile(&image, c));
-        let tooltip_read = |ocr: &mut Ocr, boxes: &mut Vec<TextBox>| -> Result<_, String> {
-            if cell.is_none() && frame.cursor.is_some() {
-                return Ok(None);
-            }
-            let (tooltip, tip_boxes) = read_tooltip(ocr, &image)?;
-            boxes.extend(tip_boxes);
-            Ok(tooltip)
-        };
-        if self.screen != Screen::Inventory {
-            let probe_page = self.screen == Screen::Unknown;
+        // Applied once the OCR is done (set_screen needs the whole worker)
+        let mut screen = self.screen;
+        if screen != Screen::Inventory {
+            // Probing: the page number over every place it can have (the scale is not known yet)
+            let probe_page = screen == Screen::Unknown && scope.inventory;
             let page = if probe_page {
-                let (page, page_boxes) = read_page(ocr, &image)?;
+                let (page, page_boxes) = read_page(ocr, &image, None)?;
                 boxes.extend(page_boxes);
                 page
             } else {
                 None
             };
-            if page.is_none() {
-                let (g, grid_boxes) = read_grid(ocr, &image, frame.cursor, self.last_pitch, debug)?;
+            if page.is_none() && scope.warehouse {
+                let (g, grid_boxes) = read_grid(ocr, &image, cursor, self.last_pitch, debug)?;
                 boxes.extend(grid_boxes);
                 if let Some(g) = &g {
                     // Only a strong fit sets the pitch the weaker reads keep
@@ -660,112 +745,127 @@ impl Worker {
                         self.last_pitch = Some((g.pitch_x, g.pitch_y));
                     }
                     found = true;
-                    self.screen = Screen::Warehouse;
+                    screen = Screen::Warehouse;
                 }
                 grid = g;
             }
-            if self.screen == Screen::Unknown || page.is_some() {
+            if scope.inventory && (screen == Screen::Unknown || page.is_some()) {
                 // The page or nothing at all: try the character inventory
-                let tooltip = tooltip_read(ocr, &mut boxes)?;
-                let page = if probe_page { page } else { read_page(ocr, &image).map(|(p, b)| { boxes.extend(b); p })? };
-                found = found || page.is_some() || tooltip.is_some();
+                let (read, k) = inventory_screen(ocr, &image, cursor, page, self.ui_scale, &mut boxes)?;
+                found = found || read.page.is_some() || read.tooltip.is_some();
                 if page.is_some() {
-                    self.screen = Screen::Inventory;
+                    screen = Screen::Inventory;
+                    self.ui_scale = Some(k);
                 }
-                components = Some(ComponentRead { tooltip, page, cell });
+                components = Some(read);
             }
         } else {
-            let tooltip = tooltip_read(ocr, &mut boxes)?;
-            let (page, page_boxes) = read_page(ocr, &image)?;
+            // The page number where the known scale puts it (cheap)
+            let (page, page_boxes) = read_page(ocr, &image, self.ui_scale)?;
             boxes.extend(page_boxes);
-            found = page.is_some() || tooltip.is_some();
-            components = Some(ComponentRead { tooltip, page, cell });
+            let (read, k) = inventory_screen(ocr, &image, cursor, page, self.ui_scale, &mut boxes)?;
+            if page.is_some() {
+                self.ui_scale = Some(k);
+            }
+            found = read.page.is_some() || read.tooltip.is_some();
+            components = Some(read);
         }
         // A screen that shows nothing SCREEN_MISSES times in a row is left: the next frame probes again
         if found {
             self.screen_misses = 0;
-        } else if self.screen != Screen::Unknown {
+        } else if screen != Screen::Unknown {
             self.screen_misses += 1;
             if self.screen_misses >= SCREEN_MISSES {
-                log::info!("inventory scan: left the {:?} screen", self.screen);
-                self.screen = Screen::Unknown;
-                self.screen_misses = 0;
+                screen = Screen::Unknown;
             }
         }
         let ms = started.elapsed().as_millis() as u64;
+        // On the character inventory the next frame comes after 1.5 × this read (set_screen below resets it
+        // when the screen changes)
+        if screen == Screen::Inventory && self.screen == Screen::Inventory {
+            self.fast.0.store((ms * 3 / 2).clamp(FAST_MIN_MS, FAST_MAX_MS) as u32, Ordering::Relaxed);
+        }
         match (&grid, &components) {
             (Some(g), _) => {
                 let tip = g.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {} Q{:?} {:?}", t.name, t.quality, t.scu));
                 let hovered = g.tiles.iter().find(|t| t.hovered).map_or(String::new(), |t| format!(", hovered r{} c{} Q{:?} x{:?}", t.row, t.col, t.quality, t.count));
-                log::info!("inventory read in {ms} ms: {}×{} tiles at pitch {:.0}×{:.0} (weight {}), cursor {:?}, {tip}{hovered}", g.cols.len(), g.rows.len(), g.pitch_x, g.pitch_y, g.fit_weight, frame.cursor);
+                log::info!("inventory read in {ms} ms: {}×{} tiles at pitch {:.0}×{:.0} (weight {}), cursor {:?}, {tip}{hovered}", g.cols.len(), g.rows.len(), g.pitch_x, g.pitch_y, g.fit_weight, cursor);
             }
             (None, Some(c)) if c.tooltip.is_some() || c.page.is_some() => {
                 // The lines as read: what the frontend matches the stat names against
                 let tip = c.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {:?} with {} lines: {}", t.title, t.lines.len(), t.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" | ")));
-                log::info!("components read in {ms} ms: page {:?}, cursor {:?} in tile {:?}, {tip}", c.page.map(|p| (p.index, p.total)), frame.cursor, c.cell.map(|x| (x.row, x.col, x.span)));
+                log::info!("components read in {ms} ms: page {:?}, cursor {:?} in tile {:?}, {tip}", c.page.map(|p| (p.index, p.total)), cursor, c.cell.map(|x| (x.row, x.col, x.span)));
             }
-            _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", self.screen),
+            _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", screen),
         }
-        let event = InventoryEvent { at_ms: frame.at_ms, ms, width, height, grid, components, cursor: frame.cursor, boxes, frame: None };
+        let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None };
         // While debugging the debug writer adds the frame and emits; the worker goes on reading
         if !debug || self.debug_tx.send((image, event.clone())).is_err() {
             let _ = self.app.emit(INVENTORY_READ, event);
         }
+        self.set_screen(screen, if found { "seen" } else { "nothing seen" });
         Ok(())
     }
 
-    /// Reads the refinery terminal's work order overview in a frame (the session is the visit; with
-    /// `AUTO_REFINERY` the visit starts only once the terminal's titles are seen).
-    fn look(&mut self, frame: Frame) -> Result<(), String> {
-        let game_dir = PathBuf::from(&self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.game_dir);
-        let labels = self.labels.get(&game_dir).clone();
+    /// Reads the refinery terminal's work order overview in a frame (the screen is the visit; a few
+    /// reads in a row without the terminal leave it).
+    fn look_refinery(&mut self, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
+        let labels = self.labels_now();
         let ocr = ensure_ocr(&mut self.ocr)?;
-        let image = frame.pixels.into_rgb();
         let started = Instant::now();
-        if self.visit.is_none() {
-            if AUTO_REFINERY {
-                let found = terminal_in_view(ocr, &image, &labels)?;
-                log::debug!("terminal check in {:?}: {found}", started.elapsed());
-                if !found {
-                    return Ok(());
-                }
-            }
-            log::info!("refinery visit started");
-            self.visit = Some(Visit { misses: 0, last_frame: Instant::now() });
-            let _ = self.app.emit(REFINERY_VISIT, VisitEvent { at_ms: frame.at_ms, active: true });
-        }
         let read = read_overview(ocr, &image, &labels)?;
-        let visit = self.visit.as_mut().expect("started above");
-        match read {
+        let ms = started.elapsed().as_millis() as u64;
+        // Read again every REREAD_MS, not only when the view moved
+        self.gate.read(true);
+        let debug = match read {
             Read::Overview(overview) => {
-                visit.misses = 0;
+                self.screen_misses = 0;
                 let orders: Vec<String> = overview.orders.iter().map(|o| format!("{:?} {} rows", o.status, o.rows.len())).collect();
-                log::info!("refinery overview read in {:?}: {}", started.elapsed(), orders.join(", "));
-                let _ = self.app.emit(REFINERY_OVERVIEW, OverviewEvent { at_ms: frame.at_ms, overview });
+                log::info!("refinery overview read in {ms} ms: {}", orders.join(", "));
+                let debug = RefineryRead { kind: "overview", overview: Some(overview.clone()) };
+                let _ = self.app.emit(REFINERY_OVERVIEW, OverviewEvent { at_ms, overview });
+                debug
             }
             Read::Terminal => {
-                visit.misses = 0;
-                log::debug!("refinery terminal without work orders ({:?})", started.elapsed());
+                self.screen_misses = 0;
+                log::debug!("refinery terminal without work orders ({ms} ms)");
+                RefineryRead { kind: "terminal", overview: None }
             }
             Read::Nothing => {
-                visit.misses += 1;
-                log::debug!("no refinery terminal ({:?}), {} in a row", started.elapsed(), visit.misses);
-                // A manual session goes on until stopped (the user looks away and back)
-                if AUTO_REFINERY && visit.misses >= LEAVE_AFTER {
-                    self.end_visit("left");
-                }
+                self.screen_misses += 1;
+                log::debug!("no refinery terminal ({ms} ms), {} in a row", self.screen_misses);
+                RefineryRead { kind: "nothing", overview: None }
             }
+        };
+        // While debugging the read goes with its frame to the debug window and a recording
+        if self.debug.0.load(Ordering::Relaxed) {
+            let (width, height) = image.dimensions();
+            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug) };
+            let _ = self.debug_tx.send((image, event));
+        }
+        if self.screen_misses >= LEAVE_AFTER {
+            self.set_screen(Screen::Unknown, "left");
         }
         Ok(())
     }
+}
 
-    fn end_visit(&mut self, why: &str) {
-        if self.visit.take().is_none() {
-            return;
-        }
-        log::info!("refinery visit ended ({why})");
-        let _ = self.app.emit(REFINERY_VISIT, VisitEvent { at_ms: unix_ms(SystemTime::now()), active: false });
-    }
+/// The rest of a character inventory read once its page number was read: the scale from the page's
+/// place (else the last one, else the measured place), the tile under the cursor (lit by the game;
+/// without one no tooltip can belong to a tile, so the tooltip is not read; the page read keeps the
+/// screen), the tooltip. Also the scale it used.
+fn inventory_screen(ocr: &mut Ocr, image: &RgbImage, cursor: Option<(f32, f32)>, page: Option<(Page, f32)>, last: Option<f32>, boxes: &mut Vec<TextBox>) -> Result<(ComponentRead, f32), String> {
+    let k = page.map(|p| p.1).or(last).unwrap_or(1.0);
+    let ui = Ui::new(image, k);
+    let cell = cursor.and_then(|c| hovered_tile(image, ui, c));
+    let tooltip = if cell.is_none() && cursor.is_some() {
+        None
+    } else {
+        let (tooltip, tip_boxes) = read_tooltip(ocr, image, ui)?;
+        boxes.extend(tip_boxes);
+        tooltip
+    };
+    Ok((ComponentRead { tooltip, page: page.map(|p| p.0), cell }, k))
 }
 
 /// Test source: reads every image file in `dir` once (by name), checking for new ones every 2 s.

@@ -32,23 +32,26 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindow};
 
-use crate::ocrwatch::{Detect, Frame, GameSeen, Pixels, GAME_SEEN};
+use crate::ocrwatch::{Detect, FastCapture, Frame, GameSeen, Pixels, GAME_SEEN};
 
 const GAME_EXE: &str = "StarCitizen.exe";
 const INTERVAL: Duration = Duration::from_secs(1);
 // Waiting for a desktop frame: the game presents continuously, a timeout means nothing changed
 const ACQUIRE_TIMEOUT_MS: u32 = 200;
 
-/// Starts the capture thread; it sends frames only while `detect` is on and the game is in front,
-/// and tells whether the game runs (`seen`, only while `detect` is on).
-pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen) {
+/// Starts the capture thread; it sends frames only while `detect` is on and the game is in front
+/// (one per second, on the character inventory as often as `fast` says), and tells whether the game runs (`seen`, only while `detect` is
+/// on).
+pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, fast: FastCapture) {
     std::thread::spawn(move || {
         let mut dup: Option<Duplication> = None;
         let mut last_error = String::new();
         // The game window last seen in front: it still counts while the companion itself is in front
         let mut last_game: Option<HWND> = None;
         loop {
-            std::thread::sleep(INTERVAL);
+            // Faster on the character inventory, paced by the worker's read time (`FastCapture`)
+            let fast_ms = fast.0.load(Ordering::Relaxed);
+            std::thread::sleep(if fast_ms > 0 { Duration::from_millis(fast_ms.into()) } else { INTERVAL });
             let on = detect.load(Ordering::Relaxed);
             let hwnd = if on { game_window(&mut last_game) } else { None };
             let running = on && (hwnd.is_some() || game_running());

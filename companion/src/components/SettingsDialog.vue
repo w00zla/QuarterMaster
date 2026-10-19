@@ -1,16 +1,17 @@
 <script setup lang="ts">
 // API token (created in the web app's Companion dialog and pasted here), game folder and the UI
 // language; saving checks the connection and reloads the log state (the path may have changed). The
-// server is fixed (only the config file changes it). The scan overlay group (Windows only): its
-// switch acts at once (not stored: off at every start), position and hotkeys are saved. The
-// diagnostics group opens the debug window.
+// server is fixed (only the config file changes it). The scan overlay group (Windows only):
+// position (six icon-only buttons on a drawn monitor) and hotkeys, saved (on/off is the scan row's
+// toggle and the hotkey). Below the groups, quiet (secondary for the user): the debug window.
 import { computed, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { openDebugWindow, setConfig, type OverlayPosition } from "../backend";
 import { t } from "../i18n";
-import { overlayOn, setOverlay } from "../overlay";
 import { applyConfig, config, loadLog, refreshConnection } from "../state";
 import { errorText, toast, toastError } from "../toasts";
 import HotkeyInput from "./HotkeyInput.vue";
@@ -101,26 +102,16 @@ async function pickFolder() {
       </section>
       <section v-if="isWindows" class="group">
         <div class="group-title">{{ t("settings.overlay") }}</div>
-        <label class="switch-line">
-          <span class="switch-label label">
-            {{ t("settings.overlayShow") }}
-            <span class="hint">{{ t("settings.overlayHint") }}</span>
-          </span>
-          <input type="checkbox" class="switch" :checked="overlayOn" @change="setOverlay(!overlayOn)" />
-        </label>
         <div class="line between">
           <span class="label">{{ t("settings.overlayPosition") }}</span>
-          <div class="corners">
-            <button
-              v-for="p in POSITIONS"
-              :key="p"
-              type="button"
-              class="btn small"
-              :class="overlayPosition === p ? 'primary' : 'outline'"
-              @click="overlayPosition = p"
-            >
-              {{ t(`overlay.pos.${p}`) }}
-            </button>
+          <!-- A small monitor with the six places where they are on the screen -->
+          <div class="monitor">
+            <div class="screen">
+              <Tooltip v-for="p in POSITIONS" :key="p" :text="t(`overlay.pos.${p}`)">
+                <button type="button" class="place" :class="{ active: overlayPosition === p }" :aria-label="t(`overlay.pos.${p}`)" :aria-pressed="overlayPosition === p" @click="overlayPosition = p" />
+              </Tooltip>
+            </div>
+            <div class="stand" />
           </div>
         </div>
         <div class="line between">
@@ -132,13 +123,13 @@ async function pickFolder() {
           <HotkeyInput v-model="hotkeyMode" class="hotkey-field" />
         </div>
       </section>
-      <section class="group">
-        <div class="group-title">{{ t("settings.diagnostics") }}</div>
-        <div class="line">
-          <span class="hint">{{ t("settings.debugHint") }}</span>
-          <button type="button" class="btn outline" @click="openDebugWindow().catch(toastError)">{{ t("debug.open") }}</button>
-        </div>
-      </section>
+      <!-- Secondary: no tile of its own, one quiet line -->
+      <div class="line debug">
+        <span class="hint">{{ t("settings.debugHint") }}</span>
+        <button type="button" class="btn small outline" @click="openDebugWindow().catch(toastError)">
+          <Icon name="log" :size="12" /> {{ t("debug.open") }}
+        </button>
+      </div>
     </form>
   </ConfirmDialog>
 </template>
@@ -186,9 +177,10 @@ async function pickFolder() {
   min-width: 0;
 }
 
+/* Hints quieter than the labels: smaller and dimmed */
 .hint {
-  font-size: 12px;
-  color: var(--text-2);
+  font-size: 11px;
+  color: var(--text-3);
 }
 
 .line .hint {
@@ -208,26 +200,67 @@ async function pickFolder() {
   justify-content: space-between;
 }
 
-/* The overlay switch: its label with the hint below it, the switch on the right */
-.switch-line {
+/* The overlay's places on a small monitor (16:9 with a stand): top row, bottom row, each place an
+   icon-only button shaped like the overlay's tile */
+.monitor {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+}
+
+.screen {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-content: space-between;
+  justify-items: center;
+  width: 176px;
+  height: 99px;
+  box-sizing: border-box;
+  padding: 7px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-base);
+}
+
+.screen > :nth-child(3n + 1) {
+  justify-self: start;
+}
+
+.screen > :nth-child(3n) {
+  justify-self: end;
+}
+
+.stand {
+  width: 44px;
+  height: 7px;
+  border: 2px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+}
+
+.place {
+  display: block;
+  width: 30px;
+  height: 18px;
+  padding: 0;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  background: transparent;
   cursor: pointer;
 }
 
-.switch-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.place:hover {
+  border-color: var(--accent);
 }
 
-/* The overlay's places as buttons where they are: top row, bottom row */
-.corners {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 4px;
+.place.active {
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* The debug window: secondary, a quiet line below the groups */
+.line.debug {
+  padding: 0 4px;
 }
 
 .hotkey-field {

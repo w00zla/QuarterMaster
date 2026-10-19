@@ -16,6 +16,7 @@
 import { findMaterial, type MaterialNames } from "../../src/stock/material-names.ts";
 import type { StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
 import type { ComponentRead } from "./components.ts";
+import type { Overview } from "./refinery.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------
 
@@ -93,6 +94,8 @@ export interface InventoryReadEvent {
   boxes: ReadBox[];
   // While debugging: the frame as a JPEG data URL (1280 px wide)
   frame: string | null;
+  // A refinery read (only while debugging; the sync gets "refinery-overview"): overview, terminal without work orders, nothing
+  refinery: { kind: "overview" | "terminal" | "nothing"; overview: Overview | null } | null;
 }
 
 // --- sightings -------------------------------------------------------------------------------------
@@ -100,7 +103,8 @@ export interface InventoryReadEvent {
 export type Unit = "SCU" | "pcs";
 
 // "component": a ship component, which only the components scan (the character inventory) books
-export type SightingProblem = "unknownMaterial" | "component" | "noQuality" | "noAmount";
+// amountFlicker: the same stack confirmed with two counts, one a digit short of the other ("X1"/"X10")
+export type SightingProblem = "unknownMaterial" | "component" | "noQuality" | "noAmount" | "amountFlicker";
 
 export interface Sighting {
   // col | material (or normalized name) | quality | amount
@@ -207,6 +211,15 @@ export class InventoryScan {
       // The certain one stays (or comes in)
       if (!twin.amountUncertain && s.amountUncertain) return null;
       this.sightings.delete(twin.key);
+    }
+    // A count whose digit got lost in some reads ("X1" and "X10" of one stack, both confirmed): neither
+    // is booked
+    const lostDigit = (a: string, b: string) => a !== b && (a.startsWith(b) || b.startsWith(a));
+    for (const o of this.sightings.values()) {
+      if (s.unit === "pcs" && o.unit === "pcs" && same(o) && o.amount !== null && s.amount !== null && lostDigit(o.amount, s.amount)) {
+        o.problem = "amountFlicker";
+        s.problem = "amountFlicker";
+      }
     }
     this.sightings.set(s.key, s);
     return s;

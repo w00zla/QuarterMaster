@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The app bar, after BindSight's: the window has no native frame, the bar is the title bar
-// (dragging, double-click maximizes) with the settings button and the window controls.
+// (dragging, double-click maximizes) with what the app puts in (the user), the settings button and
+// the window controls.
 import { onMounted, onUnmounted, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -41,6 +42,8 @@ onUnmounted(() => {
       <span class="sub" data-tauri-drag-region>{{ t("app.name") }}</span>
     </div>
     <div class="spacer" data-tauri-drag-region />
+    <!-- The user or why the connection is down, refresh and web app (App.vue) -->
+    <slot />
     <button type="button" class="btn small outline square" :title="t('settings.title')" @click="emit('settings')">
       <Icon name="settings" :size="14" />
     </button>
@@ -63,7 +66,7 @@ onUnmounted(() => {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   height: 56px;
   flex-shrink: 0;
   padding: 0 8px 0 16px;
@@ -97,7 +100,12 @@ onUnmounted(() => {
   color: var(--accent);
 }
 
+/* Gives way first when the bar gets tight */
 .sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-2);
   font-size: 13px;
   letter-spacing: 0.1em;

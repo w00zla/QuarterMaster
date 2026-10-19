@@ -276,22 +276,24 @@ fn game_names(app: AppHandle, keys: Vec<String>) -> std::collections::HashMap<St
     locale::read_values(&locale::ini_path(std::path::Path::new(&game_dir)), &keys)
 }
 
-/// The running scan session: "off", "inventory", "components" or "refinery".
+/// Whether the scan runs.
 #[tauri::command]
-fn get_scan(detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>) -> &'static str {
-    if detect.load(std::sync::atomic::Ordering::Relaxed) { scan.get() } else { ocrwatch::ScanMode::Off }.name()
+fn get_scan(detect: tauri::State<ocrwatch::Detect>) -> bool {
+    detect.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Starts a scan session ("inventory", "components", "refinery") or stops it ("off"); the capture runs only during
-/// one. Every window hears about it (`scan-changed`).
+/// Switches the scan on or off, with the screens it reads (a change of them while it runs applies to
+/// the next frame); the capture runs only while it is on. Every window hears about it (`scan-changed`).
 #[tauri::command]
-fn set_scan(app: AppHandle, detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>, mode: String) -> Result<(), String> {
-    let mode = ocrwatch::ScanMode::parse(&mode).ok_or("invalid")?;
-    scan.set(mode);
-    detect.store(mode != ocrwatch::ScanMode::Off, std::sync::atomic::Ordering::Relaxed);
-    log::info!("scan {}", mode.name());
-    let _ = app.emit(SCAN_CHANGED, mode.name());
-    Ok(())
+fn set_scan(app: AppHandle, detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>, on: bool, warehouse: bool, inventory: bool, refinery: bool) {
+    let scope = ocrwatch::Scope { warehouse, inventory, refinery };
+    scan.set(scope);
+    let was = detect.swap(on, std::sync::atomic::Ordering::Relaxed);
+    if was != on {
+        log::info!("scan {}", if on { "on" } else { "off" });
+        let _ = app.emit(SCAN_CHANGED, on);
+    }
+    log::debug!("scan scope {scope:?}");
 }
 
 /// Opens the debug window (debug.html), or brings it to the front; closing it turns the debug flag
@@ -435,10 +437,11 @@ pub fn run() {
             let scan = ocrwatch::Scan::default();
             let debug = ocrwatch::Debug::default();
             let store = ocrwatch::DebugStore::default();
-            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone());
+            let fast = ocrwatch::FastCapture::default();
+            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone(), fast.clone());
             let seen = ocrwatch::GameSeen::default();
             #[cfg(windows)]
-            capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone());
+            capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast);
             app.manage(Mutex::new(frames));
             app.manage(detect);
             app.manage(scan);

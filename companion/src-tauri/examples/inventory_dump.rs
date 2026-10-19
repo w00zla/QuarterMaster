@@ -1,6 +1,7 @@
 //! Offline check of the freight manager read over folders of screenshots:
 //! `cargo run --release --example inventory_dump -- <out dir> <screenshots dir>...`
 //!
+//! A debug recording's frames are read with the cursor stored next to them (`read-N.json`).
 //! Prints every frame's layout, tooltip and tiles (cell, quality, count, hovered, texts) and the
 //! cells read, then writes an overlay per frame into the out dir (the frame at half size: tiles green,
 //! the hovered one white, OCR boxes yellow, the tooltip magenta) and the OCR boxes as text.
@@ -21,7 +22,7 @@ fn main() {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
             let frame = image::open(&path).expect("frame").to_rgb8();
             let t = std::time::Instant::now();
-            let (grid, boxes) = read_grid(&mut ocr, &frame, None, None, true).expect("read");
+            let (grid, boxes) = read_grid(&mut ocr, &frame, cursor_of(&path), None, true).expect("read");
             let ms = t.elapsed().as_millis();
             let dump: Vec<String> = boxes.iter().map(|b| format!("{:5.0} {:5.0} {:4.0} {:3.0}  {:.2}  {}", b.rect.x0, b.rect.y0, b.rect.w(), b.rect.h(), b.score, b.text)).collect();
             fs::write(out.join(format!("boxes-{name}.txt")), dump.join("\n")).unwrap();
@@ -72,6 +73,13 @@ fn main() {
             small.save(out.join(format!("overlay-{name}.png"))).unwrap();
         }
     }
+}
+
+/// The cursor a debug recording stored with the frame (`read-N.json` next to `read-N.jpg`), if any.
+fn cursor_of(frame: &Path) -> Option<(f32, f32)> {
+    let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(frame.with_extension("json")).ok()?).ok()?;
+    let c = json.get("cursor")?.as_array()?;
+    Some((c.first()?.as_f64()? as f32, c.get(1)?.as_f64()? as f32))
 }
 
 fn sorted(dir: &Path, ext: &str) -> Vec<PathBuf> {

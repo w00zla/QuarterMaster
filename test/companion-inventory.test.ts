@@ -35,7 +35,7 @@ const tile = (row: number, col: number, quality: number | null, count: number | 
   ({ rect: tileRect(row, col), row, col, quality, qualityAmbiguous: false, count, countUncertain, hovered, qualityText: quality === null ? '' : `${quality}Q`, badgeText: count === null ? '' : `X${count}` });
 const tooltip = (name: string, quality: number | null, scu: string | null): ReadTooltip => ({ name, quality, scu, x: 0, y: 0, rect });
 const read = (atMs: number, tiles: ReadTile[], tip: ReadTooltip | null): InventoryReadEvent =>
-  ({ atMs, ms: 400, width: 3840, height: 1600, grid: { tiles, tooltip: tip, cells: [], cols: [], rows: [], pitchX: 260, pitchY: 255 }, components: null, cursor: null, boxes: [], frame: null });
+  ({ atMs, ms: 400, width: 3840, height: 1600, grid: { tiles, tooltip: tip, cells: [], cols: [], rows: [], pitchX: 260, pitchY: 255 }, components: null, cursor: null, boxes: [], frame: null, refinery: null });
 
 describe('sightings', () => {
   it('an SCU material: the amount from the tooltip', () => {
@@ -127,6 +127,20 @@ describe('InventoryScan', () => {
     scan.feed(read(1, [tile(0, 0, 561, 14, true)], tooltip('Aphorite', 561, '0.001')), cat);
     const moved = { ...tile(1, 0, 561, 14, true), rect: tileRect(0, 0) };
     assert.ok(scan.feed(read(2, [moved], tooltip('Aphorite', 561, '0.001')), cat));
+  });
+
+  it('a count confirmed with a digit lost ("X1" and "X10" of one stack) books neither', () => {
+    const scan = new InventoryScan();
+    // 1080p 2026-10-19: Aphorite X10 read as X1 in some frames, both twice in a row
+    assert.ok(twice(scan, read(1, [tile(1, 2, null, 1, true)], tooltip('Aphorite', 348, '0.001'))));
+    assert.ok(twice(scan, read(3, [tile(1, 2, null, 10, true)], tooltip('Aphorite', 348, '0.001'))));
+    assert.deepEqual(scan.list().map((s) => [s.amount, s.problem]), [['10', 'amountFlicker'], ['1', 'amountFlicker']]);
+    assert.deepEqual(proposalsOf(scan.list(), [], LOC), []);
+    // Another count of the same material in the same column (another stack): no flicker
+    const other = new InventoryScan();
+    twice(other, read(1, [tile(0, 2, null, 4, true)], tooltip('Aphorite', 348, '0.001')));
+    twice(other, read(3, [tile(1, 2, null, 2, true)], tooltip('Aphorite', 348, '0.001')));
+    assert.deepEqual(other.list().map((s) => s.problem), [null, null]);
   });
 
   it('an uncertain count merges with a certain read of the same stack', () => {

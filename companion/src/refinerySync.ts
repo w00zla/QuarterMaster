@@ -3,20 +3,44 @@
 // running jobs. Matched running jobs are updated right away; proposals wait in the list until the user
 // confirms or dismisses them. Names are resolved against the web app's catalog in both languages and
 // the player's own language pack (the terminal shows its texts); the catalog is shared with the
-// inventory scan (inventorySync.ts). The scan session itself is in scan.ts.
+// inventory scan (inventorySync.ts). The filter "Jobs" (kept, on by default) decides whether the scan
+// reads the terminal at all; the scan itself is in scan.ts.
 import { listen } from "@tauri-apps/api/event";
 import { ref, shallowRef, watch } from "vue";
 import type { CatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
 import { gameNames } from "./backend";
 import { t } from "./i18n";
 import {
-  buildCatalog, doneRequest, gameNameKeys, jobsOf, RefinerySync, removeRequest, startRequest,
+  buildCatalog, doneRequest, finishedRequests, gameNameKeys, jobsOf, RefinerySync, removeRequest, startRequest,
   type Job, type OverviewEvent, type Proposal, type SyncCatalog, type Update, type VisitEvent,
 } from "./refinery";
-import { api, config, connected, onRefresh } from "./state";
+import { api, config, connected } from "./state";
 import { toast, toastError } from "./toasts";
 
-const sync = new RefinerySync();
+// Completed orders already stored, with when (kept: the terminal shows them until they are collected in
+// the game, also after a restart of the app); forgotten after STORED_DAYS
+const STORED_KEY = "qm.companion.refinery.stored";
+const STORED_DAYS = 30;
+function loadStored(): Map<string, number> {
+  try {
+    const list = JSON.parse(localStorage.getItem(STORED_KEY) ?? "[]") as [string, number][];
+    const since = Date.now() - STORED_DAYS * 86_400_000;
+    return new Map(list.filter(([, at]) => at >= since));
+  } catch {
+    return new Map();
+  }
+}
+const storedAt = loadStored();
+const sync = new RefinerySync(storedAt.keys());
+
+function saveStored() {
+  for (const key of sync.stored) if (!storedAt.has(key)) storedAt.set(key, Date.now());
+  localStorage.setItem(STORED_KEY, JSON.stringify([...storedAt]));
+}
+
+// A completed order without a job is stored row by row: the rows already added (a retry after a failed
+// row adds only the rest)
+const finishedRows = new Map<string, number>();
 export const proposals = ref<Proposal[]>([]);
 export const syncCatalog = shallowRef<SyncCatalog | null>(null);
 // The catalog as the web app answered it, per language (the unlocks panel's blueprints): fetched once with syncCatalog
@@ -24,6 +48,15 @@ export const catalogResponses = shallowRef<Record<"de" | "en", CatalogResponse> 
 // The catalog and the player's language pack are being loaded (the state row shows it)
 export const preparing = ref(false);
 let jobs: Job[] = [];
+
+const JOBS_KEY = "qm.companion.refinery.jobs";
+// The filter: whether the scan reads the refinery terminal
+export const jobsOn = ref(localStorage.getItem(JOBS_KEY) !== "0");
+
+export function toggleJobs() {
+  jobsOn.value = !jobsOn.value;
+  localStorage.setItem(JOBS_KEY, jobsOn.value ? "1" : "0");
+}
 
 const publish = () => (proposals.value = [...sync.proposals]);
 
@@ -124,15 +157,6 @@ export async function watchRefinery() {
     loadedFor = dir;
     serial(loadCatalog);
   }, { immediate: true });
-  // The refresh button: catalog with the language pack, then the jobs (in the queue, after a running event)
-  onRefresh(() => new Promise<void>((done) => serial(async () => {
-    try {
-      await loadCatalog();
-      await loadJobs();
-    } finally {
-      done();
-    }
-  })));
 }
 
 // --- the user's answers to proposals ---------------------------------------------------------------
@@ -142,8 +166,17 @@ export async function accept(p: Proposal): Promise<boolean> {
   try {
     if (p.kind === "new") await api<OkResponse>("POST", "/refinery/start", startRequest(p, Date.now()));
     else if (p.kind === "store") await api<OkResponse>("POST", "/refinery/done", doneRequest(p));
-    else await api<OkResponse>("POST", "/refinery/remove", removeRequest(p.job));
-    sync.drop(p.id);
+    else if (p.kind === "finished") {
+      const requests = finishedRequests(p);
+      for (let i = finishedRows.get(p.id) ?? 0; i < requests.length; i++) {
+        await api<OkResponse>("POST", "/stock/add", requests[i]);
+        finishedRows.set(p.id, i + 1);
+      }
+    } else await api<OkResponse>("POST", "/refinery/remove", removeRequest(p.job));
+    if (p.kind === "store" || p.kind === "finished") {
+      sync.markStored(p);
+      saveStored();
+    } else sync.drop(p.id);
     return true;
   } catch (e) {
     toastError(e);

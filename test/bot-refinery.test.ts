@@ -45,6 +45,8 @@ describe('refinery material lines', () => {
     assert.equal(findMaterial(cat, 'quanta'), 'quantainium');
     assert.equal(findMaterial(cat, 'Laranit'), 'laranite');
     assert.equal(findMaterial(cat, 'HEPHAESTANITE'), 'heph');
+    // The OCR's accent on an A (the refinery terminal at 1080p, 2026-10-19)
+    assert.equal(findMaterial(cat, 'HEPHAESTÁNITE'), 'heph');
     assert.equal(findMaterial(cat, 'silizium'), 'silicon');
     // An exact name wins over a longer one starting with it ("Titan" is also the start of "Titanium")
     assert.equal(findMaterial(cat, 'tin'), 'tin');

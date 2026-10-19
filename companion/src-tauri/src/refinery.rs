@@ -14,6 +14,7 @@
 //! Layout as of SC 4.x (screenshots 2026-10-07/08); anything unexpected yields no panel or empty
 //! fields, never a panic.
 
+use image::imageops::{self, FilterType};
 use image::RgbImage;
 use serde::Serialize;
 
@@ -27,6 +28,11 @@ const CHECK_HEIGHT: u32 = 320;
 /// Width / height of a box that may hold the table head "MATERIALS YIELDED (CSCU)" (about 12 as
 /// one box, about 7 when split before the parenthesis)
 const HEAD_RATIO: f32 = 5.0;
+/// A row's name starts at most this share of the table head's width ("MATERIALS YIELDED (CSCU)")
+/// right of the head's left edge (the material's icon comes first)
+const NAME_INDENT: f32 = 0.35;
+/// A value cell the full pass missed is upscaled by this before it is read on its own
+const CELL_SCALE: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -208,18 +214,18 @@ fn layout_at(boxes: &[TextBox], head: &TextBox, right_limit: f32, labels: &Label
         .filter(|b| b.rect.cy() > head.rect.y1)
         .map(|b| b.rect.y0)
         .fold(time.map_or(f32::MAX, |t| t.rect.y0), f32::min);
-    // Names start at the table's left edge and end before the first column's center
+    // Names start near the table's left edge, after the material's icon (~50 px at 1600 px height: a
+    // share of the head's width, its height is too small a unit), and end before the first column's center
     let mut rows: Vec<&TextBox> = boxes
         .iter()
         .filter(|b| b.rect.y0 > head.rect.y1 - unit * 0.2 && b.rect.y1 < end)
-        .filter(|b| (b.rect.x0 - head.rect.x0).abs() < unit * 2.0 && b.rect.x1 < columns[0].cx)
+        .filter(|b| b.rect.x0 > head.rect.x0 - unit * 2.0 && b.rect.x0 < head.rect.x0 + NAME_INDENT * head.rect.w() && b.rect.x1 < columns[0].cx)
         .filter(|b| {
             let t = norm(&b.text);
             t.len() >= 3 && t.chars().any(|c| c.is_alphabetic())
         })
         .collect();
     rows.sort_by(|a, b| a.rect.y0.total_cmp(&b.rect.y0));
-
     let seconds = time.and_then(|t| {
         boxes
             .iter()
@@ -228,10 +234,11 @@ fn layout_at(boxes: &[TextBox], head: &TextBox, right_limit: f32, labels: &Label
     });
 
     // The station: the biggest text wholly above the panel header (not another panel's header) that starts left of it (the
-    // title may reach over the first panel)
+    // title may reach over the first panel); not a "// REFINERY SYSTEM C47.02" label (the slanted terminal makes its
+    // box as tall as the title's)
     let station = boxes
         .iter()
-        .filter(|b| b.rect.y1 < header.rect.y0 && b.rect.x0 < header.rect.x0 && norm(&b.text).len() >= 3)
+        .filter(|b| b.rect.y1 < header.rect.y0 && b.rect.x0 < header.rect.x0 && norm(&b.text).len() >= 3 && !b.text.trim_start().starts_with(['/', '|']))
         .max_by(|a, b| a.rect.h().total_cmp(&b.rect.h()))
         .map(|b| b.text.trim().to_string());
 
@@ -309,13 +316,18 @@ fn read_order(ocr: &mut Ocr, frame: &RgbImage, boxes: &[TextBox], l: Layout) -> 
         let mut values = Vec::new();
         for i in 0..2 {
             let c = cell(*rect, &l.columns, i);
-            // The full pass's box in this cell, else the cell read on its own
+            // The full pass's number in this cell, else the cell read on its own: upscaled and as
+            // digits only (a lone thin "1" went missing or read as a letter)
             let found = boxes.iter().find(|b| b.rect.cx() > c.x0 && b.rect.cx() < c.x1 && b.rect.cy() > c.y0 && b.rect.cy() < c.y1);
-            let text = match found {
-                Some(b) => b.text.clone(),
-                None => ocr.recognize(frame, c)?.0,
+            let value = match found.and_then(|b| parse_number(&b.text)) {
+                Some(v) => Some(v),
+                None => {
+                    let crop = crate::inventory::crop(frame, c);
+                    let big = imageops::resize(&crop, crop.width() * CELL_SCALE, crop.height() * CELL_SCALE, FilterType::CatmullRom);
+                    ocr.recognize_images_only(&[big], "0123456789")?.pop().and_then(|(t, _)| parse_number(&t))
+                }
             };
-            values.push(parse_number(&text));
+            values.push(value);
         }
         // A row always shows its quality: without one it is a stray text (a message over the panel,
         // "YIELD" half hidden)

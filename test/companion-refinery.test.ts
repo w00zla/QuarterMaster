@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { CatalogResponse, StockBatch } from '../src/webapp/api-types.ts';
 import {
-  buildCatalog, cscuToScu, doneRequest, findStation, gameNameKeys, jobsOf, RefinerySync, removeRequest, resolveOrder, startRequest,
+  buildCatalog, cscuToScu, doneRequest, findStation, finishedRequests, gameNameKeys, jobsOf, RefinerySync, removeRequest, resolveOrder, startRequest,
   type Job, type OverviewEvent, type OverviewOrder, type Proposal,
 } from '../companion/src/refinery.ts';
 
@@ -98,6 +98,22 @@ describe('companion refinery sync', () => {
     ].sort((a, b) => `${a.resourceUuid}:${a.quality}`.localeCompare(`${b.resourceUuid}:${b.quality}`)));
   });
 
+  it('a read with rows hidden ("Work Order Accepted" over the panel) is no order of its own', () => {
+    // 2026-10-19: two reads show only the first rows, then the whole order
+    const sync = new RefinerySync();
+    twice(sync, read(T0, processing(3600, ORDER2.slice(0, 1))), []);
+    assert.equal(sync.proposals.length, 1);
+    twice(sync, read(T0 + 6000, processing(3594, ORDER2)), []);
+    assert.deepEqual(sync.proposals.map((p) => p.kind === 'new' && p.rows.length), [3], 'the fuller order replaces the short one');
+    // A short read after it changes nothing
+    twice(sync, read(T0 + 12000, processing(3588, ORDER2.slice(0, 2))), []);
+    assert.equal(sync.proposals.length, 1);
+    // A short read of a registered job is not proposed
+    const other = new RefinerySync();
+    twice(other, read(T0, processing(3600, ORDER2.slice(0, 1))), [JOB2('2026-10-08T21:31:18Z')]);
+    assert.equal(other.proposals.length, 0);
+  });
+
   it('one read alone or two different reads do nothing', () => {
     const sync = new RefinerySync();
     sync.feed(read(T0, processing(3600, ORDER2)), CAT, [], T0);
@@ -134,10 +150,30 @@ describe('companion refinery sync', () => {
     assert.deepEqual(doneRequest(p), { jobId: 'job-2', rows: [
       { batchId: 11, amount: '0.91', expected: '0.8' }, { batchId: 12, amount: '5.4', expected: '5.4' }, { batchId: 13, amount: '1.05', expected: '1.05' },
     ] });
-    // A finished order without a job: nothing
-    const other = new RefinerySync();
-    twice(other, read(T0, completed(ORDER2)), []);
-    assert.equal(other.proposals.length, 0);
+    // Stored: the terminal keeps showing it until collected; no proposal again, not even as one without a job
+    sync.markStored(p);
+    twice(sync, read(T0 + 10_000, completed(ORDER2)), []);
+    assert.equal(sync.proposals.length, 0);
+  });
+
+  it('a finished order without a job: its materials into the stock, once', () => {
+    const sync = new RefinerySync();
+    twice(sync, read(T0, completed(ORDER2)), []);
+    const p = sync.proposals[0] as Extract<Proposal, { kind: 'finished' }>;
+    assert.equal(p.kind, 'finished');
+    assert.deepEqual(finishedRequests(p), [
+      { subjectUuid: HEPH, locationUuid: CRU, quality: 572, amount: '0.91' },
+      { subjectUuid: SILICON, locationUuid: CRU, quality: 310, amount: '5.4' },
+      { subjectUuid: SILICON, locationUuid: CRU, quality: 510, amount: '1.05' },
+    ]);
+    sync.markStored(p);
+    // A restart of the app: the stored keys come back from the caller
+    const again = new RefinerySync(sync.stored);
+    twice(again, read(T0 + 60_000, completed(ORDER2)), []);
+    assert.equal(again.proposals.length, 0);
+    // Another order with other yields is new
+    twice(again, read(T0 + 70_000, completed([['HEPHAESTANITE', 572, 90]])), []);
+    assert.equal(again.proposals.length, 1);
   });
 
   it('after the visit: jobs of the station no read showed are proposed for removal', () => {

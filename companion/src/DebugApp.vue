@@ -12,7 +12,7 @@ import { computed, onMounted, ref, shallowRef } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import Icon from "../../adminapp/src/components/Icon.vue";
-import { getConfig, getScan, setDebug, startDebugRecording, stopDebugRecording, type ScanMode } from "./backend";
+import { getConfig, getScan, setDebug, startDebugRecording, stopDebugRecording, type ScanScreen } from "./backend";
 import { applyLangSetting, t } from "./i18n";
 import type { ComponentSighting } from "./components";
 import type { InventoryReadEvent, ReadRect, Sighting } from "./inventory";
@@ -21,7 +21,10 @@ import { errorText, toast, toastError } from "./toasts";
 import Toasts from "./components/Toasts.vue";
 
 const read = shallowRef<InventoryReadEvent | null>(null);
-const scanMode = ref<ScanMode>("off");
+const scanOn = ref(false);
+// The screen the scan sees (known from its next change on)
+const screen = ref<ScanScreen>("none");
+const SCREEN_TEXT = { none: "scan.waiting", warehouse: "scan.warehouse", inventory: "scan.inventory", refinery: "scan.refinery" } as const;
 // The recording's folder while one runs
 const recording = ref<string | null>(null);
 const busy = ref(false);
@@ -45,9 +48,13 @@ onMounted(async () => {
     await applyLanguage();
     await listen("config-changed", () => void applyLanguage().catch(() => undefined));
     await setDebug(true);
-    scanMode.value = await getScan();
+    scanOn.value = await getScan();
     await listen<InventoryReadEvent>("inventory-read", (e) => (read.value = e.payload));
-    await listen<ScanMode>("scan-changed", (e) => (scanMode.value = e.payload));
+    await listen<boolean>("scan-changed", (e) => {
+      scanOn.value = e.payload;
+      if (!e.payload) screen.value = "none";
+    });
+    await listen<ScanScreen>("scan-screen", (e) => (screen.value = e.payload));
     await listen<SightingsReport>("inventory-sightings", (e) => (report.value = e.payload));
     await emit("inventory-sightings-request");
   } catch (e) {
@@ -63,7 +70,7 @@ const viewBox = computed(() => (read.value ? `0 0 ${read.value.width} ${read.val
 const stroke = computed(() => (read.value ? Math.max(2, Math.round(read.value.height / 400)) : 2));
 const rectAttrs = (r: ReadRect) => ({ x: r.x0, y: r.y0, width: Math.max(1, r.x1 - r.x0), height: Math.max(1, r.y1 - r.y0) });
 const time = (ms: number) => new Date(ms).toLocaleTimeString();
-const PROBLEM = { unknownMaterial: "inventory.unknown", component: "inventory.component", noQuality: "inventory.noQuality", noAmount: "inventory.noAmount" } as const;
+const PROBLEM = { unknownMaterial: "inventory.unknown", component: "inventory.component", noQuality: "inventory.noQuality", noAmount: "inventory.noAmount", amountFlicker: "inventory.amountFlicker" } as const;
 const COMPONENT_PROBLEM = { unknownComponent: "components.unknown", ambiguousComponent: "components.ambiguous", statsUnreadable: "components.statsUnreadable" } as const;
 const amount = (s: Sighting) => (s.amount === null ? "–" : s.unit === "SCU" ? `${s.amount} SCU` : t("inventory.pieces", { n: s.amount })) + (s.amountUncertain ? "?" : "");
 // A component sighting's stats as read ({property UUID: gain}: the UUIDs' first part, the window has no catalog)
@@ -132,7 +139,7 @@ async function toggleRecording() {
     <div class="bar">
       <Icon name="log" :size="16" />
       <span class="title">{{ t("debug.title") }}</span>
-      <span class="tag" :class="scanMode === 'inventory' ? 'ok' : ''">{{ t(scanMode === "inventory" ? "scan.inventory" : scanMode === "refinery" ? "scan.refinery" : "scan.off") }}</span>
+      <span class="tag" :class="scanOn && screen !== 'none' ? 'ok' : ''">{{ t(scanOn ? SCREEN_TEXT[screen] : "scan.off") }}</span>
       <div class="spacer" />
       <button type="button" class="btn small" :class="recording ? 'primary' : 'outline'" :disabled="busy" :title="recording ?? undefined" @click="toggleRecording">
         <Icon :name="recording ? 'close' : 'file'" :size="14" /> {{ t(recording ? "debug.recording" : "debug.record") }}
@@ -168,12 +175,36 @@ async function toggleRecording() {
       </template>
     </main>
     <main v-else class="content">
-      <div v-if="!read" class="empty-line">{{ t(scanMode === "inventory" ? "debug.waiting" : "debug.noScan") }}</div>
+      <div v-if="!read" class="empty-line">{{ t(scanOn ? "debug.waiting" : "debug.noScan") }}</div>
       <template v-else>
+        <!-- First and of a fixed size (the frame's aspect): what changes below does not move it -->
+        <div class="frame" :style="{ aspectRatio: `${read.width} / ${read.height}` }">
+          <template v-if="read.frame">
+            <img :src="read.frame" alt="" />
+            <svg :viewBox="viewBox" preserveAspectRatio="none">
+              <rect v-for="(b, i) in read.boxes" :key="`b${i}`" v-bind="rectAttrs(b.rect)" fill="none" stroke="#ffdc00" :stroke-width="stroke" />
+              <template v-if="grid">
+                <rect v-for="(c, i) in grid.cells" :key="`c${i}`" v-bind="rectAttrs(c.rect)" fill="none" stroke="#00c8ff" :stroke-width="stroke" />
+                <rect v-for="(x, i) in grid.tiles" :key="`t${i}`" v-bind="rectAttrs(x.rect)" fill="none" :stroke="x.hovered ? '#ffffff' : '#00ff50'" :stroke-width="stroke * 1.5" />
+                <rect v-if="grid.tooltip" v-bind="rectAttrs(grid.tooltip.rect)" fill="none" stroke="#ff50ff" :stroke-width="stroke * 1.5" />
+              </template>
+              <template v-if="comp">
+                <rect v-if="comp.cell" v-bind="rectAttrs(comp.cell.rect)" fill="none" stroke="#ffffff" :stroke-width="stroke * 1.5" />
+                <template v-if="comp.tooltip">
+                  <rect v-for="(l, i) in comp.tooltip.lines" :key="`l${i}`" v-bind="rectAttrs(l.rect)" fill="none" stroke="#ff50ff" :stroke-width="stroke" />
+                  <rect v-bind="rectAttrs(comp.tooltip.rect)" fill="none" stroke="#ff50ff" :stroke-width="stroke * 1.5" />
+                </template>
+              </template>
+            </svg>
+          </template>
+          <div v-else class="empty-line">{{ t("debug.noFrame") }}</div>
+        </div>
         <div class="facts">
           <span>{{ time(read.atMs) }}</span>
           <span v-if="grid">{{ t("debug.grid", { cols: grid.cols.length, rows: grid.rows.length, px: Math.round(grid.pitchX), py: Math.round(grid.pitchY) }) }} · {{ t("debug.tiles", { n: grid.tiles.length }) }}</span>
           <span v-else-if="comp && (comp.page || comp.tooltip)">{{ comp.page ? t("debug.page", { i: comp.page.index, n: comp.page.total }) : t("debug.noPage") }}</span>
+          <span v-else-if="read.refinery?.overview">{{ read.refinery.overview.station ?? "?" }} · {{ t("debug.orders", { n: read.refinery.overview.orders.length }) }}</span>
+          <span v-else-if="read.refinery?.kind === 'terminal'" class="tag">{{ t("debug.noOrders") }}</span>
           <span v-else class="tag warn">{{ t("debug.noTerminal") }}</span>
           <span class="num">{{ t("debug.boxes", { n: read.boxes.length }) }}</span>
           <!-- The read's duration and the frame's size at the right edge -->
@@ -192,25 +223,15 @@ async function toggleRecording() {
           <span v-if="comp.cell" class="tag ok">{{ t("debug.cell", { row: comp.cell.row + 1, col: units(comp.cell.col, comp.cell.span) }) }}</span>
           <span v-else class="tag warn">{{ t("debug.noCell") }}</span>
         </div>
-        <div v-if="read.frame" class="frame">
-          <img :src="read.frame" alt="" />
-          <svg :viewBox="viewBox" preserveAspectRatio="none">
-            <rect v-for="(b, i) in read.boxes" :key="`b${i}`" v-bind="rectAttrs(b.rect)" fill="none" stroke="#ffdc00" :stroke-width="stroke" />
-            <template v-if="grid">
-              <rect v-for="(c, i) in grid.cells" :key="`c${i}`" v-bind="rectAttrs(c.rect)" fill="none" stroke="#00c8ff" :stroke-width="stroke" />
-              <rect v-for="(x, i) in grid.tiles" :key="`t${i}`" v-bind="rectAttrs(x.rect)" fill="none" :stroke="x.hovered ? '#ffffff' : '#00ff50'" :stroke-width="stroke * 1.5" />
-              <rect v-if="grid.tooltip" v-bind="rectAttrs(grid.tooltip.rect)" fill="none" stroke="#ff50ff" :stroke-width="stroke * 1.5" />
-            </template>
-            <template v-if="comp">
-              <rect v-if="comp.cell" v-bind="rectAttrs(comp.cell.rect)" fill="none" stroke="#ffffff" :stroke-width="stroke * 1.5" />
-              <template v-if="comp.tooltip">
-                <rect v-for="(l, i) in comp.tooltip.lines" :key="`l${i}`" v-bind="rectAttrs(l.rect)" fill="none" stroke="#ff50ff" :stroke-width="stroke" />
-                <rect v-bind="rectAttrs(comp.tooltip.rect)" fill="none" stroke="#ff50ff" :stroke-width="stroke * 1.5" />
-              </template>
-            </template>
-          </svg>
-        </div>
-        <div v-else class="empty-line">{{ t("debug.noFrame") }}</div>
+        <!-- A refinery read: every work order with its rows as read -->
+        <template v-for="(o, i) in read.refinery?.overview?.orders ?? []" :key="`o${i}`">
+          <div class="sub-head">{{ o.status }}<template v-if="o.seconds !== null"> · {{ o.seconds }} s</template></div>
+          <div v-for="(r, j) in o.rows" :key="j" class="row">
+            <span class="text">{{ r.name }}</span>
+            <span class="num">Q {{ r.quality ?? "–" }}</span>
+            <span class="num">{{ r.yieldCscu ?? "–" }} cSCU</span>
+          </div>
+        </template>
         <details v-if="comp?.tooltip" class="more">
           <summary>{{ t("debug.lines", { n: comp.tooltip.lines.length }) }}</summary>
           <div class="row">
@@ -369,17 +390,21 @@ async function toggleRecording() {
   gap: 8px;
 }
 
+/* A box of the frame's aspect, kept also while no frame is there */
 .frame {
   position: relative;
+  flex-shrink: 0;
+  width: 100%;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-panel);
   overflow: hidden;
+  background: var(--bg-base);
 }
 
 .frame img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
 }
 
 .frame svg {

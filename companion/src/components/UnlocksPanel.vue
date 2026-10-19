@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The blueprint unlocks from Game.log (and, on request, the old logs), matched to the catalog and
-// compared with the user's registered blueprints. New ones are registered one by one right away
+// compared with the user's registered blueprints; only the unregistered ones are listed (registered and
+// default ones hidden), newest first. New ones are registered one by one right away
 // (ambiguous ones after picking the variant) or all at once after a confirmation.
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
@@ -14,7 +15,7 @@ import { langRef, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
 import { overlayRows, tabCounts } from "../overlay";
 import { catalogResponses } from "../refinerySync";
-import { api, connected, loadLog, log, onRefresh } from "../state";
+import { api, connected, loadLog, log } from "../state";
 import { toast, toastError } from "../toasts";
 
 type RowState = "loading" | "owned" | "default" | "unknown" | "new" | "pick";
@@ -61,6 +62,8 @@ const rows = computed<Row[]>(() => (log.value?.unlocks ?? [])
       : candidates.length === 1 ? "new" : "pick";
     return { name: u.name, at: u.at, state, candidates };
   })
+  // Only what is not registered: registered and default blueprints are hidden
+  .filter((r) => r.state !== "owned" && r.state !== "default")
   .sort((a, b) => b.at.localeCompare(a.at)));
 
 // The scan overlay shows the rows still to register (new, ambiguous), newest first
@@ -162,7 +165,7 @@ async function measureStatus() {
   if (!ctx) return;
   const family = getComputedStyle(document.body).fontFamily;
   ctx.font = `13px ${family}`;
-  const texts = (["loading", "owned", "default", "unknown"] as const).map((s) => ctx.measureText(t(stateKey(s))).width);
+  const texts = (["loading", "unknown"] as const).map((s) => ctx.measureText(t(stateKey(s))).width);
   const pick = ctx.measureText(t("unlocks.pick")).width + SELECT_EXTRA + ICON_BUTTON;
   ctx.font = `600 12px ${family}`;
   const button = ctx.measureText(t("unlocks.add")).width + BUTTON_EXTRA;
@@ -173,15 +176,12 @@ async function measureStatus() {
 const cols = computed(() => ({ "--cols": `minmax(0, 1fr) 170px ${statusWidth.value}px` }));
 
 let unlisten: UnlistenFn | undefined;
-// The refresh button reloads the registered blueprints
-const dropRefresh = onRefresh(loadOwned);
 onMounted(async () => {
   unlisten = await listen<{ done: number; total: number }>("scan-progress", (e) => (progress.value = e.payload));
   void measureStatus();
 });
 onUnmounted(() => {
   unlisten?.();
-  dropRefresh();
 });
 // The registered blueprints: once connected (again)
 watch(connected, (c) => {

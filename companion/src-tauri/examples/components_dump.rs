@@ -1,7 +1,8 @@
 //! Offline check of the character inventory read over folders of screenshots or debug exports:
 //! `cargo run --release --example components_dump -- <screenshots dir>...`
 //!
-//! Prints every frame's page, tooltip title and lines as the OCR read them (what `components.ts`
+//! A debug recording's frames are read with the cursor stored next to them (`read-N.json`).
+//! Prints every frame's page, the tile under the cursor, tooltip title and lines as the OCR read them (what `components.ts`
 //! matches the stat names against), then the boxes of the read areas.
 use std::path::{Path, PathBuf};
 
@@ -16,9 +17,15 @@ fn main() {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
             let frame = image::open(&path).expect("frame").to_rgb8();
             let t = std::time::Instant::now();
-            let (read, boxes) = read_components(&mut ocr, &frame, None).expect("read");
+            let cursor = cursor_of(&path);
+            let (read, boxes) = read_components(&mut ocr, &frame, cursor).expect("read");
             let ms = t.elapsed().as_millis();
-            println!("\n== {name}: page {:?}, {} boxes, {ms} ms", read.page.map(|p| format!("{}/{}", p.index, p.total)), boxes.len());
+            println!(
+                "\n== {name}: page {:?}, cursor {cursor:?} in tile {:?}, {} boxes, {ms} ms",
+                read.page.map(|p| format!("{}/{}", p.index, p.total)),
+                read.cell.map(|c| (c.row, c.col, c.span)),
+                boxes.len()
+            );
             match &read.tooltip {
                 Some(tip) => {
                     println!("  title: {}", tip.title);
@@ -34,6 +41,13 @@ fn main() {
             }
         }
     }
+}
+
+/// The cursor a debug recording stored with the frame (`read-N.json` next to `read-N.jpg`), if any.
+fn cursor_of(frame: &Path) -> Option<(f32, f32)> {
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(frame.with_extension("json")).ok()?).ok()?;
+    let c = json.get("cursor")?.as_array()?;
+    Some((c.first()?.as_f64()? as f32, c.get(1)?.as_f64()? as f32))
 }
 
 fn sorted(dir: &Path, ext: &str) -> Vec<PathBuf> {

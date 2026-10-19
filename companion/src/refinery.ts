@@ -6,6 +6,8 @@
 // same qualities (rows of one material and quality add up). A running order that matches updates its
 // job by itself (the yields, the time left: estimates, no stock yet); everything else is a proposal the
 // user confirms: a running order without a job (register it), a finished order of a job (store it), a
+// finished order without one (store its materials as stock; a stored finished order is remembered, the
+// terminal keeps showing it until it is collected), a
 // job of this station not seen during the whole visit (remove it; the terminal scrolls its orders
 // sideways, so only the visit as a whole tells). An order is acted on only once two reads in a row
 // showed it the same (OCR misreads do not book anything).
@@ -134,6 +136,14 @@ export interface Order {
 
 const rowKey = (resourceUuid: string, quality: number) => `${resourceUuid}:${quality}`;
 
+/** Whether the rows `a` are a real part of `b` (every material and quality of `a` in `b`, `b` has more):
+ * a read with rows hidden ("Work Order Accepted" over the panel right after the order was accepted). */
+function partOf(a: { resourceUuid: string; quality: number }[], b: { resourceUuid: string; quality: number }[]) {
+  const ka = new Set(a.map((r) => rowKey(r.resourceUuid, r.quality)));
+  const kb = new Set(b.map((r) => rowKey(r.resourceUuid, r.quality)));
+  return ka.size < kb.size && [...ka].every((k) => kb.has(k));
+}
+
 /** Rows of one material and quality summed, sorted by key. */
 function merged(rows: OrderRow[]): OrderRow[] {
   const by = new Map<string, OrderRow>();
@@ -198,10 +208,17 @@ export type Update =
   | { kind: "yield"; jobId: string; batchId: number; amount: string; expected: string }
   | { kind: "duration"; jobId: string; durationSeconds: number };
 
+// finished: a completed order without a registered job (its materials are booked as stored stock)
 export type Proposal =
   | { kind: "new"; id: string; locationUuid: string; endsAtMs: number | null; rows: OrderRow[] }
   | { kind: "store"; id: string; locationUuid: string; job: Job; rows: OrderRow[] }
+  | { kind: "finished"; id: string; locationUuid: string; rows: OrderRow[] }
   | { kind: "missing"; id: string; locationUuid: string; job: Job };
+
+/** A completed order's identity at its station (materials, qualities and yields): the terminal keeps
+ * showing it until it is collected in the game, so once stored it must not come back. */
+export const completedKey = (locationUuid: string, rows: OrderRow[]) =>
+  `${locationUuid}|${rows.map((r) => `${rowKey(r.resourceUuid, r.quality)}=${r.yieldCscu}`).join(",")}`;
 
 export interface FeedResult {
   // The station read (null: not recognized; then nothing happens)
@@ -216,6 +233,12 @@ export class RefinerySync {
   readonly proposals: Proposal[] = [];
   // Dismissed in this session: never proposed again
   private readonly dismissed = new Set<string>();
+  // Completed orders already stored (`completedKey`; kept by the caller across sessions)
+  readonly stored: Set<string>;
+
+  constructor(stored: Iterable<string> = []) {
+    this.stored = new Set(stored);
+  }
   // Per station the order contents of the last read (stability)
   private readonly lastRead = new Map<string, Set<string>>();
   // The visit: stations read and the jobs seen there
@@ -251,8 +274,13 @@ export class RefinerySync {
       // Only what two reads in a row showed the same
       if (!before.has(content(o))) continue;
       if (o.status === "processing" && job) updates.push(...jobUpdates(job, o, endsAtMs, nowMs));
-      else if (o.status === "processing") this.propose({ kind: "new", id: `new:${locationUuid}:${signature(o.rows)}`, locationUuid, endsAtMs, rows: o.rows });
+      else if (o.status === "processing") {
+        // Part of a registered job: rows hidden, not a new order
+        if (!here.some((j) => partOf(o.rows, j.batches))) this.propose({ kind: "new", id: `new:${locationUuid}:${signature(o.rows)}`, locationUuid, endsAtMs, rows: o.rows });
+      }
+      else if (this.stored.has(completedKey(locationUuid, o.rows))) continue;
       else if (job) this.propose({ kind: "store", id: `store:${job.jobId}`, locationUuid, job, rows: o.rows });
+      else this.propose({ kind: "finished", id: `finished:${completedKey(locationUuid, o.rows)}`, locationUuid, rows: o.rows });
     }
     return { locationUuid, updates };
   }
@@ -274,6 +302,7 @@ export class RefinerySync {
     const byId = new Map(jobs.map((j) => [j.jobId, j]));
     const signatures = new Set(jobs.map((j) => `${j.locationUuid}:${signature(j.batches)}`));
     for (const p of [...this.proposals]) {
+      if (p.kind === "finished") continue;
       if (p.kind === "new" ? signatures.has(`${p.locationUuid}:${signature(p.rows)}`) : !byId.has(p.job.jobId)) this.drop(p.id);
     }
   }
@@ -284,6 +313,12 @@ export class RefinerySync {
     this.drop(id);
   }
 
+  /** A completed order was stored (its job's or as stock): its later reads propose nothing. */
+  markStored(p: Extract<Proposal, { kind: "store" | "finished" }>) {
+    this.stored.add(completedKey(p.locationUuid, p.rows));
+    this.drop(p.id);
+  }
+
   /** Done (registered, stored, removed). */
   drop(id: string) {
     const i = this.proposals.findIndex((p) => p.id === id);
@@ -292,6 +327,12 @@ export class RefinerySync {
 
   private propose(p: Proposal) {
     if (this.dismissed.has(p.id)) return;
+    if (p.kind === "new") {
+      // A read with rows hidden: the fuller order of the same station wins, also when read later
+      const sameStation = (x: Proposal): x is Extract<Proposal, { kind: "new" }> => x.kind === "new" && x.locationUuid === p.locationUuid;
+      if (this.proposals.some((x) => sameStation(x) && partOf(p.rows, x.rows))) return;
+      for (const x of this.proposals.filter((x) => sameStation(x) && partOf(x.rows, p.rows))) this.drop(x.id);
+    }
     const i = this.proposals.findIndex((x) => x.id === p.id);
     // The newest read replaces the older (the time left, the job's batches)
     if (i >= 0) this.proposals[i] = p;
@@ -341,6 +382,11 @@ export function doneRequest(p: Extract<Proposal, { kind: "store" }>) {
       return { batchId: b.id, amount: row ? cscuToScu(row.yieldCscu) : b.quantity, expected: b.quantity };
     }),
   };
+}
+
+/** POST /api/stock/add per row: a completed order without a job, its materials stored at the station. */
+export function finishedRequests(p: Extract<Proposal, { kind: "finished" }>) {
+  return p.rows.map((r) => ({ subjectUuid: r.resourceUuid, locationUuid: p.locationUuid, quality: r.quality, amount: cscuToScu(r.yieldCscu) }));
 }
 
 /** POST /api/refinery/remove: every batch of the job. */
