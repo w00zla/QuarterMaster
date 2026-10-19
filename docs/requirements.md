@@ -128,7 +128,7 @@ Two web apps, **separate processes** (and separate from the bot) sharing one cod
 - Overview panel **User data checks**: stock of retired materials or at retired locations, registered retired blueprints, refinery jobs ready for over a week, jobs outside the UEX refineries.
 - Tab **3rd Party**: the UEX data (pull status, refinery terminals with their catalog match, yield bonuses per refinery × ore, refining methods).
 
-### User web app (in progress)
+### User web app (built, not live yet)
 
 - Alternative to the bot for users (the bot's UX is at its limits): personal stock, blueprints, org stock.
 - Login with **Discord OAuth2** (users only; the admin UI keeps its own access).
@@ -142,7 +142,7 @@ Two web apps, **separate processes** (and separate from the bot) sharing one cod
 ### Display in the user web app
 
 - **Words:** "Ressource"/"Resource" wherever a material or an item can be meant (stock column and add form, crafting ingredient search, error texts); "Material" only for the SCU materials alone (overview tile, refinery, the crafting check's tag next to "Item"); "Komponente"/"Component" for ship components (decided 2026-10-18).
-- **Quality levels:** below 500 "⊘" (not usable), one "★" per 100 from 500 to 999, "♛" at 1000, shown before the value without "Q" ("★★★ 720"). Table columns keep the values aligned (the level right before a fixed four-digit field). The quality filter (stock, refinery) works in these tiers: a range slider "Quality" from ⊘ to ♛, the value range in parentheses ("★★–★★★★ (600–899)"). The bot still shows "Q820".
+- **Quality levels:** below 500 "◌" (not usable), one "★" per 100 from 500 to 999, "♛" at 1000, shown before the value without "Q" ("★★★ 720"). Table columns keep the values aligned (the level right before a fixed four-digit field). The quality filter (stock, refinery) works in these tiers: a range slider "Quality" from ◌ to ♛, the value range in parentheses ("★★–★★★★ (600–899)"). The bot still shows "Q820".
 - Refinery jobs: a table with one group per work order (station, total yield, time left; the materials below with their expected yields), with the stock table's filters; the refinery picker and every row show the refinery's **UEX yield bonus** for the material ("Bonus +5 %", reported by UEX per ore). Starting a job takes station, an optional duration and the materials with quality and expected yield as the terminal shows them (no method, no estimates, decided 2026-10-10). Two jobs never merge (the same material, place and quality within one job add up). Actions per job: time left, done (stores it), remove.
 - **Adding** (stock, refinery job, blueprint) happens in a toggle panel below the view's head, without a confirmation (the toast says what was booked), with Clear; a successful add closes the panel. Remove, move, adjust, finishing a job and removing a blueprint keep their confirmation dialog; remove and move start with "everything" checked.
 - Dialog buttons always in one row in the footer; table actions are icon buttons; table filters have a neutral placeholder ("Filter…").

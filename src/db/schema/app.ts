@@ -1,6 +1,6 @@
 // App data, managed by the bot and (later) the web UI: orgs with their roles, users, roster,
 // stock and the blueprint registry. Bot-only configuration and state live in schema `bot`.
-// Design and rationale: .claude/bot-schema-draft.md. Orgs, users and members are never deleted
+// Design and rationale: docs/bot.md "Schemas", docs/stock.md. Orgs, users and members are never deleted
 // (flags instead), so stock and journal stay resolvable. Catalog references are plain FKs:
 // catalog rows are never deleted either, only retired.
 import { sql, type SQLWrapper } from 'drizzle-orm';
