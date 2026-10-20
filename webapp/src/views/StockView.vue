@@ -109,11 +109,17 @@ onUnmounted(() => {
 // This view's batches: the materials or the ship components
 const batches = computed(() => (data.value?.batches ?? []).filter((b) => b.component === !!props.components));
 
-// A component's group shows its unique label (many share a name)
-const nameOf = (b: StockBatch) => (b.component ? materials.value.get(b.subjectUuid)?.label ?? b.material : b.material);
+// A component's group shows its plain name; type, size and grade have their own columns
+const nameOf = (b: StockBatch) => (b.component ? materials.value.get(b.subjectUuid)?.name ?? b.material : b.material);
 const typeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.typeLabel ?? t("filter.noType");
 const sizeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.size;
 const gradeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.gradeLetter;
+// The text search still finds a component by its type, size ("S3") and grade
+const searchText = (b: StockBatch) => [
+  nameOf(b),
+  ...(b.component ? [typeOf(b), sizeOf(b) != null ? `S${sizeOf(b)}` : "", gradeOf(b) ?? ""] : []),
+  b.location, statsText(b.subjectUuid, b.stats),
+].join(" ");
 
 const filtered = computed(() => {
   const words = materialText.value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -123,23 +129,31 @@ const filtered = computed(() => {
       ? (!typeFilter.value || typeOf(b) === typeFilter.value) && (!sizeFilter.value || String(sizeOf(b)) === sizeFilter.value)
         && (!gradeFilter.value || gradeOf(b) === gradeFilter.value)
       : qTier(b.quality) >= qualityLow.value && qTier(b.quality) <= qualityHigh.value)
-    && words.every((w) => `${nameOf(b)} ${b.location} ${statsText(b.subjectUuid, b.stats)}`.toLowerCase().includes(w)));
+    && words.every((w) => searchText(b).toLowerCase().includes(w)));
 });
 
 // --- the table: one group per material (header with the total), its batches below ------------
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: props.components ? t("stock.col.component") : t("stock.col.material"), width: 200 },
-  ...(props.components ? [] : [{ key: "quality", label: t("stock.col.quality"), width: 130 }]),
+  ...(props.components
+    ? [
+        { key: "type", label: t("stock.col.type"), width: 160 },
+        { key: "size", label: t("stock.col.size"), width: 64 },
+        { key: "grade", label: t("stock.col.grade"), width: 72 },
+      ]
+    : [{ key: "quality", label: t("stock.col.quality"), width: 130 }]),
   { key: "amount", label: props.components ? t("stock.col.count") : t("stock.col.amount"), width: 120 },
   ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260 }] : []),
   { key: "location", label: t("stock.col.location"), width: 280 },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
   ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200 }] : []),
-  { key: "state", label: t("stock.col.state"), width: 180 },
-  { key: "actions", label: "", width: 168, sortable: false, fixed: true, sep: true },
+  // Die Füllspalte (Rest der Breite, ohne Griff): ihre Breite ist ihr Minimum, daher das der anderen (MIN_WIDTH)
+  { key: "state", label: t("stock.col.state"), width: 40 },
+  // Je Button 26px + 6px Abstand, dazu die Trennlinie: Ressourcen fünf Buttons, Ausrüstung vier
+  { key: "actions", label: "", width: props.components ? 136 : 168, sortable: false, fixed: true, sep: true },
 ]);
-// Cells of a group row before the empty ones: name, (quality,) total
-const lead = props.components ? 2 : 3;
+// Cells of a group row before the empty ones: name, (type, size, grade | quality,) total
+const lead = props.components ? 5 : 3;
 const cols = props.components
   ? useTableColumns("qm.webapp.columns.components", columns, { key: "amount", dir: "desc" })
   : useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
@@ -147,6 +161,9 @@ const cols = props.components
 function valueOf(b: StockBatch, key: string): string | number {
   switch (key) {
     case "material": return nameOf(b);
+    case "type": return typeOf(b);
+    case "size": return sizeOf(b) ?? -1;
+    case "grade": return gradeOf(b) ?? "";
     case "quality": return b.quality;
     case "amount": return Number(b.quantity);
     case "stats": return statsText(b.subjectUuid, b.stats);
@@ -164,16 +181,18 @@ const groups = computed(() => {
   const { key, dir } = cols.sort.value;
   const sign = dir === "asc" ? 1 : -1;
   const byName = (a: { material: string }, b: { material: string }) => a.material.localeCompare(b.material, lang.value);
-  return [...by.values()]
+  const list = [...by.values()]
     .map((rows) => ({
       uuid: rows[0]!.subjectUuid, material: nameOf(rows[0]!), unit: rows[0]!.unit,
       total: data.value?.totals[rows[0]!.subjectUuid] ?? "0",
       rows: sortRows(rows, cols.sort.value, valueOf, compareBatches),
-    }))
-    // Groups follow the material and amount columns (by name, by total); otherwise alphabetical
-    .sort((a, b) => key === "material" ? sign * byName(a, b)
-      : key === "amount" ? sign * (Number(a.total) - Number(b.total)) || byName(a, b)
-      : byName(a, b));
+    }));
+  // A component's type, size and grade belong to its group: the groups sort by them, then by name
+  if (key === "type" || key === "size" || key === "grade") return sortRows(list, cols.sort.value, (g, k) => valueOf(g.rows[0]!, k), byName);
+  // Groups follow the material and amount columns (by name, by total); otherwise alphabetical
+  return list.sort((a, b) => key === "material" ? sign * byName(a, b)
+    : key === "amount" ? sign * (Number(a.total) - Number(b.total)) || byName(a, b)
+    : byName(a, b));
 });
 
 const locationOptions = computed(() => {
@@ -232,8 +251,9 @@ function open(batch: StockBatch, action: BatchAction) {
       <div class="head">
         <Icon :name="components ? 'gear' : 'type-crate'" :size="16" />
         <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
-        <button type="button" class="btn small primary" @click="showAdd = !showAdd">
-          <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ t("stock.add") }}
+        <!-- Offen: als Umriss-Button "Schließen", damit nur der Hinzufügen-Button im Formular gefüllt ist -->
+        <button type="button" class="btn small" :class="showAdd ? 'outline' : 'primary'" @click="showAdd = !showAdd">
+          <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ showAdd ? t("common.close") : t("stock.add") }}
         </button>
       </div>
       <div v-if="showAdd" class="add-area">
@@ -273,14 +293,22 @@ function open(batch: StockBatch, action: BatchAction) {
               <Icon :name="materialIcon(g.uuid)" :size="15" class="type-icon" />
               <InfoTip kind="material" :uuid="g.uuid">{{ g.material }}</InfoTip>
             </span>
-            <span v-if="!components" />
+            <template v-if="components">
+              <span class="cell">{{ typeOf(g.rows[0]!) }}</span>
+              <span class="num">{{ sizeOf(g.rows[0]!) ?? "—" }}</span>
+              <span>{{ gradeOf(g.rows[0]!) ?? "—" }}</span>
+            </template>
+            <span v-else />
             <span class="num group-total">{{ qty(g.total, g.unit) }}</span>
             <span v-for="c in columns.length - lead" :key="c" :class="{ sep: c === columns.length - lead }" />
           </div>
           <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
             <span />
-            <span v-if="!components" class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
-            <span class="num">{{ qty(b.quantity, b.unit) }}</span>
+            <template v-if="components"><span /><span /><span /></template>
+            <span v-else class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
+            <!-- Ausrüstung: jeder Eintrag zählt vorerst optisch als ein Stück, die Anzahl bleibt leer -->
+            <span v-if="components" />
+            <span v-else class="num">{{ qty(b.quantity, b.unit) }}</span>
             <span v-if="components" class="cell" :title="statsText(b.subjectUuid, b.stats)">{{ statsText(b.subjectUuid, b.stats) }}</span>
             <span class="cell">{{ b.location }}</span>
             <span v-if="org" class="cell">{{ b.holderName }}</span>
@@ -295,13 +323,19 @@ function open(batch: StockBatch, action: BatchAction) {
                 <!-- Sharing needs an org to share in; taking back always works -->
                 <button type="button" class="icon-btn" :title="t('field.sharing')"
                   :disabled="b.state !== 'stored' || (!b.sharedIn.length && !shareable)" @click="open(b, 'share')"><Icon name="users" :size="15" /></button>
-                <!-- A part goes back into its main batch; only unshared batches split -->
-                <button v-if="b.part" type="button" class="icon-btn" :title="t('stock.merge')" @click="open(b, 'merge')"><Icon name="merge" :size="15" /></button>
-                <button v-else type="button" class="icon-btn" :title="t('stock.split')"
-                  :disabled="b.state !== 'stored' || b.sharedIn.length > 0" @click="open(b, 'split')"><Icon name="split" :size="15" /></button>
+                <!-- In der Raffinerie: nichts entnehmen; korrigiert wird im Raffinerie-Tab -->
+                <button type="button" class="icon-btn" :title="t('stock.remove')" :disabled="b.state !== 'stored'" @click="open(b, 'remove')"><Icon name="arrow-up" :size="15" /></button>
                 <button type="button" class="icon-btn" :title="t('stock.move')" :disabled="b.state !== 'stored'" @click="open(b, 'move')"><Icon name="move" :size="15" /></button>
-                <button type="button" class="icon-btn" :title="t('stock.remove')" @click="open(b, 'remove')"><Icon name="arrow-up" :size="15" /></button>
-                <button type="button" class="icon-btn" :title="t('stock.adjust')" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
+                <!-- A part goes back into its main batch; only unshared batches split. Ausrüstung (ein Stück
+                     je Eintrag): weder Aufteilen noch Zusammenführen -->
+                <template v-if="!components">
+                  <button v-if="b.part" type="button" class="icon-btn" :title="t('stock.merge')" @click="open(b, 'merge')"><Icon name="merge" :size="15" /></button>
+                  <button v-else type="button" class="icon-btn" :title="t('stock.split')"
+                    :disabled="b.state !== 'stored' || b.sharedIn.length > 0" @click="open(b, 'split')"><Icon name="split" :size="15" /></button>
+                </template>
+                <!-- Ausrüstung: nur die Werte korrigieren, also nur bei Teilen mit Werten -->
+                <button v-if="!components" type="button" class="icon-btn" :title="t('stock.adjust')" :disabled="b.state !== 'stored'" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
+                <button v-else-if="materials.get(b.subjectUuid)?.stats.length" type="button" class="icon-btn" :title="t('stock.adjustStats')" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
               </template>
             </span>
           </div>

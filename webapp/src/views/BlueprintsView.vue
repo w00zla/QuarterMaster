@@ -234,8 +234,8 @@ onUnmounted(() => {
       <div class="head">
         <Icon name="blueprint" :size="16" />
         <span class="head-title">{{ t("nav.blueprints") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
-        <button v-if="!org" type="button" class="btn small primary" :disabled="!catalog" @click="addOpen = !addOpen">
-          <Icon :name="addOpen ? 'close' : 'plus'" :size="14" /> {{ t("bp.add") }}
+        <button v-if="!org" type="button" class="btn small" :class="addOpen ? 'outline' : 'primary'" :disabled="!catalog" @click="addOpen = !addOpen">
+          <Icon :name="addOpen ? 'close' : 'plus'" :size="14" /> {{ addOpen ? t("common.close") : t("bp.add") }}
         </button>
       </div>
       <div v-if="addOpen && !org" class="add-area">

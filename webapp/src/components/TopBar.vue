@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The app bar in the admin UI's look: wordmark, tabs, then your history, the companion app (Access
-// Key, download), the user with avatar (opens the profile) and logout.
+// The app bar in the admin UI's look: wordmark, tabs, then the companion app (Access Key, download),
+// the user with avatar, profile, your history and logout.
 import { onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import Icon, { type IconName } from "../../../adminapp/src/components/Icon.vue";
@@ -50,9 +50,6 @@ onUnmounted(() => {
       </RouterLink>
     </nav>
     <div class="spacer" />
-    <RouterLink to="/history" class="btn small outline link-btn" :class="{ active: $route.path === '/history' }">
-      <Icon name="history" :size="14" /> {{ t("nav.history") }}
-    </RouterLink>
     <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="desktop" :size="14" /> {{ t("companion.open") }}</button>
     <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
     <span class="tab-divider" />
@@ -62,6 +59,9 @@ onUnmounted(() => {
     </span>
     <button v-if="me" class="icon-btn" type="button" :title="t('profile.open')" @click="profileOpen = true"><Icon name="settings" :size="15" /></button>
     <ProfileDialog v-if="profileOpen" @close="profileOpen = false" />
+    <RouterLink to="/history" class="icon-btn link-btn" :class="{ active: $route.path === '/history' }" :title="t('nav.history')">
+      <Icon name="history" :size="15" />
+    </RouterLink>
     <button class="icon-btn" type="button" :title="t('user.logout')" @click="logout"><Icon name="log-out" :size="15" /></button>
   </header>
 </template>
@@ -141,7 +141,7 @@ onUnmounted(() => {
   background: var(--border);
 }
 
-/* The history button is a link (a route), looking like the buttons next to it */
+/* The history button is a link (a route), looking like the icon buttons next to it */
 .link-btn {
   text-decoration: none;
 }

@@ -41,10 +41,11 @@ const orgStats = (guildId: string) => summary.value?.orgs.find((o) => o.guildId 
 const count = (n: number, one: "sum.kind" | "sum.location", many: "sum.kinds" | "sum.locations") => t(n === 1 ? one : many, { n: number(n)! });
 const kindsAndLocations = (m: { kinds: number; locations: number } | undefined) =>
   m ? `${count(m.kinds, "sum.kind", "sum.kinds")} · ${count(m.locations, "sum.location", "sum.locations")}` : "";
+// In the order of the tabs: gear, then resources (materials, harvestables)
 const stockTiles = (s: StockMetrics | undefined) => [
+  { label: t("sum.components"), value: number(s?.components.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.components), icon: "gear" as const },
   { label: t("sum.resources"), value: number(s?.resources.scu, 2), unit: "SCU", sub: kindsAndLocations(s?.resources), icon: "resource" as const },
   { label: t("sum.items"), value: number(s?.items.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.items), icon: "item" as const },
-  { label: t("sum.components"), value: number(s?.components.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.components), icon: "gear" as const },
 ];
 const blueprintsOf = (n: number | undefined) => ({ value: number(n), unit: `/ ${number(summary.value?.obtainableBlueprints)}` });
 
@@ -81,14 +82,18 @@ onUnmounted(() => {
       <div class="head">
         <Icon name="user" :size="16" />
         <span class="head-title">{{ t("stock.personal") }}</span>
+        <!-- Nächster fertiger Raffinerie-Auftrag rechts im Kopf -->
+        <span class="next-ready">
+          <span v-if="readyJobs" class="tag ok">{{ t("sum.readyCount", { n: readyJobs }) }}</span>
+          <Icon name="clock" :size="14" />
+          {{ t("sum.nextReady") }}:
+          <span class="next-value">{{ nextEnd === undefined ? "—" : hm((nextEnd - now) / 1000) }}</span>
+        </span>
       </div>
       <div class="stats">
         <StatTile v-for="tile in stockTiles(summary?.personal)" :key="tile.label" :label="tile.label" :value="tile.value" :unit="tile.unit" :icon="tile.icon">{{ tile.sub }}</StatTile>
-        <StatTile icon="blueprint" :label="t('sum.blueprints')" v-bind="blueprintsOf(summary?.personal.blueprints)" />
         <StatTile icon="drop" :label="t('sum.refining')" :value="number(refining?.jobs)">{{ refiningSub }}</StatTile>
-        <StatTile icon="clock" subtle :label="t('sum.nextReady')" :value="nextEnd === undefined ? null : hm((nextEnd - now) / 1000)">
-          <span v-if="readyJobs" class="tag ok">{{ t("sum.readyCount", { n: readyJobs }) }}</span>
-        </StatTile>
+        <StatTile icon="blueprint" :label="t('sum.blueprints')" v-bind="blueprintsOf(summary?.personal.blueprints)" />
       </div>
     </section>
     <section class="panel">
@@ -130,6 +135,23 @@ onUnmounted(() => {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   padding: 12px 16px 16px;
+}
+
+.next-ready {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* Fester Platz für die Zeit ("12 h 59 min"), damit beim Wechsel nichts springt */
+.next-value {
+  min-width: 10ch;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 .orgs {

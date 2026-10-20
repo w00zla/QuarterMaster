@@ -68,7 +68,7 @@ async function submit() {
   const m = materials.value.get(subject.value!);
   const stats = statsOf(statDefs.value, statValues.value);
   const statLine = statsText(subject.value!, Object.keys(stats).length ? stats : null);
-  const what = `${qty(amt.value!, unit.value)} ${props.components ? [m?.label ?? "", statLine].filter(Boolean).join(" · ") : `${m?.name ?? ""} · ${qText(q.value)}`} · ${
+  const what = `${props.components ? [m?.label ?? "", statLine].filter(Boolean).join(" · ") : `${qty(amt.value!, unit.value)} ${m?.name ?? ""} · ${qText(q.value)}`} · ${
     locations.value.get(location.value!)?.short ?? ""} · ${ownerText()}`;
   busy.value = true;
   try {
@@ -105,9 +105,10 @@ async function submit() {
       {{ t("field.quality") }}
       <input v-model="quality" class="input" :class="{ invalid: quality.trim() !== '' && q === null }" type="text" inputmode="numeric" placeholder="0–1000" />
     </label>
-    <div class="field">
-      {{ components ? t("field.count") : t("field.amount") }}
-      <AmountStepper v-model="amount" :unit="unit" :invalid="amount.trim() !== '' && !amt" :label="components ? t('field.count') : t('field.amount')" />
+    <!-- Ausrüstung stapelt im Spiel nicht: immer genau ein Stück (amount bleibt "1"), kein Feld -->
+    <div v-if="!components" class="field">
+      {{ t("field.amount") }}
+      <AmountStepper v-model="amount" :unit="unit" :invalid="amount.trim() !== '' && !amt" :label="t('field.amount')" />
     </div>
     <!-- The picked component's stats, a row of their own -->
     <StatSliders v-if="statDefs.length" v-model="statValues" :defs="statDefs" />

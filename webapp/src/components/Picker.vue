@@ -174,7 +174,7 @@ function onKey(e: KeyboardEvent) {
   padding: 0 28px 0 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--bg-surface-2);
+  background: var(--field-bg);
   color: var(--text);
   font-family: inherit;
   font-size: 13px;

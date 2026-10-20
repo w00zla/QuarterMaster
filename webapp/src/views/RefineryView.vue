@@ -16,6 +16,7 @@ import RangeSlider from "../components/RangeSlider.vue";
 import RefineryDoneDialog from "../components/RefineryDoneDialog.vue";
 import RefineryStartForm from "../components/RefineryStartForm.vue";
 import RefineryTimeDialog from "../components/RefineryTimeDialog.vue";
+import BatchDialog from "../components/BatchDialog.vue";
 import { signedBonus, yieldValue } from "../catalog";
 import { compareBatches, hm, Q_TIER_MAX, qMark, qText, qTier, qty, tierMark, tierQualities } from "../format";
 import { lang, t } from "../i18n";
@@ -42,6 +43,8 @@ const removing = ref<Job | null>(null);
 const busy = ref(false);
 // The job whose time left is being set
 const timing = ref<{ jobId: string; location: string; endsAt: string | null } | null>(null);
+// Ein Material eines Auftrags, das korrigiert oder entfernt wird (BatchDialog)
+const editing = ref<{ batch: StockBatch; action: "adjust" | "remove" } | null>(null);
 
 let seq = 0;
 async function load() {
@@ -212,8 +215,8 @@ const bonusText = (b: StockBatch) => {
       <div class="head">
         <Icon name="drop" :size="16" />
         <span class="head-title">{{ t("refinery.jobs") }}</span>
-        <button type="button" class="btn small primary" @click="showStart = !showStart">
-          <Icon :name="showStart ? 'close' : 'plus'" :size="14" /> {{ t("refinery.start") }}
+        <button type="button" class="btn small" :class="showStart ? 'outline' : 'primary'" @click="showStart = !showStart">
+          <Icon :name="showStart ? 'close' : 'plus'" :size="14" /> {{ showStart ? t("common.close") : t("refinery.start") }}
         </button>
       </div>
       <div v-if="showStart" class="add-area">
@@ -253,8 +256,8 @@ const bonusText = (b: StockBatch) => {
               <template v-else>{{ left(j) }}</template>
             </span>
             <span class="sep actions">
-              <button type="button" class="icon-btn" :title="t('refinery.setTime')" @click="timing = { jobId: j.id, location: j.location, endsAt: j.endsAt }"><Icon name="clock" :size="15" /></button>
               <button type="button" class="icon-btn" :title="t('refinery.done')" @click="finishing = j.all"><Icon name="check" :size="15" /></button>
+              <button type="button" class="icon-btn" :title="t('refinery.setTime')" @click="timing = { jobId: j.id, location: j.location, endsAt: j.endsAt }"><Icon name="clock" :size="15" /></button>
               <button type="button" class="icon-btn" :title="t('refinery.remove')" @click="removing = j"><Icon name="trash" :size="15" /></button>
             </span>
           </div>
@@ -267,7 +270,10 @@ const bonusText = (b: StockBatch) => {
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
             <span class="num">{{ bonusText(b) }}</span>
             <span />
-            <span class="sep" />
+            <span class="sep actions">
+              <button type="button" class="icon-btn" :title="t('stock.adjust')" @click="editing = { batch: b, action: 'adjust' }"><Icon name="edit" :size="15" /></button>
+              <button type="button" class="icon-btn" :title="t('refinery.removeRow')" @click="editing = { batch: b, action: 'remove' }"><Icon name="trash" :size="15" /></button>
+            </span>
           </div>
         </template>
       </div>
@@ -275,6 +281,7 @@ const bonusText = (b: StockBatch) => {
 
     <RefineryDoneDialog v-if="finishing" :batches="finishing" @close="finishing = null" @done="load" />
     <RefineryTimeDialog v-if="timing" v-bind="timing" @close="timing = null" />
+    <BatchDialog v-if="editing" :key="editing.batch.id" :batch="editing.batch" :action="editing.action" @close="editing = null" @done="load" />
     <ConfirmDialog v-if="removing" :title="t('refinery.removeTitle')" :subtitle="removing.location" icon="trash" :buttons="removeButtons" @choose="chooseRemove">
       <div class="summary">
         <span v-for="b in removing.all" :key="b.id">{{ b.material }} · {{ qty(b.quantity, b.unit) }} · {{ qText(b.quality) }}</span>

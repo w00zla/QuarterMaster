@@ -32,7 +32,11 @@ const b = props.batch;
 const step = ref<"input" | "confirm">("input");
 const busy = ref(false);
 
-// "Everything" is the default for remove and move
+// "Everything" is the default for remove and move. Ausrüstung zählt vorerst optisch als ein Stück je
+// Eintrag: keine Stückzahl, immer alles
+const one = b.component;
+// Ein Material eines Raffinerie-Auftrags: Entfernen nimmt es ganz heraus (Teilmengen: Korrigieren)
+const jobRow = b.state === "refining";
 const all = ref(props.action === "remove" || props.action === "move");
 // Adjust starts at the batch's amount (so a component's stats can change alone)
 const amount = ref(props.action === "adjust" ? b.quantity : "");
@@ -99,7 +103,9 @@ const valid = computed(() => {
 });
 
 const counted = computed(() => amt.value ?? "0");
-const amountText = computed(() => (all.value ? `${qty(b.quantity, b.unit)} (${t("stock.allOf")})` : qty(amt.value ?? "", unit.value)));
+const amountText = computed(() => (one ? "" : all.value ? `${qty(b.quantity, b.unit)} (${t("stock.allOf")})` : qty(amt.value ?? "", unit.value)));
+// "1.5 SCU Agricium" or, for a piece of gear, its name alone
+const withAmount = (amount: string, name: string) => (one ? name : `${amount} ${name}`);
 const shareText = (ids: string[]) => (ids.length ? ids.map((g) => orgOf(g)?.name ?? "Org").join(", ") : t("stock.notShared"));
 // What stays in the batch after a split (display only)
 const splitRest = computed(() => qty(String(Number(b.quantity) - Number(amt.value ?? 0)), b.unit));
@@ -111,10 +117,10 @@ const targetText = computed(() => {
 });
 
 const titles: Record<BatchAction, Parameters<typeof t>[0]> = {
-  share: "field.sharing", split: "stock.split", merge: "stock.merge", remove: "stock.remove", move: "stock.move", adjust: "stock.adjust",
+  share: "field.sharing", split: "stock.split", merge: "stock.merge", remove: jobRow ? "refinery.removeRow" : "stock.remove", move: "stock.move", adjust: "stock.adjust",
 };
 const icons: Record<BatchAction, IconName> = {
-  share: "users", split: "split", merge: "merge", remove: "arrow-up", move: "move", adjust: "settings",
+  share: "users", split: "split", merge: "merge", remove: jobRow ? "trash" : "arrow-up", move: "move", adjust: "settings",
 };
 // Remove, adjust and merge apply right after their check; the others continue to it
 const applies = props.action === "remove" || props.action === "adjust" || props.action === "merge";
@@ -153,13 +159,14 @@ async function book() {
     if (props.action === "remove") {
       const body: StockRemoveRequest = { batchId: b.id, amount: all.value ? null : typed, expected: b.quantity };
       await api<OkResponse>("/stock/remove", { method: "POST", body });
-      toast(t("stock.removed", { what: `−${amountText.value} ${what} · ${ownerText(b)}` }));
+      if (jobRow) toast(t("refinery.rowRemoved", { what: `${qty(b.quantity, b.unit)} ${what}` }));
+      else toast(t("stock.removed", { what: `${one ? "" : `−${amountText.value} `}${what} · ${ownerText(b)}` }));
     } else if (props.action === "adjust") {
       const body: StockAdjustRequest = { batchId: b.id, amount: typed, expected: b.quantity };
       if (statsChange.value) body.stats = newStats.value;
       await api<OkResponse>("/stock/adjust", { method: "POST", body });
       const stats = statsChange.value ? ` · ${statsLine(newStats.value)}` : "";
-      toast(t("stock.adjusted", { what: `${b.quantity} → ${qty(counted.value, b.unit)} ${what}${stats}` }));
+      toast(t("stock.adjusted", { what: one ? `${what}${stats}` : `${b.quantity} → ${qty(counted.value, b.unit)} ${what}${stats}` }));
     } else if (props.action === "share") {
       const body: StockShareRequest = { batchId: b.id, guildIds: sharedNow.value };
       await api<OkResponse>("/stock/share", { method: "POST", body });
@@ -180,7 +187,7 @@ async function book() {
         body.toOwnerUserId = giveTo.value.userId;
       }
       await api<OkResponse>("/stock/move", { method: "POST", body });
-      toast(t("stock.moved", { what: `${amountText.value} ${withQuality(b)} → ${targetText.value}` }));
+      toast(t("stock.moved", { what: `${withAmount(amountText.value, withQuality(b))} → ${targetText.value}` }));
     }
     emit("done");
     emit("close");
@@ -203,10 +210,10 @@ async function book() {
   >
     <div v-if="step === 'input'" class="form single flush" @keydown.enter="onEnter">
       <div class="summary">
-        <span class="big">{{ b.material }} · {{ qty(b.quantity, b.unit) }}</span>
+        <span class="big">{{ b.material }}<template v-if="!one"> · {{ qty(b.quantity, b.unit) }}</template></span>
         <span class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}<template v-if="b.sharedIn.length"> · {{ sharedText(b) }}</template></span>
       </div>
-      <div v-if="action === 'remove' || action === 'move'" class="field">
+      <div v-if="!one && ((action === 'remove' && !jobRow) || action === 'move')" class="field">
         {{ b.component ? t("field.count") : t("field.amount") }}
         <span class="with-unit">
           <label class="check"><input v-model="all" type="checkbox" /> {{ t("field.everything") }}</label>
@@ -218,7 +225,7 @@ async function book() {
         <AmountStepper v-model="amount" :unit="b.unit" :invalid="amount.trim() !== '' && !valid" :label="t('field.splitAmount')" />
       </div>
       <!-- Counted: "0" empties the batch -->
-      <div v-if="action === 'adjust'" class="field">
+      <div v-if="action === 'adjust' && !one" class="field">
         {{ t("field.counted") }}
         <AmountStepper v-model="amount" :unit="b.unit" :min="0" :label="t('field.counted')" />
       </div>
@@ -245,11 +252,11 @@ async function book() {
 
     <div v-else class="summary">
       <template v-if="action === 'remove'">
-        <span class="big">−{{ amountText }} {{ b.material }}</span>
+        <span class="big">{{ one ? b.material : `−${amountText} ${b.material}` }}</span>
         <span class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}</span>
       </template>
       <template v-else-if="action === 'adjust'">
-        <span class="big">{{ qty(b.quantity, b.unit) }} → {{ qty(counted, b.unit) }} {{ b.material }}</span>
+        <span class="big">{{ one ? b.material : `${qty(b.quantity, b.unit)} → ${qty(counted, b.unit)} ${b.material}` }}</span>
         <template v-if="statsChange">
           <span class="dim">{{ b.location }} · {{ ownerText(b) }}</span>
           <span><span class="dim">{{ t("stock.from") }}:</span> {{ statsLine(b.stats) }}</span>
@@ -258,7 +265,7 @@ async function book() {
         <span v-else class="dim">{{ qualityPrefix(b) }}{{ b.location }} · {{ ownerText(b) }}</span>
       </template>
       <template v-else-if="action === 'share'">
-        <span class="big">{{ qty(b.quantity, b.unit) }} {{ withQuality(b) }}</span>
+        <span class="big">{{ withAmount(qty(b.quantity, b.unit), withQuality(b)) }}</span>
         <span><span class="dim">{{ t("stock.from") }}:</span> {{ shareText(b.sharedIn) }}</span>
         <span><span class="dim">{{ t("stock.to") }}:</span> {{ shareText(sharedNow) }}</span>
       </template>
@@ -271,7 +278,7 @@ async function book() {
         <span>{{ t("stock.splitInto", { a: splitRest, b: qty(amt ?? "", b.unit) }) }}</span>
       </template>
       <template v-else>
-        <span class="big">{{ amountText }} {{ withQuality(b) }}</span>
+        <span class="big">{{ withAmount(amountText, withQuality(b)) }}</span>
         <span><span class="dim">{{ t("stock.from") }}:</span> {{ b.location }} · {{ ownerText(b) }}</span>
         <span><span class="dim">{{ t("stock.to") }}:</span> {{ targetText }}</span>
       </template>
