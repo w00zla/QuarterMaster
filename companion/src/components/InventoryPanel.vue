@@ -50,13 +50,14 @@ const locationName = (uuid: string) => syncCatalog.value?.locations.find((l) => 
 
 const amount = (value: string, unit: "SCU" | "pcs") => (unit === "SCU" ? `${value} SCU` : t("inventory.pieces", { n: value }));
 // Every stat the tooltip showed, in the catalog's order, as its gain: "Coolant Rating +12.5 % · Integrity ±0.0 %";
-// "no stats" only when the tooltip showed none (weapons, event items)
+// a dash only when the tooltip showed none (weapons, event items)
 function statsText(p: ComponentProposal): string {
   const defs = syncCatalog.value?.components.components.find((c) => c.uuid === p.componentUuid)?.stats ?? [];
   const parts = defs.filter((s) => p.readStats.includes(s.uuid) || s.uuid in p.stats).map((s) => `${s.name} ${statValueText(s.kind, p.stats[s.uuid] ?? "0")}`);
-  return parts.length ? parts.join(" · ") : t("components.noStats");
+  return parts.length ? parts.join(" · ") : "–";
 }
-// The catalog's materials in the UI language (name, type, size, grade of components and items)
+// The catalog's components in the UI language (name, type, size, grade). Items show none of these: every
+// bookable one is of the type "Misc." (checked 2026-10-20), their size says nothing
 const catalogMaterials = computed(() => {
   const r = catalogResponses.value;
   return new Map((r ? (langRef.value === "de" ? r.de : r.en).materials : []).map((m) => [m.uuid, m]));
@@ -67,12 +68,13 @@ function described(uuid: string) {
 }
 const rows = computed<Row[]>(() => [
   ...proposals.value.map((p): Row => ({
-    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), ...described(p.materialUuid), detail: null,
+    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), type: "", size: "", grade: "", detail: null,
     locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: String(p.quality), amount: amount(p.amount, p.unit), stack: p, component: null,
   })),
+  // No quality: the column stays empty
   ...componentProposals.value.map((p): Row => ({
     kind: "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), detail: statsText(p),
-    locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "–", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
+    locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
   })),
 ]);
 
@@ -88,8 +90,9 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "quality", label: t("col.quality"), width: 40, sortable: false },
   { key: "amount", label: t("col.amount"), width: 60, sortable: false },
   { key: "location", label: t("col.location"), width: 80, sortable: false },
-  { key: "register", label: "", width: 24, fixed: true, sortable: false },
-  { key: "drop", label: "", width: 24, fixed: true, sortable: false },
+  // The action buttons: as wide as an icon button, always; a line before them in the head
+  { key: "register", label: "", width: 26, fixed: true, sortable: false, sep: true },
+  { key: "drop", label: "", width: 26, fixed: true, sortable: false },
 ]);
 // The rows' column gap (.row below)
 const ROW_GAP = 8;
@@ -172,10 +175,11 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
       {{ t("inventory.empty") }}
       <div class="empty-hint">{{ t("inventory.emptyHint") }}</div>
     </div>
-    <div v-else :ref="cols.observe" class="table" :style="{ '--cols': cols.template.value }">
+    <div v-else class="table" :style="{ '--cols': cols.template.value }">
       <ColumnHead class="table-head" :columns="columns" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth" />
-      <!-- Only the rows scroll: head, filter and column titles stay -->
-      <div class="rows">
+      <!-- Only the rows scroll: head, filter and column titles stay. The widths fit the rows' box (its
+           vertical scrollbar left out: measured on the table, the rows scrolled sideways after a resize) -->
+      <div :ref="cols.observe" class="rows">
         <div v-for="r in rows" :key="r.id" class="row">
           <span class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
           <span class="cell row-name">{{ r.name }}</span>
@@ -240,6 +244,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
 .rows {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   border-top: 1px solid var(--border-dim);
 }
@@ -325,6 +330,13 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
 
 .row .tag {
   justify-self: start;
+}
+
+/* The line before the action columns in the head, in the middle of the gap, as high as the titles
+   (ui.css draws it for the web app's taller rows) */
+.table-head :deep(.sep) {
+  margin: 0 0 0 -4px;
+  padding: 0 0 0 4px;
 }
 
 /* The kind as a small icon-only badge, hardly wider than its icon (no tooltip: the filter chips name the icons) */

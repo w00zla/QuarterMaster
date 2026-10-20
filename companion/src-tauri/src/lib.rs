@@ -435,6 +435,12 @@ fn stop_debug_recording(app: AppHandle, store: tauri::State<ocrwatch::DebugStore
     }
 }
 
+/// Whether the game window is in front, so the scan reads (changes come as `game-front`).
+#[tauri::command]
+fn get_game_front(front: tauri::State<ocrwatch::GameFront>) -> bool {
+    front.0.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Whether the screen capture sees Star Citizen running (changes come as `game-seen`).
 #[tauri::command]
 fn get_game_seen(seen: tauri::State<ocrwatch::GameSeen>) -> bool {
@@ -517,16 +523,18 @@ pub fn run() {
             let debug = ocrwatch::Debug::default();
             let store = ocrwatch::DebugStore::default();
             let fast = ocrwatch::FastCapture::default();
-            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone(), fast.clone());
+            let front = ocrwatch::GameFront::default();
+            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone(), fast.clone(), front.clone());
             let seen = ocrwatch::GameSeen::default();
             #[cfg(windows)]
-            capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast);
+            capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast, front.clone());
             app.manage(Mutex::new(frames));
             app.manage(detect);
             app.manage(scan);
             app.manage(debug);
             app.manage(store);
             app.manage(seen);
+            app.manage(front);
             // The scan overlay: off at every start; its hotkeys from the config (invalid ones only logged)
             #[cfg(windows)]
             {
@@ -575,6 +583,7 @@ pub fn run() {
             stop_debug_recording,
             open_debug_window,
             get_game_seen,
+            get_game_front,
             game_names,
             set_overlay,
         ])

@@ -105,7 +105,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   outline with an eye, on = accent with a pulsing dot, locked with a lock icon while the overlay runs it),
   the overlay toggle (Windows; a desktop icon, off = dashed and dimmed, on = accent), one tag that always
   says what the scan does (`scan.ts` `scanState`: "Scan off" / "Preparing…" / "Game not detected" /
-  "Nothing to scan" (every filter off) / "Waiting for a terminal" / "Location missing" (warehouse or
+  "Game not in focus" (another window in front: the scan is idle) / "Nothing to scan" (every filter off) / "Waiting for a terminal" / "Location missing" (warehouse or
   inventory without a location) / "Warehouse|Inventory|Refinery detected"), the "Loading…" tag; on the
   right "Log not found" (a chip only then, the path in its tooltip: the blueprints and the auto location
   need the log), the auto location toggle and the location picker (see "Inventory panel"; its tooltip the picked
@@ -291,12 +291,14 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 - Head: title with count, "Register all". Below: the kind filter, toggle chips
   Materials / Items / Components (on = the kind's badge colour with a check, off = dashed and dimmed with an x; what
   the scan detects from then on, all may be off; localStorage `qm.companion.inventory.kinds`). Then one compact row per
-  proposal: an icon-only badge for the kind (no tooltip, like every panel's kind badge), name, type, size, grade (from the catalog in
-  the UI language, where it has them: components, items), a component's stats ("Coolant Rating +12.5 % ·
-  Integrity ±0.0 %"), quality, amount, location last, Register / Discard. The columns are resizable like the
+  proposal: an icon-only badge for the kind (no tooltip, like every panel's kind badge), name, type, size, grade (components only, from the
+  catalog in the UI language: every bookable item is of the type "Misc.", checked 2026-10-20), a component's
+  stats ("Coolant Rating +12.5 % · Integrity ±0.0 %", "–" without any), quality (empty for components),
+  amount, location last, Register / Discard (fixed 26 px each). The columns are resizable like the
   web app's (`useTableColumns` + `ColumnHead` from `adminapp/src`, the rows' gap passed in; widths kept in
   localStorage `qm.companion.inventory.columns`; no sorting: the newest first; the location takes the room
-  left).
+  left; the room is measured on the rows' box, its vertical scrollbar left out, else the rows scroll
+  sideways after a resize).
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a
   `ComponentScan` per location, keys and ids prefixed with the location): a read belongs to the location
   picked at that moment (changeable while scanning: the player walks from one warehouse to the next); the
@@ -410,8 +412,12 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
 ## Screen capture (Windows)
 
 `capture.rs`: while a scan session runs and the foreground window belongs to `StarCitizen.exe` (not
-minimized), or the companion itself is in front and the game window seen before is still up, one frame per
-second (while the character inventory is in view faster, paced by the read time: `FastCapture`, set by
+minimized), one frame per second. The game not in front (any other window, the companion's own too):
+no frames, the scan idle (`GameFront`, event `game-front`: the worker leaves its screen within a second,
+the scan row shows "Spiel nicht im Fokus"; with the companion in front and the game window still up the
+game still counts as seen). The capture is of the monitor: frames taken while the companion was in front
+read its own tables as a warehouse grid (2026-10-20), which switched the mode while the user worked in
+the app (while the character inventory is in view faster, paced by the read time: `FastCapture`, set by
 the worker to 1.5 × its last read there within 0.5–1 s, so the OCR works at most ~2/3 of the time also
 on slower machines; a component needs three reads of its tile: ~1.8 s at 0.4 s per read instead of ~3 s)
 through DXGI Desktop Duplication (`windows` crate, the version Tauri uses): the game's monitor

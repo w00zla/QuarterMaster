@@ -503,6 +503,20 @@ impl Scan {
 #[derive(Default, Clone)]
 pub struct GameSeen(pub Arc<AtomicBool>);
 
+/// Whether the game window is in front (only then the capture sends frames; the companion in front does
+/// not count); changes go to the frontend as `game-front`. While it is not, the worker leaves its screen
+/// and reads nothing. Always true on platforms without a capture (the test frames of `QM_OCR_FRAMES`).
+#[derive(Clone)]
+pub struct GameFront(pub Arc<AtomicBool>);
+
+impl Default for GameFront {
+    fn default() -> Self {
+        Self(Arc::new(AtomicBool::new(!cfg!(windows))))
+    }
+}
+
+pub const GAME_FRONT: &str = "game-front";
+
 /// How often the capture delivers a frame (ms; 0: the normal once a second). The worker sets it while
 /// the character inventory is in view (its tooltips need three reads of a tile): 1.5 × its last read
 /// there, within FAST_MIN_MS–FAST_MAX_MS, so it reads at most ~2/3 of the time on any machine.
@@ -513,9 +527,9 @@ const FAST_MAX_MS: u64 = 1000;
 pub const GAME_SEEN: &str = "game-seen";
 
 /// Starts the OCR worker; frames sent to the returned channel are read in order while a session runs.
-pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture) -> Sender<Frame> {
+pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront) -> Sender<Frame> {
     let (tx, rx) = channel::<Frame>();
-    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store, fast).run(rx));
+    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store, fast, front).run(rx));
     if let Some(dir) = std::env::var_os("QM_OCR_FRAMES") {
         spawn_folder_source(PathBuf::from(dir), tx.clone());
     }
@@ -553,6 +567,8 @@ struct Worker {
     debug_tx: Sender<(RgbImage, InventoryEvent)>,
     /// Set while the character inventory is in view: the capture delivers frames faster
     fast: FastCapture,
+    /// The game in front (else no frames come, and the screen is left)
+    front: GameFront,
     ocr: Option<Ocr>,
     gate: Gate,
     labels: LabelSource,
@@ -583,7 +599,7 @@ fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
 }
 
 impl Worker {
-    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture) -> Self {
+    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront) -> Self {
         let debug_tx = spawn_debug_writer(app.clone(), store);
         Self {
             app,
@@ -591,6 +607,7 @@ impl Worker {
             scan,
             debug,
             fast,
+            front,
             debug_tx,
             ocr: None,
             gate: Gate::default(),
@@ -606,7 +623,8 @@ impl Worker {
 
     fn run(mut self, rx: Receiver<Frame>) {
         loop {
-            let Ok(frame) = next_frame(&rx, Duration::from_secs(5)) else { return };
+            // A second at most: the game leaving the front is noticed that soon
+            let Ok(frame) = next_frame(&rx, Duration::from_secs(1)) else { return };
             if self.visit.as_ref().is_some_and(|v| v.last_frame.elapsed() > VISIT_GAP) {
                 self.set_screen(Screen::Unknown, "no frames");
             }
@@ -623,7 +641,14 @@ impl Worker {
                 }
                 continue;
             }
-            let Some(frame) = frame else { continue };
+            let Some(frame) = frame else {
+                // The game not in front (the companion or another window is): the scan is idle, its screen
+                // left, until the game is back
+                if !self.front.0.load(Ordering::Relaxed) {
+                    self.set_screen(Screen::Unknown, "game not in front");
+                }
+                continue;
+            };
             let scope = self.scan.get();
             // A screen the filters left out is left (and not looked for again)
             if !scope.allows(self.screen) {

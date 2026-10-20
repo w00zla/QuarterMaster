@@ -32,7 +32,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindow};
 
-use crate::ocrwatch::{Detect, FastCapture, Frame, GameSeen, Pixels, GAME_SEEN};
+use crate::ocrwatch::{Detect, FastCapture, Frame, GameFront, GameSeen, Pixels, GAME_FRONT, GAME_SEEN};
 
 const GAME_EXE: &str = "StarCitizen.exe";
 const INTERVAL: Duration = Duration::from_secs(1);
@@ -42,7 +42,7 @@ const ACQUIRE_TIMEOUT_MS: u32 = 200;
 /// Starts the capture thread; it sends frames only while `detect` is on and the game is in front
 /// (one per second, on the character inventory as often as `fast` says), and tells whether the game runs (`seen`, only while `detect` is
 /// on).
-pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, fast: FastCapture) {
+pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, fast: FastCapture, front: GameFront) {
     std::thread::spawn(move || {
         let mut dup: Option<Duplication> = None;
         let mut last_error = String::new();
@@ -53,15 +53,24 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
             let fast_ms = fast.0.load(Ordering::Relaxed);
             std::thread::sleep(if fast_ms > 0 { Duration::from_millis(fast_ms.into()) } else { INTERVAL });
             let on = detect.load(Ordering::Relaxed);
-            let hwnd = if on { game_window(&mut last_game) } else { None };
-            let running = on && (hwnd.is_some() || game_running());
+            let game = if on { game_window(&mut last_game) } else { None };
+            let running = on && (game.is_some() || game_running());
             if seen.0.swap(running, Ordering::Relaxed) != running {
                 let _ = app.emit(GAME_SEEN, running);
             }
-            let Some(hwnd) = hwnd else {
+            let in_front = game.is_some_and(|(_, f)| f);
+            if front.0.swap(in_front, Ordering::Relaxed) != in_front {
+                let _ = app.emit(GAME_FRONT, in_front);
+            }
+            let Some((hwnd, in_front)) = game else {
                 dup = None;
                 continue;
             };
+            // The companion in front: no frames (the capture is of the monitor, the companion's own window
+            // over the game was read as a warehouse grid and switched the mode while the user worked in it)
+            if !in_front {
+                continue;
+            }
             match grab(&mut dup, hwnd) {
                 Ok(Some((pixels, cursor))) => {
                     last_error.clear();
@@ -97,11 +106,12 @@ impl<T> Context<T> for windows::core::Result<T> {
     }
 }
 
-/// The game's window: the foreground window if it belongs to Star Citizen and is not minimized
-/// (remembered in `last`), or, while the companion itself is in front (the user registers what was
-/// scanned), the game window seen before as long as it is up and not minimized. Any other window in
+/// The game's window and whether it is in front: the foreground window if it belongs to Star Citizen
+/// and is not minimized (remembered in `last`; in front), or, while the companion itself is in front
+/// (the user registers what was scanned), the game window seen before as long as it is up and not
+/// minimized (not in front: the game still counts as seen, no frames are read). Any other window in
 /// front ends the capture.
-fn game_window(last: &mut Option<HWND>) -> Option<HWND> {
+fn game_window(last: &mut Option<HWND>) -> Option<(HWND, bool)> {
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_invalid() || IsIconic(hwnd).as_bool() {
@@ -110,13 +120,13 @@ fn game_window(last: &mut Option<HWND>) -> Option<HWND> {
         let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
         if pid == GetCurrentProcessId() {
-            return last.filter(|&h| IsWindow(Some(h)).as_bool() && !IsIconic(h).as_bool());
+            return last.filter(|&h| IsWindow(Some(h)).as_bool() && !IsIconic(h).as_bool()).map(|h| (h, false));
         }
         let game = is_game_process(pid).then_some(hwnd);
         if game.is_some() {
             *last = game;
         }
-        game
+        game.map(|h| (h, true))
     }
 }
 

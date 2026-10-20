@@ -7,7 +7,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { computed, ref, watch } from "vue";
 import type { IconName } from "../../adminapp/src/components/Icon.vue";
-import { getGameSeen, getScan, setScan, type ScanScope, type ScanScreen } from "./backend";
+import { getGameFront, getGameSeen, getScan, setScan, type ScanScope, type ScanScreen } from "./backend";
 import { t } from "./i18n";
 import { kinds, loadStock, locationUuid, resetSightings } from "./inventorySync";
 import { ensureCatalog, jobsOn, preparing } from "./refinerySync";
@@ -18,6 +18,8 @@ export const scanOn = ref(false);
 export const screen = ref<ScanScreen>("none");
 // Star Citizen runs (seen by the screen capture while the scan runs)
 export const gameSeen = ref(false);
+// Its window is in front: only then the scan reads (else it is idle, its screen left)
+export const gameFront = ref(false);
 
 // What the filters leave the scan to read
 export const scope = computed<ScanScope>(() => ({
@@ -57,7 +59,8 @@ export interface StateTag {
 }
 
 // What the scan does, in one tag: off (neutral), getting ready (catalog, game language), without the game,
-// without anything to read, waiting for a screen, a screen that needs the location, reading a screen (green)
+// idle while the game is not in front (neutral), without anything to read, waiting for a screen, a screen
+// that needs the location, reading a screen (green)
 export const scanState = computed<StateTag>(() => {
   const s = !scanOn.value
     ? ({ cls: "", icon: "eye-off", label: "scan.off" } as const)
@@ -65,6 +68,8 @@ export const scanState = computed<StateTag>(() => {
       ? ({ cls: "", icon: "clock", label: "scan.preparing" } as const)
       : !gameSeen.value
         ? ({ cls: "warn", icon: "warning", label: "scan.noGame" } as const)
+        : !gameFront.value
+          ? ({ cls: "", icon: "eye-off", label: "scan.notInFront" } as const)
         : scopeEmpty.value
           ? ({ cls: "warn", icon: "warning", label: "scan.nothing" } as const)
           : screen.value === "none"
@@ -82,8 +87,12 @@ export const scanState = computed<StateTag>(() => {
 export async function watchScan() {
   scanOn.value = await getScan();
   gameSeen.value = await getGameSeen();
+  gameFront.value = await getGameFront();
   await listen<boolean>("game-seen", (e) => {
     gameSeen.value = e.payload;
+  });
+  await listen<boolean>("game-front", (e) => {
+    gameFront.value = e.payload;
   });
   await listen<ScanScreen>("scan-screen", (e) => {
     screen.value = e.payload;
