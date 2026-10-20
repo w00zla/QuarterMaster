@@ -108,6 +108,8 @@ export interface CatalogBlueprint {
   // Everyone has it: never registered
   isDefault: boolean;
   retired: boolean;
+  // Names of the stats its slots can change, in the game tooltip's order; empty when none
+  stats: string[];
 }
 
 export interface CatalogResponse {

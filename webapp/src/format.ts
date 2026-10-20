@@ -4,13 +4,19 @@ import { parseAmount } from "../../src/stock/amount";
 import { statValueText } from "../../src/stock/component-stats";
 import { qMark, qualityStars } from "../../src/stock/quality";
 import { materials } from "./catalog";
-import { t } from "./i18n";
+import { lang, t } from "./i18n";
 import { orgOf } from "./orgs";
 import { me } from "./session";
 
 export type Unit = "SCU" | "pcs";
 
 export const unitText = (unit: Unit) => t(unit === "SCU" ? "unit.SCU" : "unit.pcs");
+
+/** Eine Menge in einem Eingabefeld: SCU mit mindestens einer Nachkommastelle im Format der Sprache
+ * ("1,0" / "1.0"), Stück ganz ("1"). */
+export const amountInput = (n: number, unit: Unit) => unit === "SCU"
+  ? new Intl.NumberFormat(lang.value, { minimumFractionDigits: 1, maximumFractionDigits: 6, useGrouping: false }).format(n)
+  : String(n);
 
 /** "12.5 SCU" */
 export const qty = (quantity: string, unit: Unit) => `${quantity} ${unitText(unit)}`;

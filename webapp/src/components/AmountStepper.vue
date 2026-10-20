@@ -4,7 +4,7 @@
 // checks the text (`invalid`).
 import { computed } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { type Unit, unitText } from "../format";
+import { amountInput, type Unit, unitText } from "../format";
 import { t } from "../i18n";
 
 const props = withDefaults(defineProps<{ unit: Unit; invalid?: boolean; disabled?: boolean; min?: number; label?: string }>(), {
@@ -19,7 +19,7 @@ const current = computed(() => {
 });
 const step = (by: number) => {
   const n = current.value ?? (by > 0 ? props.min - 1 : props.min);
-  model.value = String(Math.round(Math.max(props.min, n + by) * 1e6) / 1e6);
+  model.value = amountInput(Math.round(Math.max(props.min, n + by) * 1e6) / 1e6, props.unit);
 };
 </script>
 

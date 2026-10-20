@@ -8,7 +8,7 @@ import type { OkResponse, StockAddRequest } from "../../../src/webapp/api-types"
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { componentOptions, locationOptions, locations, materialOptions, materials } from "../catalog";
-import { amountOf, qText, qty, qualityOf, statsText } from "../format";
+import { amountInput, amountOf, qText, qty, qualityOf, statsText } from "../format";
 import { t } from "../i18n";
 import { me } from "../session";
 import { toast, toastError } from "../toasts";
@@ -22,9 +22,9 @@ const emit = defineEmits<{ done: [] }>();
 const subject = ref<string | null>(null);
 const location = ref<string | null>(null);
 const quality = ref("");
-// One to start with (1 SCU, one piece)
-const startAmount = () => "1";
-const amount = ref(startAmount());
+// One to start with (1,0 SCU, one piece)
+const startAmount = () => amountInput(1, unit.value);
+const amount = ref("1");
 const shareIn = reactive({} as Record<string, boolean>);
 const busy = ref(false);
 
@@ -42,6 +42,11 @@ watch(() => props.target, resetShares, { immediate: true });
 const unit = computed(() => (subject.value ? materials.value.get(subject.value)?.unit : undefined) ?? (props.components ? "pcs" : "SCU"));
 const q = computed(() => (props.components ? 0 : qualityOf(quality.value)));
 const amt = computed(() => amountOf(amount.value, unit.value));
+// Die Startmenge folgt der Einheit (SCU ↔ Stück), solange sie nicht geändert wurde
+watch(unit, (now, before) => {
+  if (amount.value === amountInput(1, before)) amount.value = amountInput(1, now);
+});
+amount.value = startAmount();
 
 // Components: the picked one's stats (StatSliders); only gains are sent
 const statDefs = computed(() => (props.components && subject.value ? materials.value.get(subject.value)?.stats ?? [] : []));

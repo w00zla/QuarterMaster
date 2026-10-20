@@ -136,8 +136,8 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "type", label: t("bp.col.type"), width: 160 },
   { key: "category", label: t("bp.col.category"), width: 170 },
   { key: "size", label: t("bp.col.size"), width: 64 },
-  { key: "class", label: t("bp.col.class"), width: 130 },
   { key: "grade", label: t("bp.col.grade"), width: 72 },
+  { key: "stats", label: t("bp.col.stats"), width: 280 },
   org.value ? { key: "owners", label: t("bp.col.owners"), width: 240 } : { key: "actions", label: "", width: 44, sortable: false, fixed: true, sep: true },
 ]);
 
@@ -147,8 +147,8 @@ function valueOf(r: Row, key: string): string | number {
     case "type": return r.bp?.typeLabel ?? "";
     case "category": return r.bp?.category ?? t("bp.other");
     case "size": return r.bp?.size ?? -1;
-    case "class": return r.bp?.itemClass ?? "";
     case "grade": return r.bp?.gradeLetter ?? "";
+    case "stats": return r.bp?.stats.join(", ") ?? "";
     case "owners": return r.owners.length;
     default: return "";
   }
@@ -283,6 +283,7 @@ onUnmounted(() => {
         <template #cell-type="{ row }"><TypeLabel :type="row.bp?.type" :label="row.bp?.typeLabel" /></template>
         <template #cell-size="{ row }">{{ row.bp?.size ?? "—" }}</template>
         <template #cell-grade="{ row }">{{ row.bp?.gradeLetter ?? "—" }}</template>
+        <template #cell-stats="{ row }"><span class="stats":title="row.bp?.stats.join(', ')">{{ row.bp?.stats.join(", ") }}</span></template>
         <template #cell-owners="{ row }">
           <span class="owners" :title="row.owners.map(memberLabel).join(', ')">{{ row.owners.map(memberLabel).join(", ") }}</span>
         </template>
@@ -320,7 +321,8 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.owners {
+.owners,
+.stats {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

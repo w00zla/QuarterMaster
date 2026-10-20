@@ -8,7 +8,8 @@ import { importCache } from '../db/import-cache.ts';
 import { itemClassText, locText, rows } from '../db/query.ts';
 import type { SubjectKind } from './amount.ts';
 import { BASE_PATHS, baseValue } from './component-base.ts';
-import type { StatBounds } from './component-stats.ts';
+import { statBounds, type StatBounds } from './component-stats.ts';
+import type { ModifierRange } from '../planner/types.ts';
 import { componentItemSql, componentStats, selectableLocationSql, type Actor, type Batch } from './service.ts';
 
 export interface LocationEntry {
@@ -105,6 +106,35 @@ async function componentBaseValues(db: Db): Promise<Map<string, Map<string, numb
   }
   return bases;
 }
+
+/**
+ * Per blueprint the names of the stats its slots can change (as componentStats: a flat range is left out),
+ * in the tooltip's order (Integrity last). Blueprints without any are missing.
+ */
+export const blueprintStatNames = importCache(async (db, lang): Promise<Map<string, string[]>> => {
+  const found = await rows<{ blueprint: string; key: string; name: string; ranges: ModifierRange[] }>(db, sql`
+    SELECT s.blueprint_uuid AS blueprint, cp.key, coalesce(${locText(lang, sql`cp.name_key`)}, cp.key) AS name, m->'ranges' AS ranges
+    FROM catalog.blueprint_slot s
+    CROSS JOIN LATERAL jsonb_array_elements(s.modifiers) m
+    JOIN catalog.crafted_property cp ON cp.uuid::text = lower(m->>'propertyUuid')`);
+  // blueprint -> property key -> its name and the slots' ranges
+  const grouped = new Map<string, Map<string, { name: string; slots: ModifierRange[][] }>>();
+  for (const r of found) {
+    const byKey = grouped.get(r.blueprint) ?? new Map<string, { name: string; slots: ModifierRange[][] }>();
+    const entry = byKey.get(r.key) ?? { name: r.name, slots: [] };
+    entry.slots.push(Array.isArray(r.ranges) ? r.ranges : []);
+    byKey.set(r.key, entry);
+    grouped.set(r.blueprint, byKey);
+  }
+  const result = new Map<string, string[]>();
+  for (const [blueprint, byKey] of grouped) {
+    const names = [...byKey].filter(([, e]) => statBounds(e.slots))
+      .sort(([a], [b]) => Number(a === 'GPP_Health_MaxHealth') - Number(b === 'GPP_Health_MaxHealth') || a.localeCompare(b))
+      .map(([, e]) => e.name);
+    if (names.length) result.set(blueprint, names);
+  }
+  return result;
+});
 
 /** What can be booked: recipe resources and items, and ship components (same rules as the stock service; never ores). */
 export const materialCatalog = importCache(async (db, lang): Promise<Map<string, MaterialEntry>> => {

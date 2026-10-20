@@ -12,6 +12,7 @@ import { computed, nextTick, onUnmounted, ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { api } from "../api";
+import { materials } from "../catalog";
 import { duration, qty } from "../format";
 import { lang, t } from "../i18n";
 
@@ -129,7 +130,8 @@ const itemLine = (i: { typeLabel: string | null; subTypeLabel: string | null; si
         <dl class="kv">
           <template v-if="mat.refined"><dt>{{ t("info.refinedTo") }}</dt><dd>{{ mat.refined }}</dd></template>
           <template v-if="mat.ores.length"><dt>{{ t("info.fromOre") }}</dt><dd>{{ mat.ores.join(", ") }}</dd></template>
-          <dt>{{ t("info.usedIn") }}</dt><dd>{{ t("info.blueprints", { n: mat.usedIn }) }}</dd>
+          <!-- Ausrüstung ist nie Zutat eines Bauplans: keine Zeile dafür -->
+          <template v-if="!materials.get(uuid)?.component"><dt>{{ t("info.usedIn") }}</dt><dd>{{ t("info.blueprints", { n: mat.usedIn }) }}</dd></template>
         </dl>
       </template>
     </div>

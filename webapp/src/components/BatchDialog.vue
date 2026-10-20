@@ -187,7 +187,7 @@ async function book() {
         body.toOwnerUserId = giveTo.value.userId;
       }
       await api<OkResponse>("/stock/move", { method: "POST", body });
-      toast(t("stock.moved", { what: `${withAmount(amountText.value, withQuality(b))} → ${targetText.value}` }));
+      toast(t(giveTo.value ? "stock.given" : "stock.moved", { what: `${withAmount(amountText.value, withQuality(b))} → ${targetText.value}` }));
     }
     emit("done");
     emit("close");

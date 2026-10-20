@@ -10,7 +10,7 @@ import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { formatAmount } from '../src/stock/amount.ts';
-import { materialCatalog, stockList } from '../src/stock/lookup.ts';
+import { blueprintStatNames, materialCatalog, stockList } from '../src/stock/lookup.ts';
 import { orgMetrics } from '../src/stock/org-summary.ts';
 import { add, adjust, COMPONENT_QUALITY, StockError, type Actor } from '../src/stock/service.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
@@ -20,6 +20,8 @@ const G = '940000000000000001';
 const MEMBER_ROLE = '941000000000000001';
 const MIA = '942000000000000001';
 const mia: Actor = { userId: MIA, guildId: G, source: 'webapp' };
+// The name the component's stat has in the material catalog (the same crafted property)
+const materialsStatName = (materials: Awaited<ReturnType<typeof materialCatalog>>) => materials.get(U.output)!.stats[0]!.name;
 
 describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
@@ -77,6 +79,12 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     assert.deepEqual(materials.get(U.output)!.stats.map(({ uuid, kind, min, max, nameKey, base }) => ({ uuid, kind, min, max, nameKey, base })),
       [{ uuid: U.property, kind: 'multiplier', min: 0, max: 20, nameKey: 'statname_gpp_test', base: 110 }]);
     assert.deepEqual(materials.get(U.gem)!.stats, []);
+  });
+
+  it('names the stats a blueprint can change; blueprints without any are missing', async () => {
+    const names = await blueprintStatNames(db, 'en');
+    assert.deepEqual(names.get(U.blueprint), [materialsStatName(await materialCatalog(db, 'en'))]);
+    assert.equal(names.has(U.blueprint2), false);
   });
 
   it('keeps batches with other stats apart and merges the same stats, normalized', async () => {

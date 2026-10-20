@@ -14,7 +14,7 @@ import { blueprintCatalog, ownedBlueprints, addBlueprint, removeBlueprint } from
 import { loadPlannerData } from '../planner/load.ts';
 import { getBlueprint, getBlueprints, getItem, getItems, getResource, getResources } from '../adminapp/queries.ts';
 import { formatAmount } from '../stock/amount.ts';
-import { locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
+import { blueprintStatNames, locationCatalog, materialCatalog, stockList, type PickableBatch } from '../stock/lookup.ts';
 import { obtainableBlueprints, orgMetrics, stockMetrics, stockMetricsSql, type StockMetricsRow } from '../stock/org-summary.ts';
 import * as stock from '../stock/service.ts';
 import { MAX_REFINE_ROWS, StockError, type Actor } from '../stock/service.ts';
@@ -200,7 +200,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
   api.get('/catalog', async (c) => {
     const lang = langOf(c);
     const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
-    const [bpTypes, types] = [await blueprintTypes(db, lang), await itemTypes(db, lang)];
+    const [bpTypes, types, bpStats] = [await blueprintTypes(db, lang), await itemTypes(db, lang), await blueprintStatNames(db, lang)];
     const refineries = await refineryMatch(db);
     return c.json({
       materials: [...materials.values()].map((m) => ({
@@ -215,7 +215,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         .sort((a, b) => a.label.localeCompare(b.label)),
       blueprints: blueprints.entries.map((e) => ({
         uuid: e.uuid, label: e.label, name: e.name, ...(bpTypes.get(e.uuid) ?? noType), size: e.size, gradeLetter: e.gradeLetter, itemClass: e.itemClass,
-        manufacturerCode: e.manufacturerCode, category: e.categoryLabel, isDefault: e.isDefault, retired: e.retired,
+        manufacturerCode: e.manufacturerCode, category: e.categoryLabel, isDefault: e.isDefault, retired: e.retired, stats: bpStats.get(e.uuid) ?? [],
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     } satisfies CatalogResponse);

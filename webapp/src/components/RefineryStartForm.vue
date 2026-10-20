@@ -8,7 +8,7 @@ import type { OkResponse, RefineryStartRequest } from "../../../src/webapp/api-t
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import { locations, materials, refineryLocationOptions, resourceOptions, yieldBonus } from "../catalog";
-import { amountOf, durationOfParts, hm, qty, qualityOf } from "../format";
+import { amountInput, amountOf, durationOfParts, hm, qty, qualityOf } from "../format";
 import { t } from "../i18n";
 import { toast, toastError } from "../toasts";
 import AmountStepper from "./AmountStepper.vue";
@@ -26,7 +26,7 @@ interface MaterialRow {
 
 let nextId = 0;
 // A new row starts at 1 SCU, like the stock add form
-const newRow = (): MaterialRow => ({ id: nextId++, material: null, quality: "", amount: "1" });
+const newRow = (): MaterialRow => ({ id: nextId++, material: null, quality: "", amount: amountInput(1, "SCU") });
 
 const location = ref<string | null>(null);
 const hours = ref("");
