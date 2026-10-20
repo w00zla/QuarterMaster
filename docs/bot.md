@@ -110,7 +110,7 @@ All root commands are prefixed `qm-`.
   elements and tractor beams carry 5 stats. Looted-only components get no such field. Other stats on
   `adjust` answer "Stats changed" with the batch as it is now.
 - **`/qm-refinery`** (`commands/refinery.ts`, parsing in `refinery-lines.ts`; personal, no member role
-  needed): `start station` (modal: optional duration, material lines `<name> <quality> <yield SCU>` read from
+  needed): `create station` (modal: optional duration, material lines `<name> <quality> <yield SCU>` read from
   the right, resolved with `findMaterial` over the resources in de and en) → preview panel (Register / Edit /
   Cancel), `time job`, `done job` (modal prefilled with "Name quality: yield" lines), `remove job` (a confirm
   panel), `list`.

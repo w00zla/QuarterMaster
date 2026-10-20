@@ -361,7 +361,7 @@ export const refineryCommand: BotCommand = {
     contexts: [InteractionContextType.Guild],
     integration_types: [ApplicationIntegrationType.GuildInstall],
     options: [
-      opt('start', 'cmd.refinery.start', ApplicationCommandOptionType.Subcommand, {
+      opt('create', 'cmd.refinery.start', ApplicationCommandOptionType.Subcommand, {
         options: [
           opt('station', 'refinery.opt.station', S, { required: true, autocomplete: true }),
         ],
@@ -378,9 +378,9 @@ export const refineryCommand: BotCommand = {
       opt('list', 'cmd.refinery.list', ApplicationCommandOptionType.Subcommand),
     ],
   },
-  modalSubcommands: ['start', 'time', 'done'],
+  modalSubcommands: ['create', 'time', 'done'],
   execute: bySubcommand({
-    start,
+    create: start,
     time,
     done,
     remove,
