@@ -28,14 +28,14 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   NTFS tunneling), a tail that hands out complete lines (lossy UTF-8: Windows SC writes the ANSI code
   page). Read: blueprint unlocks only, the `Added notification "Received Blueprint: <name>: " [n]` line
   (names may hold quotes; the `UpdateNotificationItem` repeats are skipped). The whole current log is
-  read at start, then what the game appends. "Scan old logs" reads every `logbackups/*.log` (GBs: `memmem`
-  search, off the main thread; progress per file as the `scan-progress` event, shown as a bar in place of
-  the panel title). The list keeps the first unlock per name, each marked whether it came from an old log
+  read at start, then what the game appends. "Scan history" ("Historie scannen") reads every `logbackups/*.log` (GBs: `memmem`
+  search, off the main thread; progress per file as the `scan-progress` event, shown as a bar in the head
+  between the filter chip and the buttons). The list keeps the first unlock per name, each marked whether it came from an old log
   (`backup`); the panel lists only the unregistered ones (registered and default blueprints hidden, the
-  debug window shows them), newest first, each with an icon-only badge. Below the panel's head the filter
-  "Unlocks" ("Freischaltungen", like the other panels' "Scanned:" chips; localStorage `qm.companion.unlocks`,
+  debug window shows them), newest first, each with an icon-only badge. In the panel's head after the count the filter
+  "Unlocks" ("Freischaltungen", like the other panels' filter chips; localStorage `qm.companion.unlocks`,
   on by default, like every scan filter kept across starts): off, the Rust side reads no unlocks
-  (`set_unlock_scan`, the list emptied, "Scan old logs" disabled, the overlay's mode warns); on again, it
+  (`set_unlock_scan`, the list emptied, "Scan history" disabled, the overlay's mode warns); on again, it
   reads the current log from its start. The location lines are read either way. `log_state` also holds the file as last polled (created,
   modified, size, read up to; changes of these alone send no `log-changed`: the game writes all the time).
 - The player's location (`gamelog::location`): `<RequestLocationInventory> Player[…] requested inventory
@@ -120,9 +120,13 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - A tab bar (icons; each tab and panel title with its table's row count, `tabCounts` in `overlay.ts`; the
   last tab kept in localStorage `qm.companion.tab`; it never switches by itself: the scan row's tag names
   the screen) with the panels
-  Inventory (`InventoryPanel.vue`), Refinery (`RefineryPanel.vue`) and Blueprints (`UnlocksPanel.vue`), all
-  three kept mounted (`v-show`); panel heads carry no icon. Inventory and Refinery fill the window and
-  scroll only their rows (head, filter and column titles stay).
+  Stock and Components (both `InventoryPanel.vue`, prop `part`), Blueprints (`UnlocksPanel.vue`) and
+  Refinery (`RefineryPanel.vue`), like the web app's navigation (order, names "Bestand"/"Komponenten"/
+  "Baupläne"/"Raffinerie", icons; decided 2026-10-20, before: one Inventory tab), all four kept mounted
+  (`v-show`; a stored "inventory" tab opens Stock); panel heads carry no icon. Every head: title, the count
+  (room for "999": the chips after it stay put), the panel's filter chips (no label: "Scanned" / "Not
+  scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
+  and scroll only their rows (head and column titles stay).
 - Settings dialog (`SettingsDialog.vue`): Access Key, language, the automatic tab switch (a switch), game folder, the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
   place as tooltip; the hotkeys "Hotkey Overlay an/aus" and "… Modus wechseln"; the UI says "Modus" for tab and overlay view alike), in the head's right end
@@ -288,15 +292,17 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   is turned on, when the log names another place and once the catalog is loaded; a key that is no
   selectable location clears the pick (nothing is booked at the place before: reads without a location
   are dropped); a pick by hand holds until the log names another place.
-- Head: title with count, "Register all". Below: the kind filter, toggle chips
-  Materials / Items / Components (on = the kind's badge colour with a check, off = dashed and dimmed with an x; what
-  the scan detects from then on, all may be off; localStorage `qm.companion.inventory.kinds`). Then one compact row per
-  proposal: an icon-only badge for the kind (no tooltip, like every panel's kind badge), name, type, size, grade (components only, from the
-  catalog in the UI language: every bookable item is of the type "Misc.", checked 2026-10-20), a component's
-  stats ("Coolant Rating +12.5 % · Integrity ±0.0 %", "–" without any), quality (empty for components),
-  amount, location last, Register / Discard (fixed 26 px each). The columns are resizable like the
+- One panel per part: Stock (the warehouse's stacks) and Components (the character inventory's). Head:
+  title with count, the part's kind filter, toggle chips Materials / Items (Stock) or Components (on =
+  the kind's badge colour with a check, off = dashed and dimmed with an x; what the scan detects from then
+  on, all may be off; localStorage `qm.companion.inventory.kinds`), "Register all" (the panel's rows only).
+  Then one compact row per proposal. Stock: an icon-only badge for the kind (no tooltip, like every
+  panel's kind badge), name, quality, amount. Components: name, type, size, grade (from the catalog in the
+  UI language; items show none of these: every bookable item is of the type "Misc.", checked 2026-10-20),
+  the stats ("Coolant Rating +12.5 % · Integrity ±0.0 %", "–" without any). Both: location last, Register /
+  Discard (fixed 26 px each). The columns are resizable like the
   web app's (`useTableColumns` + `ColumnHead` from `adminapp/src`, the rows' gap passed in; widths kept in
-  localStorage `qm.companion.inventory.columns`; no sorting: the newest first; the location takes the room
+  localStorage `qm.companion.{stock,comps}.columns`; no sorting: the newest first; the location takes the room
   left; the room is measured on the rows' box, its vertical scrollbar left out, else the rows scroll
   sideways after a resize).
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a
@@ -389,7 +395,7 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   accents (the OCR read "HEPHAESTÁNITE").
 - The refinery screen is a **visit** (`refinery-visit` `{atMs, active}`), each overview as
   `refinery-overview`; 3 reads in a row without the terminal or 60 s without frames end it. The panel's
-  filter "Jobs" (one chip below the head, the live colour; localStorage `qm.companion.refinery.jobs`, on by
+  filter "Jobs" (one chip in the head after the count, the live colour; localStorage `qm.companion.refinery.jobs`, on by
   default) decides whether the scan reads the terminal at all.
 - Sync (`refinery.ts`, store `refinerySync.ts`, `RefineryPanel.vue`): names via `findMaterial` (shared with
   the bot) over the catalog's de/en names plus the pack texts; the station by its title against refinery
@@ -437,7 +443,7 @@ game since.
 - A frameless, transparent, click-through, non-focusable window holding the mode's panel as a
   compact fixed-size read-only tile (340×190 logical px, slightly see-through; layout "C" of the concept
   https://claude.ai/artifact/1CK7QBiMpLcj7n4efMeybn with the rail on the right, 2026-10-20): a narrow rail
-  on the right with the three modes top down, each its icon above its count, exactly as wide as "999"
+  on the right with the four modes top down, each its icon above its count, exactly as wide as "999"
   (`3ch`, tabular digits; the shown one highlighted; a warning instead of the count when its filters are
   all off or the log is missing); next to it a 22 px line (a line below it) with the picked location after its icon in every
   mode (mono face, clipped at its end; "No location picked" in warn colour), then the newest rows at 20 px
@@ -454,11 +460,11 @@ game since.
   only position and hotkeys). Showing it switches the scan on (locked in the scan row while it is shown), hiding it switches
   the scan off only if it started it. The mode is the main window's tab, one and the same (since
   2026-10-20; before, the overlay had its own and the two drifted apart). By itself: the screen the scan
-  sees (warehouse or inventory: Inventory, terminal: Refinery; nothing in view: it stays) and a blueprint
+  sees (warehouse: Stock, character inventory: Components, terminal: Refinery; nothing in view: it stays) and a blueprint
   unlock Game.log adds while the app runs that is still to register (new or ambiguous, once matched:
   Blueprints; the log's unlocks at its first state and the old logs' do not switch); both can be turned
   off in the settings ("Modus automatisch wechseln", config `autoTab`, on by default). By hand: a click on a
-  tab, the mode hotkey stepping through the three. Also with the overlay off. A component row shows its name and stats only, a stack its name, quality and amount.
+  tab, the mode hotkey stepping through the four. Also with the overlay off. A component row shows its name and stats only, a stack its name, quality and amount.
 - Each panel writes its rows into `overlayRows`; `overlay.ts` sends the view as texts (`overlay-view`, on
   every change and on `overlay-request`).
 - Hotkeys (`hotkeyOverlay`/`hotkeyMode`, accelerators with the browser's physical key code, default

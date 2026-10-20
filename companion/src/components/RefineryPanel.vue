@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The refinery sync's proposals (refinerySync.ts; the scan is in the scan row, ScanBar.vue), below the
-// head the filter "Jobs" (off: the scan does not read the terminal): one card each in three lines: the
+// The refinery sync's proposals (refinerySync.ts; the scan is in the scan row, ScanBar.vue), in the
+// head after the count the filter "Jobs" (off: the scan does not read the terminal): one card each in three lines: the
 // job badge (icon-only), the station and the actions; the state (a colour per state) with the time left
 // as the terminal shows it and the end; the materials as compact rows like the inventory's table. A new running job: Register (the time left as its
 // duration, so the end stays the game's) or Discard; "Register all" in the head after a confirmation.
@@ -142,20 +142,22 @@ async function registerAll(value: string) {
 <template>
   <section class="panel refinery">
     <div class="head">
-      <span class="head-title">{{ t("refinery.title") }} <span class="head-count">{{ proposals.length }}</span></span>
+      <span class="head-title no-grow">{{ t("refinery.title") }} <span class="head-count">{{ proposals.length }}</span></span>
+      <!-- What the scan detects: off, the terminal is not read -->
+      <div class="chips filter">
+        <Tooltip :text="t(jobsOn ? 'filter.on' : 'filter.off')">
+          <button type="button" class="chip" :class="{ active: jobsOn }" :aria-pressed="jobsOn" @click="toggleJobs">
+            <Icon name="drop" :size="12" /> {{ t("refinery.jobs") }}
+            <Icon :name="jobsOn ? 'check' : 'close'" :size="12" />
+          </button>
+        </Tooltip>
+      </div>
+      <span class="spacer" />
       <Tooltip :text="lockTip">
         <button type="button" class="btn small primary" :disabled="!connected || !newOnes.length || busyAll" @click="confirming = true">
           <Icon name="check" :size="14" /> {{ t("refinery.addAll") }}
         </button>
       </Tooltip>
-    </div>
-    <!-- What the scan detects: off, the terminal is not read -->
-    <div class="chips filter">
-      <span class="filter-label">{{ t("inventory.scanned") }}</span>
-      <button type="button" class="chip" :class="{ active: jobsOn }" :aria-pressed="jobsOn" @click="toggleJobs">
-        <Icon name="drop" :size="12" /> {{ t("refinery.jobs") }}
-        <Icon :name="jobsOn ? 'check' : 'close'" :size="12" />
-      </button>
     </div>
     <div v-if="!proposals.length" class="empty-line">{{ t("refinery.empty") }}</div>
     <!-- Only the jobs scroll: the head stays -->
@@ -231,20 +233,12 @@ async function registerAll(value: string) {
   overflow-y: auto;
 }
 
-/* The filter below the head, like the inventory's: one chip, on = the live colour with a check, off =
-   dashed and dimmed with an x */
+/* The filter in the head after the count, like the inventory's: one chip, on = the live colour with a
+   check, off = dashed and dimmed with an x */
 .filter {
   align-items: center;
   gap: 6px;
-  padding: 4px 16px 8px;
   font-size: 11px;
-}
-
-.filter-label {
-  color: var(--text-2);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .filter .chip {

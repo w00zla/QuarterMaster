@@ -2,7 +2,7 @@
 // The title bar with the user (avatar, the name in its tooltip) and a button that opens the web app,
 // or why the connection is down (chip only then; no reload button: a restart of the app reloads
 // everything); below it the scan row (ScanBar.vue), then a tab
-// bar (icons like the debug window's) with the panels: inventory, refinery, unlocks.
+// bar (icons like the web app's navigation) with the panels: stock, comps (both InventoryPanel), unlocks, refinery.
 // The chips open the settings; the settings also open by themselves while the app is not connected
 // (no server or token, or the token is refused). An app the server calls outdated shows only the
 // update hint (no work until updated).
@@ -27,7 +27,7 @@ import {
 import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
 import { watchDebugReport } from "./debugReport";
-import { pickTab, tab, tabCounts, watchOverlay } from "./overlay";
+import { pickTab, tab, TAB_ICONS, tabCounts, watchOverlay } from "./overlay";
 import { watchScan } from "./scan";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
@@ -36,11 +36,12 @@ provide(PICKER_LABELS, { clear: t("pick.clear"), noMatch: t("pick.noMatch") });
 
 const settingsOpen = ref(false);
 const ready = ref(false);
-// The panel tabs (also the scan overlay's modes, overlay.ts)
+// The panel tabs (also the scan overlay's modes, overlay.ts), like the web app's navigation
 const TABS = [
-  { id: "inventory", icon: "item", label: "inventory.title" },
-  { id: "refinery", icon: "drop", label: "refinery.title" },
-  { id: "unlocks", icon: "blueprint", label: "unlocks.title" },
+  { id: "stock", label: "stock.title" },
+  { id: "comps", label: "comps.title" },
+  { id: "unlocks", label: "unlocks.title" },
+  { id: "refinery", label: "refinery.title" },
 ] as const;
 const info = ref<{ version: string; platform: "windows" | "linux" } | null>(null);
 const downloadUrl = computed(() => (info.value && outdated.value?.downloads[info.value.platform]) ?? null);
@@ -99,15 +100,16 @@ onMounted(async () => {
     <template v-else-if="ready">
       <nav class="tabs">
         <button v-for="x in TABS" :key="x.id" type="button" class="tab" :class="{ active: tab === x.id }" @click="pickTab(x.id)">
-          <Icon :name="x.icon" :size="14" /> {{ t(x.label) }}
+          <Icon :name="TAB_ICONS[x.id]" :size="14" /> {{ t(x.label) }}
           <span class="tab-count">{{ tabCounts[x.id] }}</span>
         </button>
       </nav>
       <!-- All panels stay mounted (v-show): the unlocks panel's catalog and scan progress survive a tab switch -->
       <main class="main">
-        <InventoryPanel v-show="tab === 'inventory'" />
-        <RefineryPanel v-show="tab === 'refinery'" />
+        <InventoryPanel v-show="tab === 'stock'" part="stock" />
+        <InventoryPanel v-show="tab === 'comps'" part="comps" />
         <UnlocksPanel v-show="tab === 'unlocks'" />
+        <RefineryPanel v-show="tab === 'refinery'" />
       </main>
     </template>
     <SettingsDialog v-if="settingsOpen" @close="settingsOpen = false" />
@@ -173,6 +175,13 @@ onMounted(async () => {
   z-index: 2;
   background: var(--bg-surface);
   border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+}
+
+/* The count after a panel's title: room for "999", so the filter chips after it stay put */
+.main :deep(.panel > .head .head-count) {
+  display: inline-block;
+  min-width: 3ch;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The panel tabs below the state row, like the debug window's */

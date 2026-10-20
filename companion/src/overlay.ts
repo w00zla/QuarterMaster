@@ -1,7 +1,7 @@
 // The scan overlay in the main window (Rust: overlay.rs; its page: OverlayApp.vue). Turning it on
 // switches the scan on (scan.ts), turning it off switches it off again if the overlay started it. Its
 // mode is the main window's tab, one and the same. It switches by itself with the screen the scan sees
-// (warehouse or character inventory: inventory; refinery terminal: refinery) and with a blueprint unlock
+// (warehouse: stock; character inventory: comps; refinery terminal: refinery) and with a blueprint unlock
 // Game.log adds while the app runs that is still to register (new or ambiguous: blueprints), unless the
 // settings turned that off (`autoTab`); by hand with
 // a click on a tab or the mode hotkey, stepping through them. Each panel
@@ -20,12 +20,12 @@ import { config, log, unlocksOn } from "./state";
 import { toastError } from "./toasts";
 
 // The main window's tabs (= the overlay's modes) in the order the mode hotkey steps through them;
-// the last one stays for the next start
-export type Tab = "inventory" | "refinery" | "unlocks";
-const TAB_ORDER: Tab[] = ["inventory", "refinery", "unlocks"];
+// the last one stays for the next start (the former "inventory" tab: stock)
+export type Tab = "stock" | "comps" | "unlocks" | "refinery";
+const TAB_ORDER: Tab[] = ["stock", "comps", "unlocks", "refinery"];
 const TAB_KEY = "qm.companion.tab";
 const stored = localStorage.getItem(TAB_KEY);
-export const tab = ref<Tab>(TAB_ORDER.includes(stored as Tab) ? (stored as Tab) : "inventory");
+export const tab = ref<Tab>(TAB_ORDER.includes(stored as Tab) ? (stored as Tab) : "stock");
 
 export function pickTab(id: Tab) {
   tab.value = id;
@@ -70,18 +70,24 @@ export interface OverlayView {
 }
 
 // The panels' rows, newest first (each panel keeps its own up to date)
-export const overlayRows = reactive<Record<Tab, OverlayRow[]>>({ inventory: [], refinery: [], unlocks: [] });
+export const overlayRows = reactive<Record<Tab, OverlayRow[]>>({ stock: [], comps: [], unlocks: [], refinery: [] });
 // How many rows each panel's table lists (shown in its tab)
-export const tabCounts = reactive<Record<Tab, number>>({ inventory: 0, refinery: 0, unlocks: 0 });
+export const tabCounts = reactive<Record<Tab, number>>({ stock: 0, comps: 0, unlocks: 0, refinery: 0 });
 // As many as the overlay's fixed tile shows below its location line (overlay.rs: 22 px line + 8 × 20 px)
 const MAX_ROWS = 8;
 
-const ICONS: Record<Tab, IconName> = { inventory: "item", refinery: "drop", unlocks: "blueprint" };
+// Like the web app's navigation
+export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "type-module", unlocks: "blueprint", refinery: "drop" };
 
 const view = computed<OverlayView>(() => {
   const m = tab.value;
-  const cannot: Record<Tab, boolean> = { inventory: !kinds.value.size, refinery: !jobsOn.value, unlocks: !unlocksOn.value || (!!log.value && !log.value.found) };
-  const tabs = TAB_ORDER.map((x) => ({ icon: ICONS[x], count: tabCounts[x], active: x === m, warn: cannot[x] }));
+  const cannot: Record<Tab, boolean> = {
+    stock: !kinds.value.has("mats") && !kinds.value.has("items"),
+    comps: !kinds.value.has("comps"),
+    unlocks: !unlocksOn.value || (!!log.value && !log.value.found),
+    refinery: !jobsOn.value,
+  };
+  const tabs = TAB_ORDER.map((x) => ({ icon: TAB_ICONS[x], count: tabCounts[x], active: x === m, warn: cannot[x] }));
   // The location in every mode
   const placeMissing = !locationUuid.value;
   const place = placeMissing ? t("overlay.noLocation") : (syncCatalog.value?.locations.find((l) => l.uuid === locationUuid.value)?.short ?? "?");

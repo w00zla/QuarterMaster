@@ -2,8 +2,9 @@
 // The blueprint unlocks from Game.log (and, on request, the old logs), matched to the catalog and
 // compared with the user's registered blueprints; only the unregistered ones are listed (registered and
 // default ones hidden), newest first. New ones are registered one by one right away
-// (ambiguous ones after picking the variant) or all at once after a confirmation. Below the head the
-// filter "Unlocks" (off: Game.log's unlocks are not read, state.ts), each row with the same icon-only badge.
+// (ambiguous ones after picking the variant) or all at once after a confirmation. In the head after the
+// count the filter "Unlocks" (off: Game.log's unlocks are not read, state.ts), then the old logs' scan
+// progress while it runs; each row with the same icon-only badge.
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -201,11 +202,22 @@ watch(connected, (c) => {
 <template>
   <section class="panel unlocks">
     <div class="head">
-      <div v-if="scanning" class="head-title scan">
+      <span class="head-title no-grow">{{ t("unlocks.title") }} <span class="head-count">{{ rows.length }}</span></span>
+      <!-- What the scan detects: off, Game.log's unlocks are not read -->
+      <div class="chips filter">
+        <Tooltip :text="t(unlocksOn ? 'filter.on' : 'filter.off')">
+          <button type="button" class="chip" :class="{ active: unlocksOn }" :aria-pressed="unlocksOn" @click="toggleUnlocks">
+            <Icon name="blueprint" :size="12" /> {{ t("unlocks.kind") }}
+            <Icon :name="unlocksOn ? 'check' : 'close'" :size="12" />
+          </button>
+        </Tooltip>
+      </div>
+      <!-- The old logs' scan in the room between the chip and the buttons (nothing moves) -->
+      <div v-if="scanning" class="scan">
         <span>{{ t("unlocks.scanning", { done: progress?.done ?? 0, total: progress?.total ?? "…" }) }}</span>
         <div class="bar"><div class="fill" :style="{ width: `${progressPct}%` }" /></div>
       </div>
-      <span v-else class="head-title">{{ t("unlocks.title") }} <span class="head-count">{{ rows.length }}</span></span>
+      <span v-else class="spacer" />
       <button type="button" class="btn small outline" :disabled="scanning || !unlocksOn" @click="scan">
         <Icon name="history" :size="14" /> {{ t("unlocks.scan") }}
       </button>
@@ -214,14 +226,6 @@ watch(connected, (c) => {
           <Icon name="check" :size="14" /> {{ t("unlocks.addAll") }}
         </button>
       </Tooltip>
-    </div>
-    <!-- What the scan detects: off, Game.log's unlocks are not read -->
-    <div class="chips filter">
-      <span class="filter-label">{{ t("inventory.scanned") }}</span>
-      <button type="button" class="chip" :class="{ active: unlocksOn }" :aria-pressed="unlocksOn" @click="toggleUnlocks">
-        <Icon name="blueprint" :size="12" /> {{ t("unlocks.kind") }}
-        <Icon :name="unlocksOn ? 'check' : 'close'" :size="12" />
-      </button>
     </div>
     <div v-if="!rows.length" class="empty-line">{{ t("unlocks.empty") }}</div>
     <div v-else class="table" :style="cols">
@@ -278,20 +282,12 @@ watch(connected, (c) => {
   flex: 1;
 }
 
-/* The filter below the head, like the inventory's: one chip, on = solid with a check, off = dashed and
-   dimmed with an x */
+/* The filter in the head after the count, like the inventory's: one chip, on = solid with a check, off =
+   dashed and dimmed with an x */
 .filter {
   align-items: center;
   gap: 6px;
-  padding: 4px 16px 8px;
   font-size: 11px;
-}
-
-.filter-label {
-  color: var(--text-2);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .filter .chip {
@@ -322,6 +318,7 @@ watch(connected, (c) => {
 
 /* The full scan's progress in place of the title (no layout change in the head) */
 .scan {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;

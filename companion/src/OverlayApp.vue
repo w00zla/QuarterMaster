@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The scan overlay's page (Rust: overlay.rs; the main window's side: overlay.ts): a compact fixed-size
 // tile on a transparent window, read-only (the window ignores the mouse): on the right a narrow rail
-// with the three modes, each its icon above its count (as wide as "999"; the shown one highlighted; a
+// with the four modes, each its icon above its count (as wide as "999"; the shown one highlighted; a
 // warning instead of the count when its filters are all off or the log is missing); next to it the
 // location line (clipped at its end), then the newest rows, 20 px each, as many as fit (more than that:
 // the last one fades out). No hint texts: without rows only the location shows.

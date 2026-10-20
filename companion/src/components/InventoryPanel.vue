@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // The inventory scan's proposals (inventorySync.ts; scan and location are in the scan row,
-// ScanBar.vue: the user hovers every stack in the freight manager's warehouse and every component in
-// the character inventory's storage pane): "Register all" in the head; below it the kind filter (what
-// the scan detects; all off: the warehouse and the inventory are not read), then the proposals of
-// every location as a compact table with resizable columns, one row per stack or component (kind, name,
-// type, size, grade, a component's stats, quality, amount, location: Register / Discard). Registering (one or all, each at
+// ScanBar.vue), one panel per part: stock (the user hovers every stack in the freight manager's
+// warehouse) and comps (every component in the character inventory's storage pane). "Register all" in
+// the head, after the count the part's kind filter (what the scan detects; off: its screen is not read), then
+// the proposals of every location as a compact table with resizable columns, one row per stack (kind,
+// name, quality, amount, location) or component (name, type, size, grade, stats, location), each with
+// Register / Discard. Registering (one or all, each at
 // its own location) asks first, with a switch per org to share right away. The overlay shows the
 // current location's only. The sightings behind the proposals, also the incomplete ones, are in the
 // debug window (settings). Without proposals: one line, how to get them as a quiet hint below.
@@ -19,9 +20,14 @@ import type { ComponentProposal } from "../components";
 import { langRef, t } from "../i18n";
 import type { Proposal } from "../inventory";
 import {
-  accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, KINDS, kinds, locationUuid, proposals,
+  accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, kinds, locationUuid, proposals,
   shareGuildIds, sightings, toggleKind, type Kind, type Located,
 } from "../inventorySync";
+
+const props = defineProps<{ part: "stock" | "comps" }>();
+const stock = props.part === "stock";
+// The kinds this part's filter switches
+const partKinds: Kind[] = stock ? ["mats", "items"] : ["comps"];
 import { overlayRows, tabCounts } from "../overlay";
 import { catalogResponses, materialName, syncCatalog } from "../refinerySync";
 import { connected, meOrgs } from "../state";
@@ -66,29 +72,33 @@ function described(uuid: string) {
   const m = catalogMaterials.value.get(uuid);
   return { type: m?.typeLabel ?? "", size: m?.size ? `S${m.size}` : "", grade: m?.gradeLetter ?? "" };
 }
-const rows = computed<Row[]>(() => [
-  ...proposals.value.map((p): Row => ({
+const rows = computed<Row[]>(() => stock
+  ? proposals.value.map((p): Row => ({
     kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), type: "", size: "", grade: "", detail: null,
     locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: String(p.quality), amount: amount(p.amount, p.unit), stack: p, component: null,
-  })),
-  // No quality: the column stays empty
-  ...componentProposals.value.map((p): Row => ({
+  }))
+  // No quality (the register dialog's column stays empty)
+  : componentProposals.value.map((p): Row => ({
     kind: "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), detail: statsText(p),
     locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "", amount: t("inventory.pieces", { n: 1 }), stack: null, component: p,
-  })),
-]);
+  })));
 
 // The table's columns (widths kept per table; no sorting: the newest come first); the location last,
-// it takes the room left
+// it takes the room left. Stacks: kind, quality and amount; components: catalog data and stats
 const columns = computed<ColumnSpec[]>(() => [
-  { key: "kind", label: "", width: 20, fixed: true, sortable: false },
+  ...(stock ? [{ key: "kind", label: "", width: 20, fixed: true, sortable: false }] : []),
   { key: "name", label: t("debug.col.name"), width: 120, sortable: false },
-  { key: "type", label: t("col.type"), width: 70, sortable: false },
-  { key: "size", label: t("col.size"), width: 40, sortable: false },
-  { key: "grade", label: t("col.grade"), width: 40, sortable: false },
-  { key: "stats", label: t("col.stats"), width: 120, sortable: false },
-  { key: "quality", label: t("col.quality"), width: 40, sortable: false },
-  { key: "amount", label: t("col.amount"), width: 60, sortable: false },
+  ...(stock
+    ? [
+      { key: "quality", label: t("col.quality"), width: 40, sortable: false },
+      { key: "amount", label: t("col.amount"), width: 60, sortable: false },
+    ]
+    : [
+      { key: "type", label: t("col.type"), width: 70, sortable: false },
+      { key: "size", label: t("col.size"), width: 40, sortable: false },
+      { key: "grade", label: t("col.grade"), width: 40, sortable: false },
+      { key: "stats", label: t("col.stats"), width: 120, sortable: false },
+    ]),
   { key: "location", label: t("col.location"), width: 80, sortable: false },
   // The action buttons: as wide as an icon button, always; a line before them in the head
   { key: "register", label: "", width: 26, fixed: true, sortable: false, sep: true },
@@ -96,19 +106,19 @@ const columns = computed<ColumnSpec[]>(() => [
 ]);
 // The rows' column gap (.row below)
 const ROW_GAP = 8;
-const cols = useTableColumns("qm.companion.inventory.columns", columns, { key: "name", dir: "asc" }, ROW_GAP);
+const cols = useTableColumns(`qm.companion.${props.part}.columns`, columns, { key: "name", dir: "asc" }, ROW_GAP);
 const what = (r: Row) => [r.name, r.detail ?? r.quality, r.amount].join(" · ");
 const tagClass: Record<Kind, string> = KIND_CLASS;
 const kindIcon = KIND_ICON;
-// The scan overlay shows the current location's rows, the most recently seen first (stacks and components mixed)
+// The scan overlay shows the current location's rows, the most recently seen first
 watchEffect(() => {
-  const seen = new Map([...sightings.value, ...componentSightings.value].map((s) => [s.key, s.atMs]));
-  overlayRows.inventory = rows.value
+  const seen = new Map((stock ? sightings.value : componentSightings.value).map((s) => [s.key, s.atMs]));
+  overlayRows[props.part] = rows.value
     .filter((r) => r.locationUuid === locationUuid.value)
     .sort((a, b) => (seen.get(b.id) ?? 0) - (seen.get(a.id) ?? 0))
     // A component: its name and stats; a stack: its name, quality and amount
     .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: r.component ? [] : [r.quality, r.amount] }));
-  tabCounts.inventory = rows.value.length;
+  tabCounts[props.part] = rows.value.length;
 });
 
 // The register dialog: one row, or all of them
@@ -156,24 +166,26 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
 <template>
   <section class="panel inventory">
     <div class="head">
-      <span class="head-title">{{ t("inventory.title") }} <span class="head-count">{{ rows.length }}</span></span>
+      <span class="head-title no-grow">{{ t(`${part}.title`) }} <span class="head-count">{{ rows.length }}</span></span>
+      <!-- What the scan detects -->
+      <div class="chips filter">
+        <Tooltip v-for="k in partKinds" :key="k" :text="t(kinds.has(k) ? 'filter.on' : 'filter.off')">
+          <button type="button" class="chip" :class="[tagClass[k], { active: kinds.has(k) }]" :aria-pressed="kinds.has(k)" @click="toggleKind(k)">
+            <Icon :name="kindIcon[k]" :size="12" /> {{ t(`inventory.kind.${k}`) }}
+            <Icon :name="kinds.has(k) ? 'check' : 'close'" :size="12" />
+          </button>
+        </Tooltip>
+      </div>
+      <span class="spacer" />
       <Tooltip :text="lockTip">
         <button type="button" class="btn small primary" :disabled="!connected || !rows.length || busy" @click="registering = [...rows]">
           <Icon name="check" :size="14" /> {{ t("inventory.addAll") }}
         </button>
       </Tooltip>
     </div>
-    <!-- What the scan detects -->
-    <div class="chips filter">
-      <span class="filter-label">{{ t("inventory.scanned") }}</span>
-      <button v-for="k in KINDS" :key="k" type="button" class="chip" :class="[tagClass[k], { active: kinds.has(k) }]" :aria-pressed="kinds.has(k)" @click="toggleKind(k)">
-        <Icon :name="kindIcon[k]" :size="12" /> {{ t(`inventory.kind.${k}`) }}
-        <Icon :name="kinds.has(k) ? 'check' : 'close'" :size="12" />
-      </button>
-    </div>
     <div v-if="!rows.length" class="empty-line">
-      {{ t("inventory.empty") }}
-      <div class="empty-hint">{{ t("inventory.emptyHint") }}</div>
+      {{ t(`${part}.empty`) }}
+      <div class="empty-hint">{{ t(`${part}.emptyHint`) }}</div>
     </div>
     <div v-else class="table" :style="{ '--cols': cols.template.value }">
       <ColumnHead class="table-head" :columns="columns" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth" />
@@ -181,14 +193,18 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
            vertical scrollbar left out: measured on the table, the rows scrolled sideways after a resize) -->
       <div :ref="cols.observe" class="rows">
         <div v-for="r in rows" :key="r.id" class="row">
-          <span class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
+          <span v-if="stock" class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
           <span class="cell row-name">{{ r.name }}</span>
-          <span class="cell">{{ r.type }}</span>
-          <span class="cell">{{ r.size }}</span>
-          <span class="cell">{{ r.grade }}</span>
-          <span class="cell">{{ r.detail }}</span>
-          <span class="num">{{ r.quality }}</span>
-          <span class="num">{{ r.amount }}</span>
+          <template v-if="stock">
+            <span class="num">{{ r.quality }}</span>
+            <span class="num">{{ r.amount }}</span>
+          </template>
+          <template v-else>
+            <span class="cell">{{ r.type }}</span>
+            <span class="cell">{{ r.size }}</span>
+            <span class="cell">{{ r.grade }}</span>
+            <span class="cell">{{ r.detail }}</span>
+          </template>
           <span class="cell">{{ r.location }}</span>
           <Tooltip :text="t('inventory.register')">
             <button type="button" class="icon-btn" :disabled="!connected || busy" @click="registering = [r]"><Icon name="check" :size="14" /></button>
@@ -249,19 +265,11 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   border-top: 1px solid var(--border-dim);
 }
 
-/* The kind filter below the head: a label, then compact chips with an icon */
+/* The kind filter in the head after the count: compact chips with an icon (what they do in their tooltip) */
 .filter {
   align-items: center;
   gap: 6px;
-  padding: 4px 16px 8px;
   font-size: 11px;
-}
-
-.filter-label {
-  color: var(--text-2);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 /* Toggles: on = the kind's badge colour with a check, off = dashed and dimmed with an x */

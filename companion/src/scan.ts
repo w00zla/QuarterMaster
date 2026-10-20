@@ -30,7 +30,7 @@ export const scope = computed<ScanScope>(() => ({
 const scopeEmpty = computed(() => !scope.value.warehouse && !scope.value.inventory && !scope.value.refinery);
 
 // The panel tab the reads of the screen in view go to (the overlay's mode follows it), else null
-export const screenTab = computed(() => (screen.value === "refinery" ? "refinery" : screen.value === "none" ? null : "inventory"));
+export const screenTab = computed(() => (screen.value === "refinery" ? "refinery" : screen.value === "warehouse" ? "stock" : screen.value === "inventory" ? "comps" : null));
 
 /** Switches the scan on (a fresh start: the inventory's earlier sightings go) or off. */
 export async function setScanOn(on: boolean) {
