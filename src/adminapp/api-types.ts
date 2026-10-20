@@ -508,3 +508,12 @@ export interface DataCheck {
   key: DataCheckKey;
   hits: DataCheckHit[];
 }
+
+// --- bot status texts ---
+
+export interface StatusQuote {
+  id: number;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}

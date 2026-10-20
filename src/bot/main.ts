@@ -9,6 +9,7 @@ import { memberInfo } from './roster.ts';
 import { RosterKeeper, onFullSyncRequest } from './roster-keeper.ts';
 import { findGuildSettings, markGuildLeft, markGuildPresent, reconcilePresence } from './settings.ts';
 import { createRegistry } from './registry.ts';
+import { StatusRotator } from './status.ts';
 
 const { DISCORD_TOKEN } = process.env;
 const RESYNC_INTERVAL_MS = 6 * 3600_000;
@@ -29,6 +30,7 @@ client.once(Events.ClientReady, (c) => {
   reconcilePresence(db, [...c.guilds.cache.keys()]).catch((err: unknown) => console.error('Presence check failed', err));
   logs.start();
   board.start();
+  status.start();
 });
 
 // The roster: synced in full whenever member events may have been missed, kept current by the
@@ -41,6 +43,8 @@ const logs = new LogsPoster(client, db, log);
 // The boards: rendered again for the orgs the database announced changes for
 const board = new BoardPoster(client, db, log);
 await listenForBoardChanges(sql, board);
+// The status: a random text from the admin UI, every 10 minutes
+const status = new StatusRotator(client, db, log);
 const fullSync = (guild: Guild) =>
   keeper.fullSync(guild.id, guild.name, async () => [...(await guild.members.fetch()).values()].map(memberInfo));
 const guildsOf = (shardId: number) => [...client.guilds.cache.filter((g) => g.shardId === shardId).values()];
@@ -48,6 +52,7 @@ onFullSyncRequest((guild) => void fullSync(guild));
 
 const shardUp = (shardId: number) => {
   shardsUp.add(shardId);
+  status.reapply();
   for (const guild of guildsOf(shardId)) void fullSync(guild);
 };
 const shardDown = (shardId: number) => {
@@ -97,6 +102,7 @@ const shutdown = async () => {
   keeper.stop();
   logs.stop();
   board.stop();
+  status.stop();
   await client.destroy();
   await close();
   process.exit(0);

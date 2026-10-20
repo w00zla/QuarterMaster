@@ -4,9 +4,10 @@ Requirements: `docs/requirements.md` "Admin web UI". Commands: `CLAUDE.md`.
 
 - **API** (`src/adminapp/main.ts`, Hono): one process, bound to `127.0.0.1` by default (in the container
   `0.0.0.0`, published on the host's loopback only), HTTP basic auth for everything (API and static SPA).
-  Read endpoints under `/api` (`queries.ts`, response types in `api-types.ts`); writing endpoints
-  (`/api/import/catalog`, `/api/import/localization`) take the file as raw body, are a dry run unless
-  `dryRun=0`, and require the header `X-Quartermaster: 1` (CSRF protection: a foreign form cannot set it).
+  Read endpoints under `/api` (`queries.ts`, response types in `api-types.ts`). Writing endpoints require the
+  header `X-Quartermaster: 1` (CSRF protection: a foreign form cannot set it): the status texts of tab Bot
+  (below) and the imports (`/api/import/catalog`, `/api/import/localization`), which take the file as raw
+  body and are a dry run unless `dryRun=0`.
   Serves `adminapp/dist` with SPA fallback. Both imports use the same functions as the CLIs
   (`docs/catalog-sources.md`).
 - **SPA** (`adminapp/`): look and building blocks taken from BindSight (design tokens, fonts, `Dropdown`,
@@ -29,3 +30,7 @@ Requirements: `docs/requirements.md` "Admin web UI". Commands: `CLAUDE.md`.
   ready for over 7 days (`OVERDUE_DAYS`), jobs outside the UEX refineries. Needs the web column grants of
   `deploy/db-roles.sh` in production. Not smoke-tested yet.
 - Tab **3rd Party**: see `docs/ext.md`.
+- Tab **Bot** (`BotView.vue`, `src/adminapp/status-quotes.ts`, tested in `test/bot-status.db.test.ts`): the
+  bot's status texts (`docs/bot.md`, `status.ts`): add, edit inline, delete (browser confirm). API
+  `GET /api/status-quotes`, `POST /api/status-quotes`, `PUT /api/status-quotes/:id` (JSON `{ text }`, trimmed,
+  1–128 characters), `DELETE /api/status-quotes/:id`; the writing ones require `X-Quartermaster: 1`.

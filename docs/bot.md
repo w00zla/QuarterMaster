@@ -15,7 +15,8 @@ Requirements and the interaction model: `docs/requirements.md` ("Roles & permiss
 - `bot` (`src/db/schema/bot.ts`): bot-only configuration and state: `guild` (base language, `#logs` channel
   + level, board channel/message/style/title/subtitle, presence: `left_at` set on `GuildDelete`, cleared on
   `GuildCreate`, reconciled with the guild cache on `ClientReady`; `logs_after` = the last `app.history` row
-  the logs channel handled), `user_config` (language override).
+  the logs channel handled), `user_config` (language override), `status_quote` (the status texts, 1–128
+  characters, edited in the admin UI).
 - `web` (`src/db/schema/web.ts`): the user web app's state (`session`, `user_setting`, `api_token`; no FK
   to `app_user`).
 - `bot` and `web` reference `app`, never the other way round. Discord IDs are `text` with a format CHECK.
@@ -34,7 +35,10 @@ Requirements and the interaction model: `docs/requirements.md` ("Roles & permiss
   `webAppButton`/`webAppRow` (link from `WEBAPP_ORIGIN`, none when unset; a path from `webAppPath` makes it a
   deep link), `textField`/`textValue` for modals), `lang.ts`, `commands.ts` (the command list),
   `commands/*.ts` (one file per root command), `register.ts` (bulk overwrite: an empty list removes all
-  registered commands), `errors.ts`, `i18n.ts`, `state.ts`.
+  registered commands), `errors.ts`, `i18n.ts`, `state.ts`, `status.ts` (`StatusRotator`: from `ClientReady`
+  every 10 minutes a random text from `bot.status_quote` as the custom status, never the same twice in a row
+  unless it is the only one; read fresh each time, no texts = no status; set again on every `ShardReady`/
+  `ShardResume`, since a new gateway session starts without it; one status for every server, no language).
 - **UI model**: options are only what has to be searched (autocomplete, at most two), everything typed comes
   in a modal opened right after the command, lists and results are ephemeral panels (Components V2,
   `ReplyContent.flags` = `IsComponentsV2`, the router adds Ephemeral). Submitting a modal books (it is the

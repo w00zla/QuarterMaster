@@ -8,6 +8,7 @@ import ImportsView from "./views/ImportsView.vue";
 import ThirdPartyView from "./views/ThirdPartyView.vue";
 import OrgsView from "./views/OrgsView.vue";
 import UsersView from "./views/UsersView.vue";
+import BotView from "./views/BotView.vue";
 
 // List views keep their table while the optional param selects the detail.
 export const router = createRouter({
@@ -23,6 +24,7 @@ export const router = createRouter({
     { path: "/texts/:key?", redirect: (to) => `/localisation/${to.params.key ?? ""}` },
     { path: "/imports/:id?", name: "imports", component: ImportsView },
     { path: "/3rd-party", name: "third-party", component: ThirdPartyView },
+    { path: "/bot", name: "bot", component: BotView },
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
 });

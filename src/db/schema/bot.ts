@@ -44,6 +44,15 @@ export const guild = bot.table('guild', {
   check('guild_logs_level', sql`${t.logsLevel} IN ('off', 'stock', 'blueprints', 'all')`),
 ]);
 
+/** Texts the bot shows as its Discord status, one at random every few minutes (status.ts); edited in the admin UI. */
+export const statusQuote = bot.table('status_quote', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  // Discord's limit for a custom status
+  text: text('text').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [check('status_quote_text_length', sql`char_length(${t.text}) BETWEEN 1 AND 128`)]);
+
 /** Bot settings per user, global. */
 export const userConfig = bot.table('user_config', {
   userId: text('user_id').primaryKey().references(() => appUser.userId),

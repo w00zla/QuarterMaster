@@ -32,6 +32,18 @@ export async function postFile<T>(path: string, params: Record<string, string | 
   return (await res.json()) as T;
 }
 
+/** Sends JSON to a writing endpoint; throws the server's error message. Null for an empty answer (204). */
+export async function send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T | null> {
+  const headers: Record<string, string> = { "X-Quartermaster": "1" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new ApiError(res.status, err?.error ?? `Request failed (${res.status})`);
+  }
+  return res.status === 204 ? null : ((await res.json()) as T);
+}
+
 /**
  * Reactive resource: refetches when the path changes, on `reload()` or (with
  * `localized`) when the language changes. A null path clears the data. Stale

@@ -1,4 +1,4 @@
-// Admin web UI: JSON API (catalog reads, catalog/localization imports, read-only user data) plus the built SPA (adminapp/dist),
+// Admin web UI: JSON API (catalog reads, catalog/localization imports, read-only user data, the bot's status texts) plus the built SPA (adminapp/dist),
 // behind HTTP basic auth. Binds to 127.0.0.1 unless ADMINAPP_HOST says otherwise; in production it sits
 // behind Caddy (TLS) and is published on the host's loopback only (compose.yaml).
 import { existsSync, readFileSync } from 'node:fs';
@@ -15,6 +15,7 @@ import { loadSnapshot } from '../catalog/import/load.ts';
 import { parseIniFile, runLocImport } from '../catalog/import/loc-import.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
 import * as q from './queries.ts';
+import * as s from './status-quotes.ts';
 import * as u from './users.ts';
 
 const { ADMINAPP_USER, ADMINAPP_PASSWORD, ADMINAPP_HOST = '127.0.0.1', ADMINAPP_PORT = '3000' } = process.env;
@@ -184,6 +185,29 @@ api.post('/import/localization', requireWriteHeader, bodyLimit({ maxSize: 100 * 
     // Validation errors (source/lang names, empty file, reserved keys)
     return c.json({ error: message(err) }, 400);
   }
+});
+
+// --- bot status texts (write: JSON body { text }) -------------------------------------------
+api.get('/status-quotes', async (c) => c.json(await s.getStatusQuotes(db)));
+const quoteBody = async (c: Context) => s.quoteText(((await c.req.json().catch(() => null)) as { text?: unknown } | null)?.text);
+const quoteId = (c: Context) => {
+  const id = Number(c.req.param('id'));
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+};
+const TEXT_ERROR = `text must have 1 to ${s.MAX_QUOTE_LENGTH} characters`;
+api.post('/status-quotes', requireWriteHeader, async (c) => {
+  const text = await quoteBody(c);
+  return text === null ? c.json({ error: TEXT_ERROR }, 400) : c.json(await s.addStatusQuote(db, text));
+});
+api.put('/status-quotes/:id', requireWriteHeader, async (c) => {
+  const id = quoteId(c);
+  const text = await quoteBody(c);
+  if (text === null) return c.json({ error: TEXT_ERROR }, 400);
+  return found(c, id ? await s.updateStatusQuote(db, id, text) : null);
+});
+api.delete('/status-quotes/:id', requireWriteHeader, async (c) => {
+  const id = quoteId(c);
+  return id && (await s.deleteStatusQuote(db, id)) ? c.body(null, 204) : c.json({ error: 'not found' }, 404);
 });
 
 api.notFound((c) => c.json({ error: 'not found' }, 404));

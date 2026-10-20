@@ -20,6 +20,7 @@ const TABS: { to: string; label: string; icon: IconName }[] = [
   { to: "/items", label: "Items", icon: "item" },
   { to: "/localisation", label: "Localisation", icon: "texts" },
   { to: "/3rd-party", label: "3rd Party", icon: "link" },
+  { to: "/bot", label: "Bot", icon: "settings" },
 ];
 const isActive = (to: string, path: string) => (to === "/" ? path === "/" : path.startsWith(to));
 
