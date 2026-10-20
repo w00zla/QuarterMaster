@@ -13,7 +13,7 @@ import ProfileDialog from "./ProfileDialog.vue";
 
 const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
   { to: "/", label: "nav.home", icon: "overview" },
-  { to: "/components", label: "nav.components", icon: "type-module" },
+  { to: "/gear", label: "nav.components", icon: "gear" },
   { to: "/resources", label: "nav.stock", icon: "type-crate" },
   { to: "/refinery", label: "nav.refinery", icon: "drop" },
   { to: "/blueprints", label: "nav.blueprints", icon: "blueprint" },

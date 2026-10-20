@@ -12,7 +12,7 @@ export const router = createRouter({
   routes: [
     { path: "/", component: HomeView },
     { path: "/resources", component: StockView },
-    { path: "/components", component: ComponentsView },
+    { path: "/gear", component: ComponentsView },
     { path: "/refinery", component: RefineryView },
     { path: "/blueprints", component: BlueprintsView },
     { path: "/crafting", component: CraftingView },

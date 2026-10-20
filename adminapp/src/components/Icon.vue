@@ -38,6 +38,7 @@ export const ICONS = {
   blueprint: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/><path d="M13 13h4M13 17h4"/>',
   resource: '<path d="M6 3h12l3 6-9 12L3 9z"/><path d="M3 9h18M12 21 8 9l4-6 4 6z"/>',
   item: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+  gear: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/><path d="M3 13h18"/><path d="M10 13v2h4v-2"/>',
   texts: '<path d="M4 5h8M8 3v2M5 11c2.5 0 5-2.7 5-6"/><path d="M6 8c1 1.8 2.7 3 5 3"/><path d="m12 21 4-9 4 9M13.5 18h5"/>',
   imports: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/>',
   // Item types

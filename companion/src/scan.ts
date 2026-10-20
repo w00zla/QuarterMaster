@@ -79,7 +79,7 @@ export const scanState = computed<StateTag>(() => {
               : screen.value === "warehouse"
                 ? ({ cls: "ok", icon: "item", label: "scan.warehouse" } as const)
                 : screen.value === "inventory"
-                  ? ({ cls: "ok", icon: "type-module", label: "scan.inventory" } as const)
+                  ? ({ cls: "ok", icon: "gear", label: "scan.inventory" } as const)
                   : ({ cls: "ok", icon: "drop", label: "scan.refinery" } as const);
   return { cls: s.cls, icon: s.icon, text: t(s.label) };
 });

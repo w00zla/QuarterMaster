@@ -123,8 +123,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - A tab bar (icons; each tab and panel title with its table's row count, `tabCounts` in `overlay.ts`; the
   last tab kept in localStorage `qm.companion.tab`; it never switches by itself: the scan row's tag names
   the screen) with the panels
-  Components and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`) and
-  Blueprints (`UnlocksPanel.vue`), like the web app's navigation (order, names "Komponenten"/"Ressourcen"/
+  Gear and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`) and
+  Blueprints (`UnlocksPanel.vue`), like the web app's navigation (order, names "Ausrüstung" (until 2026-10-20 "Komponenten")/"Ressourcen"/
   "Raffinerie"/"Baupläne", icons; decided 2026-10-20, before: one Inventory tab), all four kept mounted
   (`v-show`; a stored "inventory" tab opens Stock); panel heads carry no icon. Every head: title, the count
   (room for "999": the chips after it stay put), the panel's filter chips (no label: "Scanned" / "Not
@@ -307,8 +307,8 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   is turned on, when the log names another place and once the catalog is loaded; a key that is no
   selectable location clears the pick (nothing is booked at the place before: reads without a location
   are dropped); a pick by hand holds until the log names another place.
-- One panel per part: Resources (the warehouse's stacks) and Components (the character inventory's). Head:
-  title with count, the part's kind filter, toggle chips Materials / Items (Resources) or "Ship comp." ("Schiffs-Komp."; on =
+- One panel per part: Resources (the warehouse's stacks) and Gear (the character inventory's). Head:
+  title with count, the part's kind filter, toggle chips Materials / Harvestables ("Sammelobjekte", until 2026-10-20 "Items") (Resources) or "Ship comp." ("Schiffs-Komp."; on =
   the kind's badge colour with a check, off = dashed and dimmed with an x; what the scan detects from then
   on, all may be off; localStorage `qm.companion.inventory.kinds`), "Register all" (the panel's rows only).
   Then one compact row per proposal. What the stored stock at the location already holds stays listed,

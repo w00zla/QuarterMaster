@@ -61,6 +61,6 @@ describe('/qm-help', () => {
     const [de] = helpLines('de', [stock]);
     assert.match(de!, /^\*\*\/qm-res\*\* · Ressourcen/);
     assert.match(de!, /\n- `add` /);
-    assert.ok(user.includes('qm-comp'));
+    assert.ok(user.includes('qm-gear'));
   });
 });

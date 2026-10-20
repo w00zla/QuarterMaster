@@ -44,7 +44,7 @@ const kindsAndLocations = (m: { kinds: number; locations: number } | undefined) 
 const stockTiles = (s: StockMetrics | undefined) => [
   { label: t("sum.resources"), value: number(s?.resources.scu, 2), unit: "SCU", sub: kindsAndLocations(s?.resources), icon: "resource" as const },
   { label: t("sum.items"), value: number(s?.items.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.items), icon: "item" as const },
-  { label: t("sum.components"), value: number(s?.components.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.components), icon: "type-module" as const },
+  { label: t("sum.components"), value: number(s?.components.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.components), icon: "gear" as const },
 ];
 const blueprintsOf = (n: number | undefined) => ({ value: number(n), unit: `/ ${number(summary.value?.obtainableBlueprints)}` });
 

@@ -79,7 +79,7 @@ export const tabCounts = reactive<Record<Tab, number>>({ stock: 0, comps: 0, unl
 const MAX_ROWS = 8;
 
 // Like the web app's navigation
-export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "type-module", unlocks: "blueprint", refinery: "drop" };
+export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "gear", unlocks: "blueprint", refinery: "drop" };
 
 const view = computed<OverlayView>(() => {
   const m = tab.value;

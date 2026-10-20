@@ -97,8 +97,8 @@ All root commands are prefixed `qm-`.
   (`bookAdd`, `bookChange`, `bookShare`, `listLines`) takes no Discord objects and is tested on its own.
   `StockError` codes map to `stock.err.<code>`. Splitting and merging are not in the bot. `/qm-res` offers
   and lists only materials and items, like the web app's resources tab.
-- **`/qm-comp`** (same file, `stockCommandOf` with the area `COMPS`; until 2026-10-20 `/qm-comps`): ship
-  components, the same subcommands as `/qm-res` (option `component`, `find` without a minimum quality), like the web app's components tab.
+- **`/qm-gear`** (same file, `stockCommandOf` with the area `COMPS`; until 2026-10-20 `/qm-comps`, then
+  `/qm-comp`): "Ausrüstung"/"Gear", for now the ship components, the same subcommands as `/qm-res` (option `component`, `find` without a minimum quality), like the web app's tab Ausrüstung.
   Named by their unique label (`MaterialEntry.label`), stats instead of a quality (`statsText`). `add` and
   `adjust` carry one multi-line field "Stats" (`statLines`: one line per stat the blueprint can improve,
   "Coolant Rating (max. +20.0 %): 0", the current values on adjust; `parseStatLines` takes the number after
@@ -137,7 +137,7 @@ One message per org in its board channel, edited in place, in the server's base 
 the web app's org tile (`orgMetrics` in `src/stock/org-summary.ts`: resources, items, components), the shared
 materials per kind (`orgMaterials`: total, best quality with its level, holder count; the 10 largest per kind,
 "+n more"; components in a section of their own without quality), buttons "Show all" (`qm-res:org`, member
-check, materials and items) and "All components" (`qm-comp:org`), deep links Resources/Components/Blueprints (five
+check, materials and items) and "All gear" (`qm-gear:org`), deep links Resources/Gear/Blueprints (five
 buttons, Discord's limit per row), "Updated <t:…:R>". Style
 `list` (text lines) or `table` (code-block tables: amounts right-aligned, the stars last, names cut at 22
 characters, backticks replaced). Only stored stock shared in the org by active members; never unshared stock,

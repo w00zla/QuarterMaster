@@ -134,7 +134,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
 
 - **Übersicht**: KPI tiles from `GET /api/summary`, each with a detail line below (`StatTile`: unit after
   the value, the line as tall as a `.tag`): a personal panel with Materials (SCU materials only; SCU; kinds ·
-  locations), Items (pieces; kinds · locations), Components (the same), Blueprints "X / Y" (Y = obtainable:
+  locations), Harvestables/Sammelobjekte (until 2026-10-20 "Items"; pieces; kinds · locations), Gear/Ausrüstung (the same), Blueprints "X / Y" (Y = obtainable:
   not retired, not default, in a reward pool of the game data, cached per import; X = every registered one
   and may exceed Y: then the game data misses a source, listed in the admin overview), Refinery jobs (sum of
   the expected yields · stations) and Next job ready (countdown, a "n ready" tag); "Your orgs" with one
@@ -145,8 +145,8 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   scope starts with that org on; the batch is always personal, the switches share it). Row actions Sharing (a
   switch per org, whole batch) · Split (unshared) or Merge back (a split-off part) · Move (place, recipient) ·
   Remove · Adjust.
-- **Komponenten** (route `/components`, `?scope=` like Ressourcen; `ComponentsView` = `StockView` with
-  `components`): the ship components only, groups named by their `label`, no quality column, filters
+- **Ausrüstung** (route `/gear`, until 2026-10-20 "Komponenten" at `/components`; `?scope=` like Ressourcen;
+  `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): for now the ship components only, groups named by their `label`, no quality column, filters
   type/size/grade instead of the quality slider; the add form without quality (sends 0) but one slider per
   stat of the picked component from ±0 to its best (`CatalogMaterial.stats`, reset after each add; only gains
   are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; the

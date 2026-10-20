@@ -1,7 +1,7 @@
-// /qm-res and /qm-comp: options pick what to book (autocomplete), a modal asks for the rest (amount,
+// /qm-res and /qm-gear: options pick what to book (autocomplete), a modal asks for the rest (amount,
 // quality or a component's stats, orgs), lists and searches answer as panels. Submitting a modal books right
 // away: the modal shows the batch and the amount, like the web app's dialogs. The two commands work on the
-// same stock like the web app's tabs: /qm-res the materials and items, /qm-comp the ship components.
+// same stock like the web app's tabs: /qm-res the materials and items, /qm-gear the ship components.
 import {
   ActionRowBuilder, ApplicationCommandOptionType, ApplicationIntegrationType, ButtonBuilder, ButtonStyle, CheckboxGroupBuilder,
   CheckboxGroupOptionBuilder, ContainerBuilder, InteractionContextType, LabelBuilder, MessageFlags, ModalBuilder, SeparatorBuilder,
@@ -35,14 +35,14 @@ const MAX_ORG_OPTIONS = 10;
 
 /** Which command: its name, its texts (`cmd.<key>.*`), the option that picks what it books, ship components or not. */
 interface Area {
-  name: 'qm-res' | 'qm-comp';
+  name: 'qm-res' | 'qm-gear';
   key: 'stock' | 'comps';
   option: 'material' | 'component';
   components: boolean;
 }
 
 const STOCK: Area = { name: 'qm-res', key: 'stock', option: 'material', components: false };
-const COMPS: Area = { name: 'qm-comp', key: 'comps', option: 'component', components: true };
+const COMPS: Area = { name: 'qm-gear', key: 'comps', option: 'component', components: true };
 
 // Option JSON with a localized description; Discord validates the shape on registration
 const opt = (name: string, key: MessageKey, type: ApplicationCommandOptionType, extra: Record<string, unknown> = {}) =>

@@ -56,7 +56,7 @@ describe('/qm-res input and lists', () => {
   });
 });
 
-describe('/qm-comp stats field', () => {
+describe('/qm-gear stats field', () => {
   const stats: ComponentStat[] = [
     { uuid: 'a', name: 'Coolant Rating', nameKey: null, base: null, kind: 'multiplier', min: 0, max: 20 },
     { uuid: 'b', name: 'Power Pips', nameKey: null, base: null, kind: 'additive', min: 0, max: 2 },

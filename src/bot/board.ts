@@ -116,7 +116,7 @@ export function boardMessage(d: BoardData, guildId: string, lang: Lang, updatedA
 
   const buttons = [
     new ButtonBuilder().setCustomId(customId('qm-res', 'org')).setLabel(tr('board.btn.showAll')).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(customId('qm-comp', 'org')).setLabel(tr('board.btn.showComponents')).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(customId('qm-gear', 'org')).setLabel(tr('board.btn.showComponents')).setStyle(ButtonStyle.Secondary),
     webAppButton(lang, webAppPath.stock(guildId), tr('board.btn.stock')),
     webAppButton(lang, webAppPath.components(guildId), tr('board.btn.components')),
     webAppButton(lang, webAppPath.blueprints(guildId), tr('board.btn.blueprints')),

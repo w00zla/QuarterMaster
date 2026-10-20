@@ -30,7 +30,7 @@ export const webAppOrigin = () => process.env.WEBAPP_ORIGIN?.replace(/\/+$/, '')
  */
 export const webAppPath = {
   stock: (scope: string) => `/resources?scope=${encodeURIComponent(scope)}`,
-  components: (scope: string) => `/components?scope=${encodeURIComponent(scope)}`,
+  components: (scope: string) => `/gear?scope=${encodeURIComponent(scope)}`,
   refinery: () => '/refinery',
   blueprints: (scope: string) => `/blueprints?scope=${encodeURIComponent(scope)}`,
   crafting: (blueprintUuid: string) => `/crafting?add=${encodeURIComponent(blueprintUuid)}`,

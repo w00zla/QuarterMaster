@@ -230,7 +230,7 @@ function open(batch: StockBatch, action: BatchAction) {
 
     <section class="panel unclipped">
       <div class="head">
-        <Icon :name="components ? 'type-module' : 'type-crate'" :size="16" />
+        <Icon :name="components ? 'gear' : 'type-crate'" :size="16" />
         <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
         <button type="button" class="btn small primary" @click="showAdd = !showAdd">
           <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ t("stock.add") }}
