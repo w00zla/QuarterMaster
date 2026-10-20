@@ -13,6 +13,8 @@ export interface OrgMetrics extends StockMetrics {
   members: number;
   // Distinct blueprints its active members registered
   blueprints: number;
+  // Distinct locations of resources and items together (the board's resources line)
+  resourceItemLocations: number;
 }
 
 // Blueprints a player can unlock: not retired, not default, in a reward pool (the admin overview's
@@ -34,7 +36,7 @@ export function stockMetrics(s: StockMetricsRow | undefined): StockMetrics {
 
 export interface StockMetricsRow {
   resources: number; scu: string; resourceLocations: number; items: number; pieces: string; itemLocations: number;
-  components: number; componentPieces: string; componentLocations: number;
+  components: number; componentPieces: string; componentLocations: number; resourceItemLocations: number;
 }
 
 /** The columns of StockMetricsRow over stored batches `b`. */
@@ -49,7 +51,8 @@ export function stockMetricsSql() {
     count(DISTINCT b.location_uuid) FILTER (WHERE ${item})::int AS "itemLocations",
     count(DISTINCT b.item_uuid) FILTER (WHERE ${comp})::int AS components,
     coalesce(sum(b.quantity) FILTER (WHERE ${comp}), 0)::text AS "componentPieces",
-    count(DISTINCT b.location_uuid) FILTER (WHERE ${comp})::int AS "componentLocations"`;
+    count(DISTINCT b.location_uuid) FILTER (WHERE ${comp})::int AS "componentLocations",
+    count(DISTINCT b.location_uuid) FILTER (WHERE NOT ${comp})::int AS "resourceItemLocations"`;
 }
 
 /** The figures of each org in `guildIds` (orgs without anything get zeros). */
@@ -71,7 +74,10 @@ export async function orgMetrics(db: Db, guildIds: string[]): Promise<Map<string
     FROM app.org o WHERE o.guild_id IN (${ids})`);
   return new Map(guildIds.map((g) => {
     const p = people.find((r) => r.guildId === g);
-    return [g, { ...stockMetrics(stock.find((r) => r.guildId === g)), members: p?.members ?? 0, blueprints: p?.blueprints ?? 0 }];
+    const s = stock.find((r) => r.guildId === g);
+    return [g, {
+      ...stockMetrics(s), members: p?.members ?? 0, blueprints: p?.blueprints ?? 0, resourceItemLocations: s?.resourceItemLocations ?? 0,
+    }];
   }));
 }
 

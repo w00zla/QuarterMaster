@@ -5,7 +5,7 @@ import { BOARD_LINES, boardMessage, textTable, type BoardData } from '../src/bot
 
 const G = '960000000000000001';
 const metrics = {
-  members: 12, blueprints: 87,
+  members: 12, blueprints: 87, resourceItemLocations: 7,
   resources: { kinds: 23, scu: '1284.5', locations: 6 },
   items: { kinds: 2, pieces: '38', locations: 3 },
   components: { kinds: 0, pieces: '0', locations: 0 },
@@ -33,7 +33,7 @@ const buttons = (p: ReturnType<typeof boardMessage>) => nodes(p).filter((n) => n
 describe('board message', () => {
   const at = new Date('2026-10-10T12:00:00Z');
 
-  it('shows head, figures, then one section per kind with total, best quality with its level and holder count', () => {
+  it('shows head, figures, then resources and items in one section, best quality first, with total, its level and holder count', () => {
     const p = boardMessage(data([
       resource(1),
       { kind: 'resource', uuid: 'r2', component: false, name: 'Quantanium', total: '42.5', bestQuality: 1000, holders: 1 },
@@ -44,10 +44,10 @@ describe('board message', () => {
     assert.equal(nodes(p)[0]!.accent_color, 0xe0913a);
     assert.equal(text(p), [
       '## Red\\_Hollow',
-      '👥 **12** Members · 📘 **87 / 312** Blueprints\n⛏️ **1284.5 SCU** Materials · 23 kinds · 6 locations\n🌿 **38 pcs** Harvestables · 2 kinds · 3 locations'
-        + '\n🧰 **0 pcs** Gear · 0 kinds · 0 locations',
-      '### ⛏️ Materials\n- **Ore\\_1** · 99 SCU · ★★★★ 800 · 2 holders\n- **Quantanium** · 42.5 SCU · ♛ 1000 · 1 holders',
-      '### 🌿 Harvestables\n- **Weapon Barrel** · 8 pcs · ◌ 480 · 3 holders',
+      '👥 **12** Members · 📘 **87 / 312** Blueprints\n📦 **1284.5 SCU / 38 pcs** Resources · 25 kinds · 7 locations'
+        + '\n💠 **0 pcs** Gear · 0 kinds · 0 locations',
+      '### 📦 Resources\n- **Quantanium** · 42.5 SCU · ♛ 1000 · 1 holders\n- **Ore\\_1** · 99 SCU · ★★★★ 800 · 2 holders'
+        + '\n- **Weapon Barrel** · 8 pcs · ◌ 480 · 3 holders',
       `-# Updated <t:${at.getTime() / 1000}:R>`,
     ].join('\n'));
   });
@@ -55,9 +55,9 @@ describe('board message', () => {
   it('shows ship components in a section of their own, without a quality', () => {
     const cooler = { kind: 'item' as const, uuid: 'c1', component: true, name: 'Glacier', total: '3', bestQuality: 0, holders: 2 };
     const list = text(boardMessage(data([{ kind: 'item', uuid: 'i1', component: false, name: 'Weapon Barrel', total: '8', bestQuality: 480, holders: 3 }, cooler]), G, 'de', at));
-    assert.ok(list.includes('### 🌿 Sammelobjekte\n- **Weapon Barrel** · 8 Stk. · ◌ 480 · 3 Halter\n### 🧰 Ausrüstung\n- **Glacier** · 3 Stk. · 2 Halter'));
+    assert.ok(list.includes('### 📦 Ressourcen\n- **Weapon Barrel** · 8 Stk. · ◌ 480 · 3 Halter\n### 💠 Ausrüstung\n- **Glacier** · 3 Stk. · 2 Halter'));
     const table = text(boardMessage(data([cooler]), G, 'en', at, null, 'table'));
-    assert.ok(table.includes('### 🧰 Gear\n```\nGear item   Amount   Holders\nGlacier      3 pcs   2\n```'));
+    assert.ok(table.includes('### 💠 Gear\n```\nGear item   Amount   Holders\nGlacier      3 pcs   2\n```'));
   });
 
   it('shows the subtitle as a small line below the title', () => {
@@ -71,13 +71,13 @@ describe('board message', () => {
     assert.ok(!nodes(boardMessage(data([]), G, 'de', at)).some((n) => n.type === 9 || n.type === 11));
   });
 
-  it(`lists at most ${BOARD_LINES} materials per kind and counts the rest`, () => {
+  it(`lists at most ${BOARD_LINES} materials per section and counts the rest`, () => {
     const p = boardMessage(data(Array.from({ length: BOARD_LINES + 3 }, (_, i) => resource(i))), G, 'de', at);
     const lines = text(p).split('\n');
     assert.equal(lines.filter((l) => l.startsWith('- ')).length, BOARD_LINES);
     assert.ok(lines.includes('-# +3 weitere'));
-    assert.ok(lines.includes('### ⛏️ Materialien'));
-    assert.ok(!lines.includes('### 🌿 Sammelobjekte'));
+    assert.ok(lines.includes('### 📦 Ressourcen'));
+    assert.ok(!lines.includes('### 💠 Ausrüstung'));
   });
 
   it('table style: figures and materials as code-block tables, amounts right-aligned, the stars last', () => {
@@ -88,22 +88,21 @@ describe('board message', () => {
     const t = text(p);
     assert.ok(t.includes([
       '```',
-      'Members                12      Blueprints   87 / 312',
-      'Materials      1284.5 SCU      Kinds        23',
-      'Harvestables       38 pcs      Kinds        2',
-      'Gear                0 pcs      Kinds        0',
+      'Members                      12      Blueprints   87 / 312',
+      'Resources   1284.5 SCU / 38 pcs      Kinds        25',
+      'Gear                      0 pcs      Kinds        0',
       '```',
     ].join('\n')));
     // Names are cut, never Markdown-escaped, and cannot close the block
     assert.ok(t.includes([
-      '### ⛏️ Materials',
+      '### 📦 Resources',
       '```',
       'Material                   Amount   Holders   Best quality',
-      'Laranite                  312 SCU         4    790 ★★★',
       "Quantanium_with_'tick…   42.5 SCU         1   1000 ♛",
+      'Laranite                  312 SCU         4    790 ★★★',
       '```',
     ].join('\n')));
-    assert.ok(!t.includes('🌿'));
+    assert.ok(!t.includes('💠'));
   });
 
   it('pads table columns, the last one as it is', () => {
