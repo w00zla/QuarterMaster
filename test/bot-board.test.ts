@@ -44,10 +44,10 @@ describe('board message', () => {
     assert.equal(nodes(p)[0]!.accent_color, 0xe0913a);
     assert.equal(text(p), [
       '## Red\\_Hollow',
-      '👥 **12** Members · 📘 **87 / 312** Blueprints\n⛏️ **1284.5 SCU** Resources · 23 kinds · 6 locations\n📦 **38 pcs** Harvestables · 2 kinds · 3 locations'
+      '👥 **12** Members · 📘 **87 / 312** Blueprints\n⛏️ **1284.5 SCU** Materials · 23 kinds · 6 locations\n🌿 **38 pcs** Harvestables · 2 kinds · 3 locations'
         + '\n🧰 **0 pcs** Gear · 0 kinds · 0 locations',
-      '### ⛏️ Resources\n- **Ore\\_1** · 99 SCU · ★★★★ 800 · 2 holders\n- **Quantanium** · 42.5 SCU · ♛ 1000 · 1 holders',
-      '### 📦 Harvestables\n- **Weapon Barrel** · 8 pcs · ◌ 480 · 3 holders',
+      '### ⛏️ Materials\n- **Ore\\_1** · 99 SCU · ★★★★ 800 · 2 holders\n- **Quantanium** · 42.5 SCU · ♛ 1000 · 1 holders',
+      '### 🌿 Harvestables\n- **Weapon Barrel** · 8 pcs · ◌ 480 · 3 holders',
       `-# Updated <t:${at.getTime() / 1000}:R>`,
     ].join('\n'));
   });
@@ -55,7 +55,7 @@ describe('board message', () => {
   it('shows ship components in a section of their own, without a quality', () => {
     const cooler = { kind: 'item' as const, uuid: 'c1', component: true, name: 'Glacier', total: '3', bestQuality: 0, holders: 2 };
     const list = text(boardMessage(data([{ kind: 'item', uuid: 'i1', component: false, name: 'Weapon Barrel', total: '8', bestQuality: 480, holders: 3 }, cooler]), G, 'de', at));
-    assert.ok(list.includes('### 📦 Sammelobjekte\n- **Weapon Barrel** · 8 Stk. · ◌ 480 · 3 Halter\n### 🧰 Ausrüstung\n- **Glacier** · 3 Stk. · 2 Halter'));
+    assert.ok(list.includes('### 🌿 Sammelobjekte\n- **Weapon Barrel** · 8 Stk. · ◌ 480 · 3 Halter\n### 🧰 Ausrüstung\n- **Glacier** · 3 Stk. · 2 Halter'));
     const table = text(boardMessage(data([cooler]), G, 'en', at, null, 'table'));
     assert.ok(table.includes('### 🧰 Gear\n```\nGear item   Amount   Holders\nGlacier      3 pcs   2\n```'));
   });
@@ -76,8 +76,8 @@ describe('board message', () => {
     const lines = text(p).split('\n');
     assert.equal(lines.filter((l) => l.startsWith('- ')).length, BOARD_LINES);
     assert.ok(lines.includes('-# +3 weitere'));
-    assert.ok(lines.includes('### ⛏️ Ressourcen'));
-    assert.ok(!lines.includes('### 📦 Sammelobjekte'));
+    assert.ok(lines.includes('### ⛏️ Materialien'));
+    assert.ok(!lines.includes('### 🌿 Sammelobjekte'));
   });
 
   it('table style: figures and materials as code-block tables, amounts right-aligned, the stars last', () => {
@@ -89,21 +89,21 @@ describe('board message', () => {
     assert.ok(t.includes([
       '```',
       'Members                12      Blueprints   87 / 312',
-      'Resources      1284.5 SCU      Kinds        23',
+      'Materials      1284.5 SCU      Kinds        23',
       'Harvestables       38 pcs      Kinds        2',
       'Gear                0 pcs      Kinds        0',
       '```',
     ].join('\n')));
     // Names are cut, never Markdown-escaped, and cannot close the block
     assert.ok(t.includes([
-      '### ⛏️ Resources',
+      '### ⛏️ Materials',
       '```',
       'Material                   Amount   Holders   Best quality',
       'Laranite                  312 SCU         4    790 ★★★',
       "Quantanium_with_'tick…   42.5 SCU         1   1000 ♛",
       '```',
     ].join('\n')));
-    assert.ok(!t.includes('📦'));
+    assert.ok(!t.includes('🌿'));
   });
 
   it('pads table columns, the last one as it is', () => {
@@ -114,19 +114,19 @@ describe('board message', () => {
     assert.match(text(boardMessage(data([]), G, 'en', at)), /Nothing shared in this org yet\./);
   });
 
-  it('has "Show all" and, with the web app configured, deep links into the org\'s views', () => {
+  it('has "All resources" and, with the web app configured, deep links into the org\'s views', () => {
     const before = process.env.WEBAPP_ORIGIN;
     try {
       process.env.WEBAPP_ORIGIN = 'https://qm.example';
       assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [
-        ['Show all', 'qm-res:org'],
+        ['All resources', 'qm-res:org'],
         ['All gear', 'qm-gear:org'],
         ['Resources', `https://qm.example/resources?scope=${G}`],
         ['Gear', `https://qm.example/gear?scope=${G}`],
         ['Blueprints', `https://qm.example/blueprints?scope=${G}`],
       ]);
       delete process.env.WEBAPP_ORIGIN;
-      assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [['Show all', 'qm-res:org'], ['All gear', 'qm-gear:org']]);
+      assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [['All resources', 'qm-res:org'], ['All gear', 'qm-gear:org']]);
     } finally {
       if (before === undefined) delete process.env.WEBAPP_ORIGIN;
       else process.env.WEBAPP_ORIGIN = before;

@@ -140,7 +140,7 @@ One message per org in its board channel, edited in place, in the server's base 
 (`board_title` or the org name) with the server icon as thumbnail and the optional subtitle, the figures of
 the web app's org tile (`orgMetrics` in `src/stock/org-summary.ts`: resources, items, components), the shared
 materials per kind (`orgMaterials`: total, best quality with its level, holder count; the 10 largest per kind,
-"+n more"; components in a section of their own without quality), buttons "Show all" (`qm-res:org`, member
+"+n more"; components in a section of their own without quality), buttons "All resources" (`qm-res:org`, member
 check, materials and items) and "All gear" (`qm-gear:org`), deep links Resources/Gear/Blueprints (five
 buttons, Discord's limit per row), "Updated <t:…:R>". Style
 `list` (text lines) or `table` (code-block tables: amounts right-aligned, the stars last, names cut at 22
