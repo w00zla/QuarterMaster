@@ -132,6 +132,40 @@ pub struct Frame {
     pub live: bool,
     /// The mouse cursor in frame pixels (the capture knows it; test frames have none)
     pub cursor: Option<(f32, f32)>,
+    /// How it was captured (test frames: all 0)
+    pub capture: CaptureInfo,
+}
+
+/// How the frame behind a read came about, for the debug view and recordings (remote diagnosis of
+/// slow reads): the grab, the grabs without a new image before it, the frames not read since the read
+/// before, how long it waited. The counts cover everything since the read before.
+#[derive(Serialize, Clone, Copy, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureInfo {
+    /// The grab's duration (desktop image to the CPU)
+    pub grab_ms: u32,
+    /// Grabs without a new image: none within the timeout, only the pointer moved, the window
+    /// outside the monitor (the next try comes a full interval later)
+    pub skipped_timeout: u32,
+    pub skipped_pointer: u32,
+    pub skipped_outside: u32,
+    /// Frames the worker did not read: older ones dropped while the OCR was busy, and ones held back
+    /// by the probe throttle or the refinery's rest gate
+    pub dropped: u32,
+    pub gated: u32,
+    /// From the grab to the read's start
+    pub wait_ms: u64,
+}
+
+impl CaptureInfo {
+    /// Adds the counts of a frame that was not read (its grab and wait are its own).
+    fn add_unread(&mut self, other: CaptureInfo) {
+        self.skipped_timeout += other.skipped_timeout;
+        self.skipped_pointer += other.skipped_pointer;
+        self.skipped_outside += other.skipped_outside;
+        self.dropped += other.dropped;
+        self.gated += other.gated;
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -170,6 +204,8 @@ struct InventoryEvent {
     frame: Option<String>,
     /// A refinery read (sent only while debugging: the sync gets `refinery-overview`)
     refinery: Option<RefineryRead>,
+    /// How the frame was captured
+    capture: CaptureInfo,
 }
 
 /// What a read of the refinery terminal found, for the debug view and a recording.
@@ -218,6 +254,7 @@ pub struct DebugRead {
     pub refinery: Option<RefineryRead>,
     pub cursor: Option<(f32, f32)>,
     pub boxes: Vec<TextBox>,
+    pub capture: CaptureInfo,
     /// The frame as JPEG
     pub jpeg: Vec<u8>,
 }
@@ -264,6 +301,8 @@ struct ExportRead<'a> {
     /// The mouse cursor in frame pixels (replays pass it to the reads)
     cursor: Option<(f32, f32)>,
     boxes: &'a [TextBox],
+    /// How the frame was captured (grab time, skipped and unread frames, wait)
+    capture: CaptureInfo,
 }
 
 #[derive(Serialize)]
@@ -289,6 +328,7 @@ fn write_read(folder: &Path, n: usize, r: &DebugRead) -> Result<(), String> {
         refinery: &r.refinery,
         cursor: r.cursor,
         boxes: &r.boxes,
+        capture: r.capture,
     })
         .map_err(|e| e.to_string())?;
     std::fs::write(folder.join(format!("read-{n}.json")), json).map_err(|e| e.to_string())
@@ -352,6 +392,7 @@ fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> Sender<(RgbImage, In
                         refinery: event.refinery.clone(),
                         cursor: event.cursor,
                         boxes: event.boxes.clone(),
+                        capture: event.capture,
                         jpeg,
                     };
                     let mut state = store.0.lock().unwrap();
@@ -547,7 +588,12 @@ fn next_frame(rx: &Receiver<Frame>, wait: Duration) -> Result<Option<Frame>, ()>
     };
     while frame.live {
         match rx.try_recv() {
-            Ok(newer) => frame = newer,
+            Ok(mut newer) => {
+                // The older one dropped: counted with the newer
+                newer.capture.add_unread(frame.capture);
+                newer.capture.dropped += 1;
+                frame = newer;
+            }
             Err(_) => break,
         }
     }
@@ -582,6 +628,9 @@ struct Worker {
     last_probe_ms: u64,
     /// The character inventory's scale (`components::Ui`), from the last page number read
     ui_scale: Option<f32>,
+    /// The capture of the frame being read, and the counts of the frames not read since the last read
+    capture: CaptureInfo,
+    unread: CaptureInfo,
 }
 
 pub(crate) fn unix_ms(t: SystemTime) -> u64 {
@@ -618,6 +667,8 @@ impl Worker {
             screen_misses: 0,
             last_probe_ms: 0,
             ui_scale: None,
+            capture: CaptureInfo::default(),
+            unread: CaptureInfo::default(),
         }
     }
 
@@ -657,22 +708,28 @@ impl Worker {
             if let Some(v) = &mut self.visit {
                 v.last_frame = Instant::now();
             }
+            // Held back (refinery: not at rest; nothing in view: the probe throttle): counted with the next read
+            let held = match self.screen {
+                Screen::Refinery => frame.live && !self.gate.pass(frame.pixels.thumb(), frame.at_ms),
+                Screen::Warehouse | Screen::Inventory => false,
+                Screen::Unknown => frame.live && frame.at_ms.saturating_sub(self.last_probe_ms) < PROBE_MS,
+            };
+            if held {
+                self.unread.add_unread(frame.capture);
+                self.unread.gated += 1;
+                continue;
+            }
+            self.capture = frame.capture;
+            self.capture.add_unread(std::mem::take(&mut self.unread));
+            self.capture.wait_ms = unix_ms(SystemTime::now()).saturating_sub(frame.at_ms);
             let result = match self.screen {
                 // The terminal: once the view came to rest after it moved, and every REREAD_MS
-                Screen::Refinery => {
-                    if frame.live && !self.gate.pass(frame.pixels.thumb(), frame.at_ms) {
-                        continue;
-                    }
-                    self.look_refinery(frame.at_ms, frame.cursor, frame.pixels.into_rgb())
-                }
+                Screen::Refinery => self.look_refinery(frame.at_ms, frame.cursor, frame.pixels.into_rgb()),
                 // Warehouse and character inventory: every frame (the character and the world behind
                 // the translucent inventory screen never come to rest, and the user waits for each stack)
                 Screen::Warehouse | Screen::Inventory => self.look_inventory(scope, frame.at_ms, frame.cursor, frame.pixels.into_rgb()),
                 // Nothing in view (a menu, the verse): a probe costs the reads, so every PROBE_MS only
                 Screen::Unknown => {
-                    if frame.live && frame.at_ms.saturating_sub(self.last_probe_ms) < PROBE_MS {
-                        continue;
-                    }
                     self.last_probe_ms = frame.at_ms;
                     self.probe(scope, frame)
                 }
@@ -823,7 +880,7 @@ impl Worker {
             }
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", screen),
         }
-        let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None };
+        let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None, capture: self.capture };
         // While debugging the debug writer adds the frame and emits; the worker goes on reading
         if !debug || self.debug_tx.send((image, event.clone())).is_err() {
             let _ = self.app.emit(INVENTORY_READ, event);
@@ -865,7 +922,7 @@ impl Worker {
         // While debugging the read goes with its frame to the debug window and a recording
         if self.debug.0.load(Ordering::Relaxed) {
             let (width, height) = image.dimensions();
-            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug) };
+            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug), capture: self.capture };
             let _ = self.debug_tx.send((image, event));
         }
         if self.screen_misses >= LEAVE_AFTER {
@@ -912,7 +969,7 @@ fn spawn_folder_source(dir: PathBuf, tx: Sender<Frame>) {
                 let at_ms = std::fs::metadata(&path).and_then(|m| m.modified()).map_or(unix_ms(SystemTime::now()), unix_ms);
                 match image::open(&path) {
                     Ok(img) => {
-                        if tx.send(Frame { at_ms, pixels: Pixels::Rgb(img.to_rgb8()), live: false, cursor: None }).is_err() {
+                        if tx.send(Frame { at_ms, pixels: Pixels::Rgb(img.to_rgb8()), live: false, cursor: None, capture: CaptureInfo::default() }).is_err() {
                             return;
                         }
                     }

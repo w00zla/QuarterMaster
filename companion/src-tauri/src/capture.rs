@@ -7,7 +7,7 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter};
 use windows::core::{Interface, PWSTR};
@@ -32,12 +32,14 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindow};
 
-use crate::ocrwatch::{Detect, FastCapture, Frame, GameFront, GameSeen, Pixels, GAME_FRONT, GAME_SEEN};
+use crate::ocrwatch::{CaptureInfo, Detect, FastCapture, Frame, GameFront, GameSeen, Pixels, GAME_FRONT, GAME_SEEN};
 
 const GAME_EXE: &str = "StarCitizen.exe";
 const INTERVAL: Duration = Duration::from_secs(1);
 // Waiting for a desktop frame: the game presents continuously, a timeout means nothing changed
 const ACQUIRE_TIMEOUT_MS: u32 = 200;
+// A grab slower than this is logged (debug)
+const SLOW_GRAB: Duration = Duration::from_millis(150);
 
 /// Starts the capture thread; it sends frames only while `detect` is on and the game is in front
 /// (one per second, on the character inventory as often as `fast` says), and tells whether the game runs (`seen`, only while `detect` is
@@ -48,6 +50,8 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
         let mut last_error = String::new();
         // The game window last seen in front: it still counts while the companion itself is in front
         let mut last_game: Option<HWND> = None;
+        // What went into the next frame's way (sent with it: debug view, recordings)
+        let mut skipped = CaptureInfo::default();
         loop {
             // Faster on the character inventory, paced by the worker's read time (`FastCapture`)
             let fast_ms = fast.0.load(Ordering::Relaxed);
@@ -71,14 +75,24 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
             if !in_front {
                 continue;
             }
+            let started = Instant::now();
             match grab(&mut dup, hwnd) {
-                Ok(Some((pixels, cursor))) => {
+                Ok(Ok((pixels, cursor))) => {
                     last_error.clear();
-                    if tx.send(Frame { at_ms: now_ms(), pixels, live: true, cursor }).is_err() {
+                    // A slow copy to the CPU (the GPU busy with the game) delays every frame
+                    if started.elapsed() > SLOW_GRAB {
+                        log::debug!("screen capture: grab took {:?}", started.elapsed());
+                    }
+                    let capture = CaptureInfo { grab_ms: started.elapsed().as_millis() as u32, ..std::mem::take(&mut skipped) };
+                    if tx.send(Frame { at_ms: now_ms(), pixels, live: true, cursor, capture }).is_err() {
                         return;
                     }
                 }
-                Ok(None) => {}
+                Ok(Err(skip)) => match skip {
+                    Skip::Timeout => skipped.skipped_timeout += 1,
+                    Skip::Pointer => skipped.skipped_pointer += 1,
+                    Skip::Outside => skipped.skipped_outside += 1,
+                },
                 Err(e) => {
                     // Mode change, fullscreen switch, secure desktop (UAC): open it again next time
                     dup = None;
@@ -212,10 +226,20 @@ fn crop(client: RECT, desktop: RECT) -> Option<Crop> {
     })
 }
 
+/// Why a grab brought no new frame.
+enum Skip {
+    /// No new image within ACQUIRE_TIMEOUT_MS
+    Timeout,
+    /// Only the mouse pointer moved (or the black first frame)
+    Pointer,
+    /// The game window is not on the duplicated monitor
+    Outside,
+}
+
 /// One frame of the game window's client area with the mouse cursor's position in it (None when
 /// outside: the duplicated image has no pointer, the inventory read needs it for the hovered tile);
-/// None when the desktop did not change.
-fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<(Pixels, Option<(f32, f32)>)>, String> {
+/// a `Skip` when there is no new image.
+fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Result<(Pixels, Option<(f32, f32)>), Skip>, String> {
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
     if slot.as_ref().is_none_or(|d| d.monitor != monitor) {
         *slot = None;
@@ -226,9 +250,13 @@ fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<(Pixels, Op
     }
     let d = slot.as_mut().expect("opened above");
     let Some(crop) = crop(client_rect(hwnd)?, d.desktop) else {
-        return Ok(None);
+        log::debug!("screen capture: frame skipped (window outside the monitor)");
+        return Ok(Err(Skip::Outside));
     };
-    let Some(pixels) = d.frame(&crop)? else { return Ok(None) };
+    let pixels = match d.frame(&crop)? {
+        Ok(p) => p,
+        Err(skip) => return Ok(Err(skip)),
+    };
     // The cursor relative to the frame's top left (screen position of the crop)
     let cursor = unsafe {
         let mut p = POINT::default();
@@ -237,7 +265,7 @@ fn grab(slot: &mut Option<Duplication>, hwnd: HWND) -> Result<Option<(Pixels, Op
             (x >= 0 && y >= 0 && (x as u32) < crop.width && (y as u32) < crop.height).then_some((x as f32, y as f32))
         })
     };
-    Ok(Some((pixels, cursor)))
+    Ok(Ok((pixels, cursor)))
 }
 
 /// The window's client area in screen coordinates (physical pixels).
@@ -291,23 +319,27 @@ fn open(monitor: HMONITOR) -> Result<Duplication, String> {
 }
 
 impl Duplication {
-    fn frame(&mut self, crop: &Crop) -> Result<Option<Pixels>, String> {
+    fn frame(&mut self, crop: &Crop) -> Result<Result<Pixels, Skip>, String> {
         unsafe {
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource = None;
             match self.dup.AcquireNextFrame(ACQUIRE_TIMEOUT_MS, &mut info, &mut resource) {
                 Ok(()) => {}
-                Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(None),
+                Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+                    log::debug!("screen capture: frame skipped (no new image within {ACQUIRE_TIMEOUT_MS} ms)");
+                    return Ok(Err(Skip::Timeout));
+                }
                 Err(e) => return Err(format!("AcquireNextFrame: {e}")),
             }
             // No new desktop image (only the mouse pointer moved, or the black first frame)
             if info.LastPresentTime == 0 {
                 let _ = self.dup.ReleaseFrame();
-                return Ok(None);
+                log::debug!("screen capture: frame skipped (pointer only)");
+                return Ok(Err(Skip::Pointer));
             }
             let copied = self.copy(resource, crop);
             let _ = self.dup.ReleaseFrame();
-            copied.map(Some)
+            copied.map(Ok)
         }
     }
 
