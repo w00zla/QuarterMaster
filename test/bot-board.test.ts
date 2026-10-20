@@ -119,14 +119,14 @@ describe('board message', () => {
     try {
       process.env.WEBAPP_ORIGIN = 'https://qm.example';
       assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [
-        ['Show all', 'qm-stock:org'],
-        ['All components', 'qm-comps:org'],
-        ['Stock', `https://qm.example/stock?scope=${G}`],
+        ['Show all', 'qm-res:org'],
+        ['All components', 'qm-comp:org'],
+        ['Resources', `https://qm.example/resources?scope=${G}`],
         ['Components', `https://qm.example/components?scope=${G}`],
         ['Blueprints', `https://qm.example/blueprints?scope=${G}`],
       ]);
       delete process.env.WEBAPP_ORIGIN;
-      assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [['Show all', 'qm-stock:org'], ['All components', 'qm-comps:org']]);
+      assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [['Show all', 'qm-res:org'], ['All components', 'qm-comp:org']]);
     } finally {
       if (before === undefined) delete process.env.WEBAPP_ORIGIN;
       else process.env.WEBAPP_ORIGIN = before;

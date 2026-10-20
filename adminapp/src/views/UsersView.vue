@@ -168,7 +168,7 @@ function valueOf(u: UserRow, key: string): string | number {
         </section>
 
         <section>
-          <span class="panel-title">Stock</span>
+          <span class="panel-title">Resources</span>
           <table v-if="detail.data.value.stock.length" class="mini">
             <thead><tr><th>Material</th><th class="num">Amount</th><th class="num">Batches</th><th class="num">Quality</th><th class="num">Shared</th></tr></thead>
             <tbody>

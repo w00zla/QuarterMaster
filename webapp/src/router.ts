@@ -11,7 +11,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/", component: HomeView },
-    { path: "/stock", component: StockView },
+    { path: "/resources", component: StockView },
     { path: "/components", component: ComponentsView },
     { path: "/refinery", component: RefineryView },
     { path: "/blueprints", component: BlueprintsView },

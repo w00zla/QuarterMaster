@@ -2,7 +2,7 @@
 // The title bar with the user (avatar, the name in its tooltip) and a button that opens the web app,
 // or why the connection is down (chip only then; no reload button: a restart of the app reloads
 // everything); below it the scan row (ScanBar.vue), then a tab
-// bar (icons like the web app's navigation) with the panels: stock, comps (both InventoryPanel), unlocks, refinery.
+// bar (icons like the web app's navigation) with the panels: comps, stock (both InventoryPanel), refinery, unlocks.
 // The chips open the settings; the settings also open by themselves while the app is not connected
 // (no server or token, or the token is refused). An app the server calls outdated shows only the
 // update hint (no work until updated).
@@ -38,10 +38,10 @@ const settingsOpen = ref(false);
 const ready = ref(false);
 // The panel tabs (also the scan overlay's modes, overlay.ts), like the web app's navigation
 const TABS = [
-  { id: "stock", label: "stock.title" },
   { id: "comps", label: "comps.title" },
-  { id: "unlocks", label: "unlocks.title" },
+  { id: "stock", label: "stock.title" },
   { id: "refinery", label: "refinery.title" },
+  { id: "unlocks", label: "unlocks.title" },
 ] as const;
 const info = ref<{ version: string; platform: "windows" | "linux" } | null>(null);
 const downloadUrl = computed(() => (info.value && outdated.value?.downloads[info.value.platform]) ?? null);
@@ -106,10 +106,10 @@ onMounted(async () => {
       </nav>
       <!-- All panels stay mounted (v-show): the unlocks panel's catalog and scan progress survive a tab switch -->
       <main class="main">
-        <InventoryPanel v-show="tab === 'stock'" part="stock" />
         <InventoryPanel v-show="tab === 'comps'" part="comps" />
-        <UnlocksPanel v-show="tab === 'unlocks'" />
+        <InventoryPanel v-show="tab === 'stock'" part="stock" />
         <RefineryPanel v-show="tab === 'refinery'" />
+        <UnlocksPanel v-show="tab === 'unlocks'" />
       </main>
     </template>
     <SettingsDialog v-if="settingsOpen" @close="settingsOpen = false" />

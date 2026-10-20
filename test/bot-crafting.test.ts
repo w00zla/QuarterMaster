@@ -57,10 +57,10 @@ describe('/qm-help', () => {
     assert.ok(admin.includes('qm-setup'));
     assert.deepEqual(admin.filter((n) => n !== 'qm-setup'), user);
     assert.ok(user.includes('qm-crafting') && !user.includes('qm-help'));
-    const stock = commands.find((c) => c.data.name === 'qm-stock')!.data;
+    const stock = commands.find((c) => c.data.name === 'qm-res')!.data;
     const [de] = helpLines('de', [stock]);
-    assert.match(de!, /^\*\*\/qm-stock\*\* · Ressourcen/);
+    assert.match(de!, /^\*\*\/qm-res\*\* · Ressourcen/);
     assert.match(de!, /\n- `add` /);
-    assert.ok(user.includes('qm-comps'));
+    assert.ok(user.includes('qm-comp'));
   });
 });

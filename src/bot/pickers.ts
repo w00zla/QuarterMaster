@@ -24,7 +24,7 @@ export async function locationChoices(db: Db, lang: Lang, query: string): Promis
     .map((l) => ({ name: fit(l.label), value: l.uuid }));
 }
 
-/** What /qm-stock add takes, with its unit; `components`: what /qm-comps add takes, by its unique label. */
+/** What /qm-res add takes, with its unit; `components`: what /qm-comp add takes, by its unique label. */
 export async function materialChoices(db: Db, lang: Lang, query: string, components = false): Promise<Choice[]> {
   const materials = [...(await materialCatalog(db, lang)).values()].filter((m) => m.component === components);
   return searchWords(materials, query, (m) => `${m.label} ${m.nameEn}`, (m) => m.name)

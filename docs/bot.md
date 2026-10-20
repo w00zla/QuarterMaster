@@ -89,16 +89,16 @@ All root commands are prefixed `qm-`.
   language (`importCache`), because autocomplete must answer within 3 s; autocomplete values are blueprint
   UUIDs, free text that was not picked is refused. Autocomplete handlers get `(interaction, lang, db)` and
   must not write.
-- **`/qm-stock`** (`commands/stock.ts`): `add material location` (modal: amount, quality, "Share in"
+- **`/qm-res`** (`commands/stock.ts`; until 2026-10-20 `/qm-stock`): `add material location` (modal: amount, quality, "Share in"
   checkboxes of your active orgs, this server's ticked), `remove|adjust|share batch`, `move batch to`,
   `give batch member` (own roster autocomplete, active members only), each a modal with the batch as its head
   and the amount prefilled ("all", adjust: the current amount, "0" allowed); `list [material]` (panel:
   Personal / this org / All, 20 lines per page) and `find material [min_quality]`. The booking logic
   (`bookAdd`, `bookChange`, `bookShare`, `listLines`) takes no Discord objects and is tested on its own.
-  `StockError` codes map to `stock.err.<code>`. Splitting and merging are not in the bot. `/qm-stock` offers
-  and lists only materials and items, like the web app's stock tab.
-- **`/qm-comps`** (same file, `stockCommandOf` with the area `COMPS`): ship components, the same subcommands
-  as `/qm-stock` (option `component`, `find` without a minimum quality), like the web app's components tab.
+  `StockError` codes map to `stock.err.<code>`. Splitting and merging are not in the bot. `/qm-res` offers
+  and lists only materials and items, like the web app's resources tab.
+- **`/qm-comp`** (same file, `stockCommandOf` with the area `COMPS`; until 2026-10-20 `/qm-comps`): ship
+  components, the same subcommands as `/qm-res` (option `component`, `find` without a minimum quality), like the web app's components tab.
   Named by their unique label (`MaterialEntry.label`), stats instead of a quality (`statsText`). `add` and
   `adjust` carry one multi-line field "Stats" (`statLines`: one line per stat the blueprint can improve,
   "Coolant Rating (max. +20.0 %): 0", the current values on adjust; `parseStatLines` takes the number after
@@ -136,8 +136,8 @@ One message per org in its board channel, edited in place, in the server's base 
 (`board_title` or the org name) with the server icon as thumbnail and the optional subtitle, the figures of
 the web app's org tile (`orgMetrics` in `src/stock/org-summary.ts`: resources, items, components), the shared
 materials per kind (`orgMaterials`: total, best quality with its level, holder count; the 10 largest per kind,
-"+n more"; components in a section of their own without quality), buttons "Show all" (`qm-stock:org`, member
-check, materials and items) and "All components" (`qm-comps:org`), deep links Stock/Components/Blueprints (five
+"+n more"; components in a section of their own without quality), buttons "Show all" (`qm-res:org`, member
+check, materials and items) and "All components" (`qm-comp:org`), deep links Resources/Components/Blueprints (five
 buttons, Discord's limit per row), "Updated <t:…:R>". Style
 `list` (text lines) or `table` (code-block tables: amounts right-aligned, the stars last, names cut at 22
 characters, backticks replaced). Only stored stock shared in the org by active members; never unshared stock,

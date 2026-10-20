@@ -15,8 +15,8 @@ const checks = useFetch<DataCheck[]>(() => "/checks");
 
 // User data the catalog or the UEX refinery data no longer backs
 const CHECKS: Record<DataCheckKey, string> = {
-  retiredMaterial: "Stock of retired materials",
-  retiredLocation: "Stock at retired locations",
+  retiredMaterial: "Resources of retired materials",
+  retiredLocation: "Resources at retired locations",
   retiredBlueprint: "Registered retired blueprints",
   overdueJob: "Refinery jobs ready for over a week",
   jobNotAtRefinery: "Refinery jobs outside the UEX refineries",

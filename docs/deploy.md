@@ -93,7 +93,7 @@ docker compose logs bot                                 # optional check: "Logge
 
 Then:
 - Catalog: extract the snapshot locally (`pnpm catalog:extract`, StarBreaker does not run on the VM) and upload it in the admin UI (Imports, dry run first). Same for external `global.ini` files.
-- On the Discord server: invite the bot, run `/qm-setup` (roles, language, logs channel), then try `/qm-stock add` once: it is the first real write as `qm_app`.
+- On the Discord server: invite the bot, run `/qm-setup` (roles, language, logs channel), then try `/qm-res add` once: it is the first real write as `qm_app`.
 - Global commands can take a moment to show up; restart the Discord client if they do not.
 
 ## 5. Caddy

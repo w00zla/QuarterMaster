@@ -152,7 +152,7 @@ const logs = (o: OrgRow) => (o.logsChannelId && o.logsLevel !== "off" ? o.logsLe
         </section>
 
         <section>
-          <span class="panel-title">Shared stock</span>
+          <span class="panel-title">Shared resources</span>
           <table v-if="detail.data.value.stock.length" class="mini">
             <thead><tr><th>Material</th><th class="num">Amount</th><th class="num">Batches</th><th class="num">Owners</th><th class="num">Quality</th></tr></thead>
             <tbody>

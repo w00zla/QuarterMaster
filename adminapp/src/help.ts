@@ -35,7 +35,7 @@ export const HELP = {
 
   // Resources
   inRecipes: "Only resources used by at least one active blueprint.",
-  ores: "Unrefined ores. Recipes take the refined material; ores are not tracked in stock.",
+  ores: "Unrefined ores. Recipes take the refined material; ores are not tracked in resources.",
   usedIn: "Active blueprints using this resource.",
   boxSizes: "Cargo box sizes the game offers for this resource.",
 

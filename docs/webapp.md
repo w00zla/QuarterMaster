@@ -37,7 +37,7 @@ once for `/users/@me` and dropped (no refresh token kept). Failures redirect to 
 
 Deep links: `/auth/login?returnTo=<path>` keeps the page the login started from (in the OAuth cookie; paths
 of this app only, never `//host` or a backslash: no open redirect) and the callback returns there; the
-SPA's login button sends the current path and query. The bot links `/stock?scope=<personal|all|guildId>`,
+SPA's login button sends the current path and query. The bot links `/resources?scope=<personal|all|guildId>`,
 `/blueprints?scope=<personal|guildId>`, `/crafting?add=<uuid>` (`webAppPath` in `src/bot/ui.ts`); each view
 reads its parameter once in setup (`takeQuery` in `webapp/src/deepLink.ts`, views only render after the
 login) and drops the query from the URL; an org the user is not in falls back to personal.
@@ -139,12 +139,13 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   and may exceed Y: then the game data misses a source, listed in the admin overview), Refinery jobs (sum of
   the expected yields · stations) and Next job ready (countdown, a "n ready" tag); "Your orgs" with one
   sub-tile per org (name, state, "Members: n", Resources/Items/Blueprints). Reloads on every realtime message.
-- **Bestand** (materials only, no ship components): grouped by material, filters; scope "All" lists personal
+- **Ressourcen** (route `/resources`, until 2026-10-20 "Bestand" at `/stock`; materials only, no ship
+  components): grouped by material, filters; scope "All" lists personal
   and org stock with an owner column ("Pers." / "Org (holder)"). Adding has a share switch per org (an org
   scope starts with that org on; the batch is always personal, the switches share it). Row actions Sharing (a
   switch per org, whole batch) · Split (unshared) or Merge back (a split-off part) · Move (place, recipient) ·
   Remove · Adjust.
-- **Komponenten** (route `/components`, `?scope=` like Bestand; `ComponentsView` = `StockView` with
+- **Komponenten** (route `/components`, `?scope=` like Ressourcen; `ComponentsView` = `StockView` with
   `components`): the ship components only, groups named by their `label`, no quality column, filters
   type/size/grade instead of the quality slider; the add form without quality (sends 0) but one slider per
   stat of the picked component from ±0 to its best (`CatalogMaterial.stats`, reset after each add; only gains
@@ -155,7 +156,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   left with a "ready" tag or "duration open" on the group row; actions: a clock opens `RefineryTimeDialog` to
   set or clear the time left, done, remove with a `ConfirmDialog` listing the materials), the materials below
   with quality, expected yield and UEX bonus; job columns sort the jobs, material columns the materials
-  within; same filters as Bestand. `RefineryStartForm`: station, duration (all three fields empty = "duration
+  within; same filters as Ressourcen. `RefineryStartForm`: station, duration (all three fields empty = "duration
   open") and rows of resource, quality and expected yield (no method, no estimates). `RefineryDoneDialog`
   stores the whole job, each row's amount starting from its expected yield.
 - **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold; an org
@@ -165,7 +166,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
   field that stop at the slot's minimum (`withQualityFloor`; the track keeps the full 0–1000 scale). Below the
-  stats a collapsible "Stock" panel (open by default; closed ones in localStorage `qm.webapp.crafting.ui`):
+  stats a collapsible "Resources" panel (open by default; closed ones in localStorage `qm.webapp.crafting.ui`):
   per material the need (for the card's count) and a chip "covered" / "missing <amount>", then the stored
   batches of that material at or above the card's target quality, own first, then by quality. The stock is
   `GET /api/stock?scope=all`, loaded once per view and on stock/resync messages; each card is checked on its
@@ -183,7 +184,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
 
 ### Layout and building blocks
 
-- List views share one layout: Bestand and Blueprints have the scope switch above (`ScopeBar.vue`: big
+- List views share one layout: Ressourcen and Blueprints have the scope switch above (`ScopeBar.vue`: big
   buttons personal, each org, optionally "All"; always shown, also without any org; `scopeName` for heads),
   then ONE panel: head "<View> · <scope>" with the add button, the add area (`.add-area`), filters, table
   (Raffinerie the same without a scope switch). Never a panel holding only a head (its border doubles the

@@ -23,7 +23,7 @@ const mia: Actor = { userId: MIA, guildId: G, source: 'bot' };
 const olga: Actor = { userId: OLGA, guildId: G, source: 'bot' };
 const metal = { kind: 'resource' as const, uuid: U.metal, locationUuid: U.station };
 
-describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
+describe('/qm-res bookings and lists (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
   let close: () => Promise<void>;
 
@@ -68,12 +68,12 @@ describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_
   it('describes corrections by their result', async () => {
     const b = (await add(db, mia, { ...metal, quality: 600, amount: '5' })).batch!;
     assert.equal(await bookChange(db, mia, { op: 'adjust', batchId: b.id, amount: '6', expected: '5' }, 'en'),
-      '✏️ Corrected by **+1 SCU** · **Test Metal** Q600\nBatch: 6 SCU · Test Station · personal\n-# Test Metal in your stock: 10 SCU');
+      '✏️ Corrected by **+1 SCU** · **Test Metal** Q600\nBatch: 6 SCU · Test Station · personal\n-# Test Metal in your resources: 10 SCU');
   });
 
   it('shares what it books in the ticked orgs, on top of the shares the batch already has', async () => {
     const text = await bookAdd(db, mia, { ...metal, quality: 900, amount: '2', shareIn: [G] }, 'en');
-    assert.equal(text, '📥 Booked **2 SCU** · **Test Metal** Q900\nTest Station · shared in Stock Cmd Org\n-# Test Metal in your stock: 12 SCU');
+    assert.equal(text, '📥 Booked **2 SCU** · **Test Metal** Q900\nTest Station · shared in Stock Cmd Org\n-# Test Metal in your resources: 12 SCU');
     // Into an existing batch: its amount differs from the booked one and is shown
     assert.match(await bookAdd(db, mia, { ...metal, quality: 900, amount: '1', shareIn: [G2] }, 'en'), /\nBatch: 3 SCU · Test Station · shared in /);
     const [batch] = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).filter((p) => p.batch.quality === 900);

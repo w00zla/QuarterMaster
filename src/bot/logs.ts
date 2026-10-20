@@ -135,7 +135,7 @@ async function namesFor(db: Db, lang: Lang, logRowsList: LogRow[]): Promise<LogN
     [...new Set(stock.map((r) => r.targetUuid).filter((u) => !materials.has(u)))],
     [...new Set(places.filter((u) => !locations.has(u)))]);
   return {
-    // Components by their unique label, like /qm-comps names them
+    // Components by their unique label, like /qm-comp names them
     material: (uuid) => {
       const m = materials.get(uuid);
       return (m?.component ? m.label : m?.name) ?? missing.get(uuid) ?? '?';

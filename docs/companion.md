@@ -120,9 +120,9 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - A tab bar (icons; each tab and panel title with its table's row count, `tabCounts` in `overlay.ts`; the
   last tab kept in localStorage `qm.companion.tab`; it never switches by itself: the scan row's tag names
   the screen) with the panels
-  Stock and Components (both `InventoryPanel.vue`, prop `part`), Blueprints (`UnlocksPanel.vue`) and
-  Refinery (`RefineryPanel.vue`), like the web app's navigation (order, names "Bestand"/"Komponenten"/
-  "Baupläne"/"Raffinerie", icons; decided 2026-10-20, before: one Inventory tab), all four kept mounted
+  Components and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`) and
+  Blueprints (`UnlocksPanel.vue`), like the web app's navigation (order, names "Komponenten"/"Ressourcen"/
+  "Raffinerie"/"Baupläne", icons; decided 2026-10-20, before: one Inventory tab), all four kept mounted
   (`v-show`; a stored "inventory" tab opens Stock); panel heads carry no icon. Every head: title, the count
   (room for "999": the chips after it stay put), the panel's filter chips (no label: "Scanned" / "Not
   scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
@@ -292,7 +292,7 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   is turned on, when the log names another place and once the catalog is loaded; a key that is no
   selectable location clears the pick (nothing is booked at the place before: reads without a location
   are dropped); a pick by hand holds until the log names another place.
-- One panel per part: Stock (the warehouse's stacks) and Components (the character inventory's). Head:
+- One panel per part: Resources (the warehouse's stacks) and Components (the character inventory's). Head:
   title with count, the part's kind filter, toggle chips Materials / Items (Stock) or Components (on =
   the kind's badge colour with a check, off = dashed and dimmed with an x; what the scan detects from then
   on, all may be off; localStorage `qm.companion.inventory.kinds`), "Register all" (the panel's rows only).

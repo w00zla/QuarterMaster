@@ -11,7 +11,7 @@ const batch = (id: number, material: string, quality: number, quantity: string, 
   material, component: false, location: 'Area18', holderName: null, sharedIn: [], refine: null, ...extra,
 });
 
-describe('/qm-stock input and lists', () => {
+describe('/qm-res input and lists', () => {
   it('takes qualities 0-1000 as typed', () => {
     assert.equal(parseQuality(' 820 '), 820);
     assert.equal(parseQuality('0'), 0);
@@ -56,7 +56,7 @@ describe('/qm-stock input and lists', () => {
   });
 });
 
-describe('/qm-comps stats field', () => {
+describe('/qm-comp stats field', () => {
   const stats: ComponentStat[] = [
     { uuid: 'a', name: 'Coolant Rating', nameKey: null, base: null, kind: 'multiplier', min: 0, max: 20 },
     { uuid: 'b', name: 'Power Pips', nameKey: null, base: null, kind: 'additive', min: 0, max: 2 },

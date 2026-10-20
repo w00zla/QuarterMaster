@@ -29,7 +29,7 @@ export const webAppOrigin = () => process.env.WEBAPP_ORIGIN?.replace(/\/+$/, '')
  * query once and drops it (an org the user is not in falls back to personal).
  */
 export const webAppPath = {
-  stock: (scope: string) => `/stock?scope=${encodeURIComponent(scope)}`,
+  stock: (scope: string) => `/resources?scope=${encodeURIComponent(scope)}`,
   components: (scope: string) => `/components?scope=${encodeURIComponent(scope)}`,
   refinery: () => '/refinery',
   blueprints: (scope: string) => `/blueprints?scope=${encodeURIComponent(scope)}`,

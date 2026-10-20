@@ -21,8 +21,8 @@ import { toastError } from "./toasts";
 
 // The main window's tabs (= the overlay's modes) in the order the mode hotkey steps through them;
 // the last one stays for the next start (the former "inventory" tab: stock)
-export type Tab = "stock" | "comps" | "unlocks" | "refinery";
-const TAB_ORDER: Tab[] = ["stock", "comps", "unlocks", "refinery"];
+export type Tab = "comps" | "stock" | "refinery" | "unlocks";
+const TAB_ORDER: Tab[] = ["comps", "stock", "refinery", "unlocks"];
 const TAB_KEY = "qm.companion.tab";
 const stored = localStorage.getItem(TAB_KEY);
 export const tab = ref<Tab>(TAB_ORDER.includes(stored as Tab) ? (stored as Tab) : "stock");
