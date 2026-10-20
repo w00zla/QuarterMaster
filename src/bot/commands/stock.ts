@@ -1,6 +1,7 @@
-// /qm-stock: options pick what to book (autocomplete), a modal asks for the rest (amount, quality,
-// orgs), lists and searches answer as panels. Submitting a modal books right away: the modal shows the
-// batch and the amount, like the web app's dialogs.
+// /qm-stock and /qm-comps: options pick what to book (autocomplete), a modal asks for the rest (amount,
+// quality or a component's stats, orgs), lists and searches answer as panels. Submitting a modal books right
+// away: the modal shows the batch and the amount, like the web app's dialogs. The two commands work on the
+// same stock like the web app's tabs: /qm-stock the materials and items, /qm-comps the ship components.
 import {
   ActionRowBuilder, ApplicationCommandOptionType, ApplicationIntegrationType, ButtonBuilder, ButtonStyle, CheckboxGroupBuilder,
   CheckboxGroupOptionBuilder, ContainerBuilder, InteractionContextType, LabelBuilder, MessageFlags, ModalBuilder, SeparatorBuilder,
@@ -10,9 +11,10 @@ import {
 import type { Db } from '../../db/client.ts';
 import { formatMicros, toMicros } from '../../planner/plan.ts';
 import { formatAmount, parseAmount } from '../../stock/amount.ts';
+import { statsText, statValue, statValueText } from '../../stock/component-stats.ts';
 import {
   activeOrgs, findStock, locationCatalog, materialCatalog, materialTotal, orgNames, pickableBatches, stockList,
-  type BatchPick, type OrgName, type PickableBatch, type StockFilter,
+  type BatchPick, type ComponentStat, type MaterialEntry, type OrgName, type PickableBatch, type StockFilter,
 } from '../../stock/lookup.ts';
 import * as stock from '../../stock/service.ts';
 import { requireMember } from '../access.ts';
@@ -26,11 +28,21 @@ import { findGuildSettings } from '../settings.ts';
 import { escapeMarkdown } from '../markdown.ts';
 import { customId, panel, textField, textValue, webAppButton, webAppPath } from '../ui.ts';
 
-const NAME = 'qm-stock';
 const PAGE_SIZE = 20;
 const MAX_FIND = 25;
 // Discord's limit for the options of a checkbox group
 const MAX_ORG_OPTIONS = 10;
+
+/** Which command: its name, its texts (`cmd.<key>.*`), the option that picks what it books, ship components or not. */
+interface Area {
+  name: 'qm-stock' | 'qm-comps';
+  key: 'stock' | 'comps';
+  option: 'material' | 'component';
+  components: boolean;
+}
+
+const STOCK: Area = { name: 'qm-stock', key: 'stock', option: 'material', components: false };
+const COMPS: Area = { name: 'qm-comps', key: 'comps', option: 'component', components: true };
 
 // Option JSON with a localized description; Discord validates the shape on registration
 const opt = (name: string, key: MessageKey, type: ApplicationCommandOptionType, extra: Record<string, unknown> = {}) =>
@@ -53,18 +65,32 @@ async function book<T>(run: () => Promise<T>): Promise<T> {
 const unit = (lang: Lang, kind: string) => t(lang, kind === 'item' ? 'unit.pcs' : 'unit.scu');
 const amountText = (lang: Lang, amount: string, kind: string) => `${formatAmount(amount)} ${unit(lang, kind)}`;
 
+/** A batch as the bot shows it: a component under its unique label with its stats as text ("" without any). */
+export type ShownBatch = PickableBatch & { statsText?: string };
+
+/** Components named by their unique label, with their stats (retired ones keep their name). */
+function named(list: PickableBatch[], materials: Map<string, MaterialEntry>): ShownBatch[] {
+  return list.map((p) => {
+    if (!p.component) return p;
+    const m = materials.get(p.batch.itemUuid!);
+    return { ...p, material: m?.label ?? p.material, statsText: statsText(m?.stats ?? [], p.batch.stats) };
+  });
+}
+
 /** A batch as it looks now (names from the catalog caches, shares from the database). */
-async function describe(db: Db, actor: stock.Actor, batchId: number, lang: Lang): Promise<PickableBatch | undefined> {
-  return (await pickableBatches(db, actor, 'change', lang)).find((p) => p.batch.id === batchId);
+async function describe(db: Db, actor: stock.Actor, batchId: number, lang: Lang): Promise<ShownBatch | undefined> {
+  const found = (await pickableBatches(db, actor, 'change', lang)).filter((p) => p.batch.id === batchId);
+  return named(found, await materialCatalog(db, lang))[0];
 }
 
 // A booking's reply: line 1 what happened ("📥 Booked **2 SCU** · **Metal** Q900"), line 2 the batch as it
 // is now (place · shares, its amount only where it differs from what was booked), line 3 small: the
 // material in your stock (only where that is more than this batch). Nothing said twice.
 
-/** "**Metal** Q900": what a booking was about. */
-const subject = (p: Pick<PickableBatch, 'material'> & { batch: Pick<stock.Batch, 'quality'> }) =>
-  `**${escapeMarkdown(p.material)}** Q${p.batch.quality}`;
+/** "**Metal** Q900", a component "**Name · Cooler · S2 · B Military** · Integrity +5.0 %": what a booking was about. */
+const subject = (p: Pick<ShownBatch, 'material' | 'component' | 'statsText'> & { batch: Pick<stock.Batch, 'quality'> }) =>
+  (p.component ? [`**${escapeMarkdown(p.material)}**`, p.statsText && escapeMarkdown(p.statsText)].filter(Boolean).join(' · ')
+    : `**${escapeMarkdown(p.material)}** Q${p.batch.quality}`);
 
 const same = (a: string, b: string) => formatAmount(a) === formatAmount(b);
 
@@ -79,7 +105,7 @@ async function batchNow(db: Db, p: PickableBatch, lang: Lang, { amount = true, s
 }
 
 /** A modal's head: the batch as in a result ("**Metal** Q900", then "12 SCU · Area18 · personal"). */
-async function batchHead(db: Db, p: PickableBatch, lang: Lang, withShares = true): Promise<string> {
+async function batchHead(db: Db, p: ShownBatch, lang: Lang, withShares = true): Promise<string> {
   return `${subject(p)}\n${await batchNow(db, p, lang, { shares: withShares })}`;
 }
 
@@ -110,6 +136,8 @@ export interface AddBooking {
   amount: string;
   // The orgs ticked in the modal
   shareIn: string[];
+  // Ship components: {crafted property UUID: value} as parsed from the modal
+  stats?: Record<string, string>;
 }
 
 /**
@@ -143,7 +171,8 @@ export async function bookAdd(db: Db, actor: stock.Actor, input: AddBooking, lan
 /** A change of one batch as submitted in its modal; `expected` = the amount the modal showed. */
 export type Change =
   | { op: 'remove'; batchId: number; amount: string; expected: string }
-  | { op: 'adjust'; batchId: number; amount: string; expected: string }
+  // `stats`: a component's whole new set of stats (omitted = unchanged)
+  | { op: 'adjust'; batchId: number; amount: string; expected: string; stats?: Record<string, string> }
   | { op: 'move'; batchId: number; amount: string; expected: string; toLocationUuid: string }
   | { op: 'give'; batchId: number; amount: string; expected: string; toOwnerUserId: string; toOwnerName: string };
 
@@ -163,10 +192,20 @@ export async function bookChange(db: Db, actor: stock.Actor, c: Change, lang: La
   }
   if (c.op === 'adjust') {
     const before = await describe(db, actor, c.batchId, lang);
-    const r = await book(() => stock.adjust(db, actor, { batchId: c.batchId, amount: c.amount, expected: c.expected }));
+    const r = await book(() => stock.adjust(db, actor, {
+      batchId: c.batchId, amount: c.amount, expected: c.expected, ...(c.stats ? { stats: c.stats } : {}),
+    }));
+    const after = await batchAfter(db, actor, r.batch, before, lang);
+    // Other stats moved the batch: what it is now, with its amount in line 2
+    if (r.journal.some((j) => j.action === 'move_in') && after.left) {
+      return lines(
+        t(lang, 'stock.restated', { what: subject(after.left) }),
+        await batchLine(db, after.left, lang),
+        await totalLine(db, lang, after.left.material, after.left.batch, after.amount),
+      );
+    }
     const j = r.journal[0]!;
     const delta = `${j.delta.startsWith('-') ? '' : '+'}${amountText(lang, j.delta, j.kind)}`;
-    const after = await batchAfter(db, actor, r.batch, before, lang);
     return lines(
       t(lang, 'stock.adjusted', { delta, what: before ? subject(before) : '?' }),
       after.line,
@@ -182,9 +221,10 @@ export async function bookChange(db: Db, actor: stock.Actor, c: Change, lang: La
     // The batch is the recipient's now: described from the catalogs, no total (their stock is private)
     const [materials, locations] = [await materialCatalog(db, lang), await locationCatalog(db, lang)];
     const b = r.batch!;
-    const material = materials.get(b.resourceUuid ?? b.itemUuid!)?.name ?? '?';
+    const m = materials.get(b.resourceUuid ?? b.itemUuid!);
+    const what = subject({ material: (m?.component ? m.label : m?.name) ?? '?', component: !!m?.component, statsText: statsText(m?.stats ?? [], b.stats), batch: b });
     return [
-      t(lang, 'stock.given', { amount: amountText(lang, j.delta, j.kind), what: subject({ material, batch: b }) }),
+      t(lang, 'stock.given', { amount: amountText(lang, j.delta, j.kind), what }),
       t(lang, 'stock.result.to', { name: escapeMarkdown(c.toOwnerName), location: escapeMarkdown(locations.get(b.locationUuid)?.short ?? '?') }),
     ].join('\n');
   }
@@ -199,8 +239,8 @@ export async function bookChange(db: Db, actor: stock.Actor, c: Change, lang: La
 /** Line 2 after a remove or correction: what is left of the batch (its amount is news), or "empty" and where it was. */
 async function batchAfter(db: Db, actor: stock.Actor, batch: stock.Batch | null, before: PickableBatch | undefined, lang: Lang) {
   const left = batch ? await describe(db, actor, batch.id, lang) : undefined;
-  if (left) return { line: await batchLine(db, left, lang), amount: left.batch.quantity };
-  return { line: t(lang, 'stock.result.empty', { location: escapeMarkdown(before?.location ?? '?') }), amount: '0' };
+  if (left) return { line: await batchLine(db, left, lang), amount: left.batch.quantity, left };
+  return { line: t(lang, 'stock.result.empty', { location: escapeMarkdown(before?.location ?? '?') }), amount: '0', left };
 }
 
 /** Sets the orgs a batch is shared in; the text for the reply. */
@@ -216,6 +256,41 @@ export async function bookShare(db: Db, actor: stock.Actor, batchId: number, gui
   return [t(lang, 'stock.sharedIn', { orgs: names.join(', ') }), batch].join('\n');
 }
 
+// --- a component's stats in a modal --------------------------------------------------------------
+
+// "Coolant Rating (max. +20.0 %)": a line's fixed part
+const statHead = (s: ComponentStat) => `${s.name} (max. ${statValueText(s.kind, String(s.max))})`;
+
+/** The stats field: one line per stat the component can carry, "Coolant Rating (max. +20.0 %): 5" (0 = no change). */
+export function statLines(stats: ComponentStat[], current: Record<string, string> | null): string {
+  return stats.map((s) => `${statHead(s)}: ${current?.[s.uuid] ?? '0'}`).join('\n');
+}
+
+/**
+ * The stats as typed in the field statLines filled: the number after each colon ("%" and "+" allowed), an
+ * empty field = none. Lines that were changed beyond their number, or values out of bounds, are refused.
+ */
+export function parseStatLines(text: string, stats: ComponentStat[]): Record<string, string> {
+  const rows = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!rows.length) return {};
+  if (rows.length !== stats.length) throw new UserError('stock.err.statLines');
+  const parsed: Record<string, string> = {};
+  stats.forEach((s, i) => {
+    const row = rows[i]!;
+    const colon = row.lastIndexOf(':');
+    if (colon < 0 || row.slice(0, colon).trim() !== statHead(s)) throw new UserError('stock.err.statLine', { line: i + 1 });
+    const value = statValue(s, row.slice(colon + 1).replace('%', '').trim());
+    if (value === null) throw new UserError('stock.err.statValue', { line: i + 1, max: `${s.max}${s.kind === 'multiplier' ? ' %' : ''}` });
+    if (value !== '0') parsed[s.uuid] = value;
+  });
+  return parsed;
+}
+
+const statsField = (lang: Lang, stats: ComponentStat[], current: Record<string, string> | null) =>
+  textField('stats', t(lang, 'stock.field.stats'), {
+    value: statLines(stats, current), description: t(lang, 'stock.field.statsHint'), paragraph: true, required: false, maxLength: 1000,
+  });
+
 // --- panels ----------------------------------------------------------------------------------
 
 /** Which stock a list shows: p = personal (everything you own), o = shared in this org, a = both. */
@@ -228,7 +303,7 @@ export interface ListView {
   material: string | null;
 }
 
-const listId = (v: ListView) => customId(NAME, 'list', v.scope, v.page, v.material ?? '-');
+const listId = (area: Area, v: ListView) => customId(area.name, 'list', v.scope, v.page, v.material ?? '-');
 
 function parseListId(parts: string[]): ListView {
   const [scope, page, material] = parts;
@@ -239,8 +314,9 @@ function parseListId(parts: string[]): ListView {
 /**
  * The lines of one list page, grouped by material with each material's total over the whole list. The owner
  * column: the org list names who shares it, "All" marks your own "Pers.", your own list marks what you share.
+ * Components show their stats where materials show their quality.
  */
-export function listLines(entries: PickableBatch[], scope: ListScope, userId: string, page: number, lang: Lang) {
+export function listLines(entries: ShownBatch[], scope: ListScope, userId: string, page: number, lang: Lang) {
   const tr = (key: MessageKey, vars?: MessageVars) => t(lang, key, vars);
   const pages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
   const current = Math.min(Math.max(page, 0), pages - 1);
@@ -259,7 +335,7 @@ export function listLines(entries: PickableBatch[], scope: ListScope, userId: st
       : scope === 'a' ? (p.batch.ownerUserId === userId ? tr('stock.personal') : escapeMarkdown(p.holderName ?? '?'))
       : p.sharedIn.length ? tr('stock.shared') : null;
     const parts = [
-      `${p.batch.state === 'refining' ? '⚗️ ' : ''}Q${p.batch.quality}`,
+      p.component ? escapeMarkdown(p.statsText ?? '') : `${p.batch.state === 'refining' ? '⚗️ ' : ''}Q${p.batch.quality}`,
       amountText(lang, p.batch.quantity, p.batch.kind),
       escapeMarkdown(p.location),
       owner,
@@ -269,58 +345,63 @@ export function listLines(entries: PickableBatch[], scope: ListScope, userId: st
   return { lines, page: current, pages };
 }
 
-// The web app's stock view in a scope: personal, all or a guild ID
-const linkRow = (lang: Lang, scope: string, ...buttons: ButtonBuilder[]) => {
-  const link = webAppButton(lang, webAppPath.stock(scope));
+// The web app's stock (or components) view in a scope: personal, all or a guild ID
+const linkRow = (area: Area, lang: Lang, scope: string, ...buttons: ButtonBuilder[]) => {
+  const link = webAppButton(lang, area.components ? webAppPath.components(scope) : webAppPath.stock(scope));
   const all = link ? [...buttons, link] : buttons;
   return all.length ? new ActionRowBuilder<ButtonBuilder>().addComponents(all) : null;
 };
 
 /** The list panel: scope buttons, one page of lines, paging and the web app link. */
-async function listPanel(db: Db, actor: { userId: string; guildId: string }, view: ListView, lang: Lang) {
+async function listPanel(area: Area, db: Db, actor: { userId: string; guildId: string }, view: ListView, lang: Lang) {
   const tr = (key: MessageKey, vars?: MessageVars) => t(lang, key, vars);
   const scope: StockFilter['scope'] = view.scope === 'p' ? { personalOf: actor.userId }
     : view.scope === 'o' ? { guildId: actor.guildId } : { allOf: actor.userId };
-  const entries = await stockList(db, { scope, subjectUuid: view.material ?? undefined }, lang);
+  const found = (await stockList(db, { scope, subjectUuid: view.material ?? undefined }, lang)).filter((p) => p.component === area.components);
+  // Sorted again: components go by their label
+  const entries = named(found, await materialCatalog(db, lang))
+    .sort((a, b) => a.material.localeCompare(b.material) || b.batch.quality - a.batch.quality || a.batch.id - b.batch.id);
   const orgName = (await orgNames(db, [actor.guildId]))[0]?.name ?? tr('stock.org');
   const scopeName = view.scope === 'p' ? tr('stock.scope.personal') : view.scope === 'o' ? orgName : tr('stock.scope.all');
   const { lines, page, pages } = listLines(entries, view.scope, actor.userId, view.page, lang);
 
   const scopeButton = (scope: ListScope, label: string) => new ButtonBuilder()
-    .setCustomId(listId({ ...view, scope, page: 0 })).setLabel(label.slice(0, 80))
+    .setCustomId(listId(area, { ...view, scope, page: 0 })).setLabel(label.slice(0, 80))
     .setStyle(scope === view.scope ? ButtonStyle.Primary : ButtonStyle.Secondary);
+  const title = tr(area.components ? 'comps.list.title' : 'stock.list.title', { scope: escapeMarkdown(scopeName), count: entries.length });
   const container = new ContainerBuilder()
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(tr('stock.list.title', { scope: escapeMarkdown(scopeName), count: entries.length })))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(title))
     .addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(
       scopeButton('p', tr('stock.scope.personal')), scopeButton('o', orgName), scopeButton('a', tr('stock.scope.all')),
     ))
     .addSeparatorComponents(new SeparatorBuilder())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.length ? lines.join('\n') : tr('stock.list.empty')));
   const paging = pages > 1 ? [
-    new ButtonBuilder().setCustomId(listId({ ...view, page: page - 1 })).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
-    new ButtonBuilder().setCustomId(listId({ ...view, page: page + 1 })).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page === pages - 1),
+    new ButtonBuilder().setCustomId(listId(area, { ...view, page: page - 1 })).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+    new ButtonBuilder().setCustomId(listId(area, { ...view, page: page + 1 })).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page === pages - 1),
   ] : [];
   if (pages > 1) container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${tr('list.page', { page: page + 1, pages })}`));
-  const row = linkRow(lang, view.scope === 'p' ? 'personal' : view.scope === 'o' ? actor.guildId : 'all', ...paging);
+  const row = linkRow(area, lang, view.scope === 'p' ? 'personal' : view.scope === 'o' ? actor.guildId : 'all', ...paging);
   if (row) container.addActionRowComponents(row);
   return panel(container);
 }
 
 /** The reply after a booking: what happened, a button to the list and the web app link. */
-function bookedReply(text: string, lang: Lang) {
-  const mine = new ButtonBuilder().setCustomId(customId(NAME, 'mine')).setLabel(t(lang, 'stock.btn.yourStock')).setStyle(ButtonStyle.Secondary);
-  return { content: text, components: [linkRow(lang, 'personal', mine)!], allowedMentions: { parse: [] } };
+function bookedReply(area: Area, text: string, lang: Lang) {
+  const mine = new ButtonBuilder().setCustomId(customId(area.name, 'mine'))
+    .setLabel(t(lang, area.components ? 'comps.btn.yours' : 'stock.btn.yourStock')).setStyle(ButtonStyle.Secondary);
+  return { content: text, components: [linkRow(area, lang, 'personal', mine)!], allowedMentions: { parse: [] } };
 }
 
 // --- input -----------------------------------------------------------------------------------
 
-/** Material option value `<kind>:<uuid>` (from the suggestions), checked against the catalog. */
-async function pickedMaterial(ctx: CommandContext, required: boolean) {
-  const value = ctx.interaction.options.getString('material', required);
+/** The material (or component) option, value `<kind>:<uuid>` (from the suggestions), checked against the catalog. */
+async function pickedMaterial(area: Area, ctx: CommandContext, required: boolean) {
+  const value = ctx.interaction.options.getString(area.option, required);
   if (value === null) return null;
   const m = /^(resource|item):(.+)$/.exec(value);
   const entry = m ? (await materialCatalog(ctx.db, ctx.lang)).get(m[2]!) : undefined;
-  if (!entry) throw new UserError('stock.err.unknownSubject');
+  if (!entry || entry.component !== area.components) throw new UserError(area.components ? 'comps.err.unknown' : 'stock.err.unknownSubject');
   return { kind: m![1] as 'resource' | 'item', uuid: m![2]!, entry };
 }
 
@@ -331,12 +412,13 @@ async function pickedLocation(ctx: CommandContext, name: string) {
   return entry;
 }
 
-/** The batch option: one the actor may change (also checks that it exists and is theirs). */
-async function pickedBatch(ctx: CommandContext, actor: stock.Actor, pick: BatchPick): Promise<PickableBatch> {
+/** The batch option: one the actor may change (also checks that it exists, is theirs and belongs to this command). */
+async function pickedBatch(area: Area, ctx: CommandContext, actor: stock.Actor, pick: BatchPick): Promise<ShownBatch> {
   const id = Number(ctx.interaction.options.getString('batch', true));
-  const found = Number.isInteger(id) ? (await pickableBatches(ctx.db, actor, pick, ctx.lang)).find((p) => p.batch.id === id) : undefined;
-  if (!found) throw new UserError('stock.err.batchNotFound');
-  return found;
+  const found = Number.isInteger(id) ? (await pickableBatches(ctx.db, actor, pick, ctx.lang)).filter((p) => p.batch.id === id) : [];
+  const p = named(found, await materialCatalog(ctx.db, ctx.lang))[0];
+  if (!p || p.component !== area.components) throw new UserError('stock.err.batchNotFound');
+  return p;
 }
 
 function checkAmount(text: string, kind: 'resource' | 'item', allowZero = false): string {
@@ -383,37 +465,51 @@ async function answer(interaction: ModalSubmitInteraction, lang: Lang, run: () =
   }
 }
 
-async function onModal(interaction: ModalSubmitInteraction, db: Db, lang: Lang) {
+/** The stats typed into a component's modal; none when its catalog entry offers none (the modal had no such field). */
+function typedStats(interaction: ModalSubmitInteraction, entry: MaterialEntry | undefined): Record<string, string> | undefined {
+  return entry?.component && entry.stats.length ? parseStatLines(textValue(interaction, 'stats'), entry.stats) : undefined;
+}
+
+async function onModal(area: Area, interaction: ModalSubmitInteraction, db: Db, lang: Lang) {
   const [, action, ...rest] = interaction.customId.split(':');
+  const reply = (text: string) => bookedReply(area, text, lang);
   await answer(interaction, lang, async () => {
     const access = await requireMember(db, interaction);
     const actor = actorOf(access);
     if (action === 'add') {
       const [subject, locationUuid] = rest as [string, string];
       const kind = subject[0] === 'i' ? 'item' : 'resource';
-      const quality = parseQuality(textValue(interaction, 'quality'));
-      if (quality === null) throw new UserError('stock.err.invalidQuality');
+      const uuid = subject.slice(1);
       const amount = checkAmount(textValue(interaction, 'amount'), kind);
       const shareIn = [...interaction.fields.getCheckboxGroup('share')];
-      return bookedReply(await bookAdd(db, actor, { kind, uuid: subject.slice(1), locationUuid, quality, amount, shareIn }, lang), lang);
+      if (area.components) {
+        const stats = typedStats(interaction, (await materialCatalog(db, lang)).get(uuid));
+        return reply(await bookAdd(db, actor, { kind, uuid, locationUuid, quality: stock.COMPONENT_QUALITY, amount, shareIn, stats }, lang));
+      }
+      const quality = parseQuality(textValue(interaction, 'quality'));
+      if (quality === null) throw new UserError('stock.err.invalidQuality');
+      return reply(await bookAdd(db, actor, { kind, uuid, locationUuid, quality, amount, shareIn }, lang));
     }
     if (action === 'share') {
-      return bookedReply(await bookShare(db, actor, Number(rest[0]), [...interaction.fields.getCheckboxGroup('share')], lang), lang);
+      return reply(await bookShare(db, actor, Number(rest[0]), [...interaction.fields.getCheckboxGroup('share')], lang));
     }
     const [id, expected, target] = rest as [string, string, string | undefined];
     const batchId = Number(id);
-    const kind = (await describe(db, actor, batchId, lang))?.batch.kind;
-    if (!kind) throw new UserError('stock.err.batchNotFound');
-    const amount = checkAmount(textValue(interaction, 'amount'), kind, action === 'adj');
-    if (action === 'rm') return bookedReply(await bookChange(db, actor, { op: 'remove', batchId, amount, expected }, lang), lang);
-    if (action === 'adj') return bookedReply(await bookChange(db, actor, { op: 'adjust', batchId, amount, expected }, lang), lang);
-    if (action === 'mv') return bookedReply(await bookChange(db, actor, { op: 'move', batchId, amount, expected, toLocationUuid: target! }, lang), lang);
+    const batch = (await describe(db, actor, batchId, lang))?.batch;
+    if (!batch) throw new UserError('stock.err.batchNotFound');
+    const amount = checkAmount(textValue(interaction, 'amount'), batch.kind, action === 'adj');
+    if (action === 'rm') return reply(await bookChange(db, actor, { op: 'remove', batchId, amount, expected }, lang));
+    if (action === 'adj') {
+      const stats = area.components ? typedStats(interaction, (await materialCatalog(db, lang)).get(batch.itemUuid!)) : undefined;
+      return reply(await bookChange(db, actor, { op: 'adjust', batchId, amount, expected, stats }, lang));
+    }
+    if (action === 'mv') return reply(await bookChange(db, actor, { op: 'move', batchId, amount, expected, toLocationUuid: target! }, lang));
     if (action === 'give') {
       const entry = await rosterEntry(db, access.guildId, target!);
       if (!entry?.active) throw new UserError('stock.err.holderNotMember');
-      return bookedReply(await bookChange(db, actor, {
+      return reply(await bookChange(db, actor, {
         op: 'give', batchId, amount, expected, toOwnerUserId: target!, toOwnerName: entry.displayName,
-      }, lang), lang);
+      }, lang));
     }
     throw new Error(`Unexpected modal ${interaction.customId}`);
   });
@@ -421,7 +517,7 @@ async function onModal(interaction: ModalSubmitInteraction, db: Db, lang: Lang) 
 
 // --- autocomplete ----------------------------------------------------------------------------
 
-async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db: Db) {
+async function autocomplete(area: Area, interaction: AutocompleteInteraction, lang: Lang, db: Db) {
   // No roster writes here (autocomplete must answer fast); non-members just get no suggestions
   const settings = interaction.inGuild() ? await findGuildSettings(db, interaction.guildId) : null;
   const access = settings && interaction.member ? accessOf(memberInfo(interaction.member).roleIds, settings) : null;
@@ -431,12 +527,13 @@ async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db
   const query = String(focused.value);
   const sub = interaction.options.getSubcommand();
   let choices: Choice[] = [];
-  if (focused.name === 'material') choices = await materialChoices(db, lang, query);
+  if (focused.name === area.option) choices = await materialChoices(db, lang, query, area.components);
   else if (focused.name === 'location' || focused.name === 'to') choices = await locationChoices(db, lang, query);
   // Refinery jobs stay where they are and are not shared: only stored batches for move, give and share
   // A give lands unshared with the recipient: whether the batch is shared does not matter there
-  else if (focused.name === 'batch') choices = await batchChoices(db, actor, sub === 'remove' || sub === 'adjust' ? 'change' : 'move', lang, query, sub !== 'give');
-  else if (focused.name === 'member') {
+  else if (focused.name === 'batch') {
+    choices = await batchChoices(db, actor, sub === 'remove' || sub === 'adjust' ? 'change' : 'move', lang, query, sub !== 'give', area.components);
+  } else if (focused.name === 'member') {
     choices = (await searchMembers(db, actor.guildId!, query))
       .filter((m) => m.userId !== actor.userId)
       .map((m) => ({ name: (m.rsiHandle ? `${m.displayName} · ${m.rsiHandle}` : m.displayName).slice(0, 100), value: m.userId }));
@@ -452,136 +549,151 @@ const batchOpt = () => opt('batch', 'opt.batch', S, { required: true, ...auto })
 // actor's own batches are read: a modal must come within 3 s and cannot be deferred
 const MODAL_SUBCOMMANDS = ['add', 'remove', 'adjust', 'move', 'give', 'share'];
 
-export const stockCommand: BotCommand = {
-  data: {
-    name: NAME,
-    ...localizedDescription('cmd.stock'),
-    contexts: [InteractionContextType.Guild],
-    integration_types: [ApplicationIntegrationType.GuildInstall],
-    options: [
-      opt('add', 'cmd.stock.add', ApplicationCommandOptionType.Subcommand, {
-        options: [opt('material', 'opt.material', S, { required: true, ...auto }), opt('location', 'opt.location', S, { required: true, ...auto })],
-      }),
-      opt('remove', 'cmd.stock.remove', ApplicationCommandOptionType.Subcommand, { options: [batchOpt()] }),
-      opt('adjust', 'cmd.stock.adjust', ApplicationCommandOptionType.Subcommand, { options: [batchOpt()] }),
-      opt('move', 'cmd.stock.move', ApplicationCommandOptionType.Subcommand, {
-        options: [batchOpt(), opt('to', 'opt.toLocation', S, { required: true, ...auto })],
-      }),
-      opt('give', 'cmd.stock.give', ApplicationCommandOptionType.Subcommand, {
-        options: [batchOpt(), opt('member', 'opt.recipient', S, { required: true, ...auto })],
-      }),
-      opt('share', 'cmd.stock.share', ApplicationCommandOptionType.Subcommand, { options: [batchOpt()] }),
-      opt('list', 'cmd.stock.list', ApplicationCommandOptionType.Subcommand, {
-        options: [opt('material', 'opt.onlyMaterial', S, auto)],
-      }),
-      opt('find', 'cmd.stock.find', ApplicationCommandOptionType.Subcommand, {
-        options: [
-          opt('material', 'opt.material', S, { required: true, ...auto }),
-          opt('min_quality', 'opt.minQuality', ApplicationCommandOptionType.Integer, { min_value: 0, max_value: 1000 }),
-        ],
-      }),
-    ],
-  },
-  modalSubcommands: MODAL_SUBCOMMANDS,
-  execute: bySubcommand({
-    async add(ctx) {
-      const access = await requireMember(ctx.db, ctx.interaction);
-      const material = (await pickedMaterial(ctx, true))!;
-      const location = await pickedLocation(ctx, 'location');
-      const orgs = await activeOrgs(ctx.db, access.userId);
-      const m = modal(customId(NAME, 'add', `${material.kind === 'item' ? 'i' : 'r'}${material.uuid}`, location.uuid), ctx.t('stock.modal.add'))
-        .addTextDisplayComponents(info(`**${escapeMarkdown(material.entry.name)}**\n${escapeMarkdown(location.label)}`))
-        .addLabelComponents(
-          textField('amount', ctx.t('stock.field.amount', { unit: unit(ctx.lang, material.kind) }), { description: ctx.t('stock.field.amountHint'), maxLength: 30 }),
-          textField('quality', ctx.t('stock.field.quality'), { description: ctx.t('stock.field.qualityHint'), maxLength: 4 }),
-          orgBox(ctx.lang, orgs, [access.guildId]),
-        );
-      await ctx.showModal(m);
+function stockCommandOf(area: Area): BotCommand {
+  const NAME = area.name;
+  const cmd = (sub: string) => `cmd.${area.key}${sub ? `.${sub}` : ''}` as MessageKey;
+  const pickOpt = area.components ? 'opt.component' : 'opt.material';
+  return {
+    data: {
+      name: NAME,
+      ...localizedDescription(cmd('')),
+      contexts: [InteractionContextType.Guild],
+      integration_types: [ApplicationIntegrationType.GuildInstall],
+      options: [
+        opt('add', cmd('add'), ApplicationCommandOptionType.Subcommand, {
+          options: [opt(area.option, pickOpt, S, { required: true, ...auto }), opt('location', 'opt.location', S, { required: true, ...auto })],
+        }),
+        opt('remove', cmd('remove'), ApplicationCommandOptionType.Subcommand, { options: [batchOpt()] }),
+        opt('adjust', cmd('adjust'), ApplicationCommandOptionType.Subcommand, { options: [batchOpt()] }),
+        opt('move', cmd('move'), ApplicationCommandOptionType.Subcommand, {
+          options: [batchOpt(), opt('to', 'opt.toLocation', S, { required: true, ...auto })],
+        }),
+        opt('give', cmd('give'), ApplicationCommandOptionType.Subcommand, {
+          options: [batchOpt(), opt('member', 'opt.recipient', S, { required: true, ...auto })],
+        }),
+        opt('share', cmd('share'), ApplicationCommandOptionType.Subcommand, { options: [batchOpt()] }),
+        opt('list', cmd('list'), ApplicationCommandOptionType.Subcommand, {
+          options: [opt(area.option, area.components ? 'opt.onlyComponent' : 'opt.onlyMaterial', S, auto)],
+        }),
+        opt('find', cmd('find'), ApplicationCommandOptionType.Subcommand, {
+          options: [
+            opt(area.option, pickOpt, S, { required: true, ...auto }),
+            // Components have no quality
+            ...(area.components ? [] : [opt('min_quality', 'opt.minQuality', ApplicationCommandOptionType.Integer, { min_value: 0, max_value: 1000 })]),
+          ],
+        }),
+      ],
     },
-    async remove(ctx) {
+    modalSubcommands: MODAL_SUBCOMMANDS,
+    execute: bySubcommand({
+      async add(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const material = (await pickedMaterial(area, ctx, true))!;
+        const location = await pickedLocation(ctx, 'location');
+        const orgs = await activeOrgs(ctx.db, access.userId);
+        const m = modal(customId(NAME, 'add', `${material.kind === 'item' ? 'i' : 'r'}${material.uuid}`, location.uuid), ctx.t('stock.modal.add'))
+          .addTextDisplayComponents(info(`**${escapeMarkdown(material.entry.label)}**\n${escapeMarkdown(location.label)}`))
+          .addLabelComponents(
+            textField('amount', ctx.t('stock.field.amount', { unit: unit(ctx.lang, material.kind) }), { description: ctx.t('stock.field.amountHint'), maxLength: 30 }),
+            // A component has stats instead of a quality (none for looted-only ones)
+            ...(!area.components ? [textField('quality', ctx.t('stock.field.quality'), { description: ctx.t('stock.field.qualityHint'), maxLength: 4 })]
+              : material.entry.stats.length ? [statsField(ctx.lang, material.entry.stats, null)] : []),
+            orgBox(ctx.lang, orgs, [access.guildId]),
+          );
+        await ctx.showModal(m);
+      },
+      async remove(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const p = await pickedBatch(area, ctx, actorOf(access), 'change');
+        await ctx.showModal(modal(customId(NAME, 'rm', p.batch.id, p.batch.quantity), ctx.t('stock.modal.remove'))
+          .addTextDisplayComponents(info(await batchHead(ctx.db, p, ctx.lang)))
+          .addLabelComponents(amountField(ctx.lang, p.batch.kind, p.batch.quantity)));
+      },
+      async adjust(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const p = await pickedBatch(area, ctx, actorOf(access), 'change');
+        const stats = area.components ? (await materialCatalog(ctx.db, ctx.lang)).get(p.batch.itemUuid!)?.stats ?? [] : [];
+        await ctx.showModal(modal(customId(NAME, 'adj', p.batch.id, p.batch.quantity), ctx.t('stock.modal.adjust'))
+          .addTextDisplayComponents(info(await batchHead(ctx.db, p, ctx.lang)))
+          .addLabelComponents(
+            amountField(ctx.lang, p.batch.kind, p.batch.quantity, 'stock.field.counted', 'stock.field.countedHint'),
+            ...(stats.length ? [statsField(ctx.lang, stats, p.batch.stats)] : []),
+          ));
+      },
+      async move(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const p = await pickedBatch(area, ctx, actorOf(access), 'move');
+        const to = await pickedLocation(ctx, 'to');
+        if (to.uuid === p.batch.locationUuid) throw new UserError('stock.err.nothingToMove');
+        await ctx.showModal(modal(customId(NAME, 'mv', p.batch.id, p.batch.quantity, to.uuid), ctx.t('stock.modal.move'))
+          .addTextDisplayComponents(info(`${await batchHead(ctx.db, p, ctx.lang)}\n${ctx.t('stock.modal.to', { target: `**${escapeMarkdown(to.label)}**` })}`))
+          .addLabelComponents(amountField(ctx.lang, p.batch.kind, p.batch.quantity)));
+      },
+      async give(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const p = await pickedBatch(area, ctx, actorOf(access), 'move');
+        const userId = ctx.interaction.options.getString('member', true);
+        if (userId === access.userId) throw new UserError('stock.err.giveSelf');
+        const entry = /^\d{17,20}$/.test(userId) ? await rosterEntry(ctx.db, access.guildId, userId) : null;
+        if (!entry?.active) throw new UserError('stock.err.holderNotMember');
+        await ctx.showModal(modal(customId(NAME, 'give', p.batch.id, p.batch.quantity, userId), ctx.t('stock.modal.give'))
+          .addTextDisplayComponents(info(`${await batchHead(ctx.db, p, ctx.lang, false)}\n${ctx.t('stock.modal.to', { target: `**${escapeMarkdown(entry.displayName)}**` })}`))
+          .addLabelComponents(amountField(ctx.lang, p.batch.kind, p.batch.quantity)));
+      },
+      async share(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const p = await pickedBatch(area, ctx, actorOf(access), 'move');
+        // Orgs the batch is shared in stay on offer even where the user is no longer active: taking back always works
+        const active = await activeOrgs(ctx.db, access.userId);
+        const gone = await orgNames(ctx.db, p.sharedIn.filter((g) => !active.some((o) => o.guildId === g)));
+        await ctx.showModal(modal(customId(NAME, 'share', p.batch.id), ctx.t('stock.modal.share'))
+          .addTextDisplayComponents(info(await batchHead(ctx.db, p, ctx.lang)))
+          .addLabelComponents(orgBox(ctx.lang, [...active, ...gone], p.sharedIn)));
+      },
+      async list(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const material = await pickedMaterial(area, ctx, false);
+        await ctx.reply(await listPanel(area, ctx.db, access, { scope: 'p', page: 0, material: material?.uuid ?? null }, ctx.lang));
+      },
+      async find(ctx) {
+        const access = await requireMember(ctx.db, ctx.interaction);
+        const material = (await pickedMaterial(area, ctx, true))!;
+        const min = area.components ? 0 : ctx.interaction.options.getInteger('min_quality') ?? 0;
+        const found = named(await findStock(ctx.db, access.guildId, access.userId, material.uuid, min, ctx.lang), await materialCatalog(ctx.db, ctx.lang));
+        const name = escapeMarkdown(material.entry.label);
+        const minText = min > 0 ? ctx.t('stock.find.min', { min }) : '';
+        const lines = found.slice(0, MAX_FIND).map((p) => `- ${[
+          p.component ? escapeMarkdown(p.statsText ?? '') : `Q${p.batch.quality}`,
+          amountText(ctx.lang, p.batch.quantity, p.batch.kind),
+          escapeMarkdown(p.location),
+          p.sharedIn.length ? `${ctx.t('stock.org')} (${escapeMarkdown(p.holderName ?? '?')})` : ctx.t('stock.personal'),
+        ].filter(Boolean).join(' · ')}`);
+        if (found.length > MAX_FIND) lines.push(ctx.t('bp.who.more', { count: found.length - MAX_FIND }));
+        const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(found.length
+          ? [ctx.t('stock.find.title', { material: name, min: minText, count: found.length }), ...lines].join('\n')
+          : ctx.t('stock.find.none', { material: name, min: minText })));
+        // Your own batches and this org's: the web app's "All" holds both
+        const row = linkRow(area, ctx.lang, 'all');
+        if (row) container.addActionRowComponents(row);
+        await ctx.reply(panel(container));
+      },
+    }),
+    autocomplete: (interaction, lang, db) => autocomplete(area, interaction, lang, db),
+    modal: (ctx) => onModal(area, ctx.interaction, ctx.db, ctx.lang),
+    async component(ctx) {
+      const [, action, ...rest] = ctx.interaction.customId.split(':');
       const access = await requireMember(ctx.db, ctx.interaction);
-      const p = await pickedBatch(ctx, actorOf(access), 'change');
-      await ctx.showModal(modal(customId(NAME, 'rm', p.batch.id, p.batch.quantity), ctx.t('stock.modal.remove'))
-        .addTextDisplayComponents(info(await batchHead(ctx.db, p, ctx.lang)))
-        .addLabelComponents(amountField(ctx.lang, p.batch.kind, p.batch.quantity)));
+      // "Your stock" under a booking and "Show all" on the board open a new panel; the list's own buttons redraw it
+      if (action === 'mine' || action === 'org') {
+        const p = await listPanel(area, ctx.db, access, { scope: action === 'mine' ? 'p' : 'o', page: 0, material: null }, ctx.lang);
+        await ctx.interaction.reply({ ...p, flags: p.flags | MessageFlags.Ephemeral });
+        return;
+      }
+      if (action !== 'list') throw new Error(`Unexpected component ${ctx.interaction.customId}`);
+      await ctx.interaction.update(await listPanel(area, ctx.db, access, parseListId(rest), ctx.lang));
     },
-    async adjust(ctx) {
-      const access = await requireMember(ctx.db, ctx.interaction);
-      const p = await pickedBatch(ctx, actorOf(access), 'change');
-      await ctx.showModal(modal(customId(NAME, 'adj', p.batch.id, p.batch.quantity), ctx.t('stock.modal.adjust'))
-        .addTextDisplayComponents(info(await batchHead(ctx.db, p, ctx.lang)))
-        .addLabelComponents(amountField(ctx.lang, p.batch.kind, p.batch.quantity, 'stock.field.counted', 'stock.field.countedHint')));
-    },
-    async move(ctx) {
-      const access = await requireMember(ctx.db, ctx.interaction);
-      const p = await pickedBatch(ctx, actorOf(access), 'move');
-      const to = await pickedLocation(ctx, 'to');
-      if (to.uuid === p.batch.locationUuid) throw new UserError('stock.err.nothingToMove');
-      await ctx.showModal(modal(customId(NAME, 'mv', p.batch.id, p.batch.quantity, to.uuid), ctx.t('stock.modal.move'))
-        .addTextDisplayComponents(info(`${await batchHead(ctx.db, p, ctx.lang)}\n${ctx.t('stock.modal.to', { target: `**${escapeMarkdown(to.label)}**` })}`))
-        .addLabelComponents(amountField(ctx.lang, p.batch.kind, p.batch.quantity)));
-    },
-    async give(ctx) {
-      const access = await requireMember(ctx.db, ctx.interaction);
-      const p = await pickedBatch(ctx, actorOf(access), 'move');
-      const userId = ctx.interaction.options.getString('member', true);
-      if (userId === access.userId) throw new UserError('stock.err.giveSelf');
-      const entry = /^\d{17,20}$/.test(userId) ? await rosterEntry(ctx.db, access.guildId, userId) : null;
-      if (!entry?.active) throw new UserError('stock.err.holderNotMember');
-      await ctx.showModal(modal(customId(NAME, 'give', p.batch.id, p.batch.quantity, userId), ctx.t('stock.modal.give'))
-        .addTextDisplayComponents(info(`${await batchHead(ctx.db, p, ctx.lang, false)}\n${ctx.t('stock.modal.to', { target: `**${escapeMarkdown(entry.displayName)}**` })}`))
-        .addLabelComponents(amountField(ctx.lang, p.batch.kind, p.batch.quantity)));
-    },
-    async share(ctx) {
-      const access = await requireMember(ctx.db, ctx.interaction);
-      const p = await pickedBatch(ctx, actorOf(access), 'move');
-      // Orgs the batch is shared in stay on offer even where the user is no longer active: taking back always works
-      const active = await activeOrgs(ctx.db, access.userId);
-      const gone = await orgNames(ctx.db, p.sharedIn.filter((g) => !active.some((o) => o.guildId === g)));
-      await ctx.showModal(modal(customId(NAME, 'share', p.batch.id), ctx.t('stock.modal.share'))
-        .addTextDisplayComponents(info(await batchHead(ctx.db, p, ctx.lang)))
-        .addLabelComponents(orgBox(ctx.lang, [...active, ...gone], p.sharedIn)));
-    },
-    async list(ctx) {
-      const access = await requireMember(ctx.db, ctx.interaction);
-      const material = await pickedMaterial(ctx, false);
-      await ctx.reply(await listPanel(ctx.db, access, { scope: 'p', page: 0, material: material?.uuid ?? null }, ctx.lang));
-    },
-    async find(ctx) {
-      const access = await requireMember(ctx.db, ctx.interaction);
-      const material = (await pickedMaterial(ctx, true))!;
-      const min = ctx.interaction.options.getInteger('min_quality') ?? 0;
-      const found = await findStock(ctx.db, access.guildId, access.userId, material.uuid, min, ctx.lang);
-      const name = escapeMarkdown(material.entry.name);
-      const minText = min > 0 ? ctx.t('stock.find.min', { min }) : '';
-      const lines = found.slice(0, MAX_FIND).map((p) => `- ${[
-        `Q${p.batch.quality}`,
-        amountText(ctx.lang, p.batch.quantity, p.batch.kind),
-        escapeMarkdown(p.location),
-        p.sharedIn.length ? `${ctx.t('stock.org')} (${escapeMarkdown(p.holderName ?? '?')})` : ctx.t('stock.personal'),
-      ].join(' · ')}`);
-      if (found.length > MAX_FIND) lines.push(ctx.t('bp.who.more', { count: found.length - MAX_FIND }));
-      const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(found.length
-        ? [ctx.t('stock.find.title', { material: name, min: minText, count: found.length }), ...lines].join('\n')
-        : ctx.t('stock.find.none', { material: name, min: minText })));
-      // Your own batches and this org's: the web app's "All" holds both
-      const row = linkRow(ctx.lang, 'all');
-      if (row) container.addActionRowComponents(row);
-      await ctx.reply(panel(container));
-    },
-  }),
-  autocomplete,
-  modal: (ctx) => onModal(ctx.interaction, ctx.db, ctx.lang),
-  async component(ctx) {
-    const [, action, ...rest] = ctx.interaction.customId.split(':');
-    const access = await requireMember(ctx.db, ctx.interaction);
-    // "Your stock" under a booking and "Show all" on the board open a new panel; the list's own buttons redraw it
-    if (action === 'mine' || action === 'org') {
-      const p = await listPanel(ctx.db, access, { scope: action === 'mine' ? 'p' : 'o', page: 0, material: null }, ctx.lang);
-      await ctx.interaction.reply({ ...p, flags: p.flags | MessageFlags.Ephemeral });
-      return;
-    }
-    if (action !== 'list') throw new Error(`Unexpected component ${ctx.interaction.customId}`);
-    await ctx.interaction.update(await listPanel(ctx.db, access, parseListId(rest), ctx.lang));
-  },
-};
+  };
+}
+
+export const stockCommand = stockCommandOf(STOCK);
+export const compsCommand = stockCommandOf(COMPS);

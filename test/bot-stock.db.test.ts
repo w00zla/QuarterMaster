@@ -1,6 +1,7 @@
 // Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { sql } from 'drizzle-orm';
 import { type Db } from '../src/db/client.ts';
 import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
@@ -10,7 +11,7 @@ import { UserError } from '../src/bot/errors.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { stockList } from '../src/stock/lookup.ts';
-import { add, type Actor } from '../src/stock/service.ts';
+import { add, COMPONENT_QUALITY, type Actor } from '../src/stock/service.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -31,6 +32,14 @@ describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_
     ({ db, close } = connectAs(url, 'qm_app'));
     const snap = fixtureSnapshot();
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
+    // The fixture's cooler gets a stat as on a real one: multipliers 0.8–1.2 in its blueprint's first slot
+    const ranges = [
+      { type: 'Linear', startQuality: 0, endQuality: 500, values: { modifierAtStart: 0.8, modifierAtEnd: 1 } },
+      { type: 'Linear', startQuality: 501, endQuality: 1000, values: { modifierAtStart: 1, modifierAtEnd: 1.2 } },
+    ];
+    await db.execute(sql`UPDATE catalog.blueprint_slot SET modifiers = CASE WHEN slot_index = 0 AND tier_index = 0
+        THEN ${JSON.stringify([{ propertyUuid: U.property, ranges }])}::jsonb ELSE '[]'::jsonb END
+      WHERE blueprint_uuid IN (SELECT uuid FROM catalog.blueprint WHERE output_item_uuid = ${U.output})`);
     await ensureGuild(db, G, 'Stock Cmd Org');
     const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
     await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });
@@ -88,6 +97,19 @@ describe('/qm-stock bookings and lists (database)', { skip: url ? false : 'TEST_
       '📦 Gave **1 SCU** · **Test Metal** Q550\nTo **Olga** · Test Station');
     const olgas = await stockList(db, { scope: { personalOf: OLGA } }, 'en');
     assert.ok(olgas.some((p) => p.batch.quality === 550 && p.batch.quantity === '1.000000' && !p.sharedIn.length));
+  });
+
+  it('books components by their label with their stats, and changes the stats through a correction', async () => {
+    const cooler = { kind: 'item' as const, uuid: U.output, locationUuid: U.station, quality: COMPONENT_QUALITY };
+    assert.equal(await bookAdd(db, mia, { ...cooler, amount: '2', shareIn: [], stats: { [U.property]: '5' } }, 'en'),
+      '📥 Booked **2 pcs** · **Test Cooler · Cooler · S2 · B Military** · GPP\\_Test +5.0 %\nTest Station · personal');
+    const b = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).find((p) => p.component)!;
+    assert.equal(await bookChange(db, mia, { op: 'adjust', batchId: b.batch.id, amount: '2', expected: b.batch.quantity, stats: { [U.property]: '7.5' } }, 'en'),
+      '✏️ Stats changed · **Test Cooler · Cooler · S2 · B Military** · GPP\\_Test +7.5 %\nBatch: 2 pcs · Test Station · personal');
+    // Only the amount: the stats stay
+    const now = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).find((p) => p.component)!;
+    assert.equal(await bookChange(db, mia, { op: 'adjust', batchId: now.batch.id, amount: '3', expected: now.batch.quantity }, 'en'),
+      '✏️ Corrected by **+1 pcs** · **Test Cooler · Cooler · S2 · B Military** · GPP\\_Test +7.5 %\nBatch: 3 pcs · Test Station · personal');
   });
 
   it('lists shared stock with owners, all stock with your own marked, your own with what you share marked', async () => {

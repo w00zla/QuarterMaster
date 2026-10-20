@@ -73,10 +73,12 @@ describe('stock lookups and pickers (database)', { skip: url ? false : 'TEST_DAT
     assert.deepEqual([...materials.values()].map((m) => [m.uuid, m.kind, m.component]).sort(), [
       [U.metal, 'resource', false], [U.gem, 'item', false], [U.output, 'item', true],
     ].sort());
+    // /qm-stock offers the materials and items, /qm-comps the components by their label
     const regular = await materialChoices(db, 'de', '');
-    assert.deepEqual(regular.map((c) => c.value).sort(), [`item:${U.gem}`, `item:${U.output}`, `resource:${U.metal}`].sort());
+    assert.deepEqual(regular.map((c) => c.value).sort(), [`item:${U.gem}`, `resource:${U.metal}`].sort());
     assert.ok(regular.some((c) => c.name === 'Testmetall (SCU)'));
     assert.ok(regular.some((c) => c.name.endsWith('(Stk.)')));
+    assert.deepEqual(await materialChoices(db, 'en', '', true), [{ name: 'Test Cooler · Cooler · S2 · B Military', value: `item:${U.output}` }]);
   });
 
   it('everyone picks their own batches, shared or not; material, then best quality first', async () => {

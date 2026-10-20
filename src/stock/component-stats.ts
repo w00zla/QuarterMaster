@@ -68,3 +68,14 @@ export function statValueText(kind: StatBounds['kind'], value: string): string {
   const abs = kind === 'multiplier' ? Math.abs(n).toFixed(1) : String(Math.abs(n));
   return kind === 'multiplier' ? `${sign}${abs} %` : `${sign}${abs}`;
 }
+
+/**
+ * Stored stats with their names in the order of `named` (a component's stats from the catalog):
+ * "Coolant Rating +5.0 % · Power Pips +1"; a stat the catalog no longer lists shows "? 5"; "" without.
+ */
+export function statsText(named: { uuid: string; name: string; kind: StatBounds['kind'] }[], stats: Record<string, string> | null): string {
+  if (!stats) return '';
+  const known = named.filter((s) => s.uuid in stats).map((s) => `${s.name} ${statValueText(s.kind, stats[s.uuid]!)}`);
+  const other = Object.keys(stats).filter((k) => !named.some((s) => s.uuid === k)).map((k) => `? ${stats[k]}`);
+  return [...known, ...other].join(' · ');
+}

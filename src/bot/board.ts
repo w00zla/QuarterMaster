@@ -54,39 +54,48 @@ export function boardMessage(d: BoardData, guildId: string, lang: Lang, updatedA
   style: BoardStyle = 'list') {
   const tr = (key: Parameters<typeof t>[1], vars?: Parameters<typeof t>[2]) => t(lang, key, vars);
   const { metrics: m } = d;
-  const ofKind = (kind: 'resource' | 'item') => d.materials.filter((x) => x.kind === kind);
-  const unit = (kind: 'resource' | 'item') => tr(kind === 'item' ? 'unit.pcs' : 'unit.scu');
+  // Ship components have their own section (no quality); items are the rest
+  type Section = 'resource' | 'item' | 'component';
+  const ofKind = (kind: Section) => d.materials.filter((x) => (kind === 'component' ? x.component : x.kind === kind && !x.component));
+  const unit = (kind: Section) => tr(kind === 'resource' ? 'unit.scu' : 'unit.pcs');
+  const heading = (kind: Section) => tr(kind === 'component' ? 'board.components' : kind === 'item' ? 'board.items' : 'board.resources');
   const more = (all: unknown[]) => (all.length > BOARD_LINES ? tr('board.more', { count: all.length - BOARD_LINES }) : null);
 
   // Best quality first, with its level like the web app shows it
-  const listSection = (kind: 'resource' | 'item') => {
+  const listSection = (kind: Section) => {
     const all = ofKind(kind);
     if (!all.length) return null;
-    const lines = all.slice(0, BOARD_LINES).map((x) => tr('board.line', {
-      name: escapeMarkdown(x.name),
-      amount: `${x.total} ${unit(kind)}`,
-      quality: `${qMark(x.bestQuality)} ${x.bestQuality}`,
-      // Always plural: one holder rarely stays alone
-      holders: tr('board.holders', { count: x.holders }),
-    }));
+    const lines = all.slice(0, BOARD_LINES).map((x) => {
+      const vars = {
+        name: escapeMarkdown(x.name),
+        amount: `${x.total} ${unit(kind)}`,
+        quality: `${qMark(x.bestQuality)} ${x.bestQuality}`,
+        // Always plural: one holder rarely stays alone
+        holders: tr('board.holders', { count: x.holders }),
+      };
+      return tr(kind === 'component' ? 'board.componentLine' : 'board.line', vars);
+    });
     const rest = more(all);
     if (rest) lines.push(`-# ${rest}`);
-    return [tr(kind === 'item' ? 'board.items' : 'board.resources'), ...lines].join('\n');
+    return [heading(kind), ...lines].join('\n');
   };
   // Code blocks show names as they are (no Markdown); the stars go last, their width differs between fonts
-  const tableSection = (kind: 'resource' | 'item') => {
+  const tableSection = (kind: Section) => {
     const all = ofKind(kind);
     if (!all.length) return null;
     const cut = (name: string) => (name.length > TABLE_NAME ? `${name.slice(0, TABLE_NAME - 1)}…` : name);
+    const component = kind === 'component';
+    const name = tr(component ? 'board.col.component' : kind === 'item' ? 'board.col.item' : 'board.col.material');
     let body = textTable([
-      [tr(kind === 'item' ? 'board.col.item' : 'board.col.material'), tr('board.col.amount'), tr('board.col.holders'), tr('board.col.quality')],
+      [name, tr('board.col.amount'), tr('board.col.holders'), ...(component ? [] : [tr('board.col.quality')])],
       ...all.slice(0, BOARD_LINES).map((x) => [
-        cut(x.name), `${x.total} ${unit(kind)}`, String(x.holders), `${String(x.bestQuality).padStart(4)} ${qMark(x.bestQuality)}`,
+        cut(x.name), `${x.total} ${unit(kind)}`, String(x.holders),
+        ...(component ? [] : [`${String(x.bestQuality).padStart(4)} ${qMark(x.bestQuality)}`]),
       ]),
     ], [false, true, true, false]);
     const rest = more(all);
     if (rest) body += `\n${rest}`;
-    return `${tr(kind === 'item' ? 'board.items' : 'board.resources')}\n\`\`\`\n${body.replaceAll('`', "'")}\n\`\`\``;
+    return `${heading(kind)}\n\`\`\`\n${body.replaceAll('`', "'")}\n\`\`\``;
   };
 
   const figures = style === 'table'
@@ -94,18 +103,22 @@ export function boardMessage(d: BoardData, guildId: string, lang: Lang, updatedA
       [tr('board.col.members'), String(m.members), '', tr('board.col.blueprints'), `${m.blueprints} / ${d.obtainable}`],
       [tr('board.col.resources'), `${m.resources.scu} ${unit('resource')}`, '', tr('board.col.kinds'), String(m.resources.kinds)],
       [tr('board.col.items'), `${m.items.pieces} ${unit('item')}`, '', tr('board.col.kinds'), String(m.items.kinds)],
+      [tr('board.col.components'), `${m.components.pieces} ${unit('component')}`, '', tr('board.col.kinds'), String(m.components.kinds)],
     ], [false, true, false, false, false])}\n\`\`\``
     : [
       tr('board.people', { members: m.members, blueprints: m.blueprints, obtainable: d.obtainable }),
       tr('board.resourceFigures', { amount: m.resources.scu, kinds: m.resources.kinds, locations: m.resources.locations }),
       tr('board.itemFigures', { amount: m.items.pieces, kinds: m.items.kinds, locations: m.items.locations }),
+      tr('board.componentFigures', { amount: m.components.pieces, kinds: m.components.kinds, locations: m.components.locations }),
     ].join('\n');
   const section = style === 'table' ? tableSection : listSection;
-  const sections = [section('resource'), section('item')].filter((s): s is string => s !== null);
+  const sections = [section('resource'), section('item'), section('component')].filter((s): s is string => s !== null);
 
   const buttons = [
     new ButtonBuilder().setCustomId(customId('qm-stock', 'org')).setLabel(tr('board.btn.showAll')).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(customId('qm-comps', 'org')).setLabel(tr('board.btn.showComponents')).setStyle(ButtonStyle.Secondary),
     webAppButton(lang, webAppPath.stock(guildId), tr('board.btn.stock')),
+    webAppButton(lang, webAppPath.components(guildId), tr('board.btn.components')),
     webAppButton(lang, webAppPath.blueprints(guildId), tr('board.btn.blueprints')),
   ].filter((b): b is ButtonBuilder => !!b);
   const container = new ContainerBuilder().setAccentColor(ACCENT);

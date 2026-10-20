@@ -78,6 +78,8 @@ export async function orgMetrics(db: Db, guildIds: string[]): Promise<Map<string
 export interface OrgMaterial {
   kind: 'resource' | 'item';
   uuid: string;
+  // A ship component (an item, no quality)
+  component: boolean;
   // Exact decimal text, without trailing zeros
   total: string;
   bestQuality: number;
@@ -88,8 +90,8 @@ export interface OrgMaterial {
 /** The org's stock per material, largest amount first (per kind). */
 export async function orgMaterials(db: Db, guildId: string): Promise<OrgMaterial[]> {
   const found = await rows<OrgMaterial>(db, sql`
-    SELECT b.kind, coalesce(b.resource_uuid, b.item_uuid) AS uuid, sum(b.quantity)::text AS total,
-      max(b.quality)::int AS "bestQuality", count(DISTINCT b.owner_user_id)::int AS holders
+    SELECT b.kind, coalesce(b.resource_uuid, b.item_uuid) AS uuid, bool_or(${componentItemSql('b.item_uuid')}) AS component,
+      sum(b.quantity)::text AS total, max(b.quality)::int AS "bestQuality", count(DISTINCT b.owner_user_id)::int AS holders
     FROM app.stock_share sh
     JOIN app.stock_batch b ON b.id = sh.batch_id AND b.state = 'stored'
     JOIN app.member m ON m.guild_id = sh.guild_id AND m.user_id = b.owner_user_id AND m.active

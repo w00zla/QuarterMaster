@@ -95,8 +95,16 @@ All root commands are prefixed `qm-`.
   and the amount prefilled ("all", adjust: the current amount, "0" allowed); `list [material]` (panel:
   Personal / this org / All, 20 lines per page) and `find material [min_quality]`. The booking logic
   (`bookAdd`, `bookChange`, `bookShare`, `listLines`) takes no Discord objects and is tested on its own.
-  `StockError` codes map to `stock.err.<code>`. Splitting, merging and ship components are not in the bot
-  yet.
+  `StockError` codes map to `stock.err.<code>`. Splitting and merging are not in the bot. `/qm-stock` offers
+  and lists only materials and items, like the web app's stock tab.
+- **`/qm-comps`** (same file, `stockCommandOf` with the area `COMPS`): ship components, the same subcommands
+  as `/qm-stock` (option `component`, `find` without a minimum quality), like the web app's components tab.
+  Named by their unique label (`MaterialEntry.label`), stats instead of a quality (`statsText`). `add` and
+  `adjust` carry one multi-line field "Stats" (`statLines`: one line per stat the blueprint can improve,
+  "Coolant Rating (max. +20.0 %): 0", the current values on adjust; `parseStatLines` takes the number after
+  each colon, "%" allowed, an empty field = none) instead of a field per stat: a modal holds at most 5
+  elements and tractor beams carry 5 stats. Looted-only components get no such field. Other stats on
+  `adjust` answer "Stats changed" with the batch as it is now.
 - **`/qm-refinery`** (`commands/refinery.ts`, parsing in `refinery-lines.ts`; personal, no member role
   needed): `start station` (modal: optional duration, material lines `<name> <quality> <yield SCU>` read from
   the right, resolved with `findMaterial` over the resources in de and en) → preview panel (Register / Edit /
@@ -118,16 +126,19 @@ Polls `app.history` every 30 s per server with a channel and a level other than 
 `details.sharedIn` holds it; `blueprints` = blueprint add/remove by the server's active members; `all` =
 both). One line per row in the server's base language (`logLine`, people as mentions, `allowedMentions`
 none), packed into messages of ≤ 2000 characters; then `logs_after` moves forward (only if `/qm-setup` did not
-reset it meanwhile). A new channel or level sets `logs_after` to the newest row, so the past is never posted.
+reset it meanwhile). Components show their label and stats instead of a quality; an adjust that changed
+their stats shows old → new stats. A new channel or level sets `logs_after` to the newest row, so the past is never posted.
 Discord errors other than an unusable channel are retried next round; an unusable channel's lines are skipped.
 
 ## Board (`board.ts`, `BoardPoster`)
 
 One message per org in its board channel, edited in place, in the server's base language: title
 (`board_title` or the org name) with the server icon as thumbnail and the optional subtitle, the figures of
-the web app's org tile (`orgMetrics` in `src/stock/org-summary.ts`), the shared materials per kind
-(`orgMaterials`: total, best quality with its level, holder count; the 10 largest per kind, "+n more"),
-buttons "Show all" (`qm-stock:org`, member check) and deep links Stock/Blueprints, "Updated <t:…:R>". Style
+the web app's org tile (`orgMetrics` in `src/stock/org-summary.ts`: resources, items, components), the shared
+materials per kind (`orgMaterials`: total, best quality with its level, holder count; the 10 largest per kind,
+"+n more"; components in a section of their own without quality), buttons "Show all" (`qm-stock:org`, member
+check, materials and items) and "All components" (`qm-comps:org`), deep links Stock/Components/Blueprints (five
+buttons, Discord's limit per row), "Updated <t:…:R>". Style
 `list` (text lines) or `table` (code-block tables: amounts right-aligned, the stars last, names cut at 22
 characters, backticks replaced). Only stored stock shared in the org by active members; never unshared stock,
 refinery jobs or holder names. Rendered only for orgs marked as changed (`LISTEN qm_changes`; `/qm-setup`, a

@@ -9,6 +9,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { rows } from '../db/query.ts';
 import { formatAmount } from '../stock/amount.ts';
+import { statsText } from '../stock/component-stats.ts';
 import { locationCatalog, materialCatalog, missingNames } from '../stock/lookup.ts';
 import { blueprintCatalog } from './blueprints.ts';
 import { t, type Lang, type MessageKey } from './i18n.ts';
@@ -24,7 +25,11 @@ export interface LogRow {
   guildId: string | null;
   targetKind: 'resource' | 'item' | 'blueprint';
   targetUuid: string;
-  details: { amount?: string; batchAmount?: string; from?: string; quality?: number; locationUuid?: string; toLocationUuid?: string };
+  details: {
+    amount?: string; batchAmount?: string; from?: string; quality?: number; locationUuid?: string; toLocationUuid?: string;
+    // Ship components: the batch's stats, and on an adjust that changed them the ones before
+    stats?: Record<string, string>; statsFrom?: Record<string, string>;
+  };
 }
 
 // Rows per guild and round; the rest follows next round
@@ -53,6 +58,8 @@ export function logRows(db: Db, guildId: string, after: number, level: Exclude<L
 
 export interface LogNames {
   material: (uuid: string) => string;
+  // Ship components: their stats as text ("" without any); null for every other material
+  stats?: (uuid: string, stats: Record<string, string> | undefined) => string | null;
   location: (uuid: string | undefined) => string;
   blueprint: (uuid: string) => string;
 }
@@ -65,15 +72,24 @@ export function logLine(r: LogRow, guildId: string, names: LogNames, lang: Lang)
   }
   const unit = t(lang, r.targetKind === 'item' ? 'unit.pcs' : 'unit.scu');
   const amount = (a: string | undefined) => (a === undefined ? '' : `**${formatAmount(a)} ${unit}** · `);
-  const what = `**${escapeMarkdown(names.material(r.targetUuid))}** Q${r.details.quality ?? '?'}`;
+  const name = `**${escapeMarkdown(names.material(r.targetUuid))}**`;
+  // A component shows its stats instead of a quality
+  const statsOf = (s: Record<string, string> | undefined) => names.stats?.(r.targetUuid, s) ?? null;
+  const stats = statsOf(r.details.stats);
+  const what = stats === null ? `${name} Q${r.details.quality ?? '?'}` : [name, stats && escapeMarkdown(stats)].filter(Boolean).join(' · ');
   const where = escapeMarkdown(names.location(r.details.locationUuid));
   const vars = { who: `<@${r.actorUserId}>`, amount: amount(r.details.amount), what, where };
   // A give seen from another org the batch was shared in: the recipient is none of its business
   if (r.action === 'give' && r.guildId === guildId && r.toOwnerUserId) return t(lang, 'logs.give', { ...vars, to: `<@${r.toOwnerUserId}>` });
   if (r.action === 'give') return t(lang, 'logs.giveAway', vars);
   if (r.action === 'adjust') {
-    const change = `${formatAmount(r.details.from ?? '?')} → ${formatAmount(r.details.amount ?? '?')} ${unit}`;
-    return t(lang, 'logs.adjust', { ...vars, change });
+    const [from, to] = [formatAmount(r.details.from ?? '?'), formatAmount(r.details.amount ?? '?')];
+    const amounts = `${from} → ${to} ${unit}`;
+    if (r.details.statsFrom === undefined) return t(lang, 'logs.adjust', { ...vars, change: amounts });
+    // A component's stats changed (and maybe its amount): old → new stats, the name without them
+    const statsLine = (s: Record<string, string> | undefined) => escapeMarkdown(statsOf(s) || t(lang, 'logs.noStats'));
+    const change = [from !== to ? amounts : null, `${statsLine(r.details.statsFrom)} → ${statsLine(r.details.stats)}`].filter(Boolean).join(' · ');
+    return t(lang, 'logs.adjust', { ...vars, what: name, change });
   }
   if (r.action === 'move') return t(lang, 'logs.move', { ...vars, to: escapeMarkdown(names.location(r.details.toLocationUuid)) });
   // What the batch holds now (rows before it was recorded have no such amount)
@@ -119,7 +135,15 @@ async function namesFor(db: Db, lang: Lang, logRowsList: LogRow[]): Promise<LogN
     [...new Set(stock.map((r) => r.targetUuid).filter((u) => !materials.has(u)))],
     [...new Set(places.filter((u) => !locations.has(u)))]);
   return {
-    material: (uuid) => materials.get(uuid)?.name ?? missing.get(uuid) ?? '?',
+    // Components by their unique label, like /qm-comps names them
+    material: (uuid) => {
+      const m = materials.get(uuid);
+      return (m?.component ? m.label : m?.name) ?? missing.get(uuid) ?? '?';
+    },
+    stats: (uuid, stats) => {
+      const m = materials.get(uuid);
+      return m?.component ? statsText(m.stats, stats ?? null) : null;
+    },
     location: (uuid) => (uuid ? locations.get(uuid)?.short ?? missing.get(uuid) ?? '?' : '?'),
     // The catalog holds retired blueprints too
     blueprint: (uuid) => blueprints.byUuid.get(uuid)?.label ?? '?',

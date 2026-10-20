@@ -11,7 +11,7 @@ const metrics = {
   components: { kinds: 0, pieces: '0', locations: 0 },
 };
 const data = (materials: BoardData['materials']): BoardData => ({ orgName: 'Red_Hollow', subtitle: null, metrics, obtainable: 312, materials });
-const resource = (i: number) => ({ kind: 'resource' as const, uuid: `r${i}`, name: `Ore_${i}`, total: String(100 - i), bestQuality: 800, holders: 2 });
+const resource = (i: number) => ({ kind: 'resource' as const, uuid: `r${i}`, component: false, name: `Ore_${i}`, total: String(100 - i), bestQuality: 800, holders: 2 });
 
 type Node = {
   type: number; content?: string; custom_id?: string; url?: string; label?: string; accent_color?: number;
@@ -36,19 +36,28 @@ describe('board message', () => {
   it('shows head, figures, then one section per kind with total, best quality with its level and holder count', () => {
     const p = boardMessage(data([
       resource(1),
-      { kind: 'resource', uuid: 'r2', name: 'Quantanium', total: '42.5', bestQuality: 1000, holders: 1 },
-      { kind: 'item', uuid: 'i1', name: 'Weapon Barrel', total: '8', bestQuality: 480, holders: 3 },
+      { kind: 'resource', uuid: 'r2', component: false, name: 'Quantanium', total: '42.5', bestQuality: 1000, holders: 1 },
+      { kind: 'item', uuid: 'i1', component: false, name: 'Weapon Barrel', total: '8', bestQuality: 480, holders: 3 },
     ]), G, 'en', at);
     assert.equal(p.flags, MessageFlags.IsComponentsV2);
     assert.deepEqual(p.allowedMentions, { parse: [] });
     assert.equal(nodes(p)[0]!.accent_color, 0xe0913a);
     assert.equal(text(p), [
       '## Red\\_Hollow',
-      '👥 **12** Members · 📘 **87 / 312** Blueprints\n⛏️ **1284.5 SCU** Resources · 23 kinds · 6 locations\n📦 **38 pcs** Items · 2 kinds · 3 locations',
+      '👥 **12** Members · 📘 **87 / 312** Blueprints\n⛏️ **1284.5 SCU** Resources · 23 kinds · 6 locations\n📦 **38 pcs** Items · 2 kinds · 3 locations'
+        + '\n🔧 **0 pcs** Components · 0 kinds · 0 locations',
       '### ⛏️ Resources\n- **Ore\\_1** · 99 SCU · ★★★★ 800 · 2 holders\n- **Quantanium** · 42.5 SCU · ♛ 1000 · 1 holders',
       '### 📦 Items\n- **Weapon Barrel** · 8 pcs · ◌ 480 · 3 holders',
       `-# Updated <t:${at.getTime() / 1000}:R>`,
     ].join('\n'));
+  });
+
+  it('shows ship components in a section of their own, without a quality', () => {
+    const cooler = { kind: 'item' as const, uuid: 'c1', component: true, name: 'Glacier', total: '3', bestQuality: 0, holders: 2 };
+    const list = text(boardMessage(data([{ kind: 'item', uuid: 'i1', component: false, name: 'Weapon Barrel', total: '8', bestQuality: 480, holders: 3 }, cooler]), G, 'de', at));
+    assert.ok(list.includes('### 📦 Items\n- **Weapon Barrel** · 8 Stk. · ◌ 480 · 3 Halter\n### 🔧 Komponenten\n- **Glacier** · 3 Stk. · 2 Halter'));
+    const table = text(boardMessage(data([cooler]), G, 'en', at, null, 'table'));
+    assert.ok(table.includes('### 🔧 Components\n```\nComponent   Amount   Holders\nGlacier      3 pcs   2\n```'));
   });
 
   it('shows the subtitle as a small line below the title', () => {
@@ -73,15 +82,16 @@ describe('board message', () => {
 
   it('table style: figures and materials as code-block tables, amounts right-aligned, the stars last', () => {
     const p = boardMessage(data([
-      { kind: 'resource', uuid: 'r1', name: 'Laranite', total: '312', bestQuality: 790, holders: 4 },
-      { kind: 'resource', uuid: 'r2', name: 'Quantanium_with_`ticks`_and_a_long_name', total: '42.5', bestQuality: 1000, holders: 1 },
+      { kind: 'resource', uuid: 'r1', component: false, name: 'Laranite', total: '312', bestQuality: 790, holders: 4 },
+      { kind: 'resource', uuid: 'r2', component: false, name: 'Quantanium_with_`ticks`_and_a_long_name', total: '42.5', bestQuality: 1000, holders: 1 },
     ]), G, 'en', at, null, 'table');
     const t = text(p);
     assert.ok(t.includes([
       '```',
-      'Members             12      Blueprints   87 / 312',
-      'Resources   1284.5 SCU      Kinds        23',
-      'Items           38 pcs      Kinds        2',
+      'Members              12      Blueprints   87 / 312',
+      'Resources    1284.5 SCU      Kinds        23',
+      'Items            38 pcs      Kinds        2',
+      'Components        0 pcs      Kinds        0',
       '```',
     ].join('\n')));
     // Names are cut, never Markdown-escaped, and cannot close the block
@@ -110,11 +120,13 @@ describe('board message', () => {
       process.env.WEBAPP_ORIGIN = 'https://qm.example';
       assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [
         ['Show all', 'qm-stock:org'],
+        ['All components', 'qm-comps:org'],
         ['Stock', `https://qm.example/stock?scope=${G}`],
+        ['Components', `https://qm.example/components?scope=${G}`],
         ['Blueprints', `https://qm.example/blueprints?scope=${G}`],
       ]);
       delete process.env.WEBAPP_ORIGIN;
-      assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [['Show all', 'qm-stock:org']]);
+      assert.deepEqual(buttons(boardMessage(data([]), G, 'en', at)), [['Show all', 'qm-stock:org'], ['All components', 'qm-comps:org']]);
     } finally {
       if (before === undefined) delete process.env.WEBAPP_ORIGIN;
       else process.env.WEBAPP_ORIGIN = before;

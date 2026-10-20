@@ -23,6 +23,22 @@ describe('logs channel lines', () => {
       '📤 <@100000000000000001> took out **3 SCU** · **Quantanium** Q820 · Area18 · batch empty');
   });
 
+  it('shows a component by its label with its stats instead of a quality, and a change of its stats', () => {
+    const comp: LogNames = {
+      ...names, material: () => 'Glacier · Cooler · S2 · B Military',
+      stats: (_u, s) => (s?.p ? `Coolant Rating +${s.p}.0 %` : ''),
+    };
+    const base = { targetKind: 'item' as const, targetUuid: 'C' };
+    assert.equal(logLine(row({ ...base, details: { amount: '1', quality: 0, stats: { p: '5' }, locationUuid: 'L1' } }), 'G', comp, 'en'),
+      '📥 <@100000000000000001> added **1 pcs** · **Glacier · Cooler · S2 · B Military** · Coolant Rating +5.0 % · Area18');
+    assert.equal(logLine(row({ ...base, action: 'share', guildId: 'G', details: { amount: '2', quality: 0, locationUuid: 'L1' } }), 'G', comp, 'de'),
+      '📢 <@100000000000000001> teilt **2 Stk.** · **Glacier · Cooler · S2 · B Military** · Area18');
+    assert.equal(logLine(row({ ...base, action: 'adjust', details: { amount: '2', from: '2', quality: 0, stats: { p: '7' }, statsFrom: {}, locationUuid: 'L1' } }),
+      'G', comp, 'de'), '✏️ <@100000000000000001> korrigiert **Glacier · Cooler · S2 · B Military** · Area18: ohne Werte → Coolant Rating +7.0 %');
+    assert.equal(logLine(row({ ...base, action: 'adjust', details: { amount: '1', from: '2', quality: 0, stats: {}, statsFrom: { p: '7' }, locationUuid: 'L1' } }),
+      'G', comp, 'en'), '✏️ <@100000000000000001> corrected **Glacier · Cooler · S2 · B Military** · Area18: 2 → 1 pcs · Coolant Rating +7.0 % → no stats');
+  });
+
   it('names the recipient of a give only in the org it happened in', () => {
     const give = row({ action: 'give', guildId: 'G', toOwnerUserId: '100000000000000002' });
     assert.equal(logLine(give, 'G', names, 'en'), '📦 <@100000000000000001> gave **12.5 SCU** · **Quantanium** Q820 to <@100000000000000002> · Area18');

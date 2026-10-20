@@ -59,7 +59,8 @@ describe('/qm-help', () => {
     assert.ok(user.includes('qm-crafting') && !user.includes('qm-help'));
     const stock = commands.find((c) => c.data.name === 'qm-stock')!.data;
     const [de] = helpLines('de', [stock]);
-    assert.match(de!, /^\*\*\/qm-stock\*\* · Materialien/);
+    assert.match(de!, /^\*\*\/qm-stock\*\* · Ressourcen/);
     assert.match(de!, /\n- `add` /);
+    assert.ok(user.includes('qm-comps'));
   });
 });
