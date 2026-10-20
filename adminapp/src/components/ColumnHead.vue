@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Header row of a grid table: click a column to sort, drag the grip at its
 // right edge to resize that column, double-click the grip to reset the width.
-// Fixed columns and the filler (fillerKey) have no grip. The root carries the parent's `.row.cols-head`
+// Fixed columns and the filler (fillerKey) have no grip; slot `col-<key>` adds to a column's head. The root carries the parent's `.row.cols-head`
 // styling; the grid template comes from the parent's `--cols` variable.
 import HelpTip from "./HelpTip.vue";
 import Icon, { type IconName } from "./Icon.vue";
@@ -32,6 +32,8 @@ const emit = defineEmits<{ sort: [key: string]; resize: [key: string, e: MouseEv
         :name="sort.dir === 'asc' ? 'chevron-up' : 'chevron-down'"
         :size="12"
       />
+      <!-- Extra content of a column's head, e.g. a button in an action column (slot "col-<key>") -->
+      <slot :name="`col-${c.key}`" />
       <span
         v-if="!c.fixed && c.key !== filler"
         class="grip"

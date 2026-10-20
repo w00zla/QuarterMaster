@@ -29,7 +29,7 @@ onMounted(async () => {
       </div>
       <!-- More rows than fit: the last one fades out -->
       <div class="rows" :class="{ more: view.more }">
-        <div v-for="(r, i) in view.rows" :key="i" class="row">
+        <div v-for="(r, i) in view.rows" :key="i" class="row" :class="{ dim: r.dim }">
           <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="10" />{{ r.tag }}</span>
           <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
           <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
@@ -188,6 +188,13 @@ body,
 
 .detail {
   color: var(--text-2);
+}
+
+/* Registered or in stock already: dimmed like in the panel */
+.row.dim,
+.row.dim .name,
+.row.dim .detail {
+  color: var(--text-3);
 }
 
 .num {

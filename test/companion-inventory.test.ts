@@ -6,8 +6,8 @@ import { describe, it } from 'node:test';
 import { addName, emptyNames } from '../src/stock/material-names.ts';
 import type { StockBatch } from '../src/webapp/api-types.ts';
 import {
-  addRequest, fromMicro, InventoryScan, proposalsOf, sightingOf, toMicro,
-  type InventoryCatalog, type InventoryReadEvent, type ReadTile, type ReadTooltip,
+  addRequest, fromMicro, inStockOf, InventoryScan, proposalsOf, sightingOf, toMicro,
+  type InventoryCatalog, type InventoryReadEvent, type Proposal, type ReadTile, type ReadTooltip,
 } from '../companion/src/inventory.ts';
 
 const APHORITE = '00000000-0000-4000-8000-000000000001';
@@ -205,5 +205,19 @@ describe('proposals', () => {
     assert.deepEqual(addRequest(ps[1]!, LOC, ['g1']), { subjectUuid: SILICON, locationUuid: LOC, quality: 310, amount: '0.134', guildIds: ['g1'] });
     // Sightings are keyed by content, so the proposal ids are stable across scrolls
     assert.equal(ps[0]!.id, '0|' + SILICON + '|310|2');
+  });
+
+  it('marks the stacks the stored stock covers: registered first, then the earliest seen', () => {
+    const p = (id: string, quality: number, amount: string): Proposal =>
+      ({ id, materialUuid: SILICON, quality, unit: 'SCU', amount, amountUncertain: false, stored: '' });
+    // Newest first, as listed
+    const ps = [p('d', 310, '1'), p('c', 310, '2'), p('b', 310, '1.5'), p('a', 310, '1'), p('x', 782, '1')];
+    const stock = [batch(SILICON, 310, '2'), batch(SILICON, 310, '0.5'), batch(SILICON, 782, '5', OTHER)];
+    // 2.5 stored: a (1) and b (1.5) are covered, c and d are new; Q782 has none here
+    assert.deepEqual([...inStockOf(ps, stock, LOC, new Set())].sort(), ['a', 'b']);
+    // c registered here: it counts first (2), then a (1) fits no more of the 0.5 left
+    assert.deepEqual([...inStockOf(ps, stock, LOC, new Set(['c']))].sort(), ['c']);
+    // A registered one counts even when the stock was not reloaded yet
+    assert.deepEqual([...inStockOf(ps, [], LOC, new Set(['x']))], ['x']);
   });
 });

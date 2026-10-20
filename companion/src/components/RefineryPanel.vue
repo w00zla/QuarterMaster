@@ -7,8 +7,11 @@
 // A finished job, registered or not: Store (the terminal's yields). A job no read of the station showed: Remove (after a
 // confirmation) or Keep. Matched running jobs are updated without asking.
 import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
+import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import ColumnsButton from "./ColumnsButton.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { langRef, t } from "../i18n";
 import { overlayRows, tabCounts } from "../overlay";
@@ -58,6 +61,19 @@ function rows(p: Proposal) {
 const total = (p: Proposal) => fromMicro(rows(p).reduce((sum, x) => sum + toMicro(x.scu), 0n));
 // A registered job behind the card (store, missing), or not yet (new, finished)
 const registered = (p: Proposal) => p.kind === "store" || p.kind === "missing";
+
+// The materials' columns, one head for every card (widths and the hidden ones kept), like the web app's
+// tables: the material takes the room left, quality and amount resize; the last column holds the chooser
+const columns = computed<ColumnSpec[]>(() => [
+  { key: "material", label: t("col.material"), width: 120, sortable: false, fill: true },
+  { key: "quality", label: t("col.quality"), width: 40, sortable: false, hideable: true },
+  { key: "amount", label: t("col.amount"), width: 88, sortable: false, hideable: true },
+  { key: "actions", label: "", width: 26, fixed: true, sortable: false },
+]);
+// The compact rows' column gap (.table.compact in App.vue)
+const ROW_GAP = 8;
+const cols = useTableColumns("qm.companion.refinery.columns", columns, { key: "material", dir: "asc" }, ROW_GAP);
+const shown = computed(() => new Set(cols.columns.value.map((c) => c.key)));
 
 // Per proposal: its state tag (a colour each: new blue, finished green, missing yellow), the action's
 // label, icon and button look (storing: a crate on green, apart from registering)
@@ -160,45 +176,52 @@ async function registerAll(value: string) {
       </Tooltip>
     </div>
     <div v-if="!proposals.length" class="empty-line">{{ t("refinery.empty") }}</div>
-    <!-- Only the jobs scroll: the head stays -->
-    <div v-else class="jobs">
-      <div v-for="p in proposals" :key="p.id" class="job">
-        <!-- 1: the job badge, the station, the actions -->
-        <div class="job-head">
-          <span class="tag app kind"><Icon name="drop" :size="11" /></span>
-          <span class="job-title">{{ stationName(p.locationUuid) }}</span>
-          <button
-            type="button"
-            class="btn small"
-            :class="KIND[p.kind].button"
-            :disabled="!connected || busy.has(p.id)"
-            @click="primary(p)"
-          >
-            <Icon :name="KIND[p.kind].icon" :size="14" /> {{ t(KIND[p.kind].action) }}
-          </button>
-          <Tooltip :text="t(p.kind === 'missing' ? 'refinery.keep' : 'refinery.drop')">
-            <button type="button" class="icon-btn" @click="dismiss(p)"><Icon name="close" :size="14" /></button>
-          </Tooltip>
-        </div>
-        <!-- 2: the state, whether a job is registered, the time left and the end; the total yield at the right -->
-        <div class="job-state">
-          <span class="tag" :class="KIND[p.kind].cls">{{ t(KIND[p.kind].tag) }}</span>
-          <Tooltip :text="t(registered(p) ? 'refinery.isRegistered' : 'refinery.notRegistered')">
-            <span class="tag kind" :class="{ accent: registered(p), off: !registered(p) }"><Icon name="link" :size="11" /></span>
-          </Tooltip>
-          <template v-if="endOf(p) !== null">
-            <Icon name="clock" :size="12" />
-            <span v-if="endOf(p)! > now" class="num">{{ left(endOf(p)! - now) }}</span>
-            <span>{{ t("refinery.readyAt", { time: time(endOf(p)!) }) }}</span>
-          </template>
-          <span class="num total">{{ total(p) }} SCU</span>
-        </div>
-        <!-- 3: the materials, like the inventory's table -->
-        <div class="mats">
-          <div v-for="(x, i) in rows(p)" :key="i" class="row">
-            <span class="row-name">{{ materialName(x.uuid) }}</span>
-            <span class="num">{{ x.quality }}</span>
-            <span class="num">{{ x.scu }} SCU</span>
+    <!-- The web app's table, compact (App.vue): the jobs scroll, the materials' column titles stick to its
+         top; the columns always fit its width (measured on it) -->
+    <div v-else class="table compact" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+      <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth">
+        <template #col-actions><ColumnsButton :table="cols" /></template>
+      </ColumnHead>
+      <div class="jobs">
+        <div v-for="p in proposals" :key="p.id" class="job">
+          <!-- 1: the job badge, the station, the actions -->
+          <div class="job-head">
+            <span class="tag app kind"><Icon name="drop" :size="11" /></span>
+            <span class="job-title">{{ stationName(p.locationUuid) }}</span>
+            <button
+              type="button"
+              class="btn small"
+              :class="KIND[p.kind].button"
+              :disabled="!connected || busy.has(p.id)"
+              @click="primary(p)"
+            >
+              <Icon :name="KIND[p.kind].icon" :size="14" /> {{ t(KIND[p.kind].action) }}
+            </button>
+            <Tooltip :text="t(p.kind === 'missing' ? 'refinery.keep' : 'refinery.drop')">
+              <button type="button" class="icon-btn" @click="dismiss(p)"><Icon name="close" :size="14" /></button>
+            </Tooltip>
+          </div>
+          <!-- 2: the state, whether a job is registered, the time left and the end; the total yield at the right -->
+          <div class="job-state">
+            <span class="tag" :class="KIND[p.kind].cls">{{ t(KIND[p.kind].tag) }}</span>
+            <Tooltip :text="t(registered(p) ? 'refinery.isRegistered' : 'refinery.notRegistered')">
+              <span class="tag kind" :class="{ accent: registered(p), off: !registered(p) }"><Icon name="link" :size="11" /></span>
+            </Tooltip>
+            <template v-if="endOf(p) !== null">
+              <Icon name="clock" :size="12" />
+              <span v-if="endOf(p)! > now" class="num">{{ left(endOf(p)! - now) }}</span>
+              <span>{{ t("refinery.readyAt", { time: time(endOf(p)!) }) }}</span>
+            </template>
+            <span class="num total">{{ total(p) }} SCU</span>
+          </div>
+          <!-- 3: the materials in the columns of the head (the last one empty: the chooser's) -->
+          <div class="mats">
+            <div v-for="(x, i) in rows(p)" :key="i" class="row">
+              <span class="row-name">{{ materialName(x.uuid) }}</span>
+              <span v-if="shown.has('quality')" class="num">{{ x.quality }}</span>
+              <span v-if="shown.has('amount')" class="num">{{ x.scu }} SCU</span>
+              <span />
+            </div>
           </div>
         </div>
       </div>
@@ -227,10 +250,9 @@ async function registerAll(value: string) {
   min-height: 0;
 }
 
-.jobs {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+/* The table below the head and filter: a line between them */
+.table {
+  border-top: 1px solid var(--border-dim);
 }
 
 /* The filter in the head after the count, like the inventory's: one chip, on = the live colour with a
@@ -293,9 +315,10 @@ async function registerAll(value: string) {
   color: var(--text-3);
 }
 
-/* The total yield, aligned with the materials' amount column */
+/* The total yield, aligned with the materials' amount column (the chooser's column and its gap after it) */
 .total {
   margin-left: auto;
+  margin-right: 34px;
   color: var(--text);
 }
 
@@ -316,19 +339,16 @@ async function registerAll(value: string) {
   color: var(--text-2);
 }
 
-/* The materials: compact rows like the inventory's table (its quality and amount columns) */
+/* The materials: rows in the head's columns (the table's .row), inside the card's padding: no padding of
+   their own sideways, so they line up with the titles */
 .mats {
   margin-top: 4px;
 }
 
-.row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px 88px;
-  align-items: center;
-  gap: 8px;
+/* (beats .table.compact .row in App.vue) */
+.job .mats .row {
   min-height: 22px;
-  font-size: 12px;
-  line-height: 1.35;
+  padding: 2px 0;
   color: var(--text-2);
   border-top: 1px solid var(--border-dim);
 }
@@ -340,6 +360,10 @@ async function registerAll(value: string) {
 }
 
 .num {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

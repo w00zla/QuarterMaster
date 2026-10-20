@@ -3,7 +3,8 @@
 // ComponentScan (components.ts: the character inventory, ship components) into sightings; each
 // complete sighting is a proposal (one per stack, with what the user's stored stock at its location
 // already holds of that material and quality; one per component tile), which waits until the user
-// registers or dismisses it. The kind filter (Mats / Items / Comps, kept in localStorage; all may be
+// registers or dismisses it. One the stored stock already holds (registered here or before: stacks by
+// amount, components by count per component and stats) stays listed, marked `inStock`. The kind filter (Mats / Items / Comps, kept in localStorage; all may be
 // off) decides what is detected at all, and which screens the scan reads (scan.ts). Every location
 // collects its own sightings: the location picked (kept, changeable while scanning: the player walks
 // from one warehouse to the next) is where a read belongs, and a proposal is registered at its own
@@ -15,8 +16,10 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, ref, watch } from "vue";
 import type { OkResponse, StockBatch, StockListResponse } from "../../src/webapp/api-types";
-import { addRequest as componentRequest, ComponentScan, proposalsOf as componentProposalsOf, type ComponentProposal, type ComponentSighting } from "./components";
-import { addRequest, InventoryScan, proposalsOf, type InventoryReadEvent, type Proposal, type Sighting } from "./inventory";
+import {
+  addRequest as componentRequest, ComponentScan, inStockOf as componentsInStock, proposalsOf as componentProposalsOf, type ComponentProposal, type ComponentSighting,
+} from "./components";
+import { addRequest, inStockOf, InventoryScan, proposalsOf, type InventoryReadEvent, type Proposal, type Sighting } from "./inventory";
 import { ensureCatalog, syncCatalog } from "./refinerySync";
 import { api, connected, log } from "./state";
 import { toastError } from "./toasts";
@@ -33,6 +36,8 @@ export const KIND_ICON = { mats: "resource", items: "item", comps: "type-module"
 
 /** A sighting or proposal with the location it belongs to (its key and id unique across locations). */
 export type Located<T> = T & { locationUuid: string };
+/** A proposal as listed: whether the stored stock already holds it (registered here or before: dimmed, not to register). */
+export type Listed<T> = Located<T> & { inStock: boolean };
 
 // Each location's own scans (their pending reads and last tile stay apart too)
 const scans = new Map<string, { stacks: InventoryScan; components: ComponentScan }>();
@@ -101,18 +106,22 @@ watch([autoLocation, loggedLocation, catalogReady], () => {
   if (autoLocation.value && loggedLocation.value && syncCatalog.value) setLocation(loggedLocationUuid.value);
 });
 
-const open = (id: string) => !dismissed.value.has(id) && !registered.value.has(id);
+const kept = (p: { id: string }) => !dismissed.value.has(p.id);
 const locationsOf = (list: { locationUuid: string }[]) => [...new Set(list.map((s) => s.locationUuid))];
-// Per location: its sightings against its stored stock
-export const proposals = computed<Located<Proposal>[]>(() =>
-  locationsOf(sightings.value).flatMap((location) =>
-    proposalsOf(sightings.value.filter((s) => s.locationUuid === location), batches.value, location).map((p) => ({ ...p, locationUuid: location })),
-  ).filter((p) => open(p.id)),
+// Per location: its sightings against its stored stock; the discarded ones go, the ones the stock holds stay marked
+export const proposals = computed<Listed<Proposal>[]>(() =>
+  locationsOf(sightings.value).flatMap((location) => {
+    const list = proposalsOf(sightings.value.filter((s) => s.locationUuid === location), batches.value, location).filter(kept);
+    const held = inStockOf(list, batches.value, location, registered.value);
+    return list.map((p) => ({ ...p, locationUuid: location, inStock: held.has(p.id) }));
+  }),
 );
-export const componentProposals = computed<Located<ComponentProposal>[]>(() =>
-  locationsOf(componentSightings.value).flatMap((location) =>
-    componentProposalsOf(componentSightings.value.filter((s) => s.locationUuid === location)).map((p) => ({ ...p, locationUuid: location })),
-  ).filter((p) => open(p.id)),
+export const componentProposals = computed<Listed<ComponentProposal>[]>(() =>
+  locationsOf(componentSightings.value).flatMap((location) => {
+    const list = componentProposalsOf(componentSightings.value.filter((s) => s.locationUuid === location)).filter(kept);
+    const held = componentsInStock(list, batches.value, location, registered.value);
+    return list.map((p) => ({ ...p, locationUuid: location, inStock: held.has(p.id) }));
+  }),
 );
 
 /** What the debug window shows: the sightings of both scans, which of them were registered or discarded and their locations' names. */
@@ -211,6 +220,9 @@ export async function acceptComponent(p: Located<ComponentProposal>): Promise<bo
   } catch (e) {
     toastError(e);
     return false;
+  } finally {
+    // The pieces stored now: the same component's other tiles count against them
+    await loadStock().catch(toastError);
   }
 }
 

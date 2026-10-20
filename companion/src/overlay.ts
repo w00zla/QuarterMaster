@@ -47,6 +47,8 @@ export interface OverlayRow {
   name: string;
   detail: string | null;
   cols: string[];
+  // Registered or in stock already: dimmed like in the panel
+  dim?: boolean;
 }
 
 /** A mode in the overlay's head: its icon and count, whether it is shown, whether it cannot work (its

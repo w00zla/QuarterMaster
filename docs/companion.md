@@ -31,8 +31,11 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   read at start, then what the game appends. "Scan history" ("Historie scannen") reads every `logbackups/*.log` (GBs: `memmem`
   search, off the main thread; progress per file as the `scan-progress` event, shown as a bar in the head
   between the filter chip and the buttons). The list keeps the first unlock per name, each marked whether it came from an old log
-  (`backup`); the panel lists only the unregistered ones (registered and default blueprints hidden, the
-  debug window shows them), newest first, each with an icon-only badge. In the panel's head after the count the filter
+  (`backup`); the panel lists every one, newest first, each with an icon-only badge: registered and default
+  blueprints dimmed with their state (hidden 2026-10-19, back on 2026-10-20), the count and the tab only
+  the unregistered ones (new, ambiguous, not in the catalog: obtainable all the same); the overlay lists
+  every one like the panel (the user sees what is detected), the others dimmed with the blueprint icon
+  instead of their state text (too wide for the tile). In the panel's head after the count the filter
   "Unlocks" ("Freischaltungen", like the other panels' filter chips; localStorage `qm.companion.unlocks`,
   on by default, like every scan filter kept across starts): off, the Rust side reads no unlocks
   (`set_unlock_scan`, the list emptied, "Scan history" disabled, the overlay's mode warns); on again, it
@@ -137,8 +140,20 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   station and the actions (registering blue, storing a crate on green, removing outlined); the state tag
   (new blue, finished green, not at the terminal yellow), an icon-only link badge (accent: registered as a
   job, dimmed: not yet), the time left and the end, the total yield in SCU at the right; the materials
-  as compact rows like the inventory's table (quality 40 px, amount 88 px). German "Eintragen" for
-  registering everywhere.
+  as compact rows in the columns of one head above the cards (material, quality, amount and the column
+  chooser's column; see "Tables"). German "Eintragen" for registering everywhere.
+- **Tables** (Components, Resources, the refinery's materials, Blueprints; 2026-10-20): the web app's
+  (`useTableColumns` + `ColumnHead` from `adminapp/src`, ui.css `.table`/`.row`/`.cols-head`, the table
+  measured with `observe`: the columns always fit, growing takes the free room and then narrows the
+  columns to the right, the fixed action columns stay in view), compact (`.table.compact` in `App.vue`:
+  4 px padding for head and rows, so the titles sit in the middle, 8 px gap, 12 px text). One column
+  takes the room left (the location, the material, the blueprint: no grip); widths and hidden columns in
+  localStorage `qm.companion.{comps,stock,refinery,unlocks}.columns`. A first try with an "Excel" mode
+  (only the dragged column changes, sideways scroll) was dropped the same day: the actions scrolled out. The icon button in the
+  head of the action column (`ColumnsButton.vue`, its tooltip "Spalten wählen") opens `ColumnsDialog.vue`:
+  a switch per hideable column (all but the name and the actions), applied and kept right away. The
+  location in the mono face (like the overlay's). Lists in dialogs scroll inside them (max. 40–50 vh) and
+  show the table's shown columns in its order.
 
 ## Scan
 
@@ -293,25 +308,29 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   selectable location clears the pick (nothing is booked at the place before: reads without a location
   are dropped); a pick by hand holds until the log names another place.
 - One panel per part: Resources (the warehouse's stacks) and Components (the character inventory's). Head:
-  title with count, the part's kind filter, toggle chips Materials / Items (Stock) or Components (on =
+  title with count, the part's kind filter, toggle chips Materials / Items (Resources) or "Ship comp." ("Schiffs-Komp."; on =
   the kind's badge colour with a check, off = dashed and dimmed with an x; what the scan detects from then
   on, all may be off; localStorage `qm.companion.inventory.kinds`), "Register all" (the panel's rows only).
-  Then one compact row per proposal. Stock: an icon-only badge for the kind (no tooltip, like every
+  Then one compact row per proposal. What the stored stock at the location already holds stays listed,
+  dimmed, without Register / Discard (2026-10-20; `inStockOf` in `inventory.ts` and `components.ts`,
+  `inStock` on the listed proposals): stacks per material and quality as long as the stored amount covers
+  them, components counted per component and stats (they do not stack in the game: 5 hovered, 4 stored,
+  one new); the ones registered here count first (and always), then the earliest seen. The count, the tab and
+  "Register all" only take the rest; the overlay shows them dimmed too. Stock is loaded at the scan's start and after every
+  registration. Stock: an icon-only badge for the kind (no tooltip, like every
   panel's kind badge), name, quality, amount. Components: name, type, size, grade (from the catalog in the
   UI language; items show none of these: every bookable item is of the type "Misc.", checked 2026-10-20),
   the stats ("Coolant Rating +12.5 % · Integrity ±0.0 %", "–" without any). Both: location last, Register /
-  Discard (fixed 26 px each). The columns are resizable like the
-  web app's (`useTableColumns` + `ColumnHead` from `adminapp/src`, the rows' gap passed in; widths kept in
-  localStorage `qm.companion.{stock,comps}.columns`; no sorting: the newest first; the location takes the room
-  left; the room is measured on the rows' box, its vertical scrollbar left out, else the rows scroll
-  sideways after a resize).
+  Discard (fixed 26 px each, the column chooser in the head of the second). Columns: see "Tables" (no
+  sorting: the newest first).
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a
   `ComponentScan` per location, keys and ids prefixed with the location): a read belongs to the location
   picked at that moment (changeable while scanning: the player walks from one warehouse to the next); the
   panel lists every location's proposals, each is registered at its own location; the overlay shows the
   current location's only. Starting a session clears the sightings of the one before.
 - Registering (one or all) asks in a dialog with a switch per org to share right away (`guildIds`, the
-  choice kept for the session); adds only via `/api/stock/add`.
+  choice kept for the session); adds only via `/api/stock/add`. Rows at several locations ("Register
+  all"): first a switch per location (all on when it opens), only the rows of the ones on are registered.
 
 ## Debug window
 
@@ -353,7 +372,10 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   them).
 - "Record data" asks for a folder and writes a session folder `qm-inventory-debug-<unix s>`: the 3 kept
   reads, then every read while it runs (frame as JPEG quality 90, ~0.6 MB, + JSON with grid, components
-  part, refinery part, the cursor and boxes; `info.json` with the count), until stopped or the window
+  part, refinery part, the cursor and boxes, and `capture` for remote diagnosis since 2026-10-20: `grabMs`,
+  grabs without a new image `skippedTimeout`/`skippedPointer`/`skippedOutside`, frames not read `dropped`
+  (the OCR busy) and `gated` (probe throttle, the refinery's rest gate), `waitMs` from grab to read, the
+  counts since the read before; `info.json` with the count), until stopped or the window
   closes. The folders replay through `inventory_dump` and `components_dump` (both pass the stored cursor;
   recordings before 2026-10-19 have none).
 
@@ -431,7 +453,10 @@ duplicated on the adapter driving it, cut to the window's client area (physical 
 per-monitor DPI aware), with the cursor's position in frame pixels (`GetCursorPos`), into a staging texture
 kept while the size stays, sent as BGRA (converted to RGB only for frames that are read). Chosen over
 Windows.Graphics.Capture for its border-free capture on Windows 10. Frames without a new desktop image are
-skipped; any error drops the duplication, reopened next time. HDR untested (the legacy `DuplicateOutput`
+skipped (the next try a full interval later; a retry after 100 ms was tried 2026-10-20 and dropped: in a
+warehouse test no frame was skipped at all, the slow reads of the night before stay unexplained, slow
+grabs of up to ~0.9 s under the game's GPU load are the remaining suspect); skips and grabs over 150 ms are
+logged (debug) and go with the read (`capture` in the debug view's events and recordings); any error drops the duplication, reopened next time. HDR untested (the legacy `DuplicateOutput`
 should deliver `B8G8R8A8`; other formats are refused with a warning; `IDXGIOutput5::DuplicateOutput1` with
 FP16 and a tone map would be the fix); rotated monitors untested.
 
@@ -468,7 +493,7 @@ game since.
 - Each panel writes its rows into `overlayRows`; `overlay.ts` sends the view as texts (`overlay-view`, on
   every change and on `overlay-request`).
 - Hotkeys (`hotkeyOverlay`/`hotkeyMode`, accelerators with the browser's physical key code, default
-  `Ctrl+Shift+KeyQ` for on/off and none for the mode; recorded in `HotkeyInput.vue`, a modifier or an F key
+  `Alt+Shift+KeyQ` for on/off (until 2026-10-20 `Ctrl+Shift+KeyQ`; a stored config keeps its own) and none for the mode; recorded in `HotkeyInput.vue`, a modifier or an F key
   required; cleared with Backspace/Delete while recording or the × inside the field) are **polled** (`GetAsyncKeyState` every 30 ms, exactly these modifiers; character keys by scan
   code, mapped with the current layout): `RegisterHotKey` never fired while SC was in front (its raw input
   keeps application hotkeys away). The keys reach the game too. A press emits `overlay-hotkey`

@@ -14,7 +14,7 @@
 // tile's tooltip), and a sighting only once two such reads in a row agree (an OCR glitch in one read
 // books nothing).
 import { norm } from "../../src/stock/material-names.ts";
-import type { CatalogResponse, CatalogStat, StockAddRequest } from "../../src/webapp/api-types.ts";
+import type { CatalogResponse, CatalogStat, StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------
 
@@ -310,6 +310,36 @@ export function proposalsOf(sightings: Iterable<ComponentSighting>): ComponentPr
   for (const s of sightings) {
     if (s.problem || !s.componentUuid || !s.stats) continue;
     out.push({ id: s.key, componentUuid: s.componentUuid, label: s.label, stats: s.stats, readStats: s.readStats });
+  }
+  return out;
+}
+
+// A stat value without trailing zeros ("12.50" -> "12.5", "0.0" -> "0")
+const canonical = (v: string) => (v.includes(".") ? v.replace(/0+$/, "").replace(/\.$/, "") : v);
+// A component as the stock tells it apart: its UUID and its gains
+const stockKey = (uuid: string, stats: Record<string, string> | null) =>
+  `${uuid}|${Object.entries(stats ?? {}).map(([k, v]) => [k, canonical(v)]).filter(([, v]) => v !== "0").map(([k, v]) => `${k}=${v}`).sort().join(",")}`;
+
+/** The proposals (newest first, as listed) the stored stock at the location already holds. Components
+ * do not stack in the game: every hovered tile is one piece, so per component and stats as many count
+ * as the stock holds pieces, the ones registered here first, then the earliest seen; the others are
+ * new (5 hovered, 4 stored: one new). A registered one always counts. */
+export function inStockOf(proposals: ComponentProposal[], batches: StockBatch[], locationUuid: string, registered: ReadonlySet<string>): Set<string> {
+  const left = new Map<string, bigint>();
+  for (const b of batches) {
+    if (!b.component || b.state !== "stored" || !b.canChange || b.locationUuid !== locationUuid) continue;
+    const key = stockKey(b.subjectUuid, b.stats);
+    left.set(key, (left.get(key) ?? 0n) + BigInt(b.quantity));
+  }
+  // Stable: the registered first, each part oldest first
+  const order = [...proposals].reverse().sort((a, b) => Number(registered.has(b.id)) - Number(registered.has(a.id)));
+  const out = new Set<string>();
+  for (const p of order) {
+    const key = stockKey(p.componentUuid, p.stats);
+    const have = left.get(key) ?? 0n;
+    if (!registered.has(p.id) && have < 1n) continue;
+    out.add(p.id);
+    left.set(key, have > 0n ? have - 1n : 0n);
   }
   return out;
 }

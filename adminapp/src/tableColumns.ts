@@ -26,6 +26,12 @@ export interface ColumnSpec {
   fixed?: boolean;
   // A separator line before the column, over the full row height
   sep?: boolean;
+  // Takes the room left instead of the last resizable column (see fillerKey)
+  fill?: boolean;
+  // May be hidden by the user (`toggleHidden`; kept with the widths)
+  hideable?: boolean;
+  // Its name where the label is empty (a column chooser)
+  title?: string;
 }
 
 const MIN_WIDTH = 40;
@@ -36,6 +42,7 @@ export const collator = new Intl.Collator(undefined, { numeric: true, sensitivit
 interface Stored {
   widths?: Record<string, number>;
   sort?: SortState;
+  hidden?: string[];
 }
 
 function load(storageKey: string): Stored {
@@ -50,19 +57,28 @@ const GAP = 12;
 // A row's padding left plus right (.row in ui.css)
 const ROW_PADDING = 32;
 
-// The filler column takes the space left over: the last column that is not fixed. Every column
-// before it resizes itself; the filler has no grip and keeps its default width as minimum.
+// The filler column takes the space left over: the one marked `fill`, else the last column that is not
+// fixed. Every other column resizes itself; the filler has no grip and keeps its default width as minimum.
 export function fillerKey(columns: ColumnSpec[]): string | undefined {
-  return [...columns].reverse().find((c) => !c.fixed)?.key;
+  return columns.find((c) => c.fill && !c.fixed)?.key ?? [...columns].reverse().find((c) => !c.fixed)?.key;
 }
 
 // `columns` may be reactive (a getter or ref): columns that appear later
 // start at their default width, or the stored one if the key was seen before. `gap`: the rows' column
-// gap where it differs from ui.css's (the companion's compact rows).
+// gap where it differs from ui.css's (the companion's compact rows). Hidden columns (`hideable` ones
+// the user switched off) are left out of everything returned; `columns` returns the shown ones.
 export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<ColumnSpec[]>, defaultSort: SortState, gap = GAP) {
   const stored = load(storageKey);
   const widths = ref<Record<string, number>>({});
-  const cols = computed(() => toValue(columns));
+  const all = computed(() => toValue(columns));
+  const hidden = ref(new Set(Array.isArray(stored.hidden) ? stored.hidden : []));
+  const cols = computed(() => all.value.filter((c) => !(c.hideable && hidden.value.has(c.key))));
+  function toggleHidden(key: string) {
+    const next = new Set(hidden.value);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    hidden.value = next;
+  }
   watch(
     cols,
     (list) => {
@@ -101,7 +117,8 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   const shown = computed(() => {
     const list = cols.value;
     const out: Record<string, number> = {};
-    for (const c of list) out[c.key] = c.key === filler.value ? c.width : (widths.value[c.key] ?? c.width);
+    // Fixed columns and the filler: always their spec's width (it may change, e.g. measured from texts)
+    for (const c of list) out[c.key] = c.key === filler.value || c.fixed ? c.width : (widths.value[c.key] ?? c.width);
     if (room.value === null) return out;
     const over = list.reduce((sum, c) => sum + out[c.key]!, 0) + gap * (list.length - 1) - room.value;
     const resizable = list.filter((c) => !c.fixed && c.key !== filler.value);
@@ -164,10 +181,12 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   }
 
   watch(
-    [widths, sort],
+    [widths, sort, hidden],
     () => {
       try {
-        localStorage.setItem(storageKey, JSON.stringify({ widths: widths.value, sort: sort.value } satisfies Stored));
+        const keep: Stored = { widths: widths.value, sort: sort.value };
+        if (hidden.value.size) keep.hidden = [...hidden.value];
+        localStorage.setItem(storageKey, JSON.stringify(keep));
       } catch {
         // localStorage unavailable: widths simply do not persist.
       }
@@ -175,7 +194,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     { deep: true },
   );
 
-  return { widths, template, minWidth, sort, toggleSort, startResize, resetWidth, observe };
+  return { widths, template, minWidth, sort, toggleSort, startResize, resetWidth, observe, columns: cols, all, hidden, toggleHidden };
 }
 
 // Stable sort by the current column; `valueOf` yields the cell value for a

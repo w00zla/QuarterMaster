@@ -3,10 +3,10 @@
 // sightings with converted stats and into proposals, one per tile.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CatalogResponse, CatalogStat } from '../src/webapp/api-types.ts';
+import type { CatalogResponse, CatalogStat, StockBatch } from '../src/webapp/api-types.ts';
 import {
-  addRequest, buildComponentCatalog, ComponentScan, findComponents, parseField, parseNumber, proposalsOf, sightingOf, statFromTooltip, statNameKeys, statsOf,
-  type ComponentCatalog, type ComponentRead,
+  addRequest, buildComponentCatalog, ComponentScan, findComponents, inStockOf, parseField, parseNumber, proposalsOf, sightingOf, statFromTooltip, statNameKeys, statsOf,
+  type ComponentCatalog, type ComponentProposal, type ComponentRead,
 } from '../companion/src/components.ts';
 
 const BLIZZARD = '00000000-0000-4000-8000-000000000001';
@@ -192,5 +192,23 @@ describe('proposals', () => {
     assert.deepEqual(proposals.map((p) => [p.componentUuid, p.stats, p.readStats]), [[BLIZZARD, {}, [COOLANT, HEALTH]], [BLIZZARD, { [COOLANT]: '12.5', [HEALTH]: '2' }, [COOLANT, HEALTH]]]);
     assert.deepEqual(addRequest(proposals[1]!, LOC, ['9400']), { subjectUuid: BLIZZARD, locationUuid: LOC, quality: 0, amount: '1', stats: { [COOLANT]: '12.5', [HEALTH]: '2' }, guildIds: ['9400'] });
     assert.deepEqual(addRequest(proposals[0]!, LOC), { subjectUuid: BLIZZARD, locationUuid: LOC, quality: 0, amount: '1' });
+  });
+
+  it('counts the pieces the stock holds per component and stats: 5 hovered, 4 stored, one new', () => {
+    const p = (id: string, stats: Record<string, string> = {}): ComponentProposal => ({ id, componentUuid: BLIZZARD, label: '', stats, readStats: [] });
+    const batch = (quantity: string, stats: Record<string, string> | null, extra: Partial<StockBatch> = {}): StockBatch => ({
+      id: 1, sharedIn: [], part: false, kind: 'item', component: true, stats, subjectUuid: BLIZZARD, material: '', locationUuid: LOC, location: '', state: 'stored',
+      quality: 0, quantity, unit: 'pcs', holderUserId: 'u', holderName: null, canChange: true, refine: null, ...extra,
+    });
+    // Newest first, as listed
+    const plain = [p('e'), p('d'), p('c'), p('b'), p('a')];
+    const stock = [batch('3', null), batch('1', { [COOLANT]: '0.0' }), batch('9', null, { locationUuid: '00000000-0000-4000-8000-0000000000c2' }), batch('9', null, { canChange: false })];
+    // 4 plain ones here (a "0.0" gain is none): the earliest four, e new
+    assert.deepEqual([...inStockOf(plain, stock, LOC, new Set())].sort(), ['a', 'b', 'c', 'd']);
+    // e registered here counts first, then the earliest: d is the new one
+    assert.deepEqual([...inStockOf(plain, stock, LOC, new Set(['e']))].sort(), ['a', 'b', 'c', 'e']);
+    // Other stats are another component: "12.50" stored matches "12.5" read, the second one is new
+    const crafted = [p('g', { [COOLANT]: '12.5' }), p('f', { [COOLANT]: '12.5' })];
+    assert.deepEqual([...inStockOf(crafted, [batch('1', { [COOLANT]: '12.50' })], LOC, new Set())], ['f']);
   });
 });

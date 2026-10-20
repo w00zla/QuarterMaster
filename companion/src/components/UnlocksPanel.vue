@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The blueprint unlocks from Game.log (and, on request, the old logs), matched to the catalog and
-// compared with the user's registered blueprints; only the unregistered ones are listed (registered and
-// default ones hidden), newest first. New ones are registered one by one right away
+// compared with the user's registered blueprints, newest first: registered and default ones dimmed, the
+// counts only the unregistered ones (also those not in the catalog), the overlay all of them like the list. New ones are registered one by one right away
 // (ambiguous ones after picking the variant) or all at once after a confirmation. In the head after the
 // count the filter "Unlocks" (off: Game.log's unlocks are not read, state.ts), then the old logs' scan
 // progress while it runs; each row with the same icon-only badge.
@@ -9,14 +9,17 @@
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { BlueprintListResponse, OkResponse } from "../../../src/webapp/api-types";
+import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import ColumnsButton from "./ColumnsButton.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { scanBackups } from "../backend";
 import { unlockRows, type UnlockState } from "../debugReport";
 import { langRef, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
-import { overlayRows, tabCounts } from "../overlay";
+import { overlayRows, tabCounts, type OverlayRow } from "../overlay";
 import { catalogResponses } from "../refinerySync";
 import { api, connected, loadLog, log, toggleUnlocks, unlocksOn } from "../state";
 import { toast, toastError } from "../toasts";
@@ -69,15 +72,18 @@ const allRows = computed<Row[]>(() => (log.value?.unlocks ?? [])
     return { name: u.name, at: u.at, backup: u.backup, state, candidates, matches: all };
   })
   .sort((a, b) => b.at.localeCompare(a.at)));
-// Only what is not registered: registered and default blueprints are hidden
-const rows = computed(() => allRows.value.filter((r) => r.state !== "owned" && r.state !== "default"));
+// Every unlock; registered and default ones dimmed
+const rows = allRows;
+// The rows not registered (new, ambiguous, not in the catalog: the game unlocked it all the same): the counts
+const openRows = computed(() => rows.value.filter((r) => r.state === "new" || r.state === "pick" || r.state === "unknown"));
 
-// The scan overlay shows the rows still to register (new, ambiguous), newest first
+// The scan overlay shows every unlock, newest first: the ones to register (new, ambiguous) with their tag,
+// the others dimmed with the blueprint icon only (the state texts are too wide for the tile)
 watchEffect(() => {
-  overlayRows.unlocks = rows.value
-    .filter((r) => r.state === "new" || r.state === "pick")
-    .map((r) => ({ tag: t(r.state === "new" ? "state.new" : "state.pick"), cls: r.state === "new" ? "ok" : "warn", name: r.name, detail: null, cols: [] }));
-  tabCounts.unlocks = rows.value.length;
+  overlayRows.unlocks = rows.value.map((r): OverlayRow => r.state === "new" || r.state === "pick"
+    ? { tag: t(r.state === "new" ? "state.new" : "state.pick"), cls: r.state === "new" ? "ok" : "warn", name: r.name, detail: null, cols: [] }
+    : { tag: "", icon: "blueprint", cls: "", name: r.name, detail: null, cols: [], dim: true });
+  tabCounts.unlocks = openRows.value.length;
 });
 
 /** The blueprint a row would register, null when none. */
@@ -175,15 +181,30 @@ async function measureStatus() {
   if (!ctx) return;
   const family = getComputedStyle(document.body).fontFamily;
   ctx.font = `13px ${family}`;
-  const texts = (["loading", "unknown"] as const).map((s) => ctx.measureText(t(stateKey(s))).width);
+  const texts = (["loading", "owned", "default", "unknown"] as const).map((s) => ctx.measureText(t(stateKey(s))).width);
   const pick = ctx.measureText(t("unlocks.pick")).width + SELECT_EXTRA + ICON_BUTTON;
   ctx.font = `600 12px ${family}`;
   const button = ctx.measureText(t("unlocks.add")).width + BUTTON_EXTRA;
   ctx.font = `600 11px ${family}`;
-  const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1;
+  // Its title and the column chooser's button after it
+  const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1 + COLUMNS_BUTTON;
   statusWidth.value = Math.ceil(Math.max(...texts, pick, button, head));
 }
-const cols = computed(() => ({ "--cols": `16px minmax(0, 1fr) 170px ${statusWidth.value}px` }));
+const COLUMNS_BUTTON = 16 + 4;
+
+// The table's columns (widths and the hidden ones kept; no sorting: the newest first), like the web app's
+// tables: the blueprint takes the room left, the unlock time resizes, the status (the actions, with the
+// column chooser in its head) is as wide as its widest content
+const columns = computed<ColumnSpec[]>(() => [
+  { key: "kind", label: "", title: t("col.kind"), width: 16, fixed: true, sortable: false, hideable: true },
+  { key: "name", label: t("col.blueprint"), width: 120, sortable: false, fill: true },
+  { key: "at", label: t("col.at"), width: 170, sortable: false, hideable: true },
+  { key: "state", label: t("col.state"), width: statusWidth.value, fixed: true, sortable: false },
+]);
+// The compact rows' column gap (.table.compact in App.vue)
+const table = useTableColumns("qm.companion.unlocks.columns", columns, { key: "at", dir: "desc" }, 8);
+const shown = computed(() => new Set(table.columns.value.map((c) => c.key)));
+const cols = computed(() => ({ "--cols": table.template.value, "--cols-min": `${table.minWidth.value}px` }));
 
 let unlisten: UnlistenFn | undefined;
 onMounted(async () => {
@@ -202,7 +223,7 @@ watch(connected, (c) => {
 <template>
   <section class="panel unlocks">
     <div class="head">
-      <span class="head-title no-grow">{{ t("unlocks.title") }} <span class="head-count">{{ rows.length }}</span></span>
+      <span class="head-title no-grow">{{ t("unlocks.title") }} <span class="head-count">{{ openRows.length }}</span></span>
       <!-- What the scan detects: off, Game.log's unlocks are not read -->
       <div class="chips filter">
         <Tooltip :text="t(unlocksOn ? 'filter.on' : 'filter.off')">
@@ -228,17 +249,15 @@ watch(connected, (c) => {
       </Tooltip>
     </div>
     <div v-if="!rows.length" class="empty-line">{{ t("unlocks.empty") }}</div>
-    <div v-else class="table" :style="cols">
-      <div class="row cols-head">
-        <span />
-        <span>{{ t("col.blueprint") }}</span>
-        <span>{{ t("col.at") }}</span>
-        <span>{{ t("col.state") }}</span>
-      </div>
+    <!-- The web app's table, compact (App.vue): the columns always fit its width (measured on it) -->
+    <div v-else class="table compact" :ref="table.observe" :style="cols">
+      <ColumnHead :columns="table.columns.value" :sort="table.sort.value" @resize="table.startResize" @reset="table.resetWidth">
+        <template #col-state><span class="spacer" /><ColumnsButton :table="table" /></template>
+      </ColumnHead>
       <div v-for="row in rows" :key="row.name" class="row item" :class="{ done: row.state !== 'new' && row.state !== 'pick' }">
-        <span class="tag kind"><Icon name="blueprint" :size="11" /></span>
+        <span v-if="shown.has('kind')" class="tag kind"><Icon name="blueprint" :size="11" /></span>
         <span class="name" :title="row.candidates.length === 1 ? label(row.candidates[0]!) : row.name">{{ row.name }}</span>
-        <span class="faint">{{ when(row.at) }}</span>
+        <span v-if="shown.has('at')" class="faint">{{ when(row.at) }}</span>
         <span class="state-cell">
           <Tooltip v-if="row.state === 'new'" :text="lockTip">
             <button type="button" class="btn small outline" :disabled="!connected || busy || pending.has(row.name)" @click="registerOne(row)">
@@ -312,9 +331,6 @@ watch(connected, (c) => {
   padding: 0 1px;
 }
 
-.table {
-  --cols-min: 0;
-}
 
 /* The full scan's progress in place of the title (no layout change in the head) */
 .scan {
@@ -343,11 +359,9 @@ watch(connected, (c) => {
   transition: width 0.15s ease-out;
 }
 
-/* Compact rows: less padding, controls 24 px high */
+/* Compact rows (App.vue .table.compact): controls 24 px high */
 .row.item {
   min-height: 24px;
-  padding-top: 3px;
-  padding-bottom: 3px;
 }
 
 .row.item .btn.small,

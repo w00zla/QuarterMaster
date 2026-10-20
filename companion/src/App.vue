@@ -228,4 +228,35 @@ onMounted(async () => {
 #app ~ .backdrop {
   padding-top: 16px;
 }
+
+/* The panels' tables: the web app's (ui.css .table, .row, ColumnHead's .cols-head), compact: less
+   padding, the gap the panels pass to useTableColumns (8 px), smaller text. Head and rows share the
+   symmetric padding, so the titles sit in the middle */
+.table.compact {
+  font-size: 12px;
+}
+
+.table.compact .row {
+  gap: 8px;
+  padding: 4px 16px;
+  line-height: 1.35;
+}
+
+.table.compact .cols-head {
+  min-height: 22px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+
+.table.compact .data-row {
+  cursor: default;
+  user-select: text;
+}
+
+/* The line before the action columns (ColumnSpec.sep), in the middle of the smaller gap, over the
+   whole row (ui.css: for 8 px padding and a 12 px gap) */
+.table.compact .row > .sep {
+  margin: -4px 0 -4px -4px;
+  padding: 4px 0 4px 4px;
+}
 </style>

@@ -45,7 +45,7 @@ pub struct Config {
     /// "bottom-left", "bottom-center" or "bottom-right".
     #[serde(default = "default_overlay_position")]
     pub overlay_position: String,
-    /// The overlay's hotkeys as accelerators ("Ctrl+Shift+KeyQ"); empty = none (the mode's default).
+    /// The overlay's hotkeys as accelerators ("Alt+Shift+KeyQ", the on/off default); empty = none (the mode's default).
     #[serde(default = "default_hotkey_overlay")]
     pub hotkey_overlay: String,
     #[serde(default)]
@@ -63,7 +63,7 @@ fn default_overlay_position() -> String {
 }
 
 fn default_hotkey_overlay() -> String {
-    "Ctrl+Shift+KeyQ".into()
+    "Alt+Shift+KeyQ".into()
 }
 
 fn default_true() -> bool {

@@ -276,12 +276,7 @@ export interface Proposal {
 /** One proposal per complete sighting, with the stock's total of that material and quality at the
  * location for the user to judge (your own stored batches; shared ones are yours too). */
 export function proposalsOf(sightings: Iterable<Sighting>, batches: StockBatch[], locationUuid: string): Proposal[] {
-  const stored = new Map<string, bigint>();
-  for (const b of batches) {
-    if (b.state !== "stored" || !b.canChange || b.locationUuid !== locationUuid) continue;
-    const id = `${b.subjectUuid}:${b.quality}`;
-    stored.set(id, (stored.get(id) ?? 0n) + toMicro(b.quantity));
-  }
+  const stored = storedAt(batches, locationUuid);
   const out: Proposal[] = [];
   for (const s of sightings) {
     if (s.problem || !s.materialUuid || s.quality === null || s.amount === null) continue;
@@ -294,6 +289,36 @@ export function proposalsOf(sightings: Iterable<Sighting>, batches: StockBatch[]
       amountUncertain: s.amountUncertain,
       stored: fromMicro(stored.get(`${s.materialUuid}:${s.quality}`) ?? 0n),
     });
+  }
+  return out;
+}
+
+/** Your stored stock at the location per material and quality ("<uuid>:<quality>" -> micro units). */
+function storedAt(batches: StockBatch[], locationUuid: string): Map<string, bigint> {
+  const stored = new Map<string, bigint>();
+  for (const b of batches) {
+    if (b.state !== "stored" || !b.canChange || b.locationUuid !== locationUuid) continue;
+    const id = `${b.subjectUuid}:${b.quality}`;
+    stored.set(id, (stored.get(id) ?? 0n) + toMicro(b.quantity));
+  }
+  return stored;
+}
+
+/** The proposals (newest first, as listed) the stored stock at the location already holds: per
+ * material and quality the ones registered here first, then the earliest seen, each as long as what is
+ * stored still covers its amount; the others are new. A registered one always counts. */
+export function inStockOf(proposals: Proposal[], batches: StockBatch[], locationUuid: string, registered: ReadonlySet<string>): Set<string> {
+  const left = storedAt(batches, locationUuid);
+  // Stable: the registered first, each part oldest first
+  const order = [...proposals].reverse().sort((a, b) => Number(registered.has(b.id)) - Number(registered.has(a.id)));
+  const out = new Set<string>();
+  for (const p of order) {
+    const id = `${p.materialUuid}:${p.quality}`;
+    const have = left.get(id) ?? 0n;
+    const need = toMicro(p.amount);
+    if (!registered.has(p.id) && have < need) continue;
+    out.add(p.id);
+    left.set(id, have > need ? have - need : 0n);
   }
   return out;
 }
