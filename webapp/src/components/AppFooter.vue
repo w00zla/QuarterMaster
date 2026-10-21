@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // BindSight's footer: one line with the credits and, instead of version and GitHub link, the fan
 // site disclaimer towards CIG: a short line, the full text on hover; before it, after a divider, the
-// third-party sources (UEX: logo from its site, uex-logo-{20,40}.png Lanczos from its 960 px touch icon; SCMDB: its
-// favicon.svg); the Star Citizen logo from the official fankit at the right edge (exact sizes from
+// third-party source (UEX: logo from its site, uex-logo-{20,40}.png Lanczos from its 960 px touch icon); the
+// Star Citizen logo from the official fankit at the right edge (exact sizes from
 // local/Fankit_*/03_LOGOS/STARCITIZEN_WHITE.png).
 import scLogo from "../assets/sc-logo-20.png";
 import scLogo2x from "../assets/sc-logo-40.png";
-import scmdbLogo from "../assets/scmdb-logo.svg";
 import uexLogo from "../assets/uex-logo-20.png";
 import uexLogo2x from "../assets/uex-logo-40.png";
 import { t } from "../i18n";
@@ -19,9 +18,6 @@ import { t } from "../i18n";
       {{ t("footer.poweredBy") }}
       <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer">
         <img :src="uexLogo" :srcset="`${uexLogo} 1x, ${uexLogo2x} 2x`" alt="" /> UEX
-      </a>
-      <a href="https://scmdb.net" target="_blank" rel="noopener noreferrer">
-        <img :src="scmdbLogo" alt="" /> SCMDB
       </a>
     </span>
     <div class="divider" />

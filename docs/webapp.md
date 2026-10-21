@@ -165,9 +165,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   stores the whole job, each row's amount starting from its expected yield.
 - **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold; an org
   shows every blueprint its active members registered with who has it. A click on a row puts it into the
-  crafting check (`addToCrafting`) and opens the tab. The last column links each blueprint to scmdb.net
-  (`ScmdbLink.vue`: `?page=fab&fab=<blueprint key>`, new tab; an accent chip, not an icon button), as does
-  each crafting card after a divider behind its chips.
+  crafting check (`addToCrafting`) and opens the tab.
 - **Crafting** (after a divider in the tab bar): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
@@ -185,8 +183,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   itself is not clickable), saved with Save; no language switch in the header.
 - Top bar right: History (a route link styled as a button), Companion (`desktop` icon), divider, avatar with
   name, profile, logout (icon only). Footer (from BindSight, one line, sticky): credits, "Powered by:" with
-  logo links to UEX (`uex-logo-{20,40}.png`, Lanczos from its touch icon) and SCMDB (its `favicon.svg`), a
-  divider, a short CIG fan site disclaimer (the full text on hover) and the Star Citizen
+  a logo link to UEX (`uex-logo-{20,40}.png`, Lanczos from its touch icon), a divider, a short CIG fan site disclaimer (the full text on hover) and the Star Citizen
   logo from the official fankit (`webapp/src/assets/sc-logo-{20,40}.png`), on every page incl. login.
 
 ### Layout and building blocks

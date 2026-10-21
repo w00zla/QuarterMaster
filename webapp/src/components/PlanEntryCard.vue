@@ -16,7 +16,6 @@ import { duration, qty, unitText } from "../format";
 import { t } from "../i18n";
 import { me } from "../session";
 import CoverageTag from "./CoverageTag.vue";
-import ScmdbLink from "./ScmdbLink.vue";
 import StockBatchList from "./StockBatchList.vue";
 import TypeLabel from "./TypeLabel.vue";
 
@@ -117,8 +116,6 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ..
         <span v-if="recipe.gradeLetter" class="meta">{{ t("crafting.grade", { grade: recipe.gradeLetter }) }}</span>
         <span v-if="recipe.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
         <span v-if="recipe.retired" class="tag err">{{ t("crafting.retired") }}</span>
-        <div class="divider tags-divider" />
-        <ScmdbLink :blueprint-key="recipe.key" />
       </div>
     </div>
 
@@ -294,12 +291,6 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ..
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
-}
-
-/* The global divider's colour is the head's background: here the chips' border colour */
-.tags-divider {
-  margin: 0 6px;
-  background: rgba(173, 211, 235, 0.35);
 }
 
 .entry-foot {

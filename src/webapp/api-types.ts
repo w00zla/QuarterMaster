@@ -93,8 +93,6 @@ export interface CatalogLocation {
 
 export interface CatalogBlueprint {
   uuid: string;
-  // The record name (BP_CRAFT_…), e.g. for the SCMDB link
-  key: string;
   // Unique display label ("Name · S3 · B Industrial · CHCO")
   label: string;
   // The output's name and properties, for table columns; type = the output item's type (icon)
