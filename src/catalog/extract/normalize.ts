@@ -349,8 +349,9 @@ export function normalize(input: NormalizeInput): Snapshot {
       size: int(def.Size),
       grade: int(def.Grade),
       gradeLetter: /^Grade: ([A-D])\s*$/m.exec(description)?.[1] ?? null,
-      // Some texts use other spaces (e.g. no-break space): normalized, so equal classes match
-      itemClass: /^Class: (.+?)\s*$/m.exec(description)?.[1]?.replace(/\s+/g, ' ') ?? null,
+      // Some texts use other spaces (e.g. a no-break space, also right after "Class:", QuikCool):
+      // normalized, so equal classes match
+      itemClass: /^Class:[^\S\n]+(.+?)\s*$/m.exec(description)?.[1]?.replace(/\s+/g, ' ') ?? null,
       manufacturerUuid,
       nameKey: locKey(loc.Name),
       descriptionKey: locKey(loc.Description),
