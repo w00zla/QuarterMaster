@@ -158,6 +158,42 @@ export const blueprintInput = catalog.table('blueprint_input', {
     OR (${t.kind} = 'item' AND ${t.itemUuid} IS NOT NULL AND ${t.resourceUuid} IS NULL)`),
 ]);
 
+/**
+ * Where a blueprint comes from (snapshot `blueprintSources`): a contract handing out a reward pool with it
+ * ('mission') or a point tier of an event ('event'). Derived data: replaced as a whole on every import.
+ */
+export const blueprintSource = catalog.table('blueprint_source', {
+  blueprintUuid: uuid('blueprint_uuid').notNull().references(() => blueprint.uuid),
+  sourceIndex: integer('source_index').notNull(),
+  kind: text('kind').notNull(),
+  poolUuid: uuid('pool_uuid').notNull(),
+  poolKey: text('pool_key').notNull(),
+  // This blueprint's weight of the pool's total: the game picks one entry by weight
+  weight: numeric('weight').notNull(),
+  poolWeight: numeric('pool_weight').notNull(),
+  contractId: uuid('contract_id'),
+  contractKey: text('contract_key'),
+  titleKey: text('title_key'),
+  missionTypeKey: text('mission_type_key'),
+  factionUuid: uuid('faction_uuid'),
+  factionNameKey: text('faction_name_key'),
+  minRankNameKey: text('min_rank_name_key'),
+  minReputation: numeric('min_reputation'),
+  // Star map objects (catalog.location, no foreign key like parent_uuid): where the contract is offered
+  // (its locality, systems follow from the parents), the location it is bound to
+  localityUuids: uuid('locality_uuids').array().notNull(),
+  locationUuids: uuid('location_uuids').array().notNull(),
+  requiresPrevious: boolean('requires_previous').notNull(),
+  illegal: boolean('illegal').notNull(),
+  chance: numeric('chance'),
+  onAccept: boolean('on_accept').notNull(),
+  eventKey: text('event_key'),
+  minPoints: integer('min_points'),
+}, (t) => [
+  primaryKey({ columns: [t.blueprintUuid, t.sourceIndex] }),
+  check('blueprint_source_kind', sql`${t.kind} IN ('mission', 'event')`),
+]);
+
 /** Star map objects (systems, planets, stations, outposts, …), all of them; the app selects what it offers. */
 export const location = catalog.table('location', {
   uuid: uuid('uuid').primaryKey(),

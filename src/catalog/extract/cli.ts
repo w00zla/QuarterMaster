@@ -20,6 +20,13 @@ const DCB_FILTERS = [
   'libs/foundry/records/entities/scitem/**',
   // Whole-directory globs only: segment wildcards like '**/*refin*' match nothing in StarBreaker
   'libs/foundry/records/starmap/**',
+  // Blueprint sources: contracts (generators, templates, event progress) and what they reference
+  'libs/foundry/records/contracts/**',
+  'libs/foundry/records/missionscenarios/**',
+  'libs/foundry/records/missiontype/**',
+  'libs/foundry/records/missiondata/pu_missionlocality/**',
+  'libs/foundry/records/factions/**',
+  'libs/foundry/records/reputation/**',
 ];
 
 const HELP = `Usage: pnpm catalog:extract [options]

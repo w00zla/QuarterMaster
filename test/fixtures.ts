@@ -30,6 +30,16 @@ export const U = {
   station: '10000000-0000-0000-0000-000000000014',
   orphan: '10000000-0000-0000-0000-000000000015',
   marker: '10000000-0000-0000-0000-000000000016',
+  generator: '10000000-0000-0000-0000-000000000017',
+  contract: '10000000-0000-0000-0000-000000000018',
+  unreleased: '10000000-0000-0000-0000-000000000019',
+  template: '10000000-0000-0000-0000-00000000001a',
+  missionType: '10000000-0000-0000-0000-00000000001b',
+  faction: '10000000-0000-0000-0000-00000000001c',
+  rank: '10000000-0000-0000-0000-00000000001d',
+  locality: '10000000-0000-0000-0000-00000000001e',
+  scenario: '10000000-0000-0000-0000-00000000001f',
+  progress: '10000000-0000-0000-0000-000000000020',
 };
 
 const R = 'libs/foundry/records/';
@@ -174,6 +184,61 @@ export const RECORDS: Record<string, unknown> = {
   }),
   // Not a StarMapObject: raw only
   'starmap/smdefaultmissionmarker.json': rec('MissionMarker.Default', U.marker, { _Type_: 'StarMapMissionMarker' }),
+  // Blueprint sources: one released contract handing out the pool on accept (half the time), one not for
+  // release, one without blueprints; an event tier handing out the same pool
+  'contracts/contractgenerator/test/test_generator.json': rec('ContractGenerator.Test', U.generator, {
+    _Type_: 'ContractGenerator',
+    generators: [{
+      _Type_: 'ContractGeneratorHandler_Career', notForRelease: false, debugName: 'Test_Handler',
+      required_active_scenarios: [ref('missionscenarios/test_missionscenario.json')],
+      defaultAvailability: { _Type_: 'ContractAvailability', prerequisites: [
+        { _Type_: 'ContractPrerequisite_Locality', localityAvailable: ref('missiondata/pu_missionlocality/test.json') },
+        { _Type_: 'ContractPrerequisite_CompletedContractTags', requiredCompletedContractTags: { _Type_: 'TagList', tags: [] } },
+        null,
+      ] },
+      contractParams: { _Type_: 'ContractParamOverrides', stringParamOverrides: [{ _Type_: 'ContractStringParam', param: 'Title', value: '@Test_Mission_Title' }] },
+      factionReputation: ref('factions/factionreputation/test_faction.json'),
+      contracts: [
+        {
+          _Type_: 'CareerContract', id: U.contract, notForRelease: false, debugName: 'Test_Mission',
+          template: ref('contracts/contracttemplates/test_template.json'), required_active_scenarios: [],
+          paramOverrides: { _Type_: 'ContractParamOverrides', stringParamOverrides: [] },
+          additionalPrerequisites: [{ _Type_: 'ContractPrerequisite_Location', locationAvailable: ref('starmap/pu/station/test_station.json') }],
+          contractResults: { _Type_: 'ContractResults', contractResults: [
+            { _Type_: 'ContractResult_CalculatedReward', missionResults: [true, false, false, false, false] },
+            { _Type_: 'BlueprintRewards', blueprintPool: ref('crafting/blueprintrewards/pool.json'), chance: 0.5, missionResults: [false, true, false, false, false] },
+          ] },
+          minStanding: ref('reputation/standings/test_rank1.json'),
+        },
+        {
+          _Type_: 'CareerContract', id: U.unreleased, notForRelease: true, debugName: 'Test_Unreleased',
+          contractResults: { _Type_: 'ContractResults', contractResults: [{ _Type_: 'BlueprintRewards', blueprintPool: ref('crafting/blueprintrewards/pool.json'), chance: 1 }] },
+        },
+        { _Type_: 'CareerContract', id: '10000000-0000-0000-0000-000000000021', notForRelease: false, debugName: 'Test_NoBlueprints', contractResults: null },
+      ],
+    }],
+  }),
+  'contracts/contracttemplates/test_template.json': rec('ContractTemplate.Test', U.template, {
+    _Type_: 'ContractTemplate', contractDisplayInfo: { _Type_: 'ContractDisplayInfo', type: ref('missiontype/test_type.json'), illegal: true },
+  }),
+  'contracts/contractscenarios/testevent_scenarioprogress.json': rec('ScenarioProgress.TestEvent_ScenarioProgress', U.progress, {
+    _Type_: 'ScenarioProgress',
+    factionRewardTiers: [{ _Type_: 'SScenarioProgressRewardsTiers', tierProgressions: [{ _Type_: 'STierProgressions', tierRewards: [
+      { _Type_: 'STierReward', minPoints: 1000, blueprintPool: [ref('crafting/blueprintrewards/pool.json')] },
+      { _Type_: 'STierReward', minPoints: 2000, blueprintPool: [] },
+    ] }] }],
+  }),
+  'missionscenarios/test_missionscenario.json': rec('MissionScenario.Test_MissionScenario', U.scenario, {
+    _Type_: 'MissionScenario', name: 'Test_Scenario', schedule: { _Type_: 'MissionScenarioSchedule', enabled: false },
+  }),
+  'missiontype/test_type.json': rec('MissionType.Test', U.missionType, { _Type_: 'MissionType', LocalisedTypeName: '@test_mission_type' }),
+  'missiondata/pu_missionlocality/test.json': rec('MissionLocality.Test', U.locality, {
+    _Type_: 'MissionLocality', availableLocations: [ref('starmap/pu/system/test/teststar.json')],
+  }),
+  'factions/factionreputation/test_faction.json': rec('FactionReputation.Test', U.faction, { _Type_: 'FactionReputation', displayName: '@Test_Faction' }),
+  'reputation/standings/test_rank1.json': rec('SReputationStandingParams.Test_Rank1', U.rank, {
+    _Type_: 'SReputationStandingParams', displayName: '@test_rank1', minReputation: 800,
+  }),
   'scitemmanufacturer/scitemmanufacturer.test.json': rec('SCItemManufacturer.TEST', U.manufacturer, {
     _Type_: 'SCItemManufacturer', Code: 'TEST', Localization: { Name: '@manufacturer_NameTEST', Description: '@LOC_EMPTY' },
   }),

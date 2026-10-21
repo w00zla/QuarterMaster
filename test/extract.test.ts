@@ -89,6 +89,20 @@ describe('normalize', () => {
     assert.deepEqual(s.manufacturers.map((m) => [m.code, m.descriptionKey]), [['TEST', null]]);
   });
 
+  it('derives blueprint sources from released contracts and event tiers', () => {
+    const none = { contractId: null, contractKey: null, titleKey: null, missionTypeKey: null, factionUuid: null, factionNameKey: null,
+      minRankNameKey: null, minReputation: null, localityUuids: [], locationUuids: [], requiresPrevious: false, illegal: false, chance: null, onAccept: false };
+    const pool = { blueprintUuid: U.blueprint2, poolUuid: U.pool, poolKey: 'Pool', weight: 1, poolWeight: 1 };
+    assert.deepEqual(s.blueprintSources, [
+      { ...pool, kind: 'event', ...none, eventKey: 'TestEvent', minPoints: 1000 },
+      {
+        ...pool, kind: 'mission', contractId: U.contract, contractKey: 'Test_Mission', titleKey: 'test_mission_title', missionTypeKey: 'test_mission_type',
+        factionUuid: U.faction, factionNameKey: 'test_faction', minRankNameKey: 'test_rank1', minReputation: 800, localityUuids: [U.star],
+        locationUuids: [U.station], requiresPrevious: true, illegal: true, chance: 0.5, onAccept: true, eventKey: 'Test', minPoints: null,
+      },
+    ]);
+  });
+
   it('normalizes star map objects as locations with parent and type', () => {
     assert.deepEqual(s.locations.map((l) => l.uuid).sort(), [U.star, U.station, U.orphan].sort());
     assert.deepEqual(s.locations.find((l) => l.uuid === U.station), {
@@ -104,10 +118,11 @@ describe('normalize', () => {
     ]);
   });
 
-  it('keeps every exported record raw, incl. pools that are not normalized', () => {
+  it('keeps every exported record raw, incl. pools, but not the contract records behind the sources', () => {
     assert.ok(s.rawRecords.some((r) => r.uuid === U.pool));
     assert.ok(s.rawRecords.some((r) => r.uuid === U.marker));
-    assert.equal(s.rawRecords.length, Object.keys(RECORDS).length);
+    const sourceOnly = /^(contracts|missionscenarios|missiontype|missiondata|factions|reputation)\//;
+    assert.equal(s.rawRecords.length, Object.keys(RECORDS).filter((p) => !sourceOnly.test(p)).length);
   });
 
   it('reports anomalies instead of failing', () => {

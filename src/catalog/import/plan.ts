@@ -92,6 +92,19 @@ export function blueprintChildren(blueprints: Blueprint[]): BlueprintChildren {
   return out;
 }
 
+/** Blueprint sources as table rows, numbered per blueprint in snapshot order. */
+export function blueprintSourceRows(s: Snapshot) {
+  const index = new Map<string, number>();
+  return s.blueprintSources.map((src) => {
+    const sourceIndex = index.get(src.blueprintUuid) ?? 0;
+    index.set(src.blueprintUuid, sourceIndex + 1);
+    return {
+      ...src, sourceIndex, weight: String(src.weight), poolWeight: String(src.poolWeight),
+      minReputation: numeric(src.minReputation), chance: numeric(src.chance),
+    };
+  });
+}
+
 // --- integrity -------------------------------------------------------------------------
 
 /** Hard errors that make a snapshot unusable. Not overridable. */
@@ -111,7 +124,7 @@ export function checkIntegrity(s: Snapshot): string[] {
   const categories = ids('blueprint category', s.blueprintCategories);
   const properties = ids('crafted property', s.craftedProperties);
   const quantizations = ids('quality quantization', s.qualityQuantizations);
-  ids('blueprint', s.blueprints);
+  const blueprints = ids('blueprint', s.blueprints);
   const locations = ids('location', s.locations);
   ids('raw record', s.rawRecords);
 
@@ -136,6 +149,11 @@ export function checkIntegrity(s: Snapshot): string[] {
     }
   }
   for (const l of s.locations) ref(!l.parentUuid || locations.has(l.parentUuid), `location ${l.key}: unknown parent ${l.parentUuid}`);
+  for (const src of s.blueprintSources) {
+    const what = `blueprint source ${src.contractKey ?? src.eventKey} (${src.poolKey})`;
+    ref(blueprints.has(src.blueprintUuid), `${what}: unknown blueprint ${src.blueprintUuid}`);
+    for (const l of [...src.localityUuids, ...src.locationUuids]) ref(locations.has(l), `${what}: unknown location ${l}`);
+  }
   for (const [name, n] of [
     ['blueprints', s.blueprints.length], ['resources', s.resources.length], ['items', s.items.length], ['locations', s.locations.length],
   ] as const) {

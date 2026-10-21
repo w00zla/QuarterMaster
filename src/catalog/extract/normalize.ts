@@ -4,6 +4,7 @@ import { displayText, isMissingTranslation, locKey } from './localization.ts';
 import { isComponentType } from '../components.ts';
 import { isAppKey } from '../labels.ts';
 import { isObj, recordKey, refPath, type DcbRecord, type Obj, type RecordStore } from './records.ts';
+import { blueprintSources } from './sources.ts';
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type Anomaly, type Blueprint, type BlueprintCategory, type BlueprintInput, type BlueprintSlot,
@@ -264,8 +265,10 @@ export function normalize(input: NormalizeInput): Snapshot {
   };
 
   const blueprints: Blueprint[] = [];
+  const blueprintUuidByPath = new Map<string, string>();
   for (const path of store.list(PATHS.blueprints)) {
     const r = store.get(path)!;
+    blueprintUuidByPath.set(path, r._RecordId_);
     const from = r._RecordName_;
     const bp = r._RecordValue_.blueprint;
     if (!isObj(bp)) {
@@ -306,6 +309,7 @@ export function normalize(input: NormalizeInput): Snapshot {
     });
     if (category && !categories.some((c) => c.uuid === category)) anomaly('unresolved_ref', from, `category ${category}`);
   }
+  const sources = blueprintSources(store, blueprintUuidByPath, anomaly);
 
   // --- items and manufacturers -------------------------------------------------------
   // Besides the items the blueprints reference, every named ship item of a component type is in the
@@ -470,6 +474,7 @@ export function normalize(input: NormalizeInput): Snapshot {
     craftedProperties,
     qualityQuantizations,
     blueprints,
+    blueprintSources: sources,
     locations,
   };
 }

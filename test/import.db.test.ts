@@ -56,6 +56,13 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('localization_source', `source = 'game'`), 2);
     const [qty] = await db.execute<{ quantity: string }>(sql`SELECT quantity::text FROM catalog.blueprint_input WHERE kind = 'resource'`);
     assert.equal(qty!.quantity, '0.046');
+    // Blueprint sources, numbered per blueprint
+    const sources = await db.execute<{ i: number; kind: string; chance: string | null; systems: string[]; event: string }>(sql`
+      SELECT source_index AS i, kind, chance::text, locality_uuids AS systems, event_key AS event
+      FROM catalog.blueprint_source WHERE blueprint_uuid = ${U.blueprint2} ORDER BY source_index`);
+    assert.deepEqual(sources.map((s) => [s.i, s.kind, s.chance, s.systems, s.event]), [
+      [0, 'event', null, [], 'TestEvent'], [1, 'mission', '0.5', [U.star], 'Test'],
+    ]);
   });
 
   it('skips an identical snapshot', async () => {
@@ -70,6 +77,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     next.blueprints = next.blueprints.filter((b) => b.uuid !== U.blueprint2);
     next.blueprints[0]!.tiers[0]!.slots[0]!.inputs[0]!.quantity = 0.05;
     next.locations = next.locations.filter((l) => l.uuid !== U.orphan);
+    next.blueprintSources = next.blueprintSources.filter((s) => s.kind === 'mission');
     // Small sets: retiring 1 of 2 blueprints must not trip the ratio safeguard (absolute minimum)
     const r = await runImport(db, next, hashOf(next), OPTIONS);
     assert.equal(r.status, 'imported');
@@ -78,6 +86,8 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('blueprint_input', `quantity = 0.05`), 1);
     assert.deepEqual(r.diffs.location.retired, [U.orphan]);
     assert.equal(await count('location', 'retired_at IS NOT NULL'), 1);
+    // Sources are replaced as a whole
+    assert.equal(await count('blueprint_source'), 1);
 
     const again = fixtureSnapshot();
     again.game.build = 1002;

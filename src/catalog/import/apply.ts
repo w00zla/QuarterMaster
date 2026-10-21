@@ -5,7 +5,7 @@ import * as c from '../../db/schema/catalog.ts';
 import type { Snapshot } from '../snapshot.ts';
 import { GAME_PRIORITY, GAME_SOURCE, readSources, readTexts, removeSource, writeTexts } from './localization.ts';
 import {
-  ENTITY_NAMES, blueprintChildren, chunks, diffEntities, diffTexts, evaluateSafeguards, textsSha256, toEntitySets,
+  ENTITY_NAMES, blueprintChildren, blueprintSourceRows, chunks, diffEntities, diffTexts, evaluateSafeguards, textsSha256, toEntitySets,
   type EntityDiff, type EntityName, type ExistingRow, type LastImport, type SafeguardOptions, type SafeguardResult, type TextDiff,
 } from './plan.ts';
 
@@ -137,6 +137,9 @@ export async function runImport(db: Db, snapshot: Snapshot, snapshotSha256: stri
           }
           if (name === 'blueprint') await replaceRecipes(tx, snapshot, [...write]);
         }
+        // Derived from the whole snapshot: replaced as a whole
+        await tx.delete(c.blueprintSource);
+        for (const batch of chunks(blueprintSourceRows(snapshot), 1000)) await tx.insert(c.blueprintSource).values(batch);
 
         // Everything not seen in this import gets retired; must match the diff exactly
         for (const name of ENTITY_NAMES) {

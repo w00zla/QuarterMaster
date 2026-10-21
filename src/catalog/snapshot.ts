@@ -2,7 +2,7 @@
 // Bump SNAPSHOT_SCHEMA_VERSION on any incompatible change.
 import { z } from 'zod';
 
-export const SNAPSHOT_SCHEMA_VERSION = 3;
+export const SNAPSHOT_SCHEMA_VERSION = 4;
 
 // Game record ids are UUID-shaped but not necessarily RFC-compliant
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -125,6 +125,42 @@ export const blueprintSchema = z.object({
   tiers: z.array(blueprintTierSchema),
 });
 
+// Where a blueprint comes from: a contract hands out a reward pool holding it ('mission'), or a point tier
+// of an event's progress does ('event'). One entry per blueprint, contract (or tier) and pool.
+export const blueprintSourceSchema = z.object({
+  blueprintUuid: uuid,
+  kind: z.enum(['mission', 'event']),
+  poolUuid: uuid,
+  poolKey: z.string(),
+  // The game picks one entry of the pool by weight: this blueprint's weight of the pool's total
+  weight: z.number(),
+  poolWeight: z.number(),
+  // Mission: the contract (id within its generator record, debug name), its texts and conditions
+  contractId: uuid.nullable(),
+  contractKey: z.string().nullable(),
+  titleKey: locKey,
+  missionTypeKey: locKey,
+  factionUuid: uuid.nullable(),
+  factionNameKey: locKey,
+  // Minimum standing with the faction: its rank name and reputation points (0 = none)
+  minRankNameKey: locKey,
+  minReputation: z.number().nullable(),
+  // Star map objects the contract is offered at (its locality: systems, planets, stations, … as the game
+  // lists them; the system follows from their parents) and, if bound to one, the location
+  localityUuids: z.array(uuid),
+  locationUuids: z.array(uuid),
+  // Needs a completed earlier contract (a mission chain)
+  requiresPrevious: z.boolean(),
+  illegal: z.boolean(),
+  // Share of completions that hand out the pool (1 = always)
+  chance: z.number().nullable(),
+  // Handed out on accepting the contract, not on completing it
+  onAccept: z.boolean(),
+  // Event: the scenario ("RoX", "ORS"; missions only when their scenario is started by hand) and the tier
+  eventKey: z.string().nullable(),
+  minPoints: z.number().nullable(),
+});
+
 // Star map object (system, planet, station, outpost, …); all of them, selection happens in the app
 export const locationSchema = z.object({
   uuid,
@@ -163,6 +199,7 @@ export const snapshotSchema = z.object({
   craftedProperties: z.array(craftedPropertySchema),
   qualityQuantizations: z.array(qualityQuantizationSchema),
   blueprints: z.array(blueprintSchema),
+  blueprintSources: z.array(blueprintSourceSchema),
   locations: z.array(locationSchema),
 });
 
@@ -176,6 +213,7 @@ export type BlueprintCategory = z.infer<typeof blueprintCategorySchema>;
 export type CraftedProperty = z.infer<typeof craftedPropertySchema>;
 export type QualityQuantization = z.infer<typeof qualityQuantizationSchema>;
 export type Blueprint = z.infer<typeof blueprintSchema>;
+export type BlueprintSource = z.infer<typeof blueprintSourceSchema>;
 export type Location = z.infer<typeof locationSchema>;
 export type BlueprintTier = z.infer<typeof blueprintTierSchema>;
 export type BlueprintSlot = z.infer<typeof blueprintSlotSchema>;
