@@ -4,14 +4,14 @@
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor) and hotkeys, saved (on/off is the scan row's
 // toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes the
-// dialog).
-import { computed, ref } from "vue";
+// dialog). At the bottom, small: the app's version.
+import { computed, onMounted, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { openDebugWindow, setConfig, type OverlayPosition } from "../backend";
+import { appInfo, openDebugWindow, setConfig, type OverlayPosition } from "../backend";
 import { t } from "../i18n";
 import { applyConfig, config, loadLog, refreshConnection } from "../state";
 import { errorText, toast, toastError } from "../toasts";
@@ -27,6 +27,14 @@ const overlayPosition = ref<OverlayPosition>(config.value?.overlayPosition ?? "t
 const hotkeyOverlay = ref(config.value?.hotkeyOverlay ?? "");
 const hotkeyMode = ref(config.value?.hotkeyMode ?? "");
 const busy = ref(false);
+const version = ref("");
+onMounted(async () => {
+  try {
+    version.value = (await appInfo()).version;
+  } catch (e) {
+    toastError(e);
+  }
+});
 // The overlay needs the screen capture's window tracking (Windows only so far)
 const isWindows = navigator.userAgent.includes("Windows");
 
@@ -148,6 +156,8 @@ async function pickFolder() {
         </div>
       </section>
     </form>
+    <!-- Its line is there before the version is (no jump) -->
+    <div class="version mono">{{ version && `v${version}` }}</div>
   </ConfirmDialog>
 </template>
 
@@ -266,5 +276,12 @@ async function pickFolder() {
 
 .hotkey-field {
   width: 200px;
+}
+
+.version {
+  min-height: 1lh;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-2);
 }
 </style>
