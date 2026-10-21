@@ -45,7 +45,6 @@ const keyText = computed(() => {
   const created = t("companion.keyCreated", { date: date(info.createdAt) });
   return info.lastUsedAt ? `${created} · ${t("companion.keyUsed", { date: date(info.lastUsedAt) })}` : created;
 });
-const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 onMounted(async () => {
   try {
@@ -96,7 +95,7 @@ async function copyKey() {
             :href="d.url"
             download
           >
-            <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }} · {{ size(d.size) }}
+            <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }}
           </a>
         </template>
         <div v-else-if="release" class="faint">{{ t("companion.noRelease") }}</div>
