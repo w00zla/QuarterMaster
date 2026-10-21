@@ -4,7 +4,7 @@
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor) and hotkeys, saved (on/off is the scan row's
 // toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes the
-// dialog). At the bottom, small: the app's version.
+// dialog), small left of it the app's version.
 import { computed, onMounted, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
@@ -100,6 +100,7 @@ async function pickFolder() {
 <template>
   <ConfirmDialog :title="t('settings.title')" icon="settings" :buttons="buttons" @choose="emit('close')">
     <template #head>
+      <span class="version mono">{{ version && `v${version}` }}</span>
       <Tooltip :text="t('settings.debugHint')">
         <button type="button" class="btn small outline" @click="openDebug">
           <Icon name="log" :size="12" /> {{ t("debug.open") }}
@@ -156,8 +157,6 @@ async function pickFolder() {
         </div>
       </section>
     </form>
-    <!-- Its line is there before the version is (no jump) -->
-    <div class="version mono">{{ version && `v${version}` }}</div>
   </ConfirmDialog>
 </template>
 
@@ -229,10 +228,10 @@ async function pickFolder() {
   grid-template-columns: repeat(3, 1fr);
   align-content: space-between;
   justify-items: center;
-  width: 144px;
-  height: 81px;
+  width: 112px;
+  height: 63px;
   box-sizing: border-box;
-  padding: 6px;
+  padding: 5px;
   border: 2px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--bg-base);
@@ -247,8 +246,8 @@ async function pickFolder() {
 }
 
 .stand {
-  width: 36px;
-  height: 6px;
+  width: 28px;
+  height: 5px;
   border: 2px solid var(--border);
   border-top: none;
   border-radius: 0 0 var(--radius-control) var(--radius-control);
@@ -279,8 +278,6 @@ async function pickFolder() {
 }
 
 .version {
-  min-height: 1lh;
-  text-align: right;
   font-size: 11px;
   color: var(--text-2);
 }
