@@ -20,6 +20,10 @@ import * as stock from '../stock/service.ts';
 import { MAX_REFINE_ROWS, StockError, type Actor } from '../stock/service.ts';
 import type { Source } from '../history/record.ts';
 import { listHistory } from './history.ts';
+import { registerTradeRoutes, stockValues } from './trade.ts';
+import { materialTrade } from '../ext/trade.ts';
+import { loadUnlocks, registerUnlockRoutes, unlockSummary } from './unlocks.ts';
+import { unlockableBlueprints } from './unlock-query.ts';
 import { refineryMatch } from '../ext/refineries.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
@@ -38,7 +42,7 @@ export class HttpError extends Error {
   }
 }
 
-type Env = { Variables: { session: Session; token: string; apiToken?: boolean } };
+export type Env = { Variables: { session: Session; token: string; apiToken?: boolean } };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SNOWFLAKE = /^[0-9]{17,20}$/;
@@ -201,6 +205,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const lang = langOf(c);
     const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
     const [bpTypes, types, bpStats] = [await blueprintTypes(db, lang), await itemTypes(db, lang), await blueprintStatNames(db, lang)];
+    const unlockable = await unlockableBlueprints(db);
     const refineries = await refineryMatch(db);
     return c.json({
       materials: [...materials.values()].map((m) => ({
@@ -216,6 +221,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       blueprints: blueprints.entries.map((e) => ({
         uuid: e.uuid, label: e.label, name: e.name, ...(bpTypes.get(e.uuid) ?? noType), size: e.size, gradeLetter: e.gradeLetter, itemClass: e.itemClass,
         manufacturerCode: e.manufacturerCode, category: e.categoryLabel, isDefault: e.isDefault, retired: e.retired, stats: bpStats.get(e.uuid) ?? [],
+        unlockable: unlockable.has(e.uuid),
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     } satisfies CatalogResponse);
@@ -392,6 +398,8 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       SELECT o.guild_id AS "guildId" FROM app.member mine JOIN app.org o ON o.guild_id = mine.guild_id
       WHERE mine.user_id = ${me} AND mine.active ORDER BY lower(o.name)`)).map((o) => o.guildId);
     const orgs = await orgMetrics(db, orgIds);
+    // At the best UEX sell price: the same batches as the figures
+    const values = await stockValues(db, me, orgIds);
     const [own] = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM app.user_blueprint WHERE user_id = ${me}`);
     return c.json({
       obtainableBlueprints: await obtainableBlueprints(db),
@@ -404,8 +412,9 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
           endsAt: (refining?.ends ?? []).map((e) => new Date(e).toISOString()).sort(),
         },
         blueprints: own?.n ?? 0,
+        value: values.personal,
       },
-      orgs: orgIds.map((guildId) => ({ guildId, ...orgs.get(guildId)! })),
+      orgs: orgIds.map((guildId) => ({ guildId, ...orgs.get(guildId)!, value: values.orgs.get(guildId) ?? null })),
     } satisfies SummaryResponse);
   });
 
@@ -427,6 +436,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
         name: s.name,
         inputs: s.inputs.map((i) => ({ name: i.name, kind: i.kind, quantity: formatAmount(i.quantity), minQuality: i.minQuality })),
       })),
+      unlocks: unlockSummary(await loadUnlocks(db, id.data, langOf(c))),
     } satisfies BlueprintInfo);
   });
 
@@ -441,7 +451,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       return c.json({
         ...blank, kind: 'resource', name: resource.name, type: null, description: resource.description,
         group: resource.groupPath.join(' › ') || null, isOre: resource.isOre, refined: resource.refined?.name ?? null,
-        ores: resource.ores.map((o) => o.name), usedIn: distinct(resource.usedBy),
+        ores: resource.ores.map((o) => o.name), usedIn: distinct(resource.usedBy), prices: (await materialTrade(db, id.data))?.summary ?? null,
       } satisfies MaterialInfo);
     }
     const item = await getItem(db, id.data, lang);
@@ -450,6 +460,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       ...blank, kind: 'item', name: item.name, type: item.type, description: item.description, typeLabel: item.typeLabel, subTypeLabel: item.subTypeLabel,
       size: item.size, gradeLetter: item.gradeLetter, itemClass: item.itemClass,
       manufacturer: item.manufacturer?.name ?? item.manufacturer?.code ?? null, usedIn: distinct(item.inputOf),
+      prices: (await materialTrade(db, id.data))?.summary ?? null,
     } satisfies MaterialInfo);
   });
 
@@ -485,4 +496,8 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     }
     return ok(c);
   });
+
+  // --- blueprint unlocks, trading (UEX) -----------------------------------------------------------
+  registerUnlockRoutes(api, db);
+  registerTradeRoutes(api, db);
 }

@@ -10,7 +10,10 @@ const lastScope = ref("personal");
 // starts with that org's share switched on; the form stays open for the next batch). `components`:
 // the ship components instead of the materials (ComponentsView; no quality, filters by type, size, grade).
 import { computed, onMounted, onUnmounted, watch } from "vue";
-import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
+import type { PriceSummary, StockBatch, StockListResponse, TradePricesResponse } from "../../../src/webapp/api-types";
+import { valueMicros } from "../../../src/stock/amount";
+import ChipButton from "../components/ChipButton.vue";
+import TradeDialog from "../components/TradeDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
@@ -21,10 +24,11 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
+import ColumnsButton from "../components/ColumnsButton.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import StockAddForm from "../components/StockAddForm.vue";
-import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, sharedText, statsText, tierMark, tierQualities } from "../format";
-import { lang, t } from "../i18n";
+import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, sharedText, statsText, tierMark, tierQualities, uec } from "../format";
+import { columnsTexts, lang, t } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
 import { takeQuery } from "../deepLink";
 import { coalesced, onServerMessage } from "../realtime";
@@ -91,9 +95,21 @@ watch([scope, holder], () => {
 }, { immediate: true });
 watch(lang, load);
 
+// UEX prices per material (GET /api/trade/prices): the Handel button and the UEC columns; per visit
+const prices = ref<Record<string, PriceSummary>>({});
+async function loadPrices() {
+  try {
+    prices.value = (await api<TradePricesResponse>("/trade/prices")).prices;
+  } catch (e) {
+    toastError(e);
+  }
+}
+const trade = ref<{ uuid: string; name: string } | null>(null);
+
 const reload = coalesced(() => void load());
 let unsubscribe = () => {};
 onMounted(() => {
+  void loadPrices();
   if (isOrg(scope.value)) ensureMembers(scope.value);
   unsubscribe = onServerMessage((m) => {
     if (m.type === "resync") reload.schedule();
@@ -114,6 +130,7 @@ const nameOf = (b: StockBatch) => (b.component ? materials.value.get(b.subjectUu
 const typeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.typeLabel ?? t("filter.noType");
 const sizeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.size;
 const gradeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.gradeLetter;
+const classOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.itemClass;
 // The text search still finds a component by its type, size ("S3") and grade
 const searchText = (b: StockBatch) => [
   nameOf(b),
@@ -133,30 +150,63 @@ const filtered = computed(() => {
 });
 
 // --- the table: one group per material (header with the total), its batches below ------------
+// Every column but the name and the actions may be hidden (ColumnsButton in the actions' head)
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: props.components ? t("stock.col.component") : t("stock.col.material"), width: 200 },
   ...(props.components
     ? [
-        { key: "type", label: t("stock.col.type"), width: 160 },
-        { key: "size", label: t("stock.col.size"), width: 64 },
-        { key: "grade", label: t("stock.col.grade"), width: 72 },
+        { key: "type", label: t("stock.col.type"), width: 160, hideable: true },
+        { key: "size", label: t("stock.col.size"), width: 64, hideable: true },
+        { key: "grade", label: t("stock.col.grade"), width: 72, hideable: true },
+        { key: "class", label: t("stock.col.class"), width: 120, hideable: true, hiddenByDefault: true },
       ]
-    : [{ key: "quality", label: t("stock.col.quality"), width: 130 }]),
-  { key: "amount", label: props.components ? t("stock.col.count") : t("stock.col.amount"), width: 120 },
-  ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260 }] : []),
-  { key: "location", label: t("stock.col.location"), width: 280 },
-  ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180 }] : []),
-  ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200 }] : []),
+    : [{ key: "quality", label: t("stock.col.quality"), width: 130, hideable: true }]),
+  { key: "amount", label: props.components ? t("stock.col.count") : t("stock.col.amount"), width: 120, hideable: true },
+  // Ressourcen: what the amount is worth at UEX's prices (best sell shown, the others on demand)
+  ...(props.components ? [] : [
+    { key: "uecSell", label: t("trade.col.sell"), width: 120, hideable: true },
+    { key: "uecBuy", label: t("trade.col.buy"), width: 120, hideable: true, hiddenByDefault: true },
+    { key: "uecSellAvg", label: t("trade.col.sellAvg"), width: 120, hideable: true, hiddenByDefault: true },
+    { key: "uecBuyAvg", label: t("trade.col.buyAvg"), width: 120, hideable: true, hiddenByDefault: true },
+  ]),
+  ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260, hideable: true }] : []),
+  { key: "location", label: t("stock.col.location"), width: 280, hideable: true },
+  ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180, hideable: true }] : []),
+  ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200, hideable: true }] : []),
   // Die Füllspalte (Rest der Breite, ohne Griff): ihre Breite ist ihr Minimum, daher das der anderen (MIN_WIDTH)
-  { key: "state", label: t("stock.col.state"), width: 40 },
+  { key: "state", label: t("stock.col.state"), width: 40, hideable: true },
   // Je Button 26px + 6px Abstand, dazu die Trennlinie: Ressourcen fünf Buttons, Ausrüstung vier
   { key: "actions", label: "", width: props.components ? 136 : 168, sortable: false, fixed: true, sep: true },
+  // Der Handel-Button der Materialzeile (Preise gelten je Material)
+  { key: "trade", label: "", width: 84, sortable: false, fixed: true, sep: true },
 ]);
-// Cells of a group row before the empty ones: name, (type, size, grade | quality,) total
-const lead = props.components ? 5 : 3;
 const cols = props.components
   ? useTableColumns("qm.webapp.columns.components", columns, { key: "amount", dir: "desc" })
   : useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
+const shown = computed(() => new Set(cols.columns.value.map((c) => c.key)));
+const on = (key: string) => shown.value.has(key);
+// Cells of a group row before the empty ones: name, (type, size, grade, class | quality,) total, (UEC values);
+// the trade button comes after them
+const LEAD = new Set(["material", "type", "size", "grade", "class", "quality", "amount", "uecSell", "uecBuy", "uecSellAvg", "uecBuyAvg"]);
+const groupRest = computed(() => cols.columns.value.filter((c) => !LEAD.has(c.key) && c.key !== "trade").length);
+
+// The UEC columns' prices: best sell (highest), best buy (lowest), UEX's averages
+const UEC = {
+  uecSell: (p: PriceSummary) => p.sell?.max,
+  uecBuy: (p: PriceSummary) => p.buy?.min,
+  uecSellAvg: (p: PriceSummary) => p.sell?.avg ?? undefined,
+  uecBuyAvg: (p: PriceSummary) => p.buy?.avg ?? undefined,
+};
+type UecKey = keyof typeof UEC;
+const isUec = (key: string): key is UecKey => Object.hasOwn(UEC, key);
+const uecShown = computed(() => cols.columns.value.map((c) => c.key).filter(isUec));
+/** An amount's worth at the column's price in micro aUEC (exact, BigInt); null without a price. */
+function uecMicros(uuid: string, quantity: string, key: UecKey): bigint | null {
+  const p = prices.value[uuid];
+  const price = p && UEC[key](p);
+  return price === undefined ? null : valueMicros(quantity, price);
+}
+const uecText = (micros: bigint | null) => (micros === null ? "—" : uec(Number(micros) / 1e6));
 
 function valueOf(b: StockBatch, key: string): string | number {
   switch (key) {
@@ -164,6 +214,7 @@ function valueOf(b: StockBatch, key: string): string | number {
     case "type": return typeOf(b);
     case "size": return sizeOf(b) ?? -1;
     case "grade": return gradeOf(b) ?? "";
+    case "class": return classOf(b) ?? "";
     case "quality": return b.quality;
     case "amount": return Number(b.quantity);
     case "stats": return statsText(b.subjectUuid, b.stats);
@@ -171,7 +222,11 @@ function valueOf(b: StockBatch, key: string): string | number {
     case "holder": return b.holderName ?? "";
     case "owner": return ownerText(b);
     case "state": return b.state === "refining" ? t("stock.refining") : b.sharedIn.length ? sharedText(b) : "";
-    default: return "";
+    default: {
+      if (!isUec(key)) return "";
+      const micros = uecMicros(b.subjectUuid, b.quantity, key);
+      return micros === null ? -1 : Number(micros);
+    }
   }
 }
 
@@ -189,9 +244,11 @@ const groups = computed(() => {
     }));
   // A component's type, size and grade belong to its group: the groups sort by them, then by name
   if (key === "type" || key === "size" || key === "grade") return sortRows(list, cols.sort.value, (g, k) => valueOf(g.rows[0]!, k), byName);
-  // Groups follow the material and amount columns (by name, by total); otherwise alphabetical
+  // Groups follow the material, amount and UEC columns (by name, by total); otherwise alphabetical
+  const worth = (g: { uuid: string; total: string }, k: UecKey) => Number(uecMicros(g.uuid, g.total, k) ?? -1n);
   return list.sort((a, b) => key === "material" ? sign * byName(a, b)
     : key === "amount" ? sign * (Number(a.total) - Number(b.total)) || byName(a, b)
+    : isUec(key) ? sign * (worth(a, key) - worth(b, key)) || byName(a, b)
     : byName(a, b));
 });
 
@@ -284,7 +341,9 @@ function open(batch: StockBatch, action: BatchAction) {
       <div v-if="!data" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!batches.length" class="empty-line">{{ t("stock.empty") }}</div>
       <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
-        <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
+        <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth">
+          <template #col-actions><span class="columns"><ColumnsButton :table="cols" :texts="columnsTexts()" /></span></template>
+        </ColumnHead>
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
         <template v-for="g in groups" :key="g.uuid">
           <!-- The material's row: its name, and its total under the amounts -->
@@ -294,26 +353,30 @@ function open(batch: StockBatch, action: BatchAction) {
               <InfoTip kind="material" :uuid="g.uuid">{{ g.material }}</InfoTip>
             </span>
             <template v-if="components">
-              <span class="cell">{{ typeOf(g.rows[0]!) }}</span>
-              <span class="num">{{ sizeOf(g.rows[0]!) ?? "—" }}</span>
-              <span>{{ gradeOf(g.rows[0]!) ?? "—" }}</span>
+              <span v-if="on('type')" class="cell">{{ typeOf(g.rows[0]!) }}</span>
+              <span v-if="on('size')" class="num">{{ sizeOf(g.rows[0]!) ?? "—" }}</span>
+              <span v-if="on('grade')">{{ gradeOf(g.rows[0]!) ?? "—" }}</span>
+              <span v-if="on('class')" class="cell">{{ classOf(g.rows[0]!) ?? "—" }}</span>
             </template>
-            <span v-else />
-            <span class="num group-total">{{ qty(g.total, g.unit) }}</span>
-            <span v-for="c in columns.length - lead" :key="c" :class="{ sep: c === columns.length - lead }" />
+            <span v-else-if="on('quality')" />
+            <span v-if="on('amount')" class="num group-total">{{ qty(g.total, g.unit) }}</span>
+            <span v-for="k in uecShown" :key="k" class="num group-total">{{ uecText(uecMicros(g.uuid, g.total, k)) }}</span>
+            <span v-for="c in groupRest" :key="c" :class="{ sep: c === groupRest }" />
+            <span class="sep trade"><ChipButton :label="t('trade.button')" :disabled="!prices[g.uuid]" @click="trade = { uuid: g.uuid, name: g.material }" /></span>
           </div>
           <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
             <span />
-            <template v-if="components"><span /><span /><span /></template>
-            <span v-else class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
-            <!-- Ausrüstung: jeder Eintrag zählt vorerst optisch als ein Stück, die Anzahl bleibt leer -->
-            <span v-if="components" />
-            <span v-else class="num">{{ qty(b.quantity, b.unit) }}</span>
-            <span v-if="components" class="cell" :title="statsText(b.subjectUuid, b.stats)">{{ statsText(b.subjectUuid, b.stats) }}</span>
-            <span class="cell">{{ b.location }}</span>
-            <span v-if="org" class="cell">{{ b.holderName }}</span>
-            <span v-if="scope === 'all'" class="cell">{{ ownerText(b) }}</span>
-            <span>
+            <template v-if="components"><span v-if="on('type')" /><span v-if="on('size')" /><span v-if="on('grade')" /><span v-if="on('class')" /></template>
+            <span v-else-if="on('quality')" class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
+            <!-- Ausrüstung: jeder Eintrag ist ein Stück ("1 Stk.") -->
+            <span v-if="on('amount')" class="num">{{ qty(b.quantity, b.unit) }}</span>
+            <span v-for="k in uecShown" :key="k" class="num">{{ uecText(uecMicros(b.subjectUuid, b.quantity, k)) }}</span>
+            <!-- Ohne Verbesserung: "Standard", dezent -->
+            <span v-if="components && on('stats')" class="cell" :class="{ dim: !statsText(b.subjectUuid, b.stats) }" :title="statsText(b.subjectUuid, b.stats)">{{ statsText(b.subjectUuid, b.stats) || t("stock.standard") }}</span>
+            <span v-if="on('location')" class="cell">{{ b.location }}</span>
+            <span v-if="org && on('holder')" class="cell">{{ b.holderName }}</span>
+            <span v-if="scope === 'all' && on('owner')" class="cell">{{ ownerText(b) }}</span>
+            <span v-if="on('state')">
               <span v-if="b.state === 'refining'" class="tag warn">{{ t("stock.refining") }}</span>
               <!-- Where it is shared (an org's own list needs no tag for it) -->
               <span v-else-if="!org && b.sharedIn.length" class="tag accent">{{ sharedText(b) }}</span>
@@ -333,17 +396,19 @@ function open(batch: StockBatch, action: BatchAction) {
                   <button v-else type="button" class="icon-btn" :title="t('stock.split')"
                     :disabled="b.state !== 'stored' || b.sharedIn.length > 0" @click="open(b, 'split')"><Icon name="split" :size="15" /></button>
                 </template>
-                <!-- Ausrüstung: nur die Werte korrigieren, also nur bei Teilen mit Werten -->
+                <!-- Ausrüstung: nur die Werte korrigieren; bei Teilen ohne Werte deaktiviert (kein Layout-Sprung) -->
                 <button v-if="!components" type="button" class="icon-btn" :title="t('stock.adjust')" :disabled="b.state !== 'stored'" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
-                <button v-else-if="materials.get(b.subjectUuid)?.stats.length" type="button" class="icon-btn" :title="t('stock.adjustStats')" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
+                <button v-else type="button" class="icon-btn" :title="t('stock.adjustStats')" :disabled="!materials.get(b.subjectUuid)?.stats.length" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
               </template>
             </span>
+            <span class="sep" />
           </div>
         </template>
       </div>
     </section>
 
     <BatchDialog v-if="dialog" :key="dialog.batch.id" :batch="dialog.batch" :action="dialog.action" @close="dialog = null" @done="load" />
+    <TradeDialog v-if="trade" :key="trade.uuid" :uuid="trade.uuid" :name="trade.name" @close="trade = null" />
   </div>
 </template>
 
@@ -386,6 +451,15 @@ function open(batch: StockBatch, action: BatchAction) {
 .actions {
   justify-content: flex-end;
   gap: 6px;
+}
+
+.trade {
+  justify-content: center;
+}
+
+/* The column chooser at the right edge, above the action buttons */
+.columns {
+  margin-left: auto;
 }
 
 </style>

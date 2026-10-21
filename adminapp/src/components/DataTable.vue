@@ -1,7 +1,9 @@
 <script setup lang="ts" generic="T">
 // A grid table with BindSight's column head: click to sort, drag to resize,
 // widths and sort persist per table. Cells render `valueOf` unless a
-// `#cell-<key>` slot is given. Rows are sorted here; filtering is the caller's.
+// `#cell-<key>` slot is given; `#col-<key>` adds to a column's head (gets the table's columns as
+// `table`, e.g. for the column chooser). Columns the user hid (`hideable`) are left out. Rows are
+// sorted here; filtering is the caller's.
 import { computed } from "vue";
 import ColumnHead from "./ColumnHead.vue";
 import { sortRows, useTableColumns, type ColumnSpec, type SortState } from "../tableColumns";
@@ -28,12 +30,16 @@ const sorted = computed(() => sortRows(props.rows, cols.sort.value, props.valueO
 <template>
   <div class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
     <ColumnHead
-      :columns="columns"
+      :columns="cols.columns.value"
       :sort="cols.sort.value"
       @sort="cols.toggleSort"
       @resize="cols.startResize"
       @reset="cols.resetWidth"
-    />
+    >
+      <template v-for="c in cols.columns.value" :key="c.key" #[`col-${c.key}`]>
+        <slot :name="`col-${c.key}`" :table="cols" />
+      </template>
+    </ColumnHead>
     <div
       v-for="r in sorted"
       :key="rowKey(r)"
@@ -41,7 +47,7 @@ const sorted = computed(() => sortRows(props.rows, cols.sort.value, props.valueO
       :class="{ selected: selected === rowKey(r), ...(rowClass?.(r) ?? {}) }"
       @click="emit('select', r)"
     >
-      <span v-for="c in columns" :key="c.key" :class="{ num: numeric?.includes(c.key), sep: c.sep }">
+      <span v-for="c in cols.columns.value" :key="c.key" :class="{ num: numeric?.includes(c.key), sep: c.sep }">
         <slot :name="`cell-${c.key}`" :row="r">{{ valueOf(r, c.key) }}</slot>
       </span>
     </div>

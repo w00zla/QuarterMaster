@@ -4,20 +4,23 @@
 // events. Nothing in the card changes its height while qualities or the slot choice change: a
 // wrong slot choice shows next to the slot count, and the stats list every stat the recipe's slots
 // can give.
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
 import type { StockBatch } from "../../../src/webapp/api-types";
+import { blueprints } from "../catalog";
 import { craftingUi, toggleIn, warningText } from "../crafting";
 import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../../../src/planner/stock";
 import { duration, qty, unitText } from "../format";
 import { t } from "../i18n";
 import { me } from "../session";
+import ChipButton from "./ChipButton.vue";
 import CoverageTag from "./CoverageTag.vue";
 import StockBatchList from "./StockBatchList.vue";
 import TypeLabel from "./TypeLabel.vue";
+import UnlocksDialog from "./UnlocksDialog.vue";
 
 // stock: everything you can see (null while it loads)
 const props = defineProps<{ result: EntryResult; recipe: PlannerRecipe | undefined; stock: StockBatch[] | null }>();
@@ -89,6 +92,8 @@ const perSlotText = (s: StatResult | undefined) => !s || s.perSlot.length < 2 ? 
   s.perSlot.map((p) => `${slotName(p.slotIndex)}: ${s.kind === "additive" ? p.value : `×${p.value.toFixed(3)}`}`).join(" · ");
 const unit = (kind: string) => unitText(kind === "resource" ? "SCU" : "pcs");
 const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ...s.inputs.map((i) => i.minQuality));
+
+const unlocksOpen = ref(false);
 </script>
 
 <template>
@@ -116,7 +121,10 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ..
         <span v-if="recipe.gradeLetter" class="meta">{{ t("crafting.grade", { grade: recipe.gradeLetter }) }}</span>
         <span v-if="recipe.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
         <span v-if="recipe.retired" class="tag err">{{ t("crafting.retired") }}</span>
+        <div class="divider" />
+        <ChipButton :label="t('unlock.title')" icon="lock" :disabled="!blueprints.get(result.blueprintUuid)?.unlockable" @click="unlocksOpen = true" />
       </div>
+      <UnlocksDialog v-if="unlocksOpen" :uuid="result.blueprintUuid" :name="result.name" @close="unlocksOpen = false" />
     </div>
 
     <div class="entry-body">
@@ -244,6 +252,12 @@ const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ..
 
 .head-line.tags {
   flex-wrap: wrap;
+}
+
+/* Before the unlocks button: the global divider has the head's colour, here it takes the chips' */
+.head-line.tags .divider {
+  margin: 0 6px;
+  background: rgba(173, 211, 235, 0.35);
 }
 
 .entry-icon {

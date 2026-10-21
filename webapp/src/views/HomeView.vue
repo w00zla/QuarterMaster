@@ -2,7 +2,7 @@
 // Start page: headline numbers for your personal stock and each org, then your orgs (also fine
 // without any org). The numbers reload on every change the realtime channel announces.
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import type { StockMetrics, SummaryResponse } from "../../../src/webapp/api-types";
+import type { StockMetrics, StockValue, SummaryResponse } from "../../../src/webapp/api-types";
 import { api } from "../api";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import StatTile from "../components/StatTile.vue";
@@ -48,6 +48,11 @@ const stockTiles = (s: StockMetrics | undefined) => [
   { label: t("sum.items"), value: number(s?.items.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.items), icon: "item" as const },
 ];
 const blueprintsOf = (n: number | undefined) => ({ value: number(n), unit: `/ ${number(summary.value?.obtainableBlueprints)}` });
+// Worth at the best UEX sell price ("—" without any UEX prices), split like the tabs
+const valueOf = (v: StockValue | null | undefined) => ({
+  value: v ? number(v.total) : null,
+  sub: v ? t("sum.valueSplit", { r: number(v.resources)!, c: number(v.components)! }) : "",
+});
 
 const refining = computed(() => summary.value?.personal.refining);
 const refiningSub = computed(() => {
@@ -94,6 +99,7 @@ onUnmounted(() => {
         <StatTile v-for="tile in stockTiles(summary?.personal)" :key="tile.label" :label="tile.label" :value="tile.value" :unit="tile.unit" :icon="tile.icon">{{ tile.sub }}</StatTile>
         <StatTile icon="drop" :label="t('sum.refining')" :value="number(refining?.jobs)">{{ refiningSub }}</StatTile>
         <StatTile icon="blueprint" :label="t('sum.blueprints')" v-bind="blueprintsOf(summary?.personal.blueprints)" />
+        <StatTile icon="overview" :label="t('sum.value')" :value="valueOf(summary?.personal.value).value">{{ valueOf(summary?.personal.value).sub }}</StatTile>
       </div>
     </section>
     <section class="panel">
@@ -112,6 +118,7 @@ onUnmounted(() => {
           <div class="stats">
             <StatTile v-for="tile in stockTiles(orgStats(o.guildId))" :key="tile.label" :label="tile.label" :value="tile.value" :unit="tile.unit" :icon="tile.icon">{{ tile.sub }}</StatTile>
             <StatTile icon="blueprint" :label="t('sum.blueprints')" v-bind="blueprintsOf(orgStats(o.guildId)?.blueprints)" />
+            <StatTile icon="overview" :label="t('sum.value')" :value="valueOf(orgStats(o.guildId)?.value).value">{{ valueOf(orgStats(o.guildId)?.value).sub }}</StatTile>
           </div>
         </div>
       </div>

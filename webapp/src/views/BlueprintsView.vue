@@ -13,13 +13,16 @@ import { useRouter } from "vue-router";
 import { api } from "../api";
 import { addToCrafting } from "../crafting";
 import { blueprints, catalog } from "../catalog";
+import ChipButton from "../components/ChipButton.vue";
+import ColumnsButton from "../components/ColumnsButton.vue";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import TypeLabel from "../components/TypeLabel.vue";
+import UnlocksDialog from "../components/UnlocksDialog.vue";
 import Picker from "../components/Picker.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
-import { lang, t } from "../i18n";
+import { columnsTexts, lang, t } from "../i18n";
 import { memberLabel, orgOf } from "../orgs";
 import { takeQuery } from "../deepLink";
 import { coalesced, onServerMessage } from "../realtime";
@@ -133,12 +136,17 @@ const rows = computed(() => {
 // --- table -------------------------------------------------------------------------------------
 const columns = computed<ColumnSpec[]>(() => [
   { key: "name", label: t("bp.col.name"), width: 300 },
-  { key: "type", label: t("bp.col.type"), width: 160 },
-  { key: "category", label: t("bp.col.category"), width: 170 },
-  { key: "size", label: t("bp.col.size"), width: 64 },
-  { key: "grade", label: t("bp.col.grade"), width: 72 },
-  { key: "stats", label: t("bp.col.stats"), width: 280 },
-  org.value ? { key: "owners", label: t("bp.col.owners"), width: 240 } : { key: "actions", label: "", width: 44, sortable: false, fixed: true, sep: true },]);
+  { key: "type", label: t("bp.col.type"), width: 160, hideable: true },
+  { key: "category", label: t("bp.col.category"), width: 170, hideable: true },
+  { key: "size", label: t("bp.col.size"), width: 64, hideable: true },
+  { key: "grade", label: t("bp.col.grade"), width: 72, hideable: true },
+  { key: "stats", label: t("bp.col.stats"), width: 280, hideable: true },
+  org.value ? { key: "owners", label: t("bp.col.owners"), width: 240, hideable: true } : { key: "actions", label: "", width: 44, sortable: false, fixed: true, sep: true },
+  // Last: the unlocks button; the column chooser sits in its head
+  { key: "unlock", label: "", width: lang.value === "de" ? 124 : 96, sortable: false, fixed: true, sep: true },
+]);
+// The blueprint whose unlocks dialog is open
+const unlocksOf = ref<Row | null>(null);
 
 function valueOf(r: Row, key: string): string | number {
   switch (key) {
@@ -290,7 +298,15 @@ onUnmounted(() => {
           <button type="button" class="icon-btn remove" :title="t('bp.remove')" :disabled="busy" @click.stop="pending = row.uuid">
             <Icon name="trash" :size="14" />
           </button>
-        </template>      </DataTable>
+        </template>
+        <!-- Disabled without an unlock (kept in place); a click never reaches the row -->
+        <template #cell-unlock="{ row }">
+          <span class="unlock" @click.stop>
+            <ChipButton :label="t('unlock.title')" icon="lock" :disabled="!row.bp?.unlockable" @click="unlocksOf = row" />
+          </span>
+        </template>
+        <template #col-unlock="{ table }"><span class="columns"><ColumnsButton :table="table" :texts="columnsTexts()" /></span></template>
+      </DataTable>
     </section>
 
     <ConfirmDialog
@@ -301,6 +317,7 @@ onUnmounted(() => {
       :buttons="confirmButtons"
       @choose="choose"
     />
+    <UnlocksDialog v-if="unlocksOf" :uuid="unlocksOf.uuid" :name="unlocksOf.bp?.name ?? t('bp.unknown')" @close="unlocksOf = null" />
   </div>
 </template>
 
@@ -311,8 +328,14 @@ onUnmounted(() => {
 }
 
 /* Centred in its fixed column (the cell is a flex box, see .sep in ui.css) */
-.remove {
+.remove,
+.columns,
+.unlock {
   margin: 0 auto;
+}
+
+.unlock {
+  display: inline-flex;
 }
 
 .bp-name {

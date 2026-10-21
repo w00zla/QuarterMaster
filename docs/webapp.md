@@ -56,7 +56,8 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 
 - `GET /api/catalog?lang`: bookable materials with unit, the `component` flag, `label`, size, grade letter
   and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag,
-  yield bonuses and the star map `key` (as Game.log names it, for the companion); blueprints; each material and location with its loc `nameKey` (the companion looks it up in
+  yield bonuses and the star map `key` (as Game.log names it, for the companion); blueprints (`unlockable`: a
+  row in `catalog.blueprint_source`); each material and location with its loc `nameKey` (the companion looks it up in
   the player's language pack). From the shared in-memory catalogs; no ores, no refining methods.
 - Stock: `/api/stock` personal = everything you own incl. shared, org = what its active members shared (with
   an owner filter), or `all` = both; writes `add`/`remove`/`adjust`/`move` (+ split, merge, share).
@@ -68,7 +69,17 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   of a blueprint (active members of the same org only); `GET /api/orgs/:g/blueprints`.
 - Profile (`POST /api/profile`): RSI handle in `app.app_user`, the web app's own language override in
   `web.user_setting` (the bot keeps its own in `bot.user_config`).
+- Trading (`trade.ts`, UEX prices from `src/ext/trade.ts`, see `docs/ext.md`): `GET /api/trade/prices` (the
+  `PriceSummary` of every bookable material with a price: sell/buy min, max, UEX average, terminals, latest
+  date), `GET /api/trade/:uuid` (every terminal per side, best first; 404 without a price). `MaterialInfo.prices`
+  and `value` in the summary (personal and per org: the same stored batches as the other figures, at the best
+  sell price, whole aUEC, Ressourcen and Ausrüstung apart; unpriced batches left out; null without UEX data).
 - `GET /api/summary` (overview tiles), `GET /api/info/blueprint|material/:uuid` (info cards),
+  `GET /api/unlocks/:uuid` (a blueprint's unlocks, `unlocks.ts`, SQL in `unlock-query.ts`: sources of
+  `catalog.blueprint_source` with their texts; missions grouped by faction · mission type, equal rows merged
+  with a count, event tiers; odds = weight of the pool's total, reduced, plus `chance` below 1; the system of
+  a locality or bound place is the star above it, roots without one (solar system records, the Nyx asteroid
+  field) by the star key their key starts with; bound places that are no system are listed after it),
   `/api/crafting/*` (the admin's catalog queries and `loadPlannerData`), `GET /api/history` (see
   `docs/stock.md` "History").
 - Writes go through the stock service with an `Actor` from the roster. `guildId` in a write = the org
@@ -143,19 +154,36 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   and may exceed Y: then the game data misses a source, listed in the admin overview), Refinery jobs (sum of
   the expected yields · stations) and Next job ready (countdown, a "n ready" tag); "Your orgs" with one
   sub-tile per org (name, state, "Members: n", Resources/Items/Blueprints). Reloads on every realtime message.
+  The last tile of both is "Gesamtwert" (at the best UEX sell price; "Ressourcen X · Ausrüstung Y").
 - **Ressourcen** (route `/resources`, until 2026-10-20 "Bestand" at `/stock`; materials only, no ship
   components): grouped by material, filters; scope "All" lists personal
   and org stock with an owner column ("Pers." / "Org (holder)"). Adding has a share switch per org (an org
   scope starts with that org on; the batch is always personal, the switches share it). Row actions Sharing (a
   switch per org, whole batch) · Split (unshared) or Merge back (a split-off part) · Move (place, recipient) ·
-  Remove · Adjust.
+  Remove · Adjust. UEC columns (amount × UEX price, BigInt micro units; batch rows their value, the group row
+  the material's total; "—" without a price): "UEC Verkauf" (best sell) shown, "UEC Kauf" (best buy) and both
+  averages hidden by default. Ressourcen and Ausrüstung: a last fixed column with the "Handel" button
+  (`ChipButton`) on each material's row, disabled without a UEX price; it opens `TradeDialog.vue`: tabs
+  "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal (Terminal,
+  System, Preis, Nachfrage with its average dim / Bestand, Stand; items without that column), best price
+  first, scrolling inside; UEX's averages in the head.
 - **Ausrüstung** (route `/gear`, until 2026-10-20 "Komponenten" at `/components`; `?scope=` like Ressourcen;
   `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): for now the ship components only, groups named by their `label`, no quality column, filters
   type/size/grade instead of the quality slider; the add form without quality (sends 0) but one slider per
   stat of the picked component from ±0 to its best (`CatalogMaterial.stats`, reset after each add; only gains
-  are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; the
+  are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; without
+  any gain a dimmed "Standard"/"Default"; the
   sliders are `StatSliders.vue`, also in the batch dialog's Adjust, which confirms "from → to"); "Anzahl" in
-  pieces instead of "Menge"; `BatchDialog` leaves the quality out (`withQuality`/`qualityPrefix`).
+  pieces instead of "Menge" (each row "1 Stk."); `BatchDialog` leaves the quality out (`withQuality`/`qualityPrefix`).
+  Its Adjust button (the stats) is disabled for a component without stats, not left out. A Class column
+  (`itemClass`, "Military", …) is hidden until switched on.
+- Ressourcen, Ausrüstung and Blueprints: every column but the name and the actions may be hidden (`hideable`);
+  the eye button in the head of the action column (`ColumnsButton.vue` → `ColumnsDialog.vue`, shared with
+  the companion, texts via `columnsTexts()`) switches them, kept with the widths in localStorage
+  (`qm.webapp.columns.{stock,components,bp-mine,bp-org}`; `hiddenByDefault` columns start hidden, the ones the
+  user switched on are kept as `shown`). In the blueprint lists the button sits in the head of the last
+  column (Unlocks), the owners of an org's list may be hidden too. `DataTable` renders only the shown columns and passes
+  `#col-<key>` head slots on (with the table as `table`).
 - **Raffinerie**: running jobs as a table with one group per work order (station, total yield and the time
   left with a "ready" tag or "duration open" on the group row; actions: a clock opens `RefineryTimeDialog` to
   set or clear the time left, done, remove with a `ConfirmDialog` listing the materials), the materials below
@@ -165,7 +193,12 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   stores the whole job, each row's amount starting from its expected yield.
 - **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold; an org
   shows every blueprint its active members registered with who has it. A click on a row puts it into the
-  crafting check (`addToCrafting`) and opens the tab.
+  crafting check (`addToCrafting`) and opens the tab. The last column (fixed, both scopes) holds the
+  "Freischaltung" button (`ChipButton`, disabled without an unlock; its click never reaches the row): it opens
+  `UnlocksDialog.vue`, one section per kind; missions in collapsible groups (collapsed, a single group open;
+  head: count, systems, rank span, best chance), every row listed (title with the game's placeholders as "…",
+  rank, systems · bound place, markers Kette/Illegal/Annahme/event, chance), the list scrolls inside with a
+  sticky head row; event tiers with event, points and chance. Wording in `webapp/src/unlocks.ts`.
 - **Crafting** (after a divider in the tab bar): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
@@ -175,10 +208,17 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   batches of that material at or above the card's target quality, own first, then by quality. The stock is
   `GET /api/stock?scope=all`, loaded once per view and on stock/resync messages; each card is checked on its
   own. Pure logic in `src/planner/stock.ts` (shared with `/qm-crafting`), tested in
-  `test/crafting-stock.test.ts`.
+  `test/crafting-stock.test.ts`. The chips line under the name ends with a divider and the "Freischaltung"
+  button (as in the Blueprints list).
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
 - Info cards: hovering a blueprint name or a material shows game data from `GET /api/info/...`
   (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records).
+  A blueprint's card ends with "Freischaltung" (`BlueprintInfo.unlocks`): one line per kind ("126 Missionen",
+  "1 Event-Stufe"; code per kind, more kinds can follow), marker tags only when every source of that kind has
+  them (Illegal red, Event yellow; Kette, Rang, Zufall, Annahme grey), right the best chance ("bis 1 von 6",
+  "1 von 14", "sicher"); no details; none: "Keine".
+  A material's card ends with "Preise" ("UEX · 21.10.", the latest report) when UEX has a price: lines
+  Verkauf/Kauf with the range and, dim, UEX's average (items: the number of terminals); no locations.
 - Profile (RSI handle, language) is a dialog from the settings icon button next to the avatar (the avatar
   itself is not clickable), saved with Save; no language switch in the header.
 - Top bar right: History (a route link styled as a button), Companion (`desktop` icon), divider, avatar with

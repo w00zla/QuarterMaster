@@ -28,6 +28,8 @@ const props = defineProps<{
   subtitle?: string;
   icon: IconName;
   buttons: ConfirmButton[];
+  // A dialog with a table in its body: wider still
+  xl?: boolean;
 }>();
 const emit = defineEmits<{ choose: [value: string] }>();
 
@@ -56,7 +58,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <div class="backdrop">
-      <div class="dialog" :class="{ wide: !!$slots.default }" role="dialog" aria-modal="true" :aria-label="title">
+      <div class="dialog" :class="{ wide: !!$slots.default, xl }" role="dialog" aria-modal="true" :aria-label="title">
         <div class="head">
           <Icon :name="icon" :size="18" />
           <div class="titles">
@@ -114,6 +116,10 @@ onUnmounted(() => {
 /* A dialog with body content gets more room */
 .dialog.wide {
   width: min(560px, 100%);
+}
+
+.dialog.xl {
+  width: min(900px, 100%);
 }
 
 .head,

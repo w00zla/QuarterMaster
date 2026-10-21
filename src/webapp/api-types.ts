@@ -110,6 +110,8 @@ export interface CatalogBlueprint {
   retired: boolean;
   // Names of the stats its slots can change, in the game tooltip's order; empty when none
   stats: string[];
+  // The game data has a source for it (GET /api/unlocks/:uuid)
+  unlockable: boolean;
 }
 
 export interface CatalogResponse {
@@ -342,9 +344,18 @@ export interface SummaryResponse {
   // Blueprints a player can unlock: not retired, not default, in a reward pool of the game data.
   // The registered counts are not capped by it (a higher count means the game data is incomplete)
   obtainableBlueprints: number;
-  personal: StockMetrics & { refining: RefiningMetrics; blueprints: number };
+  personal: StockMetrics & { refining: RefiningMetrics; blueprints: number; value: StockValue | null };
   // Your active memberships, in the order of /api/me
-  orgs: Array<StockMetrics & { guildId: string; members: number; blueprints: number }>;
+  orgs: Array<StockMetrics & { guildId: string; members: number; blueprints: number; value: StockValue | null }>;
+}
+
+// The stored stock at the best UEX sell price, in aUEC (whole numbers as text); batches without a price
+// do not count; null without any UEX prices. resources = the Ressourcen view (materials and
+// harvestables), components = Ausrüstung
+export interface StockValue {
+  total: string;
+  resources: string;
+  components: string;
 }
 
 // --- crafting check (the admin UI's planner; all take &lang=de|en) ---------------------------------
@@ -376,6 +387,78 @@ export interface BlueprintInfo {
   // First tier: requiredSlots of the slots are filled, each with one of its inputs
   requiredSlots: number;
   slots: Array<{ name: string | null; inputs: Array<{ name: string; kind: 'resource' | 'item'; quantity: string; minQuality: number }> }>;
+  // One line per kind of source (missions, event tiers); empty = no unlock in the game data
+  unlocks: UnlockSummary[];
+}
+
+// --- blueprint unlocks (catalog.blueprint_source; &lang=de|en) ---------------------------------------
+// GET /api/unlocks/:uuid   UnlocksResponse (404 for an unknown blueprint)
+
+export type UnlockKind = 'mission' | 'event';
+// illegal, event (started by hand: ORS), chain (needs an earlier contract), rank (a minimum reputation),
+// random (the pool comes only sometimes), onAccept (handed out on accepting the contract)
+export type UnlockMarker = 'illegal' | 'event' | 'chain' | 'rank' | 'random' | 'onAccept';
+
+/** The pool hands out one entry by weight: num of den (reduced); chance < 1: the pool itself only sometimes (null = always). */
+export interface UnlockOdds {
+  num: number;
+  den: number;
+  chance: number | null;
+}
+
+export interface UnlockSummary {
+  kind: UnlockKind;
+  // Sources of this kind (contracts or event tiers, per pool)
+  count: number;
+  // Only the markers that hold for every one of them
+  markers: UnlockMarker[];
+  // The best odds; varies: the sources' odds differ ("up to")
+  best: UnlockOdds;
+  varies: boolean;
+}
+
+export interface UnlockMissionRow {
+  // The game's placeholders ("~mission(Location)") as "…"; no text: the contract's debug name
+  title: string;
+  rank: string | null;
+  // Systems the contract is offered in (sorted), places it is bound to (not a system itself)
+  systems: string[];
+  locations: string[];
+  // chain, illegal, onAccept
+  markers: UnlockMarker[];
+  // The event a manually started scenario belongs to ("ORS")
+  event: string | null;
+  odds: UnlockOdds;
+  // Equal rows merged
+  count: number;
+}
+
+/** Missions of one faction and mission type. */
+export interface UnlockMissionGroup {
+  faction: string | null;
+  missionType: string | null;
+  count: number;
+  systems: string[];
+  // Lowest and highest rank (equal when one); null without any rank
+  rankFrom: string | null;
+  rankTo: string | null;
+  best: UnlockOdds;
+  varies: boolean;
+  rows: UnlockMissionRow[];
+}
+
+export interface UnlockEventTier {
+  event: string;
+  minPoints: number | null;
+  odds: UnlockOdds;
+  count: number;
+}
+
+export type UnlockSection = { kind: 'mission'; count: number; groups: UnlockMissionGroup[] } | { kind: 'event'; count: number; tiers: UnlockEventTier[] };
+
+export interface UnlocksResponse {
+  name: string;
+  sections: UnlockSection[];
 }
 
 export interface MaterialInfo {
@@ -399,6 +482,51 @@ export interface MaterialInfo {
   manufacturer: string | null;
   // Blueprints that take it
   usedIn: number;
+  // UEX prices; null = none
+  prices: PriceSummary | null;
+}
+
+// --- trading (UEX community prices in aUEC per SCU or piece) --------------------------------------
+// GET /api/trade/prices    TradePricesResponse: the summary of every bookable material with a price
+// GET /api/trade/:uuid     TradeResponse: every terminal (404 without any price)
+
+export interface PriceRange {
+  // Lowest and highest price over the terminals (0 = not traded there: left out)
+  min: number;
+  max: number;
+  // UEX's average (commodities only; null for items or when UEX has none)
+  avg: number | null;
+  terminals: number;
+}
+
+export interface PriceSummary {
+  // The latest report (ISO)
+  date: string;
+  // sell = the terminals pay (the player sells), buy = they ask (the player buys); null = none
+  sell: PriceRange | null;
+  buy: PriceRange | null;
+}
+
+export interface TradePricesResponse {
+  prices: Record<string, PriceSummary>;
+}
+
+export interface TradeOffer {
+  terminal: string;
+  system: string | null;
+  price: number;
+  // Sell: what the terminal takes (demand) and its average; buy: its stock and average; null for items
+  scu: number | null;
+  scuAvg: number | null;
+  // The report (ISO)
+  date: string;
+}
+
+export interface TradeResponse {
+  prices: PriceSummary;
+  // Best price first: sell highest, buy lowest
+  sell: TradeOffer[];
+  buy: TradeOffer[];
 }
 
 // --- profile (POST /api/profile) ------------------------------------------------------------------

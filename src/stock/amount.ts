@@ -1,5 +1,6 @@
 // Amounts as users type them and as Postgres stores them (NUMERIC(14,6), passed as strings).
 // Pure: no JS floats on the way, the decimal string is validated and normalized as text.
+import { toMicros } from '../planner/plan.ts';
 
 export type SubjectKind = 'resource' | 'item';
 
@@ -26,3 +27,12 @@ export function parseAmount(text: string, kind: SubjectKind): string | null {
 export function formatAmount(numeric: string): string {
   return numeric.includes('.') ? numeric.replace(/0+$/, '').replace(/\.$/, '') : numeric;
 }
+
+/**
+ * An amount's worth at a price (UEX: aUEC per SCU or piece) in micro aUEC: the amount exact (BigInt
+ * micro units), the price to 6 decimals. Sum these, round at the end.
+ */
+export const valueMicros = (amount: string, price: number): bigint => toMicros(amount) * BigInt(Math.round(price * 1e6)) / 1_000_000n;
+
+/** Micro aUEC as whole aUEC (half up). */
+export const wholeOfMicros = (micros: bigint): bigint => (micros + 500_000n) / 1_000_000n;

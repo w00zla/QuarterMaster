@@ -12,8 +12,18 @@ location bonuses (server-side).
   `commodities_prices_all` (buy/sell price, SCU in stock and demand, status 1–7 per commodity × terminal; ~1 MB),
   `commodities_raw_prices_all` (ore sell prices) and `items_prices_all` (buy/sell price per item × terminal with
   the game's `item_uuid`, no stock; ~6.4 MB). Not pulled: `commodities_status` (only the names of the status
-  codes 1–7; 0 = not traded), the ID endpoints (`items`, `*_averages`, `*_history`, `routes`). Nothing reads
-  the new endpoints yet (UI later).
+  codes 1–7; 0 = not traded), the ID endpoints (`items`, `*_averages`, `*_history`, `routes`).
+  `commodities_raw_prices_all` is read by nothing yet.
+- **Trading** (`trade.ts`, read by the web app: `docs/webapp.md`): `terminals`, `commodities`,
+  `commodities_prices_all` and `items_prices_all` per catalog material. Commodities are matched to catalog
+  resources (not retired, ores too) by `nameKey` of the English name (lower case, only letters and digits:
+  exact names, unlike `oreKey`), items by `item_uuid` (the game's UUID). Price 0 = not traded on that side,
+  left out. Fields: `price_sell`/`scu_sell`/`scu_sell_avg` = what the terminal pays and takes when the
+  player sells (its demand), `price_buy`/`scu_buy`/`scu_buy_avg` = what it asks and has in stock when the
+  player buys (UEX's docs only say "last"/"average"; read from the field names and UEX's site); `commodities`'
+  `price_sell`/`price_buy` = UEX's averages (items have none, `items_prices_all` no stock);
+  `date_modified` unix seconds. Per material: min/max per side, terminals per side, the latest date, every
+  offer best price first. Cached per snapshot ID of the four endpoints and the resource catalog.
 - `ext.snapshot` (`src/db/schema/ext.ts`, migration `0008`, written by `store.ts`): one row per `source`
   (`uex`), endpoint and distinct response (`data` as received, SHA-256 of it); a fetch with the same content
   as the endpoint's latest row only moves its `checked_at`, so the rows are the history of changes. The three

@@ -30,6 +30,8 @@ export interface ColumnSpec {
   fill?: boolean;
   // May be hidden by the user (`toggleHidden`; kept with the widths)
   hideable?: boolean;
+  // With `hideable`: hidden until the user switches it on
+  hiddenByDefault?: boolean;
   // Its name where the label is empty (a column chooser)
   title?: string;
 }
@@ -43,6 +45,8 @@ interface Stored {
   widths?: Record<string, number>;
   sort?: SortState;
   hidden?: string[];
+  // Columns hidden by default that the user switched on
+  shown?: string[];
 }
 
 function load(storageKey: string): Stored {
@@ -72,11 +76,28 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   const widths = ref<Record<string, number>>({});
   const all = computed(() => toValue(columns));
   const hidden = ref(new Set(Array.isArray(stored.hidden) ? stored.hidden : []));
+  // Columns hidden by default (as seen so far) and those of them the user switched on
+  const byDefault = new Set<string>();
+  const switchedOn = new Set(Array.isArray(stored.shown) ? stored.shown : []);
+  watch(
+    all,
+    (list) => {
+      const fresh = list.filter((c) => c.hiddenByDefault && !byDefault.has(c.key));
+      for (const c of fresh) byDefault.add(c.key);
+      const add = fresh.filter((c) => !switchedOn.has(c.key) && !hidden.value.has(c.key));
+      if (add.length) hidden.value = new Set([...hidden.value, ...add.map((c) => c.key)]);
+    },
+    { immediate: true },
+  );
   const cols = computed(() => all.value.filter((c) => !(c.hideable && hidden.value.has(c.key))));
   function toggleHidden(key: string) {
     const next = new Set(hidden.value);
     if (next.has(key)) next.delete(key);
     else next.add(key);
+    if (byDefault.has(key)) {
+      if (next.has(key)) switchedOn.delete(key);
+      else switchedOn.add(key);
+    }
     hidden.value = next;
   }
   watch(
@@ -185,7 +206,10 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     () => {
       try {
         const keep: Stored = { widths: widths.value, sort: sort.value };
-        if (hidden.value.size) keep.hidden = [...hidden.value];
+        // Hidden by default needs no entry: only what the user switched on is kept for those
+        const off = [...hidden.value].filter((k) => !byDefault.has(k));
+        if (off.length) keep.hidden = off;
+        if (switchedOn.size) keep.shown = [...switchedOn];
         localStorage.setItem(storageKey, JSON.stringify(keep));
       } catch {
         // localStorage unavailable: widths simply do not persist.

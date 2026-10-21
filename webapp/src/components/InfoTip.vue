@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { BlueprintInfo, MaterialInfo } from "../../../src/webapp/api-types";
+import type { BlueprintInfo, MaterialInfo, PriceRange, PriceSummary } from "../../../src/webapp/api-types";
 // Loaded cards, per language: hovering the same entry again costs nothing
 const cache = new Map<string, Promise<BlueprintInfo | MaterialInfo>>();
 </script>
@@ -13,8 +13,9 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { api } from "../api";
 import { materials } from "../catalog";
-import { duration, qty } from "../format";
+import { duration, priceRange, qty, shortDate, uec } from "../format";
 import { lang, t } from "../i18n";
+import { bestText, kindCount, markerClass, markerText } from "../unlocks";
 
 const props = defineProps<{ kind: "blueprint" | "material"; uuid: string }>();
 
@@ -81,6 +82,14 @@ const mat = computed(() => (props.kind === "material" ? (info.value as MaterialI
 const itemLine = (i: { typeLabel: string | null; subTypeLabel: string | null; size: number | null; gradeLetter: string | null; itemClass: string | null; manufacturer: string | null }) =>
   [i.typeLabel, i.subTypeLabel, i.size !== null ? `S${i.size}` : null, [i.gradeLetter, i.itemClass].filter(Boolean).join(" ") || null, i.manufacturer]
     .filter(Boolean).join(" · ");
+
+// The price lines: sell, then buy; after the range UEX's average, else (items) the number of terminals
+const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.buy"), p.buy]] as const)
+  .filter((s): s is readonly [string, PriceRange] => s[1] !== null)
+  .map(([label, range]) => ({
+    label, range,
+    extra: range.avg !== null ? `⌀ ${uec(range.avg)}` : t(range.terminals === 1 ? "trade.terminal" : "trade.terminals", { n: range.terminals }),
+  }));
 </script>
 
 <template>
@@ -117,6 +126,16 @@ const itemLine = (i: { typeLabel: string | null; subTypeLabel: string | null; si
             </span>
           </li>
         </ul>
+        <!-- Freischaltung: eine Zeile je Art, Marker nur wenn alle Quellen sie haben, rechts die beste Chance -->
+        <div class="section">{{ t("unlock.title") }}</div>
+        <ul v-if="bp.unlocks.length" class="unlocks">
+          <li v-for="u in bp.unlocks" :key="u.kind">
+            <span>{{ kindCount(u.kind, u.count) }}</span>
+            <span v-for="m in u.markers" :key="m" class="tag" :class="markerClass(m)">{{ markerText(m) }}</span>
+            <span class="unlock-odds">{{ bestText(u) }}</span>
+          </li>
+        </ul>
+        <div v-else class="dim">{{ t("unlock.none") }}</div>
       </template>
 
       <template v-else-if="mat">
@@ -133,6 +152,15 @@ const itemLine = (i: { typeLabel: string | null; subTypeLabel: string | null; si
           <!-- Ausrüstung ist nie Zutat eines Bauplans: keine Zeile dafür -->
           <template v-if="!materials.get(uuid)?.component"><dt>{{ t("info.usedIn") }}</dt><dd>{{ t("info.blueprints", { n: mat.usedIn }) }}</dd></template>
         </dl>
+        <!-- UEX-Preise: Spanne über die Terminals, dahinter der UEX-Durchschnitt (Gegenstände: die Zahl der Terminals) -->
+        <template v-if="mat.prices">
+          <div class="section price-head"><span>{{ t("trade.prices") }}</span><span class="source">UEX · {{ shortDate(mat.prices.date) }}</span></div>
+          <dl class="kv">
+            <template v-for="s in priceSides(mat.prices)" :key="s.label">
+              <dt>{{ s.label }}</dt><dd>{{ priceRange(s.range) }} <span class="dim">· {{ s.extra }}</span></dd>
+            </template>
+          </dl>
+        </template>
       </template>
     </div>
   </Teleport>
@@ -210,6 +238,19 @@ const itemLine = (i: { typeLabel: string | null; subTypeLabel: string | null; si
   color: var(--text-3);
 }
 
+/* "Preise" left, the source and its date right */
+.price-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.price-head .source {
+  letter-spacing: normal;
+  text-transform: none;
+  font-weight: 500;
+}
+
 .inputs {
   margin: 0;
   padding: 0;
@@ -230,6 +271,30 @@ const itemLine = (i: { typeLabel: string | null; subTypeLabel: string | null; si
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One line per kind: count, markers, the best chance at the right */
+.unlocks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text);
+}
+
+.unlocks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.unlock-odds {
+  margin-left: auto;
+  padding-left: 6px;
   white-space: nowrap;
 }
 </style>
