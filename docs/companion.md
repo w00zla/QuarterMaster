@@ -82,10 +82,26 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   the token (only URLs below the configured origin's `/downloads/`, `<dest>.part` renamed when complete,
   the file left as downloaded: no permission changes) to a path picked in a save dialog, progress as the
   `download-progress` event. Plain http only for localhost.
+- Installed app (Windows NSIS setup, per user, no admin): it updates itself instead (like BindSight, but
+  from the own server). `app_info.updater` says which build runs: the bundler stamps the exe it packs into
+  the setup (`bundle_type()` = NSIS), the bare exe of the standalone zip stays unstamped and keeps the
+  download above. The panel's "Install update" calls Rust `install_update`: `tauri-plugin-updater` (Windows
+  only, registered under `cfg(windows)`) reads the feed `<origin>/downloads/companion/latest.json` and the
+  setup with the token (`Authorization` header), checks the setup against the updater key
+  (`plugins.updater.pubkey` in `tauri.windows.conf.json`), runs it passive (progress window, no questions)
+  and ends the app; the setup starts the new version. Progress as `download-progress` like the download.
+  `dangerousInsecureTransportProtocol` is on because `server::origin` already allows plain http for
+  localhost only. Updates come only with the 426 (the manifest's version is required), there is no own check.
 - Release: bump the version in `companion/src-tauri/Cargo.toml` (bundle names and the header use it),
-  build per platform (standalone only: the AppImage, and `target/release/quartermaster-companion.exe`
-  zipped as `…_x64-standalone.zip`), copy them and `companion.json` to `COMPANION_DIR` (`docs/deploy.md`
-  § 8; the server side is in `docs/webapp.md` "Companion release").
+  build per platform: Windows `build:windows` with the updater's private key **as content** in
+  `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if it has one; the `_PATH`
+  variant is not read by the CLI, see BindSight) gives the setup
+  `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and its `.sig`, and
+  `target/release/quartermaster-companion.exe` zipped as `…_x64-standalone.zip`; Linux the AppImage.
+  Copy them and `companion.json` to `COMPANION_DIR` (`docs/deploy.md` § 8; the server side is in
+  `docs/webapp.md` "Companion release"). The key pair comes from `pnpm --filter
+  sc-quartermaster-companion tauri signer generate -w <file>` once; the private key never goes into the
+  repo, losing it means installed apps take no update until reinstalled with a new key.
 
 ## Window, tabs and state
 
@@ -551,6 +567,6 @@ GPU process should not compete with the game; not measured yet.
 - "[CS2] StrikeForce Missile" stays unknown (the catalog says "StrikeForce II Missile"); which tooltips show
   stats at all; Quantum Fuel Burn (a lower value is the improvement, the bounds run 0…+20 %).
 - `--disable-gpu` and the RAM with the OCR running are not measured in game.
-- Not built: the Linux screen capture (xdg portal), updater, CI, tray/autostart, a release script; the API
+- Not built: the Linux screen capture (xdg portal), the AppImage's updater, CI, tray/autostart, a release script; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.

@@ -90,10 +90,14 @@ cookie) and skips the same-origin check (a cross-site page cannot set the header
 ### Companion release (`companion.ts`)
 
 `COMPANION_DIR` (default `local/companion`) holds the built app files and `companion.json`
-`{"version":"x.y.z","windows":"<…_x64-standalone.zip>","linux":"<.AppImage>"}` (re-read when it changes).
-`GET /api/companion` lists version and downloads; `GET /downloads/companion/<file>` serves only manifest
-files, only with a session (else redirect to `/`) or the API token (no version check: the outdated app
-downloads its update; a wrong token = 401). Token requests must send `X-QM-Companion: <version>`: older than
+`{"version":"x.y.z","windows":"<…_x64-standalone.zip>","linux":"<.AppImage>","windowsSetup":"<…_x64-setup.exe>"}`
+(re-read when it changes; the setup's updater signature is read from `<setup>.sig` next to it, missing =
+manifest ignored). `GET /api/companion` lists version and downloads (the setup first, `kind` setup or
+standalone); `GET /downloads/companion/<file>` serves only manifest files (not the `.sig`), only with a
+session (else redirect to `/`) or the API token (no version check: the outdated app downloads its update;
+a wrong token = 401). `GET /downloads/companion/latest.json`, same access: the installed app's update feed
+in the Tauri updater format (`version`, `platforms.windows-x86_64` with the setup's absolute URL and
+signature), 404 without a setup. Token requests must send `X-QM-Companion: <version>`: older than
 the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no manifest = no check.
 
 ### Realtime (`realtime.ts`)

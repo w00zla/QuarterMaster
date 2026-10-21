@@ -1,8 +1,10 @@
 // The companion app release the server hands out: COMPANION_DIR holds the built files and a manifest
-// companion.json {"version": "0.1.0", "windows": "<…_x64-standalone.zip>", "linux": "<….AppImage>"} (standalone
-// builds only, like BindSight's: the bare exe zipped, the AppImage). Its version
+// companion.json {"version": "0.1.0", "windows": "<…_x64-standalone.zip>", "linux": "<….AppImage>",
+// "windowsSetup": "<…_x64-setup.exe>"} (like BindSight's: the bare exe zipped, the AppImage, the NSIS setup
+// with its updater signature next to it as <setup>.sig). Its version
 // is the one the server requires: an older app (or one that does not say) gets 426 and the download
-// links. No manifest = no download and no version check.
+// links; the installed app then fetches the setup through the update feed (updateFeed). No manifest =
+// no download and no version check.
 import { statSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
@@ -14,12 +16,16 @@ export const PLATFORMS: CompanionPlatform[] = ['windows', 'linux'];
 export interface CompanionRelease {
   version: string;
   files: Partial<Record<CompanionPlatform, { file: string; size: number }>>;
+  // The Windows setup and its updater signature (the .sig file's content)
+  setup?: { file: string; size: number; signature: string };
 }
 
 const VERSION = /^\d+\.\d+\.\d+$/;
 // A plain file name in the directory: no path parts
 const fileName = z.string().min(1).max(200).refine((f) => basename(f) === f && f !== '.' && f !== '..' && !f.includes('\\'));
-const manifestSchema = z.object({ version: z.string().regex(VERSION), windows: fileName.optional(), linux: fileName.optional() });
+const manifestSchema = z.object({
+  version: z.string().regex(VERSION), windows: fileName.optional(), linux: fileName.optional(), windowsSetup: fileName.optional(),
+});
 
 // The manifest is looked at again at most this often (a new release shows up without a restart)
 const RECHECK_MS = 10_000;
@@ -51,7 +57,14 @@ export function companionRelease(dir: string | null): () => CompanionRelease | n
         if (file) files[platform] = { file, size: statSync(join(dir, file)).size };
       }
       release = { version: parsed.version, files };
+      if (parsed.windowsSetup) {
+        const file = parsed.windowsSetup;
+        const signature = readFileSync(join(dir, `${file}.sig`), 'utf8').trim();
+        if (!signature) throw new Error(`${file}.sig is empty`);
+        release.setup = { file, size: statSync(join(dir, file)).size, signature };
+      }
     } catch (err) {
+      release = null;
       console.error(`Companion manifest ${manifest} ignored: ${err instanceof Error ? err.message : String(err)}`);
     }
     return release;
@@ -67,3 +80,13 @@ export function compareVersions(a: string, b: string): number {
 }
 
 export const downloadPath = (file: string) => `/downloads/companion/${encodeURIComponent(file)}`;
+
+// The installed app's update feed (Tauri updater format) next to the files: /downloads/companion/latest.json
+export const UPDATE_FEED = 'latest.json';
+
+/** The update feed for the release's setup at `origin`; null without a setup. */
+export function updateFeed(release: CompanionRelease | null, origin: string) {
+  if (!release?.setup) return null;
+  const { file, signature } = release.setup;
+  return { version: release.version, platforms: { 'windows-x86_64': { url: `${origin}${downloadPath(file)}`, signature } } };
+}

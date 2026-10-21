@@ -13,7 +13,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from 'hono-rate-limiter';
 import type { Db } from '../db/client.ts';
 import type { ApiTokenCreated, CompanionInfo, CompanionOutdated } from './api-types.ts';
-import { COMPANION_HEADER, PLATFORMS, companionRelease, compareVersions, downloadPath } from './companion.ts';
+import { COMPANION_HEADER, PLATFORMS, UPDATE_FEED, companionRelease, compareVersions, downloadPath, updateFeed } from './companion.ts';
 import type { DiscordLogin } from './discord.ts';
 import { clientAddress, rateKey } from './ip.ts';
 import { getMe } from './me.ts';
@@ -206,12 +206,17 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
 
   api.get('/companion', (c) => {
     const current = release();
-    const downloads = current
-      ? PLATFORMS.flatMap((platform) => {
-        const f = current.files[platform];
-        return f ? [{ platform, file: f.file, size: f.size, url: downloadPath(f.file) }] : [];
-      })
+    // The setup first (the Windows app for good, it updates itself), then the standalone builds
+    const setup = current?.setup;
+    const downloads: CompanionInfo['downloads'] = setup
+      ? [{ platform: 'windows', kind: 'setup', file: setup.file, size: setup.size, url: downloadPath(setup.file) }]
       : [];
+    if (current) {
+      for (const platform of PLATFORMS) {
+        const f = current.files[platform];
+        if (f) downloads.push({ platform, kind: 'standalone', file: f.file, size: f.size, url: downloadPath(f.file) });
+      }
+    }
     return c.json({ version: current?.version ?? null, downloads } satisfies CompanionInfo);
   });
 
@@ -239,7 +244,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
 
   // --- companion app downloads (logged in or the companion's API token; only the files the manifest names) ---
   app.use('/downloads/*', rateLimiter({ windowMs: limits.windowMs, limit: limits.auth, keyGenerator: (c) => rateKey(clientIp(c)) }));
-  app.get('/downloads/companion/:file', async (c) => {
+  app.use('/downloads/companion/*', async (c, next) => {
     // The companion app downloads its update itself, with its token (no version check here: an
     // outdated app is exactly the one that needs the file)
     const auth = c.req.header('authorization');
@@ -250,9 +255,18 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
       const token = sessionToken(c);
       if (!token || !await validateSession(db, token)) return c.redirect('/', 302);
     }
+    return next();
+  });
+  // The installed app's updater reads the setup's URL and signature here
+  app.get(`/downloads/companion/${UPDATE_FEED}`, (c) => {
+    const feed = updateFeed(release(), config.origin);
+    c.header('Cache-Control', 'no-store');
+    return feed ? c.json(feed) : c.json({ error: 'not found' }, 404);
+  });
+  app.get('/downloads/companion/:file', async (c) => {
     const current = release();
     const file = c.req.param('file');
-    const entry = current && PLATFORMS.map((p) => current.files[p]).find((f) => f?.file === file);
+    const entry = current && [...PLATFORMS.map((p) => current.files[p]), current.setup].find((f) => f?.file === file);
     if (!entry || !config.companionDir) return c.text('Not found', 404);
     c.header('Content-Type', 'application/octet-stream');
     c.header('Content-Length', String(entry.size));

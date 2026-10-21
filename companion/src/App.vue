@@ -43,7 +43,7 @@ const TABS = [
   { id: "refinery", label: "refinery.title" },
   { id: "unlocks", label: "unlocks.title" },
 ] as const;
-const info = ref<{ version: string; platform: "windows" | "linux" } | null>(null);
+const info = ref<{ version: string; platform: "windows" | "linux"; updater: boolean } | null>(null);
 const downloadUrl = computed(() => (info.value && outdated.value?.downloads[info.value.platform]) ?? null);
 
 // Why not connected, short (the full text in the tooltip)
@@ -95,7 +95,7 @@ onMounted(async () => {
     </TopBar>
     <ScanBar @settings="settingsOpen = true" />
     <main v-if="ready && outdated" class="main">
-      <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :url="downloadUrl" />
+      <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :url="downloadUrl" :updater="info?.updater ?? false" />
     </main>
     <template v-else-if="ready">
       <nav class="tabs">

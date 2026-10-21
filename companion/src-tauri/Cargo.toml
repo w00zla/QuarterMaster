@@ -56,6 +56,8 @@ windows = { version = "0.62", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# Updates of the installed app (NSIS setup from the own server, signed with the updater key); Windows only
+tauri-plugin-updater = "2"
 
 [profile.release]
 codegen-units = 1

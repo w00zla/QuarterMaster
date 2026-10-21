@@ -3,7 +3,7 @@
 // openid-client's real state/PKCE handling runs, the fake token endpoint checks the PKCE verifier.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
@@ -13,6 +13,7 @@ import { connectAs, prepareDb } from './roles.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { createApp, type WebappConfig } from '../src/webapp/app.ts';
+import type { CompanionInfo } from '../src/webapp/api-types.ts';
 import { discordLogin } from '../src/webapp/discord.ts';
 import { deleteExpiredSessions } from '../src/webapp/session.ts';
 
@@ -407,13 +408,19 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
   });
 
   describe('companion app release', () => {
-    /** A release dir: the manifest names the Windows standalone zip and the AppImage. */
-    const releaseDir = (version = '1.2.0') => {
+    /** A release dir: the manifest names the Windows standalone zip and the AppImage (and the setup with its signature). */
+    const releaseDir = (version = '1.2.0', setup = false) => {
       const dir = mkdtempSync(join(tmpdir(), 'qm-companion-'));
       writeFileSync(join(dir, 'QM_x64-standalone.zip'), 'zip-bytes');
       writeFileSync(join(dir, 'QM_amd64.AppImage'), 'appimage-bytes!');
       writeFileSync(join(dir, 'secret.txt'), 'nope');
-      writeFileSync(join(dir, 'companion.json'), JSON.stringify({ version, windows: 'QM_x64-standalone.zip', linux: 'QM_amd64.AppImage' }));
+      if (setup) {
+        writeFileSync(join(dir, 'QM_x64-setup.exe'), 'setup');
+        writeFileSync(join(dir, 'QM_x64-setup.exe.sig'), 'c2lnbmF0dXJl\n');
+      }
+      writeFileSync(join(dir, 'companion.json'), JSON.stringify({
+        version, windows: 'QM_x64-standalone.zip', linux: 'QM_amd64.AppImage', ...(setup ? { windowsSetup: 'QM_x64-setup.exe' } : {}),
+      }));
       return dir;
     };
     const tokenFor = async (session: string) => ((await (await app.request('/api/token', {
@@ -431,10 +438,43 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
       assert.deepEqual(await (await app.request('/api/companion', { headers: cookie })).json(), {
         version: '1.2.0',
         downloads: [
-          { platform: 'windows', file: 'QM_x64-standalone.zip', size: 9, url: '/downloads/companion/QM_x64-standalone.zip' },
-          { platform: 'linux', file: 'QM_amd64.AppImage', size: 15, url: '/downloads/companion/QM_amd64.AppImage' },
+          { platform: 'windows', kind: 'standalone', file: 'QM_x64-standalone.zip', size: 9, url: '/downloads/companion/QM_x64-standalone.zip' },
+          { platform: 'linux', kind: 'standalone', file: 'QM_amd64.AppImage', size: 15, url: '/downloads/companion/QM_amd64.AppImage' },
         ],
       });
+      app = build({ companionDir: releaseDir('1.2.0', true) });
+      const { downloads } = await (await app.request('/api/companion', { headers: cookie })).json() as CompanionInfo;
+      assert.deepEqual(downloads.map((d) => [d.kind, d.file, d.size]), [
+        ['setup', 'QM_x64-setup.exe', 5], ['standalone', 'QM_x64-standalone.zip', 9], ['standalone', 'QM_amd64.AppImage', 15],
+      ]);
+    });
+
+    it('hands the installed app its update feed and setup with its token; none without a setup', async () => {
+      const token = await tokenFor(await loginAs());
+      const auth = { authorization: `Bearer ${token}`, 'x-qm-companion': '1.0.0' };
+      app = build({ companionDir: releaseDir('1.2.0') });
+      assert.equal((await app.request('/downloads/companion/latest.json', { headers: auth })).status, 404);
+      app = build({ companionDir: releaseDir('1.2.0', true) });
+      assert.equal((await app.request('/downloads/companion/latest.json')).status, 302, 'not logged in');
+      assert.equal((await app.request('/downloads/companion/latest.json', { headers: { authorization: `Bearer qmt_${'x'.repeat(43)}` } })).status, 401);
+      const feed = await app.request('/downloads/companion/latest.json', { headers: auth });
+      assert.equal(feed.status, 200);
+      assert.deepEqual(await feed.json(), {
+        version: '1.2.0',
+        platforms: { 'windows-x86_64': { url: `${ORIGIN}/downloads/companion/QM_x64-setup.exe`, signature: 'c2lnbmF0dXJl' } },
+      });
+      const setup = await app.request('/downloads/companion/QM_x64-setup.exe', { headers: auth });
+      assert.equal(setup.status, 200);
+      assert.equal(await setup.text(), 'setup');
+      assert.equal((await app.request('/downloads/companion/QM_x64-setup.exe.sig', { headers: auth })).status, 404);
+    });
+
+    it('ignores a manifest whose setup has no signature', async () => {
+      const dir = releaseDir('1.2.0', true);
+      rmSync(join(dir, 'QM_x64-setup.exe.sig'));
+      app = build({ companionDir: dir });
+      const cookie = { cookie: `__Host-qm_session=${await loginAs()}` };
+      assert.deepEqual(await (await app.request('/api/companion', { headers: cookie })).json(), { version: null, downloads: [] });
     });
 
     it('serves only the manifest files, only when logged in', async () => {

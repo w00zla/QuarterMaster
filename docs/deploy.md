@@ -167,7 +167,13 @@ ssh w00zla@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node sr
 
 ## 8. Companion app release
 
-Copy the standalone builds (`…_x64-standalone.zip`, the AppImage) and `companion.json` (`{"version":"x.y.z","windows":"<zip>","linux":"<AppImage>"}`) into `local/companion/` of the VM's checkout; the web app picks a new manifest up within seconds, no restart. Its version is the one it requires: older apps get the update panel. No manifest = no downloads and no version check.
+Copy the builds (`…_x64-standalone.zip`, the AppImage, the Windows setup with its `.sig` next to it) and `companion.json` (`{"version":"x.y.z","windows":"<zip>","linux":"<AppImage>","windowsSetup":"<setup.exe>"}`) into `local/companion/` of the VM's checkout; the web app picks a new manifest up within seconds, no restart. Its version is the one it requires: older apps get the update panel, the installed one installs the setup itself. No manifest = no downloads and no version check; a setup without its `.sig` = the manifest is ignored. Building the setup: `docs/companion.md` "Release".
+
+Windows, after `pnpm companion:build` (PowerShell 7): setup + `.sig` + standalone zip from the build into `local/companion/` under the version from `Cargo.toml`, `companion.json` updated (a `linux` entry stays), then uploaded like below:
+
+```powershell
+scripts/publish-win-companion.ps1 w00zla@<vm>   # -DeployPath for another checkout path
+```
 
 From the local checkout, with the release files and `companion.json` in `local/companion/`:
 
@@ -178,7 +184,7 @@ scripts/push-companion.sh w00zla@<vm>
 It copies the files the manifest names, then the manifest (`DEPLOY_PATH` for another checkout path). The manifest goes last: copied first, it would already send outdated apps to downloads that are not there yet. By hand:
 
 ```sh
-scp local/companion/<zip> local/companion/<AppImage> w00zla@<vm>:/opt/sc-quartermaster/local/companion/
+scp local/companion/<zip> local/companion/<AppImage> local/companion/<setup.exe> local/companion/<setup.exe>.sig w00zla@<vm>:/opt/sc-quartermaster/local/companion/
 scp local/companion/companion.json w00zla@<vm>:/opt/sc-quartermaster/local/companion/
 ```
 

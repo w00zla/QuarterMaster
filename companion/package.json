@@ -9,7 +9,7 @@
     "typecheck": "vue-tsc --noEmit",
     "tauri": "tauri",
     "build:linux": "NO_STRIP=true tauri build --bundles appimage",
-    "build:windows": "tauri build --no-bundle",
+    "build:windows": "tauri build --bundles nsis",
     "ocr:models": "node scripts/fetch-ocr-models.mjs"
   },
   "dependencies": {

@@ -70,8 +70,11 @@ export const setUnlockScan = (on: boolean) => call<void>("set_unlock_scan", { on
 // Writes the debug window's Game.log export (the log state plus the main window's report) into dir; the file's path
 export const exportLogDebug = (dir: string, report: unknown) => call<string>("export_log_debug", { dir, report });
 export const scanBackups = () => call<{ found: number; failed: number }>("scan_backups");
-export const appInfo = () => call<{ version: string; platform: CompanionPlatform }>("app_info");
+// updater = the installed app (setup), which updates itself (installUpdate); the standalone exe downloads the zip
+export const appInfo = () => call<{ version: string; platform: CompanionPlatform; updater: boolean }>("app_info");
 export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });
+// Ends the app when it worked (the setup starts the new version)
+export const installUpdate = () => call<void>("install_update");
 export const openWebapp = () => call<void>("open_webapp");
 // The scan: what the OCR reads from the screen capture, switched on and off by the user or the overlay. The scope says
 // which screens it reads: the freight manager's warehouse (materials, items), the character inventory's storage pane

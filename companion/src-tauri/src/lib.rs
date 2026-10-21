@@ -316,12 +316,78 @@ async fn api(
 struct AppInfo {
     version: &'static str,
     platform: &'static str,
+    /// The installed app (NSIS setup), which updates itself
+    updater: bool,
 }
 
 /// This build's version and platform (for the update hint: which download fits).
 #[tauri::command]
 fn app_info() -> AppInfo {
-    AppInfo { version: env!("CARGO_PKG_VERSION"), platform: if cfg!(windows) { "windows" } else { "linux" } }
+    AppInfo { version: env!("CARGO_PKG_VERSION"), platform: if cfg!(windows) { "windows" } else { "linux" }, updater: updater_available() }
+}
+
+/// Whether this is the installed app: the bundler stamps the exe it packs into the setup, the bare
+/// exe (the standalone zip) stays unstamped and gets the zip as its update (like BindSight).
+fn updater_available() -> bool {
+    #[cfg(windows)]
+    return matches!(tauri::utils::platform::bundle_type(), Some(tauri::utils::config::BundleType::Nsis));
+    #[cfg(not(windows))]
+    false
+}
+
+/// Installs the server's release over the installed app: the setup its update feed names
+/// (`/downloads/companion/latest.json`, with the token like every download), checked against the
+/// updater key and run by the plugin, which ends the app (the setup starts the new one).
+/// Progress as with `download_update`.
+#[cfg(windows)]
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let config = app.state::<Mutex<AppData>>().lock().unwrap().config.clone();
+    let origin = server::origin(&config.server)?;
+    if config.token.is_empty() {
+        return Err("noToken".into());
+    }
+    let fail = |e: tauri_plugin_updater::Error| {
+        log::warn!("update failed: {e}");
+        e.to_string()
+    };
+    let feed = format!("{origin}/downloads/companion/latest.json").parse().map_err(|_| "invalidServer")?;
+    let update = app
+        .updater_builder()
+        .endpoints(vec![feed])
+        .map_err(fail)?
+        .header("Authorization", format!("Bearer {}", config.token))
+        .map_err(fail)?
+        .build()
+        .map_err(fail)?
+        .check()
+        .await
+        .map_err(fail)?
+        .ok_or("noUpdate")?;
+    log::info!("update {} found, downloading", update.version);
+    let mut done = 0;
+    let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    update
+        .download_and_install(
+            |chunk, total| {
+                done += chunk as u64;
+                if Some(done) == total || last.elapsed() >= std::time::Duration::from_millis(100) {
+                    last = std::time::Instant::now();
+                    let _ = app.emit(DOWNLOAD_PROGRESS, DownloadProgress { done, total });
+                }
+            },
+            || log::info!("update downloaded, starting the setup"),
+        )
+        .await
+        .map_err(fail)?;
+    app.restart()
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn install_update() -> Result<(), String> {
+    Err("noUpdater".into())
 }
 
 #[derive(Serialize, Clone)]
@@ -480,7 +546,7 @@ pub fn run() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(
             // Stdout for `tauri dev`, plus a rotating file in the app log dir;
             // dependencies only when they warn
@@ -507,7 +573,11 @@ pub fn run() {
                 )
                 .with_denylist(&["overlay"])
                 .build(),
-        )
+        );
+    // The installed app's updates (install_update); its key and settings in tauri.windows.conf.json
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .setup(|app| {
             std::panic::set_hook(Box::new(|info| log::error!("panic: {info}")));
             let config = config::load(app.handle());
@@ -575,6 +645,7 @@ pub fn run() {
             api,
             app_info,
             download_update,
+            install_update,
             open_webapp,
             get_scan,
             set_scan,

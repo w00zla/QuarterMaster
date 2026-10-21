@@ -24,11 +24,12 @@ if [[ ! -f $manifest ]]; then
   exit 1
 fi
 
-# version, then one file per line (windows, linux; entries left out are skipped). One line: on Windows
-# the Volta shim cuts a -e argument at its first line break.
+# version, then one file per line (windows, linux, the setup and its signature; entries left out are
+# skipped). One line: on Windows the Volta shim cuts a -e argument at its first line break.
 script='const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));'
 script+=' if (typeof m.version !== "string" || !m.version) throw new Error("no version in the manifest");'
 script+=' console.log(m.version); for (const k of ["windows", "linux"]) if (m[k]) console.log(m[k]);'
+script+=' if (m.windowsSetup) console.log(m.windowsSetup + "\n" + m.windowsSetup + ".sig");'
 mapfile -t fields < <(node -e "$script" "$manifest")
 if [[ ${#fields[@]} -eq 0 ]]; then
   echo "Cannot read $manifest" >&2

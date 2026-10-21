@@ -65,9 +65,9 @@ pnpm bot                      # Discord bot (needs DISCORD_TOKEN)
 pnpm bot:register [--dry-run] # bulk-overwrite slash commands: DISCORD_DEV_GUILD_ID set = that server only, else global
 pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every hour
 pnpm companion:start          # companion app: tauri dev (Vite on :1430)
-pnpm companion:build          # standalone build for this OS: build:linux (AppImage) or build:windows (bare exe); in-game tests need it (the OCR is far too slow in debug), the running exe must be closed first
+pnpm companion:build          # release build for this OS: build:linux (AppImage) or build:windows (setup + bare exe); in-game tests need it (the OCR is far too slow in debug), the running exe must be closed first
 pnpm --filter sc-quartermaster-companion build:linux      # standalone AppImage (no installer, like BindSight)
-pnpm --filter sc-quartermaster-companion build:windows    # standalone exe (no bundle; zip it as …_x64-standalone.zip)
+pnpm --filter sc-quartermaster-companion build:windows    # NSIS setup + .sig (self-updating; needs TAURI_SIGNING_PRIVATE_KEY = the key's content) and the bare exe (zip it as …_x64-standalone.zip)
 pnpm --filter sc-quartermaster-companion typecheck        # companion SPA typecheck
 pnpm --filter sc-quartermaster-companion ocr:models      # once per checkout: OCR models (PP-OCRv6 small) into companion/src-tauri/resources/ocr (not in git; every Rust build needs them)
 cargo test --release --manifest-path companion/src-tauri/Cargo.toml # its Rust tests (the OCR tests read local/screenshots/… if present)

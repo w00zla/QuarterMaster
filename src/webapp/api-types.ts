@@ -425,11 +425,14 @@ export interface ApiTokenCreated {
   token: string;
 }
 
-// --- companion app release (GET /api/companion; files at GET /downloads/companion/<file>, session or API token)
+// --- companion app release (GET /api/companion; files at GET /downloads/companion/<file>, session or API token;
+// the installed app's update feed at GET /downloads/companion/latest.json, Tauri updater format)
 export type CompanionPlatform = 'windows' | 'linux';
 
 export interface CompanionDownload {
   platform: CompanionPlatform;
+  // setup = the installed app (Windows, updates itself); standalone = the bare exe zipped, the AppImage
+  kind: 'setup' | 'standalone';
   file: string;
   // Bytes
   size: number;

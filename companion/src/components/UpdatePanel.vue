@@ -1,17 +1,18 @@
 <script setup lang="ts">
 // Shown instead of everything else while the server calls this version outdated: installed and
-// required version, and the download of the new one to a folder the user picks (with progress).
+// required version, and the download of the new one to a folder the user picks (with progress);
+// the installed app (updater) installs the new setup itself instead and restarts.
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { downloadDir, join } from "@tauri-apps/api/path";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { CompanionOutdated } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { downloadUpdate } from "../backend";
+import { downloadUpdate, installUpdate } from "../backend";
 import { langRef, t } from "../i18n";
 import { errorText, toast } from "../toasts";
 
-const props = defineProps<{ outdated: CompanionOutdated; current: string; url: string | null }>();
+const props = defineProps<{ outdated: CompanionOutdated; current: string; url: string | null; updater: boolean }>();
 
 const downloading = ref(false);
 const progress = ref<{ done: number; total: number | null } | null>(null);
@@ -35,6 +36,20 @@ async function download() {
     toast(t("outdated.saved", { path: dest }));
   } catch (e) {
     // Also token and network refusals: this download does not go through the connection state
+    toast(errorText(e), "error");
+  } finally {
+    downloading.value = false;
+  }
+}
+
+async function install() {
+  if (downloading.value) return;
+  downloading.value = true;
+  progress.value = null;
+  try {
+    // Ends the app when it worked
+    await installUpdate();
+  } catch (e) {
     toast(errorText(e), "error");
   } finally {
     downloading.value = false;
@@ -66,7 +81,10 @@ onUnmounted(() => unlisten?.());
         <div class="bar"><div class="fill" :style="{ width: `${pct}%` }" /></div>
         <span class="amount mono">{{ amount }}</span>
       </div>
-      <button v-if="url" type="button" class="btn primary" :disabled="downloading" @click="download">
+      <button v-if="updater" type="button" class="btn primary" :disabled="downloading" @click="install">
+        <Icon name="imports" :size="14" /> {{ t("outdated.install") }}
+      </button>
+      <button v-else-if="url" type="button" class="btn primary" :disabled="downloading" @click="download">
         <Icon name="imports" :size="14" /> {{ t("outdated.download") }}
       </button>
     </div>

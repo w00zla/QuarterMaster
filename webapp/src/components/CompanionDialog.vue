@@ -3,7 +3,7 @@
 // hands out (the browser's own platform first and primary); below it a bar with its Access Key (the
 // API token; shown once when created, a new one replaces the old).
 import { computed, onMounted, ref } from "vue";
-import type { ApiTokenCreated, ApiTokenInfo, CompanionInfo, CompanionPlatform } from "../../../src/webapp/api-types";
+import type { ApiTokenCreated, ApiTokenInfo, CompanionDownload, CompanionInfo, CompanionPlatform } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 // Exact sizes (72 px, 144 px for 2x screens) from assets/logo.png
 import logo from "../assets/logo-72.png";
@@ -26,10 +26,11 @@ const PLATFORM: Record<CompanionPlatform, { name: string; type: string }> = {
   windows: { name: "Windows", type: "zip" },
   linux: { name: "Linux", type: "AppImage" },
 };
-// The browser's platform, for the primary download
+const type = (d: CompanionDownload) => (d.kind === "setup" ? "Setup" : PLATFORM[d.platform].type);
+// The browser's platform, for the primary download (its first: the setup on Windows)
 const ua = navigator.userAgent;
 const own: CompanionPlatform | null = /Windows/.test(ua) ? "windows" : /Linux/.test(ua) && !/Android/.test(ua) ? "linux" : null;
-// The own platform first
+// The own platform first (stable: the server's order within it)
 const downloads = computed(() => [...(release.value?.downloads ?? [])].sort((a, b) => Number(b.platform === own) - Number(a.platform === own)));
 
 // "2026-10-07" in every language
@@ -88,14 +89,14 @@ async function copyKey() {
         </div>
         <template v-if="release?.version">
           <a
-            v-for="d in downloads"
-            :key="d.platform"
+            v-for="(d, i) in downloads"
+            :key="d.file"
             class="btn small get"
-            :class="d.platform === own ? 'primary' : 'outline'"
+            :class="i === 0 && d.platform === own ? 'primary' : 'outline'"
             :href="d.url"
             download
           >
-            <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ PLATFORM[d.platform].type }} · {{ size(d.size) }}
+            <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }} · {{ size(d.size) }}
           </a>
         </template>
         <div v-else-if="release" class="faint">{{ t("companion.noRelease") }}</div>
