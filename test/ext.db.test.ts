@@ -63,6 +63,18 @@ describe('UEX pull', { skip: !url && 'TEST_DATABASE_URL not set' }, () => {
     ]);
   });
 
+  it('keeps only the latest snapshot of a latest-only endpoint', async () => {
+    await storeSnapshot(db, 'uex', 'items_prices_all', [{ id: 1, price_buy: 10 }], true);
+    await storeSnapshot(db, 'uex', 'refineries_yields', [{ id: 1, value: 5 }]);
+    assert.equal(await storeSnapshot(db, 'uex', 'items_prices_all', [{ id: 1, price_buy: 10 }], true), 'unchanged');
+    assert.equal(await storeSnapshot(db, 'uex', 'items_prices_all', [{ id: 1, price_buy: 12 }], true), 'inserted');
+    // Other endpoints keep their rows
+    assert.deepEqual((await rows()).map((r) => [r.endpoint, r.data]), [
+      ['refineries_yields', [{ id: 1, value: 5 }]],
+      ['items_prices_all', [{ id: 1, price_buy: 12 }]],
+    ]);
+  });
+
   it('sends the token and refuses error answers and foreign shapes', async () => {
     const { fetchFn, seen } = fakeUex({
       refineries_yields: ok([{ id: 1 }]),

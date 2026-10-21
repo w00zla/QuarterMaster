@@ -149,7 +149,7 @@ Two web apps, **separate processes** (and separate from the bot) sharing one cod
 
 ## Third-party data
 
-- **UEX** (community reports, not game data; bearer token): refinery yield bonuses per terminal × ore (shown for the ore's refined material) and the refining methods, pulled every hour. Raw responses are kept as history (a new row only when the content changed).
+- **UEX** (community reports, not game data; bearer token): refinery yield bonuses per terminal × ore (shown for the ore's refined material) and the refining methods, pulled every 15 minutes, as well as terminals, commodities and the prices and stock of commodities and items (not used yet). Raw responses are kept as history (a new row only when the content changed); prices only as their latest state.
 - Used for: which locations have a refinery, and the yield bonus shown in the web app.
 - **Refining method values** (yield %, time per SCU) exist neither in the game data nor at UEX: measured from in-game quotes (since migration `0015`; the scminer.rocks seed of `0009` was far off) and stored statically (`ext.refining_method`, seeded by a migration, corrected by later ones). Costs are not kept. Shown in the admin UI only: the web app no longer estimates jobs (decided 2026-10-10).
 

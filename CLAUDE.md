@@ -63,7 +63,7 @@ pnpm webapp:dev               # its SPA on Vite, http://localhost:5174 (proxies 
 pnpm webapp:build             # vue-tsc + vite build -> webapp/dist (served by pnpm webapp)
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)
 pnpm bot:register [--dry-run] # bulk-overwrite slash commands: DISCORD_DEV_GUILD_ID set = that server only, else global
-pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every hour
+pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every 15 minutes
 pnpm companion:start          # companion app: tauri dev (Vite on :1430)
 pnpm companion:build          # release build for this OS: build:linux (AppImage) or build:windows (setup + bare exe); in-game tests need it (the OCR is far too slow in debug), the running exe must be closed first
 pnpm --filter sc-quartermaster-companion build:linux      # standalone AppImage (no installer, like BindSight)
@@ -121,6 +121,6 @@ docker compose run --rm bot node src/bot/register.ts    # after command changes
 - **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth (PKCE), hashed session cookies, a strict CSP and same-origin checks, role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket messages that only say what changed; the companion authenticates with a per-user API token (`Bearer qmt_…`) and a version header.
 - **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth, catalog browser, imports, read-only user data and checks.
 - **Companion** (`docs/companion.md`): Tauri 2 (Rust + Vue); `Game.log` unlocks; scan sessions that capture the game window (DXGI, Windows), read tooltips with PP-OCRv6 (ONNX, compiled in) and turn them into proposals the user registers through the web app's API; a click-through overlay over the game.
-- **ext** (`docs/ext.md`): hourly UEX pull into schema `ext` (refinery terminals and yield bonuses, refining methods).
+- **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext` (refinery terminals and yield bonuses, refining methods; terminals, commodities, commodity and item prices, not used yet).
 
 **Tests** (`test/`): `fixtures.ts` builds synthetic DataCore records (no real game data) and runs them through the real normalizer; the resulting snapshot feeds both the pure tests and the DB integration tests. Pure companion logic is tested from `test/companion-*.test.ts`, its Rust side with `cargo test`.

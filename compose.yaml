@@ -75,7 +75,7 @@ services:
       # Link to the user web app in the bot's panels (empty: no link)
       WEBAPP_ORIGIN: ${WEBAPP_ORIGIN:-}
 
-  # Pulls the third-party data (UEX) into schema ext every hour; no port
+  # Pulls the third-party data (UEX) into schema ext every 15 minutes; no port
   ext:
     <<: *app
     command: [node, src/ext/main.ts]

@@ -1,8 +1,8 @@
-// Pulls the third-party data into ext.snapshot at start and then every hour (today: UEX).
+// Pulls the third-party data into ext.snapshot at start and then every 15 minutes (today: UEX).
 import { connect } from '../db/client.ts';
 import { pullUex } from './uex.ts';
 
-const INTERVAL_MS = 60 * 60 * 1000;
+const INTERVAL_MS = 15 * 60 * 1000;
 
 const token = process.env.UEX_TOKEN;
 if (!token) throw new Error('UEX_TOKEN is not set');
