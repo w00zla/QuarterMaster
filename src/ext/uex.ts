@@ -29,15 +29,28 @@ export async function fetchEndpoint(endpoint: string, token: string, fetchFn: ty
   return parsed.data.data;
 }
 
+export interface PullResult {
+  inserted: number;
+  unchanged: number;
+  failed: number;
+}
+
 /** Fetches and stores every endpoint; one failing endpoint does not stop the others. */
-export async function pullUex(db: Db, token: string, fetchFn: typeof fetch = fetch): Promise<void> {
+export async function pullUex(db: Db, token: string, fetchFn: typeof fetch = fetch): Promise<PullResult> {
+  const result: PullResult = { inserted: 0, unchanged: 0, failed: 0 };
   for (const endpoint of UEX_ENDPOINTS) {
+    const t0 = performance.now();
     try {
       const data = await fetchEndpoint(endpoint, token, fetchFn);
-      const result = await storeSnapshot(db, UEX_SOURCE, endpoint, data, LATEST_ONLY.has(endpoint));
-      console.log(`UEX ${endpoint}: ${data.length} rows, ${result}`);
+      const stored = await storeSnapshot(db, UEX_SOURCE, endpoint, data, LATEST_ONLY.has(endpoint));
+      result[stored]++;
+      console.log(`  ${endpoint}: ${data.length} rows, ${stored} (${seconds(t0)})`);
     } catch (err) {
-      console.error(`UEX ${endpoint} failed`, err);
+      result.failed++;
+      console.error(`  ${endpoint}: failed (${seconds(t0)})`, err);
     }
   }
+  return result;
 }
+
+const seconds = (t0: number) => `${((performance.now() - t0) / 1000).toFixed(1)} s`;
