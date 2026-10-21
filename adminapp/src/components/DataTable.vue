@@ -2,8 +2,8 @@
 // A grid table with BindSight's column head: click to sort, drag to resize,
 // widths and sort persist per table. Cells render `valueOf` unless a
 // `#cell-<key>` slot is given; `#col-<key>` adds to a column's head (gets the table's columns as
-// `table`, e.g. for the column chooser). Columns the user hid (`hideable`) are left out. Rows are
-// sorted here; filtering is the caller's.
+// `table`, e.g. for the column chooser; also exposed as `table`). Columns the user hid (`hideable`) are
+// left out. Rows are sorted here; filtering is the caller's.
 import { computed } from "vue";
 import ColumnHead from "./ColumnHead.vue";
 import { sortRows, useTableColumns, type ColumnSpec, type SortState } from "../tableColumns";
@@ -25,6 +25,8 @@ const emit = defineEmits<{ select: [row: T] }>();
 
 const cols = useTableColumns(props.storageKey, () => props.columns, props.defaultSort);
 const sorted = computed(() => sortRows(props.rows, cols.sort.value, props.valueOf));
+// The columns' state for a chooser outside the table (a template ref's `table`)
+defineExpose({ table: cols });
 </script>
 
 <template>

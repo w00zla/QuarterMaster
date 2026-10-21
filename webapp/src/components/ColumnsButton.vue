@@ -1,27 +1,22 @@
 <script setup lang="ts">
-// The icon button in the head of a table's action column: opens the column chooser (ColumnsDialog.vue).
-// Shared by the web app and the companion: texts come in.
+// The icon button that opens the column chooser (ColumnsDialog.vue): in the companion in the head of a
+// table's action column, in the web app right of the filter chips. Shared by both: texts come in.
 import { ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import type { useTableColumns } from "../../../adminapp/src/tableColumns";
 import ColumnsDialog, { type ColumnsTexts } from "./ColumnsDialog.vue";
 
-defineProps<{ table: ReturnType<typeof useTableColumns>; texts: ColumnsTexts }>();
+// `size`: the button's edge in px (16 in compact column titles; the web app's filter row a bit larger)
+const props = withDefaults(defineProps<{ table: ReturnType<typeof useTableColumns>; texts: ColumnsTexts; size?: number }>(), { size: 16 });
 const open = ref(false);
 </script>
 
 <template>
   <Tooltip :text="texts.choose">
-    <button type="button" class="icon-btn columns-btn" @click.stop="open = true"><Icon name="eye" :size="11" /></button>
+    <button type="button" class="icon-btn columns-btn" :style="{ width: `${props.size}px`, height: `${props.size}px` }" @click.stop="open = true">
+      <Icon name="eye" :size="props.size - 5" />
+    </button>
   </Tooltip>
   <ColumnsDialog v-if="open" :table="table" :texts="texts" @close="open = false" />
 </template>
-
-<style scoped>
-/* Small in the compact column titles; an eye: which columns are shown */
-.columns-btn {
-  width: 16px;
-  height: 16px;
-}
-</style>

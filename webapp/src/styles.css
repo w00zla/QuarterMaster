@@ -9,7 +9,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
   width: 100%;
 }
@@ -197,8 +197,8 @@
 
 .filters .search {
   width: auto;
-  flex: 1 1 180px;
-  max-width: 280px;
+  flex: 1 1 160px;
+  max-width: 220px;
 }
 
 /* The add form inside a list's panel, between its head and the filters: eine eigene, eingerückte

@@ -150,7 +150,7 @@ const filtered = computed(() => {
 });
 
 // --- the table: one group per material (header with the total), its batches below ------------
-// Every column but the name and the actions may be hidden (ColumnsButton in the actions' head)
+// Every column but the name and the actions may be hidden (ColumnsButton right of the filters)
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: props.components ? t("stock.col.component") : t("stock.col.material"), width: 200 },
   ...(props.components
@@ -162,32 +162,34 @@ const columns = computed<ColumnSpec[]>(() => [
       ]
     : [{ key: "quality", label: t("stock.col.quality"), width: 130, hideable: true }]),
   { key: "amount", label: props.components ? t("stock.col.count") : t("stock.col.amount"), width: 120, hideable: true },
-  // Ressourcen: what the amount is worth at UEX's prices (best sell shown, the others on demand)
+  ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260, hideable: true }] : []),
+  // What the amount is worth at UEX's prices (best sell shown, the others on demand); items have no averages
+  { key: "uecSell", label: t("trade.col.sell"), width: 120, hideable: true },
+  { key: "uecBuy", label: t("trade.col.buy"), width: 120, hideable: true, hiddenByDefault: true },
   ...(props.components ? [] : [
-    { key: "uecSell", label: t("trade.col.sell"), width: 120, hideable: true },
-    { key: "uecBuy", label: t("trade.col.buy"), width: 120, hideable: true, hiddenByDefault: true },
     { key: "uecSellAvg", label: t("trade.col.sellAvg"), width: 120, hideable: true, hiddenByDefault: true },
     { key: "uecBuyAvg", label: t("trade.col.buyAvg"), width: 120, hideable: true, hiddenByDefault: true },
   ]),
-  ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260, hideable: true }] : []),
   { key: "location", label: t("stock.col.location"), width: 280, hideable: true },
   ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180, hideable: true }] : []),
   ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200, hideable: true }] : []),
   // Die Füllspalte (Rest der Breite, ohne Griff): ihre Breite ist ihr Minimum, daher das der anderen (MIN_WIDTH)
   { key: "state", label: t("stock.col.state"), width: 40, hideable: true },
-  // Je Button 26px + 6px Abstand, dazu die Trennlinie: Ressourcen fünf Buttons, Ausrüstung vier
-  { key: "actions", label: "", width: props.components ? 136 : 168, sortable: false, fixed: true, sep: true },
+  // Genau so breit wie die Buttons (je 26px, 6px Abstand) plus der Abstand hinter der Trennlinie (6px) und ein
+  // Mini-Abstand (3px) vor der Handel-Spalte: Ressourcen fünf Buttons, Ausrüstung vier
+  { key: "actions", label: "", width: (props.components ? 4 * 26 + 3 * 6 : 5 * 26 + 4 * 6) + 6 + 3, sortable: false, fixed: true, sep: true },
   // Der Handel-Button der Materialzeile (Preise gelten je Material)
-  { key: "trade", label: "", width: 84, sortable: false, fixed: true, sep: true },
+  // Der Button füllt die Spalte (kein Polster); breit genug für "Handel" und "Trading"
+  { key: "trade", label: "", width: 6 + 62, sortable: false, fixed: true, sep: true },
 ]);
 const cols = props.components
   ? useTableColumns("qm.webapp.columns.components", columns, { key: "amount", dir: "desc" })
   : useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
 const shown = computed(() => new Set(cols.columns.value.map((c) => c.key)));
 const on = (key: string) => shown.value.has(key);
-// Cells of a group row before the empty ones: name, (type, size, grade, class | quality,) total, (UEC values);
-// the trade button comes after them
-const LEAD = new Set(["material", "type", "size", "grade", "class", "quality", "amount", "uecSell", "uecBuy", "uecSellAvg", "uecBuyAvg"]);
+// Cells of a group row before the empty ones: name, (type, size, grade, class | quality,) total, (stats, empty,)
+// UEC values; the trade button comes after them
+const LEAD = new Set(["material", "type", "size", "grade", "class", "quality", "amount", "stats", "uecSell", "uecBuy", "uecSellAvg", "uecBuyAvg"]);
 const groupRest = computed(() => cols.columns.value.filter((c) => !LEAD.has(c.key) && c.key !== "trade").length);
 
 // The UEC columns' prices: best sell (highest), best buy (lowest), UEX's averages
@@ -207,6 +209,17 @@ function uecMicros(uuid: string, quantity: string, key: UecKey): bigint | null {
   return price === undefined ? null : valueMicros(quantity, price);
 }
 const uecText = (micros: bigint | null) => (micros === null ? "—" : uec(Number(micros) / 1e6));
+// The list's worth at the best sell prices (its stored batches, like the overview's total value); null
+// while no batch has a price
+const listWorth = computed(() => {
+  let sum: bigint | null = null;
+  for (const b of batches.value) {
+    if (b.state !== "stored") continue;
+    const m = uecMicros(b.subjectUuid, b.quantity, "uecSell");
+    if (m !== null) sum = (sum ?? 0n) + m;
+  }
+  return sum;
+});
 
 function valueOf(b: StockBatch, key: string): string | number {
   switch (key) {
@@ -307,7 +320,7 @@ function open(batch: StockBatch, action: BatchAction) {
     <section class="panel unclipped">
       <div class="head">
         <Icon :name="components ? 'gear' : 'type-crate'" :size="16" />
-        <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
+        <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}<template v-if="listWorth !== null"> ({{ uecText(listWorth) }} aUEC)</template></span></span>
         <!-- Offen: als Umriss-Button "Schließen", damit nur der Hinzufügen-Button im Formular gefüllt ist -->
         <button type="button" class="btn small" :class="showAdd ? 'outline' : 'primary'" @click="showAdd = !showAdd">
           <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ showAdd ? t("common.close") : t("stock.add") }}
@@ -334,6 +347,7 @@ function open(batch: StockBatch, action: BatchAction) {
           <Dropdown v-model="gradeFilter" variant="chip" :options="gradeOptions" />
         </template>
         <RangeSlider v-else v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :detail="tierQualities" :label="t('field.quality')" />
+        <ColumnsButton :table="cols" :texts="columnsTexts()" :size="22" />
         <span class="spacer" />
         <span class="head-count">{{ filtered.length }} / {{ batches.length }}</span>
       </div>
@@ -341,9 +355,7 @@ function open(batch: StockBatch, action: BatchAction) {
       <div v-if="!data" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!batches.length" class="empty-line">{{ t("stock.empty") }}</div>
       <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
-        <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth">
-          <template #col-actions><span class="columns"><ColumnsButton :table="cols" :texts="columnsTexts()" /></span></template>
-        </ColumnHead>
+        <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
         <template v-for="g in groups" :key="g.uuid">
           <!-- The material's row: its name, and its total under the amounts -->
@@ -360,7 +372,8 @@ function open(batch: StockBatch, action: BatchAction) {
             </template>
             <span v-else-if="on('quality')" />
             <span v-if="on('amount')" class="num group-total">{{ qty(g.total, g.unit) }}</span>
-            <span v-for="k in uecShown" :key="k" class="num group-total">{{ uecText(uecMicros(g.uuid, g.total, k)) }}</span>
+            <span v-if="components && on('stats')" />
+            <span v-for="k in uecShown" :key="k" class="num uec total">{{ uecText(uecMicros(g.uuid, g.total, k)) }}</span>
             <span v-for="c in groupRest" :key="c" :class="{ sep: c === groupRest }" />
             <span class="sep trade"><ChipButton :label="t('trade.button')" :disabled="!prices[g.uuid]" @click="trade = { uuid: g.uuid, name: g.material }" /></span>
           </div>
@@ -370,9 +383,9 @@ function open(batch: StockBatch, action: BatchAction) {
             <span v-else-if="on('quality')" class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
             <!-- Ausrüstung: jeder Eintrag ist ein Stück ("1 Stk.") -->
             <span v-if="on('amount')" class="num">{{ qty(b.quantity, b.unit) }}</span>
-            <span v-for="k in uecShown" :key="k" class="num">{{ uecText(uecMicros(b.subjectUuid, b.quantity, k)) }}</span>
             <!-- Ohne Verbesserung: "Standard", dezent -->
             <span v-if="components && on('stats')" class="cell" :class="{ dim: !statsText(b.subjectUuid, b.stats) }" :title="statsText(b.subjectUuid, b.stats)">{{ statsText(b.subjectUuid, b.stats) || t("stock.standard") }}</span>
+            <span v-for="k in uecShown" :key="k" class="num uec">{{ uecText(uecMicros(b.subjectUuid, b.quantity, k)) }}</span>
             <span v-if="on('location')" class="cell">{{ b.location }}</span>
             <span v-if="org && on('holder')" class="cell">{{ b.holderName }}</span>
             <span v-if="scope === 'all' && on('owner')" class="cell">{{ ownerText(b) }}</span>
@@ -436,6 +449,18 @@ function open(batch: StockBatch, action: BatchAction) {
   font-weight: 600;
 }
 
+/* UEX values: secondary figures, in the mono face and quieter than the amounts; the material's total a
+   little brighter */
+.uec {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.uec.total {
+  color: var(--text-2);
+}
+
 /* Rows look like the blueprint table's (same .data-row type), without the click cursor */
 .data-row {
   cursor: default;
@@ -453,13 +478,15 @@ function open(batch: StockBatch, action: BatchAction) {
   gap: 6px;
 }
 
-.trade {
-  justify-content: center;
+/* A hair of room before the Handel column's line (ui.css's .sep sets no right padding) */
+.sep.actions {
+  padding-right: 3px;
 }
 
-/* The column chooser at the right edge, above the action buttons */
-.columns {
-  margin-left: auto;
+/* The button fills the column */
+.trade :deep(.chip-btn) {
+  flex: 1;
+  justify-content: center;
 }
 
 </style>

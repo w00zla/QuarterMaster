@@ -48,11 +48,11 @@ const stockTiles = (s: StockMetrics | undefined) => [
   { label: t("sum.items"), value: number(s?.items.pieces), unit: t("unit.pcs"), sub: kindsAndLocations(s?.items), icon: "item" as const },
 ];
 const blueprintsOf = (n: number | undefined) => ({ value: number(n), unit: `/ ${number(summary.value?.obtainableBlueprints)}` });
-// Worth at the best UEX sell price ("—" without any UEX prices), split like the tabs
-const valueOf = (v: StockValue | null | undefined) => ({
-  value: v ? number(v.total) : null,
-  sub: v ? t("sum.valueSplit", { r: number(v.resources)!, c: number(v.components)! }) : "",
-});
+// Worth at the best UEX sell price ("—" without any UEX prices), rounded up and short: "21 Mio." / "21M",
+// "4,9 Mio." / "4.9M" (German writes thousands out); the detail line just names the currency.
+// roundingMode is in every current browser, not yet in this TypeScript lib
+const compactUp = { notation: "compact", maximumFractionDigits: 1, roundingMode: "ceil" } as Intl.NumberFormatOptions;
+const valueOf = (v: StockValue | null | undefined) => (v ? new Intl.NumberFormat(lang.value, compactUp).format(Number(v.total)) : null);
 
 const refining = computed(() => summary.value?.personal.refining);
 const refiningSub = computed(() => {
@@ -99,7 +99,7 @@ onUnmounted(() => {
         <StatTile v-for="tile in stockTiles(summary?.personal)" :key="tile.label" :label="tile.label" :value="tile.value" :unit="tile.unit" :icon="tile.icon">{{ tile.sub }}</StatTile>
         <StatTile icon="drop" :label="t('sum.refining')" :value="number(refining?.jobs)">{{ refiningSub }}</StatTile>
         <StatTile icon="blueprint" :label="t('sum.blueprints')" v-bind="blueprintsOf(summary?.personal.blueprints)" />
-        <StatTile icon="overview" :label="t('sum.value')" :value="valueOf(summary?.personal.value).value">{{ valueOf(summary?.personal.value).sub }}</StatTile>
+        <StatTile icon="overview" :label="t('sum.value')" :value="valueOf(summary?.personal.value)">aUEC</StatTile>
       </div>
     </section>
     <section class="panel">
@@ -118,7 +118,7 @@ onUnmounted(() => {
           <div class="stats">
             <StatTile v-for="tile in stockTiles(orgStats(o.guildId))" :key="tile.label" :label="tile.label" :value="tile.value" :unit="tile.unit" :icon="tile.icon">{{ tile.sub }}</StatTile>
             <StatTile icon="blueprint" :label="t('sum.blueprints')" v-bind="blueprintsOf(orgStats(o.guildId)?.blueprints)" />
-            <StatTile icon="overview" :label="t('sum.value')" :value="valueOf(orgStats(o.guildId)?.value).value">{{ valueOf(orgStats(o.guildId)?.value).sub }}</StatTile>
+            <StatTile icon="overview" :label="t('sum.value')" :value="valueOf(orgStats(o.guildId)?.value)">aUEC</StatTile>
           </div>
         </div>
       </div>
@@ -131,8 +131,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 1280px;
-  /* Centred like the other views */
+  max-width: 1440px;
+  /* Centred like the other views, as wide as their .page */
   margin: 0 auto;
   width: 100%;
 }

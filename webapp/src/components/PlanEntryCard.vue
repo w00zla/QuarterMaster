@@ -1,6 +1,16 @@
+<script lang="ts">
+import type { BlueprintOwner } from "../../../src/webapp/api-types";
+
+/** Who has a blueprint: you, and per org of yours its active members who registered it. */
+export interface BlueprintOwners {
+  mine: boolean;
+  orgs: Array<{ guildId: string; name: string; owners: BlueprintOwner[] }>;
+}
+</script>
+
 <script setup lang="ts">
 // One checked blueprint: count, slot choice, material quality per slot (never below the slot's
-// minimum), the resulting stat changes and, below, what of it the stock covers. Changes go up as
+// minimum), the resulting stat changes and, below, what of it the stock covers and who has the blueprint. Changes go up as
 // events. Nothing in the card changes its height while qualities or the slot choice change: a
 // wrong slot choice shows next to the slot count, and the stats list every stat the recipe's slots
 // can give.
@@ -15,6 +25,7 @@ import { craftingUi, toggleIn, warningText } from "../crafting";
 import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../../../src/planner/stock";
 import { duration, qty, unitText } from "../format";
 import { t } from "../i18n";
+import { memberLabel } from "../orgs";
 import { me } from "../session";
 import ChipButton from "./ChipButton.vue";
 import CoverageTag from "./CoverageTag.vue";
@@ -22,8 +33,9 @@ import StockBatchList from "./StockBatchList.vue";
 import TypeLabel from "./TypeLabel.vue";
 import UnlocksDialog from "./UnlocksDialog.vue";
 
-// stock: everything you can see (null while it loads)
-const props = defineProps<{ result: EntryResult; recipe: PlannerRecipe | undefined; stock: StockBatch[] | null }>();
+// stock: everything you can see; owners: whether you have the blueprint and who has it in each of your
+// orgs (both null while they load)
+const props = defineProps<{ result: EntryResult; recipe: PlannerRecipe | undefined; stock: StockBatch[] | null; owners: BlueprintOwners | null }>();
 const emit = defineEmits<{ quality: [slotIndex: number, q: number]; slots: [indexes: number[]]; count: [n: number]; remove: [] }>();
 
 const choosesSlots = computed(() => !!props.recipe && props.recipe.requiredSlots < props.result.slots.length);
@@ -54,6 +66,8 @@ const step = (by: number) => emit("count", clampCount(props.result.count + by));
 
 // The stock part: each card on its own (nothing reserved across cards), open by default
 const stockOpen = computed(() => !craftingUi.stockClosed.includes(props.result.blueprintUuid));
+// The owners part, built like the stock part: you first, then each org; open by default
+const ownersOpen = computed(() => !craftingUi.ownersClosed.includes(props.result.blueprintUuid));
 const coverages = computed(() => needsOf(props.result).map((n) => coverageOf(n, props.stock ?? [], me.value?.userId ?? null)));
 
 const slotWarning = computed(() => {
@@ -212,6 +226,36 @@ const unlocksOpen = ref(false);
           <StockBatchList :rows="c.batches" />
         </div>
         <div v-if="!coverages.length" class="faint">—</div>
+      </div>
+    </div>
+
+    <!-- Who has the blueprint: you, then each of your orgs with its members who registered it -->
+    <div class="stock-part">
+      <button type="button" class="stock-toggle" :aria-expanded="ownersOpen" @click="toggleIn(craftingUi.ownersClosed, result.blueprintUuid)">
+        <Icon :name="ownersOpen ? 'chevron-down' : 'chevron-right'" :size="14" />
+        <Icon name="users" :size="14" />
+        <span class="panel-title">{{ t("crafting.owners") }}</span>
+      </button>
+      <div v-if="ownersOpen" class="needs">
+        <div v-if="!owners" class="faint">{{ t("common.loading") }}</div>
+        <template v-else>
+          <div class="need-line owner-line">
+            <span class="need-name">{{ t("crafting.ownersYou") }}</span>
+            <span />
+            <span class="need-tag">
+              <span v-if="recipe?.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
+              <span v-else class="tag" :class="owners.mine ? 'ok' : 'warn'">{{ t(owners.mine ? "crafting.ownHave" : "crafting.ownMissing") }}</span>
+            </span>
+          </div>
+          <!-- A default blueprint: everyone has it, nobody registers it -->
+          <template v-if="!recipe?.isDefault">
+            <div v-for="o in owners.orgs" :key="o.guildId" class="need-line owner-line">
+              <span class="need-name">{{ o.name }}</span>
+              <span class="owner-names" :class="{ faint: !o.owners.length }">{{ o.owners.length ? o.owners.map(memberLabel).join(", ") : t("crafting.ownersNone") }}</span>
+              <span class="need-tag"><span class="tag" :class="{ ok: o.owners.length }">{{ o.owners.length }}</span></span>
+            </div>
+          </template>
+        </template>
       </div>
     </div>
 
@@ -377,6 +421,16 @@ const unlocksOpen = ref(false);
   white-space: nowrap;
   font-weight: 600;
   color: var(--text);
+}
+
+/* Owners: the org (or "you"), its members wrapping in the wide middle, the count or state at the right */
+.need-line.owner-line {
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 15ch;
+}
+
+.owner-names {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 
 .need-total {

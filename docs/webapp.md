@@ -154,18 +154,23 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   and may exceed Y: then the game data misses a source, listed in the admin overview), Refinery jobs (sum of
   the expected yields · stations) and Next job ready (countdown, a "n ready" tag); "Your orgs" with one
   sub-tile per org (name, state, "Members: n", Resources/Items/Blueprints). Reloads on every realtime message.
-  The last tile of both is "Gesamtwert" (at the best UEX sell price; "Ressourcen X · Ausrüstung Y").
+  The last tile of both is "Gesamtwert" (at the best UEX sell price, rounded up and compact: "21 Mio." /
+  "21M", Intl `notation: "compact"`; detail line just "aUEC").
 - **Ressourcen** (route `/resources`, until 2026-10-20 "Bestand" at `/stock`; materials only, no ship
   components): grouped by material, filters; scope "All" lists personal
   and org stock with an owner column ("Pers." / "Org (holder)"). Adding has a share switch per org (an org
   scope starts with that org on; the batch is always personal, the switches share it). Row actions Sharing (a
   switch per org, whole batch) · Split (unshared) or Merge back (a split-off part) · Move (place, recipient) ·
-  Remove · Adjust. UEC columns (amount × UEX price, BigInt micro units; batch rows their value, the group row
+  Remove · Adjust. UEC columns (mono, 12 px, dimmed; amount × UEX price, BigInt micro units; batch rows their value, the group row
   the material's total; "—" without a price): "UEC Verkauf" (best sell) shown, "UEC Kauf" (best buy) and both
-  averages hidden by default. Ressourcen and Ausrüstung: a last fixed column with the "Handel" button
+  averages hidden by default; Ausrüstung has "UEC Verkauf" and "UEC Kauf" only (items have no averages).
+  The panel title adds the list's worth at the best sell prices, dimmed: "Ressourcen · Persönlich (123.000
+  aUEC)" (its stored batches with a price, like the overview's total; left out without any price).
+  Ressourcen and Ausrüstung: a last fixed column with the "Handel" button
   (`ChipButton`) on each material's row, disabled without a UEX price; it opens `TradeDialog.vue`: tabs
-  "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal (Terminal,
-  System, Preis, Nachfrage with its average dim / Bestand, Stand; items without that column), best price
+  "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal (Terminal as "place – shop", e.g. "ARC-L1 Wide Forest Station – Admin",
+  System, Preis, Nachfrage / Bestand as a bar against the tab's largest amount with a tick at the terminal's
+  average, the figures on hover, Stand dimmed; items without that column), best price
   first, scrolling inside; UEX's averages in the head.
 - **Ausrüstung** (route `/gear`, until 2026-10-20 "Komponenten" at `/components`; `?scope=` like Ressourcen;
   `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): for now the ship components only, groups named by their `label`, no quality column, filters
@@ -178,12 +183,15 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   Its Adjust button (the stats) is disabled for a component without stats, not left out. A Class column
   (`itemClass`, "Military", …) is hidden until switched on.
 - Ressourcen, Ausrüstung and Blueprints: every column but the name and the actions may be hidden (`hideable`);
-  the eye button in the head of the action column (`ColumnsButton.vue` → `ColumnsDialog.vue`, shared with
-  the companion, texts via `columnsTexts()`) switches them, kept with the widths in localStorage
+  the small eye button right of the filter chips (`ColumnsButton.vue` → `ColumnsDialog.vue`, shared with
+  the companion, which keeps it in a column head; texts via
+  `columnsTexts()`) switches them, kept with the widths in localStorage
   (`qm.webapp.columns.{stock,components,bp-mine,bp-org}`; `hiddenByDefault` columns start hidden, the ones the
-  user switched on are kept as `shown`). In the blueprint lists the button sits in the head of the last
-  column (Unlocks), the owners of an org's list may be hidden too. `DataTable` renders only the shown columns and passes
-  `#col-<key>` head slots on (with the table as `table`).
+  user switched on are kept as `shown`). The owners of an org's blueprint list may be hidden too. `DataTable`
+  renders only the shown columns, passes `#col-<key>` head slots on (with the table as `table`) and exposes
+  the column state as `table` (the blueprint list's chooser outside the table). The action and Handel
+  columns are exactly as wide as their buttons (the Handel button fills its column). The blueprint list's
+  Stats column is dimmed and smaller.
 - **Raffinerie**: running jobs as a table with one group per work order (station, total yield and the time
   left with a "ready" tag or "duration open" on the group row; actions: a clock opens `RefineryTimeDialog` to
   set or clear the time left, done, remove with a `ConfirmDialog` listing the materials), the materials below
@@ -208,8 +216,13 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   batches of that material at or above the card's target quality, own first, then by quality. The stock is
   `GET /api/stock?scope=all`, loaded once per view and on stock/resync messages; each card is checked on its
   own. Pure logic in `src/planner/stock.ts` (shared with `/qm-crafting`), tested in
-  `test/crafting-stock.test.ts`. The chips line under the name ends with a divider and the "Freischaltung"
-  button (as in the Blueprints list).
+  `test/crafting-stock.test.ts`. Below it a collapsible "Besitzer" ("Owners") panel built the same way (open
+  by default, closed ones as `ownersClosed` in the same localStorage entry): "Du" with "vorhanden" / "fehlt"
+  ("Standard" for a default blueprint, then nothing more), then each of your orgs with its active members who
+  registered it ("niemand" without) and their count; from `GET /api/blueprints` and
+  `GET /api/orgs/:g/blueprints` per org, loaded once per view and on blueprints/members/profile/resync
+  messages. The chips line under the name ends with a divider and the "Freischaltung" button (as in the
+  Blueprints list).
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
 - Info cards: hovering a blueprint name or a material shows game data from `GET /api/info/...`
   (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records).
@@ -217,7 +230,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   "1 Event-Stufe"; code per kind, more kinds can follow), marker tags only when every source of that kind has
   them (Illegal red, Event yellow; Kette, Rang, Zufall, Annahme grey), right the best chance ("bis 1 von 6",
   "1 von 14", "sicher"); no details; none: "Keine".
-  A material's card ends with "Preise" ("UEX · 21.10.", the latest report) when UEX has a price: lines
+  A material's card ends with "Preise" ("UEX · 21.10.2026, 14:17", the latest report, to the minute like the dialog's Stand: `priceTime`) when UEX has a price: lines
   Verkauf/Kauf with the range and, dim, UEX's average (items: the number of terminals); no locations.
 - Profile (RSI handle, language) is a dialog from the settings icon button next to the avatar (the avatar
   itself is not clickable), saved with Save; no language switch in the header.

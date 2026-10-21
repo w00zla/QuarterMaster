@@ -23,7 +23,9 @@ location bonuses (server-side).
   player buys (UEX's docs only say "last"/"average"; read from the field names and UEX's site); `commodities`'
   `price_sell`/`price_buy` = UEX's averages (items have none, `items_prices_all` no stock);
   `date_modified` unix seconds. Per material: min/max per side, terminals per side, the latest date, every
-  offer best price first. Cached per snapshot ID of the four endpoints and the resource catalog.
+  offer best price first. A terminal is split into its place (station, city or outpost field, else the
+  last part of UEX's "<shop> - <place>" name) and its shop (the rest; the company when the name is only the
+  place): `terminalPlace`. Cached per snapshot ID of the four endpoints and the resource catalog.
 - `ext.snapshot` (`src/db/schema/ext.ts`, migration `0008`, written by `store.ts`): one row per `source`
   (`uex`), endpoint and distinct response (`data` as received, SHA-256 of it); a fetch with the same content
   as the endpoint's latest row only moves its `checked_at`, so the rows are the history of changes. The three

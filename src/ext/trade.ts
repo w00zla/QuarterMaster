@@ -16,6 +16,8 @@ type Row = Record<string, unknown>;
 
 /** One terminal's price on one side. */
 export interface Offer {
+  // Where (station, city or outpost) and which shop/terminal there ("ARC-L1 Wide Forest Station", "Admin")
+  location: string;
   terminal: string;
   system: string | null;
   price: number;
@@ -49,16 +51,30 @@ const positive = (v: unknown) => { const n = num(v); return n !== null && n > 0 
 function range(offers: Offer[], avg: number | null): PriceRange | null {
   if (!offers.length) return null;
   const prices = offers.map((o) => o.price);
-  return { min: Math.min(...prices), max: Math.max(...prices), avg, terminals: new Set(offers.map((o) => o.terminal)).size };
+  return { min: Math.min(...prices), max: Math.max(...prices), avg, terminals: new Set(offers.map((o) => `${o.location}|${o.terminal}`)).size };
+}
+
+/**
+ * A UEX terminal split into its place and its shop. UEX names them "<shop> - <place>" ("Admin - ARC-L1",
+ * "TDD - Trade and Development Division - Area 18"); the place comes from the station, city or outpost
+ * field, else the name's last part. A name that is only the place ("ArcCorp Mining Area 056") gives its
+ * company as the shop.
+ */
+export function terminalPlace(t: Row): { location: string; shop: string } {
+  const name = str(t.name) ?? str(t.displayname) ?? '?';
+  const parts = name.split(' - ').map((p) => p.trim()).filter(Boolean);
+  const location = str(t.space_station_name) ?? str(t.city_name) ?? str(t.outpost_name) ?? (parts.length > 1 ? parts.at(-1)! : str(t.displayname) ?? name);
+  const shop = parts.length > 1 ? parts.slice(0, -1).join(' - ') : name;
+  return { location, shop: shop === location ? str(t.company_name) ?? shop : shop };
 }
 
 /** Pure: the trade data per catalog material UUID from the UEX `data` arrays. */
 export function buildTrade(
   data: Partial<Record<Endpoint, Row[]>>, resources: Iterable<ResourceName>,
 ): Map<string, MaterialTrade> {
-  const terminals = new Map<number, { name: string | null; system: string | null }>();
+  const terminals = new Map<number, { location: string; shop: string; system: string | null }>();
   for (const t of data.terminals ?? []) {
-    if (typeof t.id === 'number') terminals.set(t.id, { name: str(t.name) ?? str(t.displayname), system: str(t.star_system_name) });
+    if (typeof t.id === 'number') terminals.set(t.id, { ...terminalPlace(t), system: str(t.star_system_name) });
   }
   const byName = new Map<string, string[]>();
   for (const r of resources) byName.set(nameKey(r.nameEn), [...(byName.get(nameKey(r.nameEn)) ?? []), r.uuid]);
@@ -77,8 +93,10 @@ export function buildTrade(
   };
   const offer = (r: Row, price: number, scu: unknown, scuAvg: unknown): Offer => {
     const t = typeof r.id_terminal === 'number' ? terminals.get(r.id_terminal) : undefined;
+    // Without the terminals snapshot: the price row's terminal name for both
+    const fallback = str(r.terminal_name) ?? `#${String(r.id_terminal)}`;
     return {
-      terminal: t?.name ?? str(r.terminal_name) ?? `#${String(r.id_terminal)}`, system: t?.system ?? null,
+      location: t?.location ?? fallback, terminal: t?.shop ?? fallback, system: t?.system ?? null,
       price, scu: num(scu), scuAvg: num(scuAvg), date: num(r.date_modified) ?? 0,
     };
   };
@@ -107,8 +125,9 @@ export function buildTrade(
   const result = new Map<string, MaterialTrade>();
   for (const [uuid, e] of collected) {
     if (!e.sell.length && !e.buy.length) continue;
-    e.sell.sort((a, b) => b.price - a.price || a.terminal.localeCompare(b.terminal));
-    e.buy.sort((a, b) => a.price - b.price || a.terminal.localeCompare(b.terminal));
+    const byPlace = (a: Offer, b: Offer) => a.location.localeCompare(b.location) || a.terminal.localeCompare(b.terminal);
+    e.sell.sort((a, b) => b.price - a.price || byPlace(a, b));
+    e.buy.sort((a, b) => a.price - b.price || byPlace(a, b));
     const date = Math.max(...[...e.sell, ...e.buy].map((o) => o.date));
     result.set(uuid, {
       summary: { date: new Date(date * 1000).toISOString(), sell: range(e.sell, e.avgSell), buy: range(e.buy, e.avgBuy) },

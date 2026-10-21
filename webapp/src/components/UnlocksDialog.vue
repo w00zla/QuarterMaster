@@ -146,7 +146,7 @@ const placeText = (r: UnlockMissionRow) => [r.systems.join(", "), r.locations.jo
 /* One grid for all rows (columns line up); scrolls inside, the head row stays */
 .rows {
   display: grid;
-  grid-template-columns: minmax(160px, 3fr) minmax(90px, 1.3fr) minmax(90px, 1.6fr) max-content max-content;
+  grid-template-columns: minmax(160px, 3fr) minmax(90px, 1.3fr) minmax(70px, 1fr) max-content max-content;
   max-height: 360px;
   overflow-y: auto;
   border-top: 1px solid var(--border-dim);

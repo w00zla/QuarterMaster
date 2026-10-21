@@ -1,7 +1,7 @@
 // UEX trading prices: matching to catalog materials and the price aggregation (pure).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildTrade, nameKey } from '../src/ext/trade.ts';
+import { buildTrade, nameKey, terminalPlace } from '../src/ext/trade.ts';
 import { valueMicros, wholeOfMicros } from '../src/stock/amount.ts';
 import { stockValue } from '../src/webapp/trade.ts';
 
@@ -48,8 +48,8 @@ describe('UEX trade prices', () => {
 
     const metal = trade.get(METAL)!;
     assert.deepEqual(metal.summary, { date: new Date(T2 * 1000).toISOString(), sell: { min: 80, max: 100, avg: 90, terminals: 2 }, buy: null });
-    assert.deepEqual(metal.sell.map((o) => [o.terminal, o.system, o.price, o.scu, o.scuAvg]), [
-      ['Admin - Alpha', 'Stanton', 100, 500, 400], ['Admin - Beta', 'Pyro', 80, 50, 40],
+    assert.deepEqual(metal.sell.map((o) => [o.location, o.terminal, o.system, o.price, o.scu, o.scuAvg]), [
+      ['Alpha', 'Admin', 'Stanton', 100, 500, 400], ['Beta', 'Admin', 'Pyro', 80, 50, 40],
     ]);
     // UEX's average 0 = none
     const ore = trade.get(ORE)!;
@@ -58,7 +58,7 @@ describe('UEX trade prices', () => {
     // Items: no average, no stock; the catalog's UUIDs are lower case
     const gem = trade.get(GEM)!;
     assert.deepEqual(gem.summary.buy, { min: 12, max: 15, avg: null, terminals: 2 });
-    assert.deepEqual(gem.buy.map((o) => [o.terminal, o.price, o.scu]), [['Admin - Alpha', 12, null], ['Admin - Beta', 15, null]]);
+    assert.deepEqual(gem.buy.map((o) => [o.location, o.terminal, o.price, o.scu]), [['Alpha', 'Admin', 12, null], ['Beta', 'Admin', 15, null]]);
     // Not traded at all: nothing
     assert.equal(trade.has('10000000-0000-0000-0000-0000000000ff'), false);
     assert.equal(trade.size, 3);
@@ -66,7 +66,19 @@ describe('UEX trade prices', () => {
 
   it('without terminals: the name of the price row', () => {
     const trade = buildTrade({ commodities, commodities_prices_all: [price(10, 7, 3, 0, T1, { terminal_name: 'Somewhere' })] }, [{ uuid: METAL, nameEn: 'Test Metal' }]);
-    assert.deepEqual(trade.get(METAL)!.sell.map((o) => [o.terminal, o.system]), [['Somewhere', null]]);
+    assert.deepEqual(trade.get(METAL)!.sell.map((o) => [o.location, o.terminal, o.system]), [['Somewhere', 'Somewhere', null]]);
+  });
+
+  it('splits a terminal into its place and its shop', () => {
+    assert.deepEqual(terminalPlace({ name: 'Admin - ARC-L1', space_station_name: 'ARC-L1 Wide Forest Station' }),
+      { location: 'ARC-L1 Wide Forest Station', shop: 'Admin' });
+    assert.deepEqual(terminalPlace({ name: 'TDD - Trade and Development Division - Area 18', city_name: 'Area 18' }),
+      { location: 'Area 18', shop: 'TDD - Trade and Development Division' });
+    // Only the place: the company is the shop
+    assert.deepEqual(terminalPlace({ name: 'ArcCorp Mining Area 056', outpost_name: 'ArcCorp Mining Area 056', company_name: 'ArcCorp' }),
+      { location: 'ArcCorp Mining Area 056', shop: 'ArcCorp' });
+    // No place field: the name's last part
+    assert.deepEqual(terminalPlace({ name: 'Admin - UEX Station' }), { location: 'UEX Station', shop: 'Admin' });
   });
 
   it('values amounts exactly at a price, components apart, unpriced left out', () => {

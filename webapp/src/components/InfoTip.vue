@@ -13,7 +13,7 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { api } from "../api";
 import { materials } from "../catalog";
-import { duration, priceRange, qty, shortDate, uec } from "../format";
+import { duration, priceRange, priceTime, qty, uec } from "../format";
 import { lang, t } from "../i18n";
 import { bestText, kindCount, markerClass, markerText } from "../unlocks";
 
@@ -154,7 +154,7 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
         </dl>
         <!-- UEX-Preise: Spanne über die Terminals, dahinter der UEX-Durchschnitt (Gegenstände: die Zahl der Terminals) -->
         <template v-if="mat.prices">
-          <div class="section price-head"><span>{{ t("trade.prices") }}</span><span class="source">UEX · {{ shortDate(mat.prices.date) }}</span></div>
+          <div class="section price-head"><span>{{ t("trade.prices") }}</span><span class="source">UEX · {{ priceTime(mat.prices.date) }}</span></div>
           <dl class="kv">
             <template v-for="s in priceSides(mat.prices)" :key="s.label">
               <dt>{{ s.label }}</dt><dd>{{ priceRange(s.range) }} <span class="dim">· {{ s.extra }}</span></dd>
@@ -230,7 +230,9 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
   color: var(--text);
 }
 
+/* A category's head (Zutaten, Freischaltung, Preise): set apart from what comes before */
 .section {
+  margin-top: 8px;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.14em;

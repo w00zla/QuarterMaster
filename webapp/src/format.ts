@@ -27,8 +27,10 @@ export const uec = (n: number) => new Intl.NumberFormat(lang.value, { maximumFra
 /** "6.500 – 10.000", one price when all terminals agree. */
 export const priceRange = (r: { min: number; max: number }) => (r.min === r.max ? uec(r.min) : `${uec(r.min)} – ${uec(r.max)}`);
 
-/** "21.10." / "10/21": the day of a UEX report. */
-export const shortDate = (iso: string) => new Intl.DateTimeFormat(lang.value, { day: "2-digit", month: "2-digit" }).format(new Date(iso));
+/** "21.10.2026, 14:17" / "10/21/2026, 02:17 PM": the time of a UEX report, to the minute. */
+export const priceTime = (iso: string) => new Intl.DateTimeFormat(lang.value, {
+  day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+}).format(new Date(iso));
 
 /** The typed amount normalized ("12,50" → "12.5"), null when the server would refuse it. */
 export const amountOf = (text: string, unit: Unit) => parseAmount(text, unit === "SCU" ? "resource" : "item");

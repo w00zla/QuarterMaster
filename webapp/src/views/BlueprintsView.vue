@@ -2,13 +2,13 @@
 // Blueprints as a table like the admin UI's: scope "personal" (yours: add, remove) or an org (every
 // blueprint its active members registered, with who has it). Filters: text, category, type, size, and in
 // an org the member.
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import type {
   BlueprintListResponse, BlueprintOwner, BlueprintRequest, CatalogBlueprint, OkResponse, OrgBlueprintsResponse,
 } from "../../../src/webapp/api-types";
 import DataTable from "../../../adminapp/src/components/DataTable.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import type { ColumnSpec } from "../../../adminapp/src/tableColumns";
+import type { ColumnSpec, useTableColumns } from "../../../adminapp/src/tableColumns";
 import { useRouter } from "vue-router";
 import { api } from "../api";
 import { addToCrafting } from "../crafting";
@@ -142,11 +142,13 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "grade", label: t("bp.col.grade"), width: 72, hideable: true },
   { key: "stats", label: t("bp.col.stats"), width: 280, hideable: true },
   org.value ? { key: "owners", label: t("bp.col.owners"), width: 240, hideable: true } : { key: "actions", label: "", width: 44, sortable: false, fixed: true, sep: true },
-  // Last: the unlocks button; the column chooser sits in its head
+  // Last: the unlocks button (the column chooser sits right of the filters)
   { key: "unlock", label: "", width: lang.value === "de" ? 124 : 96, sortable: false, fixed: true, sep: true },
 ]);
 // The blueprint whose unlocks dialog is open
 const unlocksOf = ref<Row | null>(null);
+// The table's column state, for the column chooser right of the filters
+const table = shallowRef<{ table: ReturnType<typeof useTableColumns> } | null>(null);
 
 function valueOf(r: Row, key: string): string | number {
   switch (key) {
@@ -266,13 +268,17 @@ onUnmounted(() => {
         <Dropdown v-model="type" :options="typeOptions" variant="chip" />
         <Dropdown v-model="size" :options="sizeOptions" variant="chip" />
         <Dropdown v-if="org" v-model="member" :options="memberOptions" variant="chip" />
+        <ColumnsButton v-if="table?.table" :table="table.table" :texts="columnsTexts()" :size="22" />
         <span class="spacer" />
         <span class="head-count">{{ rows.length }} / {{ allRows.length }}</span>
       </div>
       <div v-if="org ? !orgEntries : !mine" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!allRows.length" class="empty-line">{{ t(org ? "bp.orgNone" : "bp.none") }}</div>
+      <!-- Keyed by its storage key: org and personal list keep their own columns (a scope switch rebuilds it) -->
       <DataTable
         v-else
+        ref="table"
+        :key="org ? 'bp-org' : 'bp-mine'"
         :storage-key="org ? 'qm.webapp.columns.bp-org' : 'qm.webapp.columns.bp-mine'"
         :columns="columns"
         :rows="rows"
@@ -290,7 +296,7 @@ onUnmounted(() => {
         <template #cell-type="{ row }"><TypeLabel :type="row.bp?.type" :label="row.bp?.typeLabel" /></template>
         <template #cell-size="{ row }">{{ row.bp?.size ?? "—" }}</template>
         <template #cell-grade="{ row }">{{ row.bp?.gradeLetter ?? "—" }}</template>
-        <template #cell-stats="{ row }"><span class="stats":title="row.bp?.stats.join(', ')">{{ row.bp?.stats.join(", ") }}</span></template>
+        <template #cell-stats="{ row }"><span class="stats" :title="row.bp?.stats.join(', ')">{{ row.bp?.stats.join(", ") }}</span></template>
         <template #cell-owners="{ row }">
           <span class="owners" :title="row.owners.map(memberLabel).join(', ')">{{ row.owners.map(memberLabel).join(", ") }}</span>
         </template>
@@ -305,7 +311,6 @@ onUnmounted(() => {
             <ChipButton :label="t('unlock.title')" icon="lock" :disabled="!row.bp?.unlockable" @click="unlocksOf = row" />
           </span>
         </template>
-        <template #col-unlock="{ table }"><span class="columns"><ColumnsButton :table="table" :texts="columnsTexts()" /></span></template>
       </DataTable>
     </section>
 
@@ -324,12 +329,11 @@ onUnmounted(() => {
 <style scoped>
 /* A bit narrower than the stock view's: the filters follow in the same row */
 .filters .search {
-  flex: 0 1 220px;
+  flex: 0 1 180px;
 }
 
 /* Centred in its fixed column (the cell is a flex box, see .sep in ui.css) */
 .remove,
-.columns,
 .unlock {
   margin: 0 auto;
 }
@@ -347,5 +351,11 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The stats a blueprint can improve: background facts, kept quiet */
+.stats {
+  color: var(--text-3);
+  font-size: 12px;
 }
 </style>

@@ -512,6 +512,8 @@ export interface TradePricesResponse {
 }
 
 export interface TradeOffer {
+  // The station, city or outpost, then the shop/terminal there
+  location: string;
   terminal: string;
   system: string | null;
   price: number;

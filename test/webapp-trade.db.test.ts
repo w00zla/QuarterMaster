@@ -99,11 +99,11 @@ describe('web app trading (database)', { skip: url ? false : 'TEST_DATABASE_URL 
 
     const trade = (await get<TradeResponse>(SOLO, `/trade/${U.metal}`)).body;
     assert.deepEqual(trade.prices, metal);
-    assert.deepEqual(trade.sell.map((o) => [o.terminal, o.system, o.price, o.scu, o.scuAvg, o.date]), [
-      ['Admin - Alpha', 'Stanton', 100, 500, 400, new Date(T1 * 1000).toISOString()],
-      ['Admin - Beta', 'Pyro', 80, 50, 40, new Date(T2 * 1000).toISOString()],
+    assert.deepEqual(trade.sell.map((o) => [o.location, o.terminal, o.system, o.price, o.scu, o.scuAvg, o.date]), [
+      ['Alpha', 'Admin', 'Stanton', 100, 500, 400, new Date(T1 * 1000).toISOString()],
+      ['Beta', 'Admin', 'Pyro', 80, 50, 40, new Date(T2 * 1000).toISOString()],
     ]);
-    assert.deepEqual(trade.buy.map((o) => [o.terminal, o.price, o.scu, o.scuAvg]), [['Admin - Beta', 125, 30, 20]]);
+    assert.deepEqual(trade.buy.map((o) => [o.location, o.terminal, o.price, o.scu, o.scuAvg]), [['Beta', 'Admin', 125, 30, 20]]);
     const gem = (await get<TradeResponse>(SOLO, `/trade/${U.gem}`)).body;
     assert.deepEqual([gem.sell, gem.buy.map((o) => [o.price, o.scu])], [[], [[15, null]]]);
     assert.equal((await get(SOLO, `/trade/${U.ore}`)).status, 404);

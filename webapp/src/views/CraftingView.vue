@@ -1,21 +1,24 @@
 <script setup lang="ts">
 // Crafting check: a list of blueprints, each with its count, its own material qualities, the
-// resulting stats and what the stock covers. The math is the shared planner module (src/planner).
-// The stock (yours and what others share in your orgs) loads once for the view and reloads on stock
-// changes.
+// resulting stats, what the stock covers and who has the blueprint. The math is the shared planner module
+// (src/planner). The stock (yours and what others share in your orgs) loads once for the view and reloads
+// on stock changes; the owners (yours, your orgs' active members) on blueprint, member and profile changes.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { computePlan, MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlanEntry, PlannerData } from "../../../src/planner/types";
-import type { StockBatch, StockListResponse } from "../../../src/webapp/api-types";
+import type {
+  BlueprintListResponse, BlueprintOwner, OrgBlueprintsResponse, StockBatch, StockListResponse,
+} from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
 import CraftingPicker from "../components/CraftingPicker.vue";
-import PlanEntryCard from "../components/PlanEntryCard.vue";
+import PlanEntryCard, { type BlueprintOwners } from "../components/PlanEntryCard.vue";
 import { addToCrafting, checks, useCrafting } from "../crafting";
 import { clampCount, withQualityFloor } from "../../../src/planner/stock";
 import { takeQuery } from "../deepLink";
 import { lang, t } from "../i18n";
 import { coalesced, onServerMessage } from "../realtime";
+import { me } from "../session";
 import { toastError } from "../toasts";
 
 // A deep link puts its blueprint on top of the list
@@ -47,16 +50,46 @@ async function loadStock() {
 }
 watch(lang, loadStock, { immediate: true });
 
+// --- who has the blueprints: you, and per org its active members (null while it loads) -------
+const ownMine = ref<Set<string> | null>(null);
+const orgOwners = ref<Map<string, Map<string, BlueprintOwner[]>> | null>(null);
+let ownSeq = 0;
+async function loadOwners() {
+  const mine = ++ownSeq;
+  try {
+    const own = new Set((await api<BlueprintListResponse>("/blueprints")).uuids);
+    const byOrg = new Map<string, Map<string, BlueprintOwner[]>>();
+    for (const o of me.value?.orgs ?? []) {
+      const r = await api<OrgBlueprintsResponse>(`/orgs/${encodeURIComponent(o.guildId)}/blueprints`);
+      byOrg.set(o.guildId, new Map(r.entries.map((e) => [e.uuid, e.owners])));
+    }
+    if (mine === ownSeq) [ownMine.value, orgOwners.value] = [own, byOrg];
+  } catch (e) {
+    if (mine === ownSeq) toastError(e);
+  }
+}
+watch(() => me.value?.orgs, loadOwners, { immediate: true });
+const ownersOf = (uuid: string): BlueprintOwners | null => {
+  if (!ownMine.value || !orgOwners.value) return null;
+  return {
+    mine: ownMine.value.has(uuid),
+    orgs: (me.value?.orgs ?? []).map((o) => ({ guildId: o.guildId, name: o.name, owners: orgOwners.value!.get(o.guildId)?.get(uuid) ?? [] })),
+  };
+};
+
 const reload = coalesced(() => void loadStock());
+const reloadOwners = coalesced(() => void loadOwners());
 let unsubscribe = () => {};
 onMounted(() => {
   unsubscribe = onServerMessage((m) => {
     if (m.type === "stock" || m.type === "resync") reload.schedule();
+    if (m.type === "blueprints" || m.type === "members" || m.type === "profile" || m.type === "resync") reloadOwners.schedule();
   });
 });
 onUnmounted(() => {
   unsubscribe();
   reload.cancel();
+  reloadOwners.cancel();
 });
 
 const add = addToCrafting;
@@ -96,6 +129,7 @@ function setCount(entry: PlanEntry, n: number) {
             :result="results.get(entry.blueprintUuid)!"
             :recipe="recipeOf(entry.blueprintUuid)"
             :stock="stock"
+            :owners="ownersOf(entry.blueprintUuid)"
             @count="(n) => setCount(entry, n)"
             @quality="(slot, q) => setQuality(entry, slot, q)"
             @slots="(slots) => (entry.slots = slots)"
