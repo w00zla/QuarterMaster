@@ -13,11 +13,11 @@ import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
-import ColumnsButton from "./ColumnsButton.vue";
+import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { scanBackups } from "../backend";
 import { unlockRows, type UnlockState } from "../debugReport";
-import { langRef, t, type Key } from "../i18n";
+import { columnsTexts, langRef, t, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
 import { overlayRows, tabCounts, type OverlayRow } from "../overlay";
 import { catalogResponses } from "../refinerySync";
@@ -252,7 +252,7 @@ watch(connected, (c) => {
     <!-- The web app's table, compact (App.vue): the columns always fit its width (measured on it) -->
     <div v-else class="table compact" :ref="table.observe" :style="cols">
       <ColumnHead :columns="table.columns.value" :sort="table.sort.value" @resize="table.startResize" @reset="table.resetWidth">
-        <template #col-state><span class="spacer" /><ColumnsButton :table="table" /></template>
+        <template #col-state><span class="spacer" /><ColumnsButton :table="table" :texts="columnsTexts()" /></template>
       </ColumnHead>
       <div v-for="row in rows" :key="row.name" class="row item" :class="{ done: row.state !== 'new' && row.state !== 'pick' }">
         <span v-if="shown.has('kind')" class="tag kind"><Icon name="blueprint" :size="11" /></span>

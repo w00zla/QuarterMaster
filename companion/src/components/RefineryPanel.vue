@@ -11,9 +11,9 @@ import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
-import ColumnsButton from "./ColumnsButton.vue";
+import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { langRef, t } from "../i18n";
+import { columnsTexts, langRef, t } from "../i18n";
 import { overlayRows, tabCounts } from "../overlay";
 import { fromMicro, toMicro } from "../inventory";
 import { cscuToScu, type Proposal } from "../refinery";
@@ -180,7 +180,7 @@ async function registerAll(value: string) {
          top; the columns always fit its width (measured on it) -->
     <div v-else class="table compact" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
       <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth">
-        <template #col-actions><ColumnsButton :table="cols" /></template>
+        <template #col-actions><ColumnsButton :table="cols" :texts="columnsTexts()" /></template>
       </ColumnHead>
       <div class="jobs">
         <div v-for="p in proposals" :key="p.id" class="job">

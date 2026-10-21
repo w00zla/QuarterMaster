@@ -166,7 +166,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   takes the room left (the location, the material, the blueprint: no grip); widths and hidden columns in
   localStorage `qm.companion.{comps,stock,refinery,unlocks}.columns`. A first try with an "Excel" mode
   (only the dragged column changes, sideways scroll) was dropped the same day: the actions scrolled out. The icon button in the
-  head of the action column (`ColumnsButton.vue`, its tooltip "Spalten wählen") opens `ColumnsDialog.vue`:
+  head of the action column (`ColumnsButton.vue`, its tooltip "Spalten wählen"; both in `webapp/src/components/`
+  since 2026-10-21, shared with the web app, texts via `columnsTexts()`) opens `ColumnsDialog.vue`:
   a switch per hideable column (all but the name and the actions), applied and kept right away. The
   location in the mono face (like the overlay's). Lists in dialogs scroll inside them (max. 40–50 vh) and
   show the table's shown columns in its order.
@@ -336,7 +337,8 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   registration. Stock: an icon-only badge for the kind (no tooltip, like every
   panel's kind badge), name, quality, amount. Components: name, type, size, grade (from the catalog in the
   UI language; items show none of these: every bookable item is of the type "Misc.", checked 2026-10-20),
-  the stats ("Coolant Rating +12.5 % · Integrity ±0.0 %", "–" without any). Both: location last, Register /
+  the stats ("Coolant Rating +12.5 % · Integrity ±0.0 %"; without any gain, or when the tooltip showed none,
+  a dimmed "Standard"/"Default" since 0.2.1, before a "–"). Both: location last, Register /
   Discard (fixed 26 px each, the column chooser in the head of the second). Columns: see "Tables" (no
   sorting: the newest first).
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a

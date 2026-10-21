@@ -18,8 +18,8 @@ import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableCol
 import { statValueText } from "../../../src/stock/component-stats";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import type { ComponentProposal } from "../components";
-import ColumnsButton from "./ColumnsButton.vue";
-import { langRef, t } from "../i18n";
+import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
+import { columnsTexts, langRef, t } from "../i18n";
 import type { Proposal } from "../inventory";
 import {
   accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, kinds, locationUuid, proposals,
@@ -44,8 +44,10 @@ interface Row {
   type: string;
   size: string;
   grade: string;
-  // A component's stats ("Coolant Rating +12.5 %"), or "no stats"
+  // A component's stats ("Coolant Rating +12.5 %"), or "Standard" without any gain
   detail: string | null;
+  // The detail is "Standard": shown dimmed
+  standard: boolean;
   locationUuid: string;
   location: string;
   quality: string;
@@ -60,11 +62,14 @@ const locationName = (uuid: string) => syncCatalog.value?.locations.find((l) => 
 
 const amount = (value: string, unit: "SCU" | "pcs") => (unit === "SCU" ? `${value} SCU` : t("inventory.pieces", { n: value }));
 // Every stat the tooltip showed, in the catalog's order, as its gain: "Coolant Rating +12.5 % · Integrity ±0.0 %";
-// a dash only when the tooltip showed none (weapons, event items)
-function statsText(p: ComponentProposal): string {
+// without any gain, or when the tooltip showed none (weapons, event items), "Standard" (shown dimmed, see
+// `standard`)
+function statsOf(p: ComponentProposal): { detail: string; standard: boolean } {
   const defs = syncCatalog.value?.components.components.find((c) => c.uuid === p.componentUuid)?.stats ?? [];
-  const parts = defs.filter((s) => p.readStats.includes(s.uuid) || s.uuid in p.stats).map((s) => `${s.name} ${statValueText(s.kind, p.stats[s.uuid] ?? "0")}`);
-  return parts.length ? parts.join(" · ") : "–";
+  const shown = defs.filter((s) => p.readStats.includes(s.uuid) || s.uuid in p.stats);
+  // No gain at all: the component as the game hands it out
+  if (!shown.length || Object.values(p.stats).every((v) => Number(v) === 0)) return { detail: t("components.standard"), standard: true };
+  return { detail: shown.map((s) => `${s.name} ${statValueText(s.kind, p.stats[s.uuid] ?? "0")}`).join(" · "), standard: false };
 }
 // The catalog's components in the UI language (name, type, size, grade). Items show none of these: every
 // bookable one is of the type "Misc." (checked 2026-10-20), their size says nothing
@@ -78,12 +83,12 @@ function described(uuid: string) {
 }
 const rows = computed<Row[]>(() => stock
   ? proposals.value.map((p): Row => ({
-    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), type: "", size: "", grade: "", detail: null,
+    kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), type: "", size: "", grade: "", detail: null, standard: false,
     locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: String(p.quality), amount: amount(p.amount, p.unit), inStock: p.inStock, stack: p, component: null,
   }))
   // No quality (the register dialog's column stays empty)
   : componentProposals.value.map((p): Row => ({
-    kind: "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), detail: statsText(p),
+    kind: "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), ...statsOf(p),
     locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "", amount: t("inventory.pieces", { n: 1 }), inStock: p.inStock, stack: null, component: p,
   })));
 // What is still to register: the counts and "Register all"
@@ -221,7 +226,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
          always fit its width (measured on it), the actions stay in view -->
     <div v-else class="table compact" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
       <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth">
-        <template #col-drop><ColumnsButton :table="cols" /></template>
+        <template #col-drop><ColumnsButton :table="cols" :texts="columnsTexts()" /></template>
       </ColumnHead>
       <div v-for="r in rows" :key="r.id" class="row data-row" :class="{ done: r.inStock }">
         <span v-if="shown.has('kind')" class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
@@ -231,7 +236,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
         <span v-if="shown.has('type')" class="cell">{{ r.type }}</span>
         <span v-if="shown.has('size')" class="cell">{{ r.size }}</span>
         <span v-if="shown.has('grade')" class="cell">{{ r.grade }}</span>
-        <span v-if="shown.has('stats')" class="cell">{{ r.detail }}</span>
+        <span v-if="shown.has('stats')" class="cell" :class="{ dim: r.standard }">{{ r.detail }}</span>
         <span v-if="shown.has('location')" class="cell loc">{{ r.location }}</span>
         <!-- In stock already: nothing to register or discard, the columns stay -->
         <template v-if="r.inStock"><span /><span /></template>
@@ -267,7 +272,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
             <template v-for="k in dialogKeys" :key="k">
               <span v-if="k === 'kind'" class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
               <span v-else-if="k === 'quality' || k === 'amount'" class="num">{{ r[k] }}</span>
-              <span v-else class="cell" :class="{ 'row-name': k === 'name', loc: k === 'location' }">{{ k === "stats" ? r.detail : r[k as "name" | "type" | "size" | "grade" | "location"] }}</span>
+              <span v-else class="cell" :class="{ 'row-name': k === 'name', loc: k === 'location', dim: k === 'stats' && r.standard }">{{ k === "stats" ? r.detail : r[k as "name" | "type" | "size" | "grade" | "location"] }}</span>
             </template>
           </div>
         </div>

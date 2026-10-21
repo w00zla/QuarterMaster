@@ -145,6 +145,7 @@ const en = {
   "inventory.added": "{n} entries registered.",
   "inventory.registered": "Registered: {what}",
   "components.noStats": "no stats",
+  "components.standard": "Default",
   "components.unknown": "Not in the catalog",
   "components.ambiguous": "Several catalog entries",
   "components.statsUnreadable": "Stats not readable",
@@ -426,6 +427,7 @@ const de: Record<Key, string> = {
   "inventory.confirmAddMany": "{n} Einträge an {count} Standorten eintragen?",
   "inventory.shareTitle": "Teilen in",
   "components.noStats": "keine Werte",
+  "components.standard": "Standard",
   "components.unknown": "Nicht im Katalog",
   "components.ambiguous": "Mehrere Katalogeinträge",
   "components.statsUnreadable": "Werte nicht lesbar",
@@ -583,3 +585,6 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
   const dict = langRef.value === "de" ? de : en;
   return dict[key].replace(/\{(\w+)\}/g, (m, name: string) => (name in vars ? String(vars[name]) : m));
 }
+
+/** Texts of the column chooser shared with the web app (ColumnsButton.vue). */
+export const columnsTexts = () => ({ choose: t("columns.choose"), title: t("columns.title"), close: t("common.close") });
