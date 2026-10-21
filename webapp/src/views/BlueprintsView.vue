@@ -18,6 +18,7 @@ import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import TypeLabel from "../components/TypeLabel.vue";
 import Picker from "../components/Picker.vue";
+import ScmdbLink from "../components/ScmdbLink.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import { lang, t } from "../i18n";
 import { memberLabel, orgOf } from "../orgs";
@@ -139,6 +140,7 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "grade", label: t("bp.col.grade"), width: 72 },
   { key: "stats", label: t("bp.col.stats"), width: 280 },
   org.value ? { key: "owners", label: t("bp.col.owners"), width: 240 } : { key: "actions", label: "", width: 44, sortable: false, fixed: true, sep: true },
+  { key: "scmdb", label: "", width: 84, sortable: false, fixed: true, sep: true },
 ]);
 
 function valueOf(r: Row, key: string): string | number {
@@ -292,6 +294,7 @@ onUnmounted(() => {
             <Icon name="trash" :size="14" />
           </button>
         </template>
+        <template #cell-scmdb="{ row }"><ScmdbLink v-if="row.bp" :blueprint-key="row.bp.key" class="scmdb-cell" /></template>
       </DataTable>
     </section>
 
@@ -313,7 +316,8 @@ onUnmounted(() => {
 }
 
 /* Centred in its fixed column (the cell is a flex box, see .sep in ui.css) */
-.remove {
+.remove,
+.scmdb-cell {
   margin: 0 auto;
 }
 

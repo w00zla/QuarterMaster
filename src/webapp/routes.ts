@@ -214,7 +214,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
       blueprints: blueprints.entries.map((e) => ({
-        uuid: e.uuid, label: e.label, name: e.name, ...(bpTypes.get(e.uuid) ?? noType), size: e.size, gradeLetter: e.gradeLetter, itemClass: e.itemClass,
+        uuid: e.uuid, key: e.key, label: e.label, name: e.name, ...(bpTypes.get(e.uuid) ?? noType), size: e.size, gradeLetter: e.gradeLetter, itemClass: e.itemClass,
         manufacturerCode: e.manufacturerCode, category: e.categoryLabel, isDefault: e.isDefault, retired: e.retired, stats: bpStats.get(e.uuid) ?? [],
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
