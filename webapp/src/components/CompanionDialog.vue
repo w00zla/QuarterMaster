@@ -80,25 +80,27 @@ async function copyKey() {
 <template>
   <ConfirmDialog :title="t('companion.title')" icon="desktop" :buttons="buttons" @choose="emit('close')">
     <div class="app-card">
-      <img class="logo" :src="logo" :srcset="`${logo} 1x, ${logo2x} 2x`" alt="" />
-      <div class="app-main">
-        <div class="app-name">
-          Quartermaster Companion
-          <span v-if="release?.version" class="tag mono">v{{ release.version }}</span>
+      <div class="app-head">
+        <img class="logo" :src="logo" :srcset="`${logo} 1x, ${logo2x} 2x`" alt="" />
+        <div class="app-main">
+          <div class="app-name">
+            Quartermaster Companion
+            <span v-if="release?.version" class="tag mono">v{{ release.version }}</span>
+          </div>
+          <div v-if="release && !release.version" class="faint">{{ t("companion.noRelease") }}</div>
         </div>
-        <template v-if="release?.version">
-          <a
-            v-for="(d, i) in downloads"
-            :key="d.file"
-            class="btn small get"
-            :class="i === 0 && d.platform === own ? 'primary' : 'outline'"
-            :href="d.url"
-            download
-          >
-            <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }}
-          </a>
-        </template>
-        <div v-else-if="release" class="faint">{{ t("companion.noRelease") }}</div>
+      </div>
+      <div v-if="release?.version" class="downloads">
+        <a
+          v-for="(d, i) in downloads"
+          :key="d.file"
+          class="btn small get"
+          :class="i === 0 && d.platform === own ? 'primary' : 'outline'"
+          :href="d.url"
+          download
+        >
+          <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }}
+        </a>
       </div>
     </div>
 
@@ -121,13 +123,25 @@ async function copyKey() {
 </template>
 
 <style scoped>
-/* The app: logo left, name, version and downloads right */
+/* The app: logo left of name and version, the downloads in one row below (beside the logo three do not fit) */
 .app-card {
   display: flex;
-  align-items: flex-start;
-  gap: 16px;
+  flex-direction: column;
+  gap: 14px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-dim);
+}
+
+.app-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .logo {

@@ -73,7 +73,11 @@ const ownersOf = (uuid: string): BlueprintOwners | null => {
   if (!ownMine.value || !orgOwners.value) return null;
   return {
     mine: ownMine.value.has(uuid),
-    orgs: (me.value?.orgs ?? []).map((o) => ({ guildId: o.guildId, name: o.name, owners: orgOwners.value!.get(o.guildId)?.get(uuid) ?? [] })),
+    // You are not listed among an org's owners: the "you" line already says it
+    orgs: (me.value?.orgs ?? []).map((o) => ({
+      guildId: o.guildId, name: o.name,
+      owners: (orgOwners.value!.get(o.guildId)?.get(uuid) ?? []).filter((m) => m.userId !== me.value?.userId),
+    })),
   };
 };
 
