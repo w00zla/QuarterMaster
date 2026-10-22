@@ -1,10 +1,10 @@
 // The inventory scan in the app: the OCR's reads (Rust event "inventory-read") go through
 // InventoryScan (inventory.ts: the freight manager's warehouse, materials and items) and
-// ComponentScan (components.ts: the character inventory, ship components) into sightings; each
+// ComponentScan (components.ts: the character inventory, ship components and FPS gear) into sightings; each
 // complete sighting is a proposal (one per stack, with what the user's stored stock at its location
-// already holds of that material and quality; one per component tile), which waits until the user
+// already holds of that material and quality; one per gear tile, a stack of attachments with its count), which waits until the user
 // registers or dismisses it. One the stored stock already holds (registered here or before: stacks by
-// amount, components by count per component and stats) stays listed, marked `inStock`. The kind filter (Mats / Items / Comps, kept in localStorage; all may be
+// amount, gear by pieces per item and stats) stays listed, marked `inStock`. The kind filter (Mats / Items / Comps / FPS, kept in localStorage; all may be
 // off) decides what is detected at all, and which screens the scan reads (scan.ts). Every location
 // collects its own sightings: the location picked (kept, changeable while scanning: the player walks
 // from one warehouse to the next) is where a read belongs, and a proposal is registered at its own
@@ -28,11 +28,14 @@ const LOCATION_KEY = "qm.companion.inventory.location";
 const AUTO_LOCATION_KEY = "qm.companion.inventory.autoLocation";
 const KINDS_KEY = "qm.companion.inventory.kinds";
 
-export type Kind = "mats" | "items" | "comps";
-export const KINDS: Kind[] = ["mats", "items", "comps"];
+// comps = ship components, fps = FPS gear (2026-10-22)
+export type Kind = "mats" | "items" | "comps" | "fps";
+export const KINDS: Kind[] = ["mats", "items", "comps", "fps"];
 // Each kind's tag colour and icon (panel rows, filter chips, the overlay's head)
-export const KIND_CLASS = { mats: "ok", items: "", comps: "accent" } as const satisfies Record<Kind, string>;
-export const KIND_ICON = { mats: "resource", items: "item", comps: "type-module" } as const satisfies Record<Kind, string>;
+export const KIND_CLASS = { mats: "ok", items: "", comps: "accent", fps: "app" } as const satisfies Record<Kind, string>;
+export const KIND_ICON = { mats: "resource", items: "item", comps: "type-module", fps: "type-personal-weapon" } as const satisfies Record<Kind, string>;
+// The kinds the filter knew before FPS gear (the stored list of then): a kind added later starts on
+const OLD_KINDS: Kind[] = ["mats", "items", "comps"];
 
 /** A sighting or proposal with the location it belongs to (its key and id unique across locations). */
 export type Located<T> = T & { locationUuid: string };
@@ -60,10 +63,12 @@ const batches = ref<StockBatch[]>([]);
 const dismissed = ref(new Set<string>());
 const registered = ref(new Set<string>());
 
+// Stored as the kinds on and the kinds known then ({on, known}; before FPS gear a plain list of the kinds on)
 function storedKinds(): Set<Kind> {
   try {
-    const list = JSON.parse(localStorage.getItem(KINDS_KEY) ?? "null") as unknown;
-    if (Array.isArray(list)) return new Set(list.filter((k): k is Kind => KINDS.includes(k as Kind)));
+    const stored = JSON.parse(localStorage.getItem(KINDS_KEY) ?? "null") as unknown;
+    const { on, known } = Array.isArray(stored) ? { on: stored, known: OLD_KINDS } : (stored as { on?: unknown; known?: unknown } | null) ?? {};
+    if (Array.isArray(on) && Array.isArray(known)) return new Set(KINDS.filter((k) => on.includes(k) || !known.includes(k)));
   } catch {
     // Not valid: every kind
   }
@@ -78,7 +83,7 @@ export function toggleKind(kind: Kind) {
   if (next.has(kind)) next.delete(kind);
   else next.add(kind);
   kinds.value = next;
-  localStorage.setItem(KINDS_KEY, JSON.stringify([...next]));
+  localStorage.setItem(KINDS_KEY, JSON.stringify({ on: [...next], known: KINDS }));
 }
 
 export function setLocation(uuid: string | null) {
@@ -173,7 +178,9 @@ function onRead(e: InventoryReadEvent) {
       changed = !!at.stacks.feed(e, inventoryCatalog, (s) => kinds.value.has(s.unit === "SCU" ? "mats" : "items"));
     }
     if (e.components) {
-      changed = !!at.components.feed(e.atMs, e.components, cat.components, () => kinds.value.has("comps")) || changed;
+      // An unknown title (no kind yet) only while either gear kind is on (it is listed in the debug window)
+      const accept = (s: ComponentSighting) => (s.fps === null ? kinds.value.has("comps") || kinds.value.has("fps") : kinds.value.has(s.fps ? "fps" : "comps"));
+      changed = !!at.components.feed(e.atMs, e.components, cat.components, accept) || changed;
     }
     if (changed) publish();
   });
@@ -210,7 +217,7 @@ export async function accept(p: Located<Proposal>): Promise<boolean> {
   }
 }
 
-/** Books a component proposal at its location (one piece, its stats), shared in `shareGuildIds`; true when done. */
+/** Books a gear proposal at its location (its pieces, its stats), shared in `shareGuildIds`; true when done. */
 export async function acceptComponent(p: Located<ComponentProposal>): Promise<boolean> {
   try {
     await api<OkResponse>("POST", "/stock/add", componentRequest(p, p.locationUuid, shareGuildIds.value));

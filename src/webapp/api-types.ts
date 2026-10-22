@@ -73,6 +73,9 @@ export interface CatalogStat {
   // The unmodified value as the game's tooltip shows it ("Coolant Rating: 60.00" -> 60); null when the
   // app does not know where the record keeps it (the companion then reads no stats off such a tooltip)
   base: number | null;
+  // How the tooltip shows it: its value (converted with `base`) or its change in percent, negated for
+  // some ("Recoil Smoothness: +28.44 %" for a stored -28.4; src/stock/component-base.ts)
+  tooltip: 'value' | 'change' | 'negatedChange';
 }
 
 export interface CatalogLocation {

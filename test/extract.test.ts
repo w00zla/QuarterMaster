@@ -94,6 +94,9 @@ describe('normalize', () => {
     assert.deepEqual(fps.items.map((i) => i.uuid).sort(), [U.output, U.gem, FPS.rifle, FPS.helmet, FPS.optic].sort());
     const helmet = fps.items.find((i) => i.uuid === FPS.helmet)!;
     assert.deepEqual([helmet.type, helmet.subType], ['Char_Armor_Helmet', 'Light']);
+    // Its damage resistance record is kept raw (the base of the crafted damage mitigation)
+    assert.ok(fps.rawRecords.some((r) => r.uuid === FPS.damage && r.path === 'libs/foundry/records/damage/lightarmor.json'));
+    assert.ok(!s.rawRecords.some((r) => r.uuid === FPS.damage), 'no armor, no damage record');
   });
 
   it('derives blueprint sources from released contracts and event tiers', () => {

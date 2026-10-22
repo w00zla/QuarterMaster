@@ -57,7 +57,7 @@ whole `app`/`bot`/`web` split).
   flag and rules): items whose type and sub type are in `FPS_TYPES` (`src/catalog/components.ts`): personal
   weapons (Small/Medium/Large, knives, gadgets like the multitool, tractor and salvage tools, binoculars),
   attachments (optics, barrels, underbarrels, multitool heads), mining gadgets, armor (helmet, torso, arms,
-  legs, backpack, undersuit). Nothing stackable: grenades, magazines, medpens and food stay out. The plain-part
+  legs, backpack, undersuit). No consumables: grenades, magazines, medpens and food stay out (attachments stack in the game: booked by count). The plain-part
   rule also drops their AI and test variants. The check looks items up by type and name (index of migration
   `0030`; without it, one evaluation over 4300 items took 1.1 s).
 - Components are `kind = 'item'`, always quality `COMPONENT_QUALITY` (0; others refused with
@@ -68,7 +68,8 @@ whole `app`/`bot`/`web` split).
   component is never recorded worse than a looted one), only the stats their blueprints' slots can improve
   (`componentStats`: Cooler = Coolant Rating + Integrity, …; flat ranges left out), each within its bounds.
 - Bounds (`src/stock/component-stats.ts`, pure, tested in `test/component-stats.test.ts`): `statBounds` per
-  blueprint, from no change to what Q1000 makes of the stat (decided 2026-10-22: each slot's modifier at the
+  blueprint (a slot without any range changes nothing, decided 2026-10-22: most armor's "Panel Covering"
+  names the damage mitigation with `valueRanges: [null]` and hid the other slot's range), from no change to what Q1000 makes of the stat (decided 2026-10-22: each slot's modifier at the
   end of its highest range): a gain (min 0, e.g. coolant +20 %) or a drop (max 0: recoil 1.4 at Q0 → 0.6 at
   Q1000 = −40 %, quantum fuel burn −20 %; `statBest` gives the end that counts), combined with the planner's
   unverified `combine` assumption (multipliers multiply, steps add up; community tools disagree; one
@@ -79,11 +80,15 @@ whole `app`/`bot`/`web` split).
   other stats re-key the batch with a move_out/move_in pair into an existing batch with those stats, which
   keeps its shares, or a new one, which takes this one's; history adjust with `details.statsFrom`);
   move/split/merge carry them with the key.
-- `materialCatalog` lists each component's `stats` (`{uuid, name, nameKey, kind, min, max, base}`, Integrity
-  last; `base` = the unmodified value as the game's tooltip shows it, read from the item's `raw_record` by
-  the jsonpaths in `src/stock/component-base.ts`: Integrity, Coolant Rating, Power Pips, Max. Shield
-  Strength, Quantum Speed (× 1e-6), Quantum Fuel Burn (× 1000), the radar assist distances; null for the
-  rest; the companion converts the tooltip's absolute values with it) and marks them `component` with a
+- `materialCatalog` lists each component's `stats` (`{uuid, name, nameKey, kind, min, max, base, tooltip}`,
+  Integrity last; `base` = the unmodified value as the game's tooltip shows it, read from the item's
+  `raw_record` by the jsonpaths in `src/stock/component-base.ts`: Integrity, Coolant Rating, Power Pips,
+  Max. Shield Strength, Quantum Speed (× 1e-6), Quantum Fuel Burn (× 1000), the radar assist distances, FPS
+  fire rate, armor temperatures and radiation dissipation, armor damage mitigation (1 − the multiplier in
+  the linked damage record, a second `raw_record` found by its path); null for the rest; `tooltip` =
+  `value`, or `change`/`negatedChange` where the tooltip shows the change in percent (from the property's
+  display transformation: impact force, recoil; no base needed); the companion converts the tooltip's
+  values with them) and marks them `component` with a
   unique `label` ("Name · Cooler · S3 · B Industrial": the type instead of a manufacturer, the class name
   where that still collides; FPS gear with its sub type and without a size but on attachments: "Name ·
   Helmets · Light", "Name · Attachment · Barrel · S1"). The bases are read only for the stats an item's

@@ -33,10 +33,12 @@ function slotBest(ranges: ModifierRange[]): { kind: StatBounds['kind']; value: n
  * multiply, steps add up). Only improvements count (decided 2026-10-18: a crafted component is never
  * recorded worse than a looted one, so the bounds start at no change). The improvement is what Q1000
  * makes of it (decided 2026-10-22): a gain for most stats, a drop for recoil (1.4 at Q0, 0.6 at Q1000)
- * and quantum fuel burn. Null when nothing can improve it (a flat range) or the data is unknown.
+ * and quantum fuel burn. Null when nothing can improve it (a flat range) or the data is unknown. A
+ * slot without any range changes nothing (decided 2026-10-22: most armor's "Panel Covering" names the
+ * damage mitigation with `valueRanges: [null]`; it no longer hides the other slot's range).
  */
 export function statBounds(slots: ModifierRange[][]): StatBounds | null {
-  const best = slots.map(slotBest);
+  const best = slots.filter((s) => s.length).map(slotBest);
   if (!best.length || best.some((s) => !s) || new Set(best.map((s) => s!.kind)).size !== 1) return null;
   const kind = best[0]!.kind;
   const change = kind === 'multiplier' ? outward((best.reduce((a, s) => a * s!.value, 1) - 1) * 100) : best.reduce((a, s) => a + s!.value, 0);

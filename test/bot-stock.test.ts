@@ -58,8 +58,8 @@ describe('/qm-res input and lists', () => {
 
 describe('/qm-gear stats field', () => {
   const stats: ComponentStat[] = [
-    { uuid: 'a', name: 'Coolant Rating', nameKey: null, base: null, kind: 'multiplier', min: 0, max: 20 },
-    { uuid: 'b', name: 'Power Pips', nameKey: null, base: null, kind: 'additive', min: 0, max: 2 },
+    { uuid: 'a', name: 'Coolant Rating', nameKey: null, base: null, tooltip: 'value', kind: 'multiplier', min: 0, max: 20 },
+    { uuid: 'b', name: 'Power Pips', nameKey: null, base: null, tooltip: 'value', kind: 'additive', min: 0, max: 2 },
   ];
   const refused = (key: string, vars?: object) => (err: unknown) =>
     err instanceof UserError && err.key === key && (!vars || JSON.stringify(err.vars) === JSON.stringify(vars));
@@ -84,7 +84,7 @@ describe('/qm-gear stats field', () => {
   });
 
   it('shows the best of a stat whose improvement is a drop (recoil) and takes values down to it', () => {
-    const recoil: ComponentStat[] = [{ uuid: 'r', name: 'Recoil Kick', nameKey: null, base: null, kind: 'multiplier', min: -40, max: 0 }];
+    const recoil: ComponentStat[] = [{ uuid: 'r', name: 'Recoil Kick', nameKey: null, base: null, tooltip: 'change', kind: 'multiplier', min: -40, max: 0 }];
     assert.equal(statLines(recoil, null), 'Recoil Kick (max. −40.0 %): 0');
     assert.deepEqual(parseStatLines('Recoil Kick (max. −40.0 %): -12.5', recoil), { r: '-12.5' });
     assert.throws(() => parseStatLines('Recoil Kick (max. −40.0 %): 5', recoil), refused('stock.err.statValue', { line: 1, min: -40, max: '0 %' }));

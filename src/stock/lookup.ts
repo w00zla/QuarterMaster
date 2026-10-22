@@ -8,7 +8,7 @@ import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { itemClassText, locText, rows } from '../db/query.ts';
 import type { SubjectKind } from './amount.ts';
-import { BASE_PATHS, baseValue } from './component-base.ts';
+import { BASE_PATHS, baseValue, tooltipForm, type TooltipForm } from './component-base.ts';
 import { statBounds, type StatBounds } from './component-stats.ts';
 import type { ModifierRange } from '../planner/types.ts';
 import { componentItemSql, componentStats, selectableLocationSql, type Actor, type Batch } from './service.ts';
@@ -86,6 +86,8 @@ export interface ComponentStat extends StatBounds {
   nameKey: string | null;
   // The unmodified value as the game's tooltip shows it (from the item's raw record, `component-base.ts`); null when unknown
   base: number | null;
+  // How the tooltip shows the stat: its value, or its change in percent (negated for some; `component-base.ts`)
+  tooltip: TooltipForm;
 }
 
 /**
@@ -93,14 +95,18 @@ export interface ComponentStat extends StatBounds {
  * Only stats its blueprints change (the only ones shown): spares the jsonpath over every gear record.
  */
 async function componentBaseValues(db: Db): Promise<Map<string, Map<string, number>>> {
-  const paths = sql.join(Object.entries(BASE_PATHS).map(([key, p]) => sql`(${key}, ${p.path}::jsonpath)`), sql`, `);
+  const paths = sql.join(Object.entries(BASE_PATHS).map(([key, p]) => sql`(${key}, ${p.path}::jsonpath, ${p.link ?? null}::jsonpath)`), sql`, `);
   const found = await rows<{ item: string; property: string; key: string; raw: string | null }>(db, sql`
-    SELECT i.uuid AS item, cp.uuid AS property, cp.key, jsonb_path_query_first(rr.data, p.path) #>> '{}' AS raw
+    SELECT i.uuid AS item, cp.uuid AS property, cp.key, jsonb_path_query_first(coalesce(lr.data, rr.data), p.path) #>> '{}' AS raw
     FROM catalog.item i
     JOIN catalog.raw_record rr ON rr.uuid = i.uuid
-    CROSS JOIN (VALUES ${paths}) AS p(key, path)
+    CROSS JOIN (VALUES ${paths}) AS p(key, path, link)
+    -- A linked record ("file://./../…/libs/foundry/records/damage/mediumarmor.json"; raw paths are lower case)
+    LEFT JOIN catalog.raw_record lr ON p.link IS NOT NULL
+      AND lr.path = lower(substring(jsonb_path_query_first(rr.data, p.link) #>> '{}' from 'libs/foundry/records/.*$'))
     JOIN catalog.crafted_property cp ON cp.key = p.key
     WHERE i.retired_at IS NULL AND ${componentItemSql()}
+      AND (p.link IS NULL OR lr.uuid IS NOT NULL)
       AND EXISTS (SELECT 1 FROM catalog.blueprint cb JOIN catalog.blueprint_slot s ON s.blueprint_uuid = cb.uuid
         CROSS JOIN LATERAL jsonb_array_elements(s.modifiers) m
         WHERE cb.output_item_uuid = i.uuid AND cb.retired_at IS NULL AND lower(m->>'propertyUuid') = cp.uuid::text)`);
@@ -178,13 +184,14 @@ export const materialCatalog = importCache(async (db, lang): Promise<Map<string,
   // The stats each component can carry with their bounds, in the tooltip's order (Integrity last)
   const bounds = await componentStats(db, sql`i.retired_at IS NULL`);
   const bases = await componentBaseValues(db);
-  const properties = new Map((await rows<{ uuid: string; key: string; name: string; nameKey: string | null }>(db, sql`
-    SELECT cp.uuid, cp.key, coalesce(${locText(lang, sql`cp.name_key`)}, cp.key) AS name, lower(cp.name_key) AS "nameKey" FROM catalog.crafted_property cp`))
+  const properties = new Map((await rows<{ uuid: string; key: string; name: string; nameKey: string | null; display: unknown }>(db, sql`
+    SELECT cp.uuid, cp.key, coalesce(${locText(lang, sql`cp.name_key`)}, cp.key) AS name, lower(cp.name_key) AS "nameKey",
+      cp.display_transformation AS display FROM catalog.crafted_property cp`))
     .map((p) => [p.uuid, p]));
   const statsOf = (item: string): ComponentStat[] => [...(bounds.get(item) ?? [])]
     .map(([uuid, b]) => ({
       uuid, name: properties.get(uuid)?.name ?? uuid, key: properties.get(uuid)?.key ?? uuid, nameKey: properties.get(uuid)?.nameKey ?? null,
-      base: bases.get(item)?.get(uuid) ?? null, ...b,
+      base: bases.get(item)?.get(uuid) ?? null, tooltip: tooltipForm(properties.get(uuid)?.display), ...b,
     }))
     .sort((a, b) => Number(a.key === 'GPP_Health_MaxHealth') - Number(b.key === 'GPP_Health_MaxHealth') || a.key.localeCompare(b.key))
     .map(({ key: _k, ...s }) => s);

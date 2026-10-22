@@ -4,9 +4,9 @@ A desktop app (Tauri 2, structure after BindSight) that works for the user next 
 user web app's API with the user's API token ("Access Key"):
 
 - reads blueprint unlocks from `Game.log` and registers them;
-- scans the freight manager's warehouse for material stacks and the character inventory for ship
-  components with their stats (OCR of the hovered tile's tooltip on a screen capture) and proposes them
-  as stock;
+- scans the freight manager's warehouse for material stacks and the character inventory for gear (ship
+  components and FPS gear) with their stats and stack counts (OCR of the hovered tile's tooltip on a screen
+  capture) and proposes them as stock;
 - syncs the refinery jobs of a station with the terminal's work order overview (same OCR; checked against
   screenshots and recordings, the sync untested in game);
 - shows what it detects in a scan overlay over the game.
@@ -180,7 +180,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   the scan row or by showing the overlay (which switches it off again only if it started it); off at every
   start; the capture runs only while it is on. Starting clears the inventory's sightings and loads catalog
   and stored stock. The **scope** follows the filters: warehouse = Materials or Items, inventory =
-  Components, refinery = Jobs; a screen out of scope is neither looked for nor read (all off: "Nothing to
+  Ship comp. or FPS gear, refinery = Jobs; a screen out of scope is neither looked for nor read (all off: "Nothing to
   scan"); a filter change applies to the next frame.
 - **Which screen** (`Screen` in `ocrwatch.rs`, sent as `scan-screen`: `none`, `warehouse`, `inventory`,
   `refinery`): without one the worker probes every 2 s (`PROBE_MS`): the refinery's big titles first
@@ -266,10 +266,11 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 - **One proposal per stack**, nothing summed up, with what the user's stored stock at that location already
   holds of that material and quality.
 
-## Components scan (character inventory)
+## Gear scan (character inventory)
 
-Ship components only (`components.rs`, pure part `components.ts`), read in the character inventory's
-"Storage Access" screen, because only its tooltip shows a component's stats.
+Ship components and FPS gear (weapons, attachments, armor, gadgets; since 2026-10-22, checked against
+`local/screenshots/inventory 4`, 3840×1600) (`components.rs`, pure part `components.ts`), read in the
+character inventory's "Storage Access" screen, because only its tooltip shows an item's stats.
 
 - The storage pane on the right: a grid 4 units wide, a tile 1 unit (coolers, missiles) or 2 (weapons)
   wide, rows mixed like 2+2 or 1+2+1, 6 rows in view, scrolled row by row with a green thumb on its right,
@@ -285,7 +286,13 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   number's go through the OCR, ~0.25–0.4 s per read on 3840×1600 (~0.2–0.3 s at 1080p), and only while the
   cursor is on a lit tile.
   A tooltip needs ≥ 4 body lines and 3 letters in the title (real ones have 13–17 lines, stray reads of the
-  scene 1–3); the Rust side emits the title and the body lines as texts (also into the log).
+  scene 1–3); the Rust side emits the title and the body lines as texts (also into the log). It ends at the
+  first gap of 0.038 of the height between two lines (`TIP_GAP`): FPS gear often shows a second tooltip
+  right below (the equipped piece to compare, or the list "1: MaxLift Tractor Beam / 2: CQ7 Rifle"), ≥ 0.041
+  down; within one tooltip the widest gap is 0.035 (above "Registered To You"; 29 FPS and 22 component shots).
+- The **stack count**: stackable items (weapon attachments) show "2x" in the tile's top right corner; with a
+  tooltip and a hovered tile that corner (half the width, 0.35 of the height, scaled 2×) is read too
+  (`read_count`, `Cell.count`; none = one piece). Checked on one shot (the cursor set to the tile's centre).
 - The **hovered tile** (`hovered_tile`, pixel checks, no OCR): the light cyan frame the game draws around
   it, found from the cursor outwards: left and right the nearest columns with a lit run of ≥ 0.4 of the row
   pitch in a band of ±0.6 pitches around the cursor's height (the other side at least half a unit away:
@@ -296,21 +303,27 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   row at 1600 px height, snapped to whole rows within 0.15). The cursor may be 0.3 units outside the
   scaled grid. Checked against the recording of 2026-10-19 (1080p, 56 frames with the cursor): every tile
   under a tooltip found where the cursor was on it.
-- Frontend: the title ("Mil/3/A Blizzard") against the catalog's component names in de/en plus the language
-  pack, the prefix narrowing size and grade (`findComponents`; among same-name variants the craftable one;
-  the catalog lists only the plain part of a variant group, see `docs/stock.md`). Stat lines ("Coolant
+- Frontend: the title ("Mil/3/A Blizzard", "CQ7 Rifle") against the catalog's gear names in de/en plus the
+  language pack, the prefix narrowing size and grade (`findComponents`; among same-name variants the
+  craftable one; the catalog lists only the plain part of a variant group, see `docs/stock.md`); without an
+  exact match with the OCR's look-alikes folded (l/I and 1, O and 0: "Sion Compensatorl"). Ship component
+  or FPS gear by the item's catalog type (`FPS_TYPES`), which picks the filter that lets it through. Stat lines ("Coolant
   Rating:  60.00", the value in a column of its own; a dropped colon is tolerated) against each stat's
   names (`CatalogStat.name` per language, `nameKey` in the pack); the absolute value converted to the stored
-  gain with `CatalogStat.base` (`statFromTooltip`): an unmodified component reads as ±0; "no stats" only
+  gain with `CatalogStat.base` (`statFromTooltip`; a negative base like armor's minimum temperature divides
+  the same way), where `CatalogStat.tooltip` says the tooltip shows the change in percent (impact force
+  "+6.11 %", recoil kick "-28.44 %", recoil smoothness and handling negated: "+28.44 %" = stored -28.4) that
+  change itself: an unmodified item reads as ±0; "no stats" only
   when the tooltip had no stat lines (weapons, event items); a value below the base beyond rounding, above
   the blueprint's bound (mirrored for a stat whose improvement is a drop, e.g. quantum fuel burn, since
   2026-10-22), unparsable or without a known base = "Stats not readable" (no proposal, listed in
   the debug window with the reason, like unknown or ambiguous titles).
 - A sighting's identity is **page + content row + units + content** (a tile hovered again after a scroll is
   the same sighting, equal components on other tiles stay apart). A tooltip counts only once the cursor
-  stayed on its tile for a read, then two agreeing reads in a row (≥ 3 reads per tile). One proposal per
-  sighting (one piece, quality 0, the stats if any).
-- Screenshot tests over `local/screenshots/inventory 3`; `cargo run --release --example components_dump --
+  stayed on its tile for a read, then two agreeing reads in a row (≥ 3 reads per tile). The stack count is
+  not part of the identity: a count that changes on the same tile (two agreeing reads) updates the
+  sighting. One proposal per sighting (its pieces, quality 0, the stats if any).
+- Screenshot tests over `local/screenshots/inventory 3` and `inventory 4`; `cargo run --release --example components_dump --
   <dir>…` prints page, the tile under the stored cursor, title and lines per image (a recording's
   frames with their cursor).
 
@@ -326,20 +339,21 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   selectable location clears the pick (nothing is booked at the place before: reads without a location
   are dropped); a pick by hand holds until the log names another place.
 - One panel per part: Resources (the warehouse's stacks) and Gear (the character inventory's). Head:
-  title with count, the part's kind filter, toggle chips Materials / Harvestables ("Sammelobjekte", until 2026-10-20 "Items") (Resources) or "Ship comp." ("Schiffs-Komp."; on =
+  title with count, the part's kind filter, toggle chips Materials / Harvestables ("Sammelobjekte", until 2026-10-20 "Items") (Resources) or "Ship comp." ("Schiffs-Komp.") / "FPS gear" ("FPS-Ausrüstung", since 2026-10-22) (Gear; on =
   the kind's badge colour with a check, off = dashed and dimmed with an x; what the scan detects from then
-  on, all may be off; localStorage `qm.companion.inventory.kinds`), "Register all" (the panel's rows only).
+  on, all may be off; localStorage `qm.companion.inventory.kinds` as `{on, known}`: a kind added later
+  starts on; the plain list before FPS gear is read as known = the three of then), "Register all" (the panel's rows only).
   Then one compact row per proposal. What the stored stock at the location already holds stays listed,
   dimmed, without Register / Discard (2026-10-20; `inStockOf` in `inventory.ts` and `components.ts`,
   `inStock` on the listed proposals): stacks per material and quality as long as the stored amount covers
-  them, components counted per component and stats (they do not stack in the game: 5 hovered, 4 stored,
-  one new); the ones registered here count first (and always), then the earliest seen. The count, the tab and
+  them, gear counted in pieces per item and stats (ship components do not stack in the game, attachments
+  do: 5 tiles hovered, 4 stored, one new; a stack of 3 with 2 stored is new); the ones registered here count first (and always), then the earliest seen. The count, the tab and
   "Register all" only take the rest; the overlay shows them dimmed too. Stock is loaded at the scan's start and after every
   registration. Stock: an icon-only badge for the kind (no tooltip, like every
-  panel's kind badge), name, quality, amount. Components: name, type, size, grade (from the catalog in the
+  panel's kind badge), name, quality, amount. Gear: the kind badge, name, type, size, grade (from the catalog in the
   UI language; items show none of these: every bookable item is of the type "Misc.", checked 2026-10-20),
   the stats ("Coolant Rating +12.5 % · Integrity ±0.0 %"; without any gain, or when the tooltip showed none,
-  a dimmed "Standard"/"Default" since 0.2.1, before a "–"). Both: location last, Register /
+  a dimmed "Standard"/"Default" since 0.2.1, before a "–"), the pieces (the overlay shows them only above 1). Both: location last, Register /
   Discard (fixed 26 px each, the column chooser in the head of the second). Columns: see "Tables" (no
   sorting: the newest first).
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a

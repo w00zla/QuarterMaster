@@ -24,7 +24,7 @@ export const gameFront = ref(false);
 // What the filters leave the scan to read
 export const scope = computed<ScanScope>(() => ({
   warehouse: kinds.value.has("mats") || kinds.value.has("items"),
-  inventory: kinds.value.has("comps"),
+  inventory: kinds.value.has("comps") || kinds.value.has("fps"),
   refinery: jobsOn.value,
 }));
 const scopeEmpty = computed(() => !scope.value.warehouse && !scope.value.inventory && !scope.value.refinery);

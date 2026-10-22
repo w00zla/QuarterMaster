@@ -350,6 +350,14 @@ export function normalize(input: NormalizeInput): Snapshot {
         anomaly('unresolved_ref', r._RecordName_, `manufacturer ${mPath}`);
       }
     }
+    // Armor keeps its damage resistance in a shared record ("damage/mediumarmor.json"): kept raw, it
+    // holds the base of the crafted damage mitigation (src/stock/component-base.ts)
+    const armor = arr(r._RecordValue_.Components).find((c) => isObj(c) && c._Type_ === 'SCItemSuitArmorParams');
+    const dPath = isObj(armor) ? refPath(armor.damageResistance) : null;
+    if (dPath) {
+      if (store.get(dPath)) rawPaths.add(dPath);
+      else anomaly('unresolved_ref', r._RecordName_, `damage resistance ${dPath}`);
+    }
     // Grade letter and class are only stated in the English description text
     const description = displayText(en?.get(locKey(loc.Description) ?? '') ?? '');
     return {

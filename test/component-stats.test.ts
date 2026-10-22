@@ -15,6 +15,9 @@ describe('component stat bounds', () => {
     // HeatSafe's coolant rating: COOLANT 0.85–1.15 and PUMP IMPELLER 0.95–1.05
     assert.deepEqual(statBounds([linear(0.85, 1.15), linear(0.95, 1.05)]), { kind: 'multiplier', min: 0, max: 20.8 });
     assert.deepEqual(statBounds([linear(0.8, 1.2)]), { kind: 'multiplier', min: 0, max: 20 });
+    // A slot without a range (armor's "Panel Covering": valueRanges [null]) changes nothing
+    assert.deepEqual(statBounds([linear(0.9, 1.1), []]), { kind: 'multiplier', min: 0, max: 10 });
+    assert.equal(statBounds([[]]), null);
   });
 
   it('adds up the steps of an additive stat (power pips), from no change', () => {

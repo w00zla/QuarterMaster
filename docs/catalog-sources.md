@@ -45,6 +45,7 @@ starbreaker dcb extract --dcb out/Data/Game2.dcb -o rec --format json \
 starbreaker dcb extract ... --filter 'libs/foundry/records/resourcetypedatabase/**'
 starbreaker dcb extract ... --filter 'libs/foundry/records/entities/scitem/**'   # 24064 records
 starbreaker dcb extract ... --filter 'libs/foundry/records/starmap/**'           # 2073 records
+starbreaker dcb extract ... --filter 'libs/foundry/records/damage/**'            # 19 records (armor damage resistance)
 starbreaker dcb query --dcb ... 'CraftingBlueprintRecord'              # dump by type
 ```
 
@@ -69,6 +70,7 @@ starbreaker dcb query --dcb ... 'CraftingBlueprintRecord'              # dump by
 | `crafting/craftedproperties/gpp_*.json` | stat properties modified by quality |
 | `resourcetypedatabase/resourcetypedatabase.json` | 237 `ResourceType` (UUID, `displayName` loc key, cargo box sizes, `refinedVersion`) |
 | `entities/scitem/**` — `EntityClassDefinition` | output items and item ingredients; name via `SAttachableComponentParams.AttachDef.Localization.Name` |
+| `damage/*armor*.json` — `DamageResistanceMacro` | armor's damage resistance, linked from `SCItemSuitArmorParams.damageResistance` (mediumarmor: physical multiplier 0.7 = "Damage Mitigation: 0.30"); only the linked ones are kept raw |
 | `starmap/**` — `StarMapObject` | 2068 locations (systems, planets, moons, stations, landing zones, outposts, Lagrange points, …); 5 other record types (markers, special events) stay raw only |
 | `starmap/starmapobjecttypes.json` | one record with the object types inline (`types[]`: `_RecordId_`, `name` like `Planet`, `Manmade`, `LandingZone`) |
 | `Data/Localization/<lang>/global.ini` | UTF-8 with BOM, CRLF, keys may carry a `,P` suffix |
@@ -274,7 +276,7 @@ Throwaway script, not in the repo. Result:
 - **Crafted stats** (checked 2026-10-18 on build 12881860, ship components):
   - A slot's modifier changes one crafted property (`CraftingGameplayPropertyDef`) by quality: `Linear` ranges are **factors** (typically 0–500: 0.8→1, 501–1000: 1→1.2; Q500 = no change), `LinearIntegerAdditive` ranges are **steps** in constant bands (only `GPP_ItemResource_PowerGeneration`, "Power Pips": −1/0/+1 per slot). Several slots may change the same stat (a cooler's coolant: COOLANT 0.85–1.15 and PUMP IMPELLER 0.95–1.05).
   - Per component type: Cooler = Coolant Rating + Integrity, PowerPlant = Power Pips + Integrity, Shield = Max. Shield Strength + Integrity, QuantumDrive = Quantum Speed + Fuel Requirement (flat 1.0) + Integrity, Radar = two aim assist distances + Integrity, ship weapons and mining lasers = Impact Force + Integrity, tractor/salvage heads 3–4 own values. The names match the game's tooltip ("Coolant Rating: 22.00, Integrity: 110.00").
-  - The **absolute values** need the item's base value, which is not in the blueprint but in its `raw_record`, at a different path per property (`src/stock/component-base.ts`, verified against the user's inventory tooltips of 2026-10-18): Integrity `Components[SHealthComponentParams].Health` (HeatSafe 110, Blizzard 1800, Atlas 200, CoverAll 660), Coolant Rating `Components[ItemResourceComponentParams].states[].deltas[].generation(resource Coolant).resourceAmountPerSecond.standardResourceUnits` (HeatSafe 22, Blizzard 60; the property's display scale 1e-6 does not apply to the record's value), Power Pips the same with resource Power → `.units` (Regulus 16; tooltip not seen yet), Max. Shield Strength `SCItemShieldGeneratorParams.MaxShieldHealth` (CoverAll 10560), Quantum Speed `SCItemQuantumDriveParams.params.driveSpeed` × 1e-6 (Atlas 259054500 → "259.05 Mm/s"), Quantum Fuel Burn `SCItemQuantumDriveParams.quantumFuelRequirement` × 1000 (Atlas 0.007546 → "7.55 per Km"), radar `SCItemRadarComponentParams.aimAssist.distanceMax/MinAssignment` (tooltip not seen yet). Weapons (Impact Force: displayed as a percent change of the base per its display transformation), tractor and salvage heads: no path, their tooltip format is unknown. The web app stores stats as the crafting check shows them (percent change / steps); the companion's components scan converts the tooltip's values with these bases.
+  - The **absolute values** need the item's base value, which is not in the blueprint but in its `raw_record`, at a different path per property (`src/stock/component-base.ts`, verified against the user's inventory tooltips of 2026-10-18): Integrity `Components[SHealthComponentParams].Health` (HeatSafe 110, Blizzard 1800, Atlas 200, CoverAll 660), Coolant Rating `Components[ItemResourceComponentParams].states[].deltas[].generation(resource Coolant).resourceAmountPerSecond.standardResourceUnits` (HeatSafe 22, Blizzard 60; the property's display scale 1e-6 does not apply to the record's value), Power Pips the same with resource Power → `.units` (Regulus 16; tooltip not seen yet), Max. Shield Strength `SCItemShieldGeneratorParams.MaxShieldHealth` (CoverAll 10560), Quantum Speed `SCItemQuantumDriveParams.params.driveSpeed` × 1e-6 (Atlas 259054500 → "259.05 Mm/s"), Quantum Fuel Burn `SCItemQuantumDriveParams.quantumFuelRequirement` × 1000 (Atlas 0.007546 → "7.55 per Km"), radar `SCItemRadarComponentParams.aimAssist.distanceMax/MinAssignment` (tooltip not seen yet). Weapons' Impact Force needs none (the tooltip shows the percent change, see "FPS tooltips and bases" below); tractor and salvage heads: no path, their tooltip format is unknown. The web app stores stats as the crafting check shows them (percent change / steps); the companion's components scan converts the tooltip's values with these bases.
   - **How several slots on one stat combine is unverified**: the crafting check multiplies the factors and adds the steps (as erkul.games and sc-craft.tools do); SC Crafter, the Citizen Starter Guide blueprint finder, scblueprintfinder and SC-Toolbox's Craft Database add the deltas instead. None measured it in game; at the current spans the results differ by 1–2 %. One craft decides: an IcePlunge cooler (base coolant 22) with both slots at Q1000 shows 26.57 (product) or 26.40 (sum).
   - Materials below Q500 (the only ones that lower a stat) cannot be used for crafting at the moment (user, 2026-10-18), although recipe inputs have `minQuality` from 0.
   - Display transformations (`CraftingDisplayTransformation_*`: `Scale`, `ConvertValueToFactorOfBaseValue`, `ConvertFactorToPercentChange`) are documented nowhere; known scales: coolant 1e-6, quantum speed 1e-6.
@@ -293,8 +295,20 @@ Throwaway script, not in the repo. Result:
   `GPP_Weapon_Recoil_{Handling,Kick,Smoothness}` (1.2→0.8 or 1.4→0.6: lower is the improvement), tools
   `GPP_Weapon_Tractor_*`/`GPP_Weapon_HullScraping_*`; armor `GPP_Armor_DamageMitigation`,
   `GPP_Armor_TemperatureMax`/`Min`, a few `GPP_Armor_RadiationDissipation`. Three DamageMitigation ranges start
-  at 9 (instead of ~0.9; the Q1000 end is 1.1). No base paths for FPS yet (the companion needs them; armor
-  mitigation sits in a linked `damage/…armor.json`, weapon damage in the ammo record).
+  at 9 (instead of ~0.9; the Q1000 end is 1.1). About 470 armor blueprints have a second slot ("Panel
+  Covering") on DamageMitigation whose `valueRanges` is `[null]` (the extractor skips the null): it changes
+  nothing (`statBounds`, decided 2026-10-22).
+- **FPS tooltips and bases** (checked 2026-10-22 against `local/screenshots/inventory 4`, 3840×1600): the
+  properties with a percent-change display transformation (`GPP_Weapon_Damage` "Impact Force: +6.11 %",
+  `GPP_Weapon_Recoil_Kick` "-28.44 %", `Recoil_Smoothness`/`Handling` negated: "+28.44 %" for a factor of
+  0.7156) show the change itself, no base needed (`tooltipForm`). The others show the absolute value:
+  Fire Rate `SCItemWeaponComponentParams.fireActions[0].fireRate` (Gallant 900, CQ7 650 → crafted
+  "713.49 RPM"; a weapon whose first action is a sequence has none there: Killshot shows 535, its
+  sequence says 600, left null), armor `SCItemClothingParams.TemperatureResistance.Min/MaxResistance`
+  (Canuto -61 / 91), `RadiationResistance.RadiationDissipationRate` (145.8), Damage Mitigation = 1 −
+  `PhysicalResistance.Multiplier` of the linked `damage/…armor.json` (0.30; the extractor keeps the linked
+  record raw since 2026-10-22, the lookup resolves the link by its path). The item description's own
+  lines ("Damage Reduction: 30%", "Rate Of Fire: 450 rpm" for the Gallant's 900) are not used.
 - **Prepared but unused by CIG:** `tiers[]` (always 1), `optionalCosts` (always empty), `research` (always null). The schema should not block them.
 - **Catalog is global**, not per guild. One import affects every server → safeguards matter.
 

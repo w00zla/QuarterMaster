@@ -244,8 +244,8 @@ export const RECORDS: Record<string, unknown> = {
   }),
 };
 
-const gearItem = (name: string, id: string, def: Record<string, unknown>) => rec(`EntityClassDefinition.${name}`, id, {
-  _Type_: 'EntityClassDefinition', Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Size: 1, Grade: 1, ...def } }],
+const gearItem = (name: string, id: string, def: Record<string, unknown>, more: Record<string, unknown>[] = []) => rec(`EntityClassDefinition.${name}`, id, {
+  _Type_: 'EntityClassDefinition', Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Size: 1, Grade: 1, ...def } }, ...more],
 });
 
 export const FPS = {
@@ -257,6 +257,8 @@ export const FPS = {
   template: '10000000-0000-0000-0000-000000000035',
   unnamed: '10000000-0000-0000-0000-000000000036',
   jacket: '10000000-0000-0000-0000-000000000037',
+  // The helmet's damage resistance (a shared record, kept raw for the damage mitigation's base)
+  damage: '10000000-0000-0000-0000-000000000038',
 };
 
 /** FPS gear outside the blueprints (looted or bought), with what must stay out: stackables, templates,
@@ -265,7 +267,11 @@ export const FPS_RECORDS: Record<string, unknown> = {
   'entities/scitem/weapons/fps_weapons/test_rifle.json': gearItem('test_rifle', FPS.rifle,
     { Type: 'WeaponPersonal', SubType: 'Medium', Size: 3, Localization: { Name: '@item_Nametest_rifle' } }),
   'entities/scitem/characters/human/armor/test_helmet.json': gearItem('test_helmet', FPS.helmet,
-    { Type: 'Char_Armor_Helmet', SubType: 'Light', Localization: { Name: '@item_Nametest_helmet' } }),
+    { Type: 'Char_Armor_Helmet', SubType: 'Light', Localization: { Name: '@item_Nametest_helmet' } },
+    [{ _Type_: 'SCItemSuitArmorParams', damageResistance: 'file://./../../../../../libs/foundry/records/damage/lightarmor.json' }]),
+  'damage/lightarmor.json': rec('DamageResistanceMacro.LightArmor', FPS.damage, {
+    _Type_: 'DamageResistanceMacro', damageResistance: { _Type_: 'DamageResistance', PhysicalResistance: { _Type_: 'DamageResistanceEntry', Multiplier: 0.8 } },
+  }),
   'entities/scitem/weapons/weapon_modifier/test_optic.json': gearItem('test_optic', FPS.optic,
     { Type: 'WeaponAttachment', SubType: 'IronSight', Size: 2, Localization: { Name: '@item_Nametest_optic' } }),
   'entities/scitem/weapons/magazines/test_rifle_mag.json': gearItem('test_rifle_mag', FPS.magazine,

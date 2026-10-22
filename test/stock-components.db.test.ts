@@ -76,8 +76,8 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
 
   it('offers the stats of the component blueprint with their bounds, nothing for other materials', async () => {
     const materials = await materialCatalog(db, 'en');
-    assert.deepEqual(materials.get(U.output)!.stats.map(({ uuid, kind, min, max, nameKey, base }) => ({ uuid, kind, min, max, nameKey, base })),
-      [{ uuid: U.property, kind: 'multiplier', min: 0, max: 20, nameKey: 'statname_gpp_test', base: 110 }]);
+    assert.deepEqual(materials.get(U.output)!.stats.map(({ uuid, kind, min, max, nameKey, base, tooltip }) => ({ uuid, kind, min, max, nameKey, base, tooltip })),
+      [{ uuid: U.property, kind: 'multiplier', min: 0, max: 20, nameKey: 'statname_gpp_test', base: 110, tooltip: 'value' }]);
     assert.deepEqual(materials.get(U.gem)!.stats, []);
   });
 

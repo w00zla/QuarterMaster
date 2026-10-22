@@ -33,7 +33,7 @@ use image::{GrayImage, ImageFormat, RgbImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::components::{hovered_tile, read_page, read_tooltip, ComponentRead, Page, Ui};
+use crate::components::{hovered_tile, read_count, read_page, read_tooltip, ComponentRead, Page, Ui};
 use crate::inventory::{read_grid, Grid};
 use crate::locale::{LabelSource, Labels};
 use crate::ocr::{Ocr, TextBox};
@@ -876,7 +876,7 @@ impl Worker {
             (None, Some(c)) if c.tooltip.is_some() || c.page.is_some() => {
                 // The lines as read: what the frontend matches the stat names against
                 let tip = c.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {:?} with {} lines: {}", t.title, t.lines.len(), t.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" | ")));
-                log::info!("components read in {ms} ms: page {:?}, cursor {:?} in tile {:?}, {tip}", c.page.map(|p| (p.index, p.total)), cursor, c.cell.map(|x| (x.row, x.col, x.span)));
+                log::info!("components read in {ms} ms: page {:?}, cursor {:?} in tile {:?}, {tip}", c.page.map(|p| (p.index, p.total)), cursor, c.cell.map(|x| (x.row, x.col, x.span, x.count)));
             }
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", screen),
         }
@@ -935,11 +935,11 @@ impl Worker {
 /// The rest of a character inventory read once its page number was read: the scale from the page's
 /// place (else the last one, else the measured place), the tile under the cursor (lit by the game;
 /// without one no tooltip can belong to a tile, so the tooltip is not read; the page read keeps the
-/// screen), the tooltip. Also the scale it used.
+/// screen), the tooltip, and with a tooltip the tile's stack count. Also the scale it used.
 fn inventory_screen(ocr: &mut Ocr, image: &RgbImage, cursor: Option<(f32, f32)>, page: Option<(Page, f32)>, last: Option<f32>, boxes: &mut Vec<TextBox>) -> Result<(ComponentRead, f32), String> {
     let k = page.map(|p| p.1).or(last).unwrap_or(1.0);
     let ui = Ui::new(image, k);
-    let cell = cursor.and_then(|c| hovered_tile(image, ui, c));
+    let mut cell = cursor.and_then(|c| hovered_tile(image, ui, c));
     let tooltip = if cell.is_none() && cursor.is_some() {
         None
     } else {
@@ -947,6 +947,11 @@ fn inventory_screen(ocr: &mut Ocr, image: &RgbImage, cursor: Option<(f32, f32)>,
         boxes.extend(tip_boxes);
         tooltip
     };
+    if let (Some(c), Some(_)) = (cell.as_mut(), &tooltip) {
+        let (count, count_boxes) = read_count(ocr, image, c.rect)?;
+        c.count = count;
+        boxes.extend(count_boxes);
+    }
     Ok((ComponentRead { tooltip, page: page.map(|p| p.0), cell }, k))
 }
 

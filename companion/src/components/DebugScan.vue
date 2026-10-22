@@ -32,7 +32,7 @@ const busy = ref(false);
 const report = ref<SightingsReport>({ materials: [], components: [], registered: [], dismissed: [], locations: {}, statNames: [] });
 const view = ref<"read" | "sightings">("read");
 // The detections table's kind filter (this window's own)
-const KINDS: Kind[] = ["mats", "items", "comps"];
+const KINDS: Kind[] = ["mats", "items", "comps", "fps"];
 const kinds = ref(new Set<Kind>(KINDS));
 function toggleKind(kind: Kind) {
   const next = new Set(kinds.value);
@@ -129,7 +129,8 @@ const PROBLEM = { unknownMaterial: "inventory.unknown", component: "inventory.co
 const COMPONENT_PROBLEM = { unknownComponent: "components.unknown", ambiguousComponent: "components.ambiguous", statsUnreadable: "components.statsUnreadable" } as const;
 const amount = (s: Sighting) => (s.amount === null ? "–" : s.unit === "SCU" ? `${s.amount} SCU` : t("inventory.pieces", { n: s.amount })) + (s.amountUncertain ? "?" : "");
 // A component sighting's stats as read ({property UUID: gain}: the UUIDs' first part, the window has no catalog)
-const componentStats = (s: ComponentSighting) => s.readStats.map((k) => `${k.slice(0, 8)} ${s.stats?.[k] ?? "±0"}`).join(" · ") || t("components.noStats");
+// A stack's count first ("2× "), then the stats read
+const componentStats = (s: ComponentSighting) => `${s.count > 1 ? `${s.count}× ` : ""}${s.readStats.map((k) => `${k.slice(0, 8)} ${s.stats?.[k] ?? "±0"}`).join(" · ") || t("components.noStats")}`;
 
 interface Row {
   key: string;
@@ -158,7 +159,7 @@ const rows = computed<Row[]>(() => {
     location: locationName(s.locationUuid), cell: rc(s.row, s.col), ...stateOf(s.key, s.problem ? t(PROBLEM[s.problem]) : null), atMs: s.atMs,
   }));
   const components = report.value.components.map((s): Row => ({
-    key: s.key, source: "INV", kind: "comps", name: s.label, quality: "–", amount: s.problem ? "–" : componentStats(s),
+    key: s.key, source: "INV", kind: s.fps ? "fps" : "comps", name: s.label, quality: "–", amount: s.problem ? "–" : componentStats(s),
     location: locationName(s.locationUuid), cell: `${s.page ?? "?"}/ ${rc(s.row, s.col, s.span)}`,
     ...stateOf(s.key, s.problem ? `${t(COMPONENT_PROBLEM[s.problem])}${s.unreadable.length ? `: ${s.unreadable.join(", ")}` : ""}` : null), atMs: s.atMs,
   }));

@@ -1,18 +1,21 @@
-// The ship component part of the inventory scan: what the OCR read off the character inventory's
-// tooltip (Rust: components.rs, the `components` part of the event "inventory-read") turned into
-// sightings of components, and the sightings into proposals. Pure (tested from
+// The gear part of the inventory scan (ship components and FPS gear): what the OCR read off the
+// character inventory's tooltip (Rust: components.rs, the `components` part of the event
+// "inventory-read") turned into sightings, and the sightings into proposals. Pure (tested from
 // test/companion-components.test.ts): no Vue, no Tauri.
 //
-// The tooltip's title names the component with the game's "class/size/grade" prefix ("Mil/3/A
-// Blizzard"); the stat lines show absolute values ("Coolant Rating: 67.50"), the stock keeps a crafted
-// component's gain over the unmodified value (`CatalogStat.base`: "12.5" = +12.5 %, power pips in
-// steps), so each read stat is converted; a tooltip without stat lines is a looted component (no
-// stats). A sighting's identity is its tile's place in the page's content (page, row with the pane's
+// The tooltip's title names the item, a ship component with the game's "class/size/grade" prefix
+// ("Mil/3/A Blizzard"); the stat lines show absolute values ("Coolant Rating: 67.50") or, for some FPS
+// stats, the change in percent ("Recoil Kick: -28.44 %", `CatalogStat.tooltip`); the stock keeps a
+// crafted item's gain over the unmodified value (`CatalogStat.base`: "12.5" = +12.5 %, power pips in
+// steps), so each read stat is converted; a tooltip without stat lines is a looted item (no stats).
+// Stackable FPS gear (weapon attachments) shows its count on the tile ("2x"): one sighting per tile
+// with that many pieces. A sighting's identity is its tile's place in the page's content (page, row with the pane's
 // scroll counted in, units; the Rust side finds them) and its content: a tile hovered again after a
 // scroll is the same sighting, equal components on other tiles stay apart. A tooltip counts only once
 // the cursor stayed on its tile for a read (right after a move the game may still show the previous
 // tile's tooltip), and a sighting only once two such reads in a row agree (an OCR glitch in one read
 // books nothing).
+import { FPS_TYPES } from "../../src/catalog/components.ts";
 import { norm } from "../../src/stock/material-names.ts";
 import type { CatalogResponse, CatalogStat, StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
 
@@ -41,8 +44,9 @@ export interface ComponentRead {
   tooltip: ReadTooltip | null;
   page: { index: number; total: number } | null;
   // The tile under the mouse cursor: its row in the page's content (the pane's scroll counted in), its
-  // first unit of four and how many it spans (weapons 2); null outside the grid or without a lit tile
-  cell: { row: number; col: number; span: number; rect: ReadRect } | null;
+  // first unit of four and how many it spans (weapons 2), the stack's count where the tile shows one
+  // ("2x"; null: one piece); null outside the grid or without a lit tile
+  cell: { row: number; col: number; span: number; rect: ReadRect; count?: number | null } | null;
 }
 
 // --- catalog ---------------------------------------------------------------------------------------
@@ -56,6 +60,8 @@ export interface ComponentDef {
   size: number | null;
   gradeLetter: string | null;
   stats: CatalogStat[];
+  // FPS gear (weapons, attachments, armor, gadgets), else a ship component
+  fps: boolean;
 }
 
 export interface ComponentCatalog {
@@ -78,7 +84,8 @@ export function buildComponentCatalog(responses: CatalogResponse[], gameNames: R
   for (const r of responses) {
     for (const m of r.materials) {
       if (!m.component) continue;
-      const def = byUuid.get(m.uuid) ?? { uuid: m.uuid, label: m.label, names: new Set<string>(), size: m.size, gradeLetter: m.gradeLetter, stats: m.stats };
+      const fps = !!m.type && Object.hasOwn(FPS_TYPES, m.type);
+      const def = byUuid.get(m.uuid) ?? { uuid: m.uuid, label: m.label, names: new Set<string>(), size: m.size, gradeLetter: m.gradeLetter, stats: m.stats, fps };
       def.names.add(norm(m.name));
       const own = m.nameKey ? gameNames[m.nameKey] : undefined;
       if (own) def.names.add(norm(own));
@@ -98,13 +105,21 @@ export function buildComponentCatalog(responses: CatalogResponse[], gameNames: R
 // "Ind/1/B Guardian", "Mil/3/A JS-500", "Sth/2/B Bolt"; the OCR drops the space now and then ("Sth/1/ASnowBlind")
 const PREFIX = /^[A-Za-z]{3}\/(\d+)\/([A-Z])\s*(.+)$/;
 
-/** The components a tooltip title can mean: none, one, or several. The prefix's size and grade narrow
+// A normalized name with the OCR's look-alikes folded: "Sion Compensatorl" for "Sion Compensator1"
+const loose = (normed: string) => normed.replace(/[LI]/g, "1").replace(/O/g, "0");
+
+/** The items a tooltip title can mean: none, one, or several; without an exact match the names with
+ * look-alike letters and digits folded (l/I and 1, O and 0). The prefix's size and grade narrow
  * them; among variants that share a name (a ship weapon's turret, low-poly and ship-fitted records next
  * to the one the blueprints make), the craftable ones (with stats) count. */
 export function findComponents(cat: ComponentCatalog, title: string): ComponentDef[] {
   const prefix = PREFIX.exec(title.trim());
   let hits = cat.components.filter((c) => c.names.has(norm(title)));
   if (!hits.length && prefix) hits = cat.components.filter((c) => c.names.has(norm(prefix[3]!)));
+  if (!hits.length) {
+    const folded = loose(norm(prefix ? prefix[3]! : title));
+    hits = cat.components.filter((c) => [...c.names].some((n) => loose(n) === folded));
+  }
   if (hits.length > 1 && prefix) {
     const narrowed = hits.filter((c) => c.size === Number(prefix[1]) && c.gradeLetter === prefix[2]);
     if (narrowed.length) hits = narrowed;
@@ -146,18 +161,22 @@ export function parseNumber(value: string): number | null {
 
 /** The stored gain for a tooltip value: percent over the base (one decimal) or whole steps; "0" for
  * no gain; null when it cannot be: no base known, no number, worse than the base beyond rounding, or
- * better than what the blueprint can make. A stat whose improvement is a drop (recoil) mirrors this. */
+ * better than what the blueprint can make. A stat whose improvement is a drop (recoil) mirrors this.
+ * A stat the tooltip shows as its change in percent needs no base ("+6.11 %"; negated for some:
+ * "Recoil Smoothness: +28.44 %" is a factor of 0.72, stored -28.4). A negative base (armor's minimum
+ * temperature, -61) divides the same way. */
 export function statFromTooltip(stat: CatalogStat, value: string): string | null {
   const v = parseNumber(value);
-  if (v === null || stat.base === null || stat.base <= 0) return null;
+  const change = stat.tooltip !== "value" && stat.kind === "multiplier";
+  if (v === null || (!change && !stat.base)) return null;
   const dir = stat.min < 0 ? -1 : 1;
   const best = dir * (dir < 0 ? stat.min : stat.max);
   if (stat.kind === "multiplier") {
-    const pct = Math.round((v / stat.base - 1) * 1000) / 10;
+    const pct = change ? Math.round((stat.tooltip === "negatedChange" ? -v : v) * 10) / 10 : Math.round((v / stat.base! - 1) * 1000) / 10;
     if (dir * pct < -0.5 || dir * pct > best + 0.05) return null;
     return dir * pct <= 0 ? "0" : String(pct);
   }
-  const steps = Math.round(v - stat.base);
+  const steps = Math.round(v - stat.base!);
   if (dir * steps < 0 || dir * steps > best) return null;
   return String(steps);
 }
@@ -211,6 +230,11 @@ export interface ComponentSighting {
   readStats: string[];
   // The stats that could not be read
   unreadable: string[];
+  // FPS gear, a ship component, or not known (an unknown title, variants of both)
+  fps: boolean | null;
+  // The pieces on the tile (a stack of attachments: its count; else 1); not part of the key (a stack
+  // whose count changes stays the same sighting)
+  count: number;
   page: number | null;
   row: number;
   col: number;
@@ -240,6 +264,8 @@ export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog
     stats,
     readStats: read.read,
     unreadable: read.unreadable,
+    fps: hits.length && hits.every((h) => h.fps === hits[0]!.fps) ? hits[0]!.fps : null,
+    count: e.cell.count ?? 1,
     page,
     row: e.cell.row,
     col: e.cell.col,
@@ -258,9 +284,9 @@ export class ComponentScan {
   // after a move the game may still show the previous tile's tooltip)
   private lastTile: string | null = null;
 
-  /** Takes a read in; the sighting it added, null when nothing changed (the cursor just came to the
-   * tile, a known sighting read again, a first read still waiting for its confirmation, or one
-   * `accept` turns down). */
+  /** Takes a read in; the sighting it added (or a known one with another count), null when nothing
+   * changed (the cursor just came to the tile, a known sighting read again, a first read still waiting
+   * for its confirmation, or one `accept` turns down). */
   feed(atMs: number, e: ComponentRead, cat: ComponentCatalog, accept: (s: ComponentSighting) => boolean = () => true): ComponentSighting | null {
     const tile = tileOf(e);
     const arrived = tile !== this.lastTile;
@@ -271,8 +297,8 @@ export class ComponentScan {
     }
     const s = sightingOf(atMs, e, cat);
     if (!s || !accept(s)) return null;
-    if (this.sightings.has(s.key)) return null;
-    if (this.pending?.key !== s.key) {
+    if (this.sightings.get(s.key)?.count === s.count) return null;
+    if (this.pending?.key !== s.key || this.pending.count !== s.count) {
       this.pending = s;
       return null;
     }
@@ -304,14 +330,17 @@ export interface ComponentProposal {
   stats: Record<string, string>;
   // The stats read at all, to show (±0 without a gain)
   readStats: string[];
+  // The pieces (a stack's count, else 1)
+  amount: number;
+  fps: boolean;
 }
 
-/** One proposal per complete sighting (one piece each). */
+/** One proposal per complete sighting (its tile's pieces). */
 export function proposalsOf(sightings: Iterable<ComponentSighting>): ComponentProposal[] {
   const out: ComponentProposal[] = [];
   for (const s of sightings) {
     if (s.problem || !s.componentUuid || !s.stats) continue;
-    out.push({ id: s.key, componentUuid: s.componentUuid, label: s.label, stats: s.stats, readStats: s.readStats });
+    out.push({ id: s.key, componentUuid: s.componentUuid, label: s.label, stats: s.stats, readStats: s.readStats, amount: s.count, fps: !!s.fps });
   }
   return out;
 }
@@ -322,10 +351,10 @@ const canonical = (v: string) => (v.includes(".") ? v.replace(/0+$/, "").replace
 const stockKey = (uuid: string, stats: Record<string, string> | null) =>
   `${uuid}|${Object.entries(stats ?? {}).map(([k, v]) => [k, canonical(v)]).filter(([, v]) => v !== "0").map(([k, v]) => `${k}=${v}`).sort().join(",")}`;
 
-/** The proposals (newest first, as listed) the stored stock at the location already holds. Components
- * do not stack in the game: every hovered tile is one piece, so per component and stats as many count
- * as the stock holds pieces, the ones registered here first, then the earliest seen; the others are
- * new (5 hovered, 4 stored: one new). A registered one always counts. */
+/** The proposals (newest first, as listed) the stored stock at the location already holds: per item and
+ * stats as many as the stock holds pieces, the ones registered here first, then the earliest seen; the
+ * others are new (5 tiles hovered, 4 pieces stored: one new; a stack of 3 with 2 stored: new). Ship
+ * components do not stack in the game, attachments do. A registered one always counts. */
 export function inStockOf(proposals: ComponentProposal[], batches: StockBatch[], locationUuid: string, registered: ReadonlySet<string>): Set<string> {
   const left = new Map<string, bigint>();
   for (const b of batches) {
@@ -339,16 +368,17 @@ export function inStockOf(proposals: ComponentProposal[], batches: StockBatch[],
   for (const p of order) {
     const key = stockKey(p.componentUuid, p.stats);
     const have = left.get(key) ?? 0n;
-    if (!registered.has(p.id) && have < 1n) continue;
+    const need = BigInt(p.amount);
+    if (!registered.has(p.id) && have < need) continue;
     out.add(p.id);
-    left.set(key, have > 0n ? have - 1n : 0n);
+    left.set(key, have > need ? have - need : 0n);
   }
   return out;
 }
 
-/** The add for a proposal: one piece, no quality, its stats, shared right away in `guildIds` (none: unshared). */
+/** The add for a proposal: its pieces, no quality, its stats, shared right away in `guildIds` (none: unshared). */
 export function addRequest(p: ComponentProposal, locationUuid: string, guildIds: string[] = []): StockAddRequest {
-  const req: StockAddRequest = { subjectUuid: p.componentUuid, locationUuid, quality: 0, amount: "1" };
+  const req: StockAddRequest = { subjectUuid: p.componentUuid, locationUuid, quality: 0, amount: String(p.amount) };
   if (Object.keys(p.stats).length) req.stats = p.stats;
   return guildIds.length ? { ...req, guildIds } : req;
 }

@@ -18,6 +18,8 @@ const DCB_FILTERS = [
   'libs/foundry/records/resourcetypedatabase/**',
   'libs/foundry/records/scitemmanufacturer/**',
   'libs/foundry/records/entities/scitem/**',
+  // Armor's damage resistance (the base of its crafted damage mitigation)
+  'libs/foundry/records/damage/**',
   // Whole-directory globs only: segment wildcards like '**/*refin*' match nothing in StarBreaker
   'libs/foundry/records/starmap/**',
   // Blueprint sources: contracts (generators, templates, event progress) and what they reference

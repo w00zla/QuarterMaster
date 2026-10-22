@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // The inventory scan's proposals (inventorySync.ts; scan and location are in the scan row,
 // ScanBar.vue), one panel per part: stock (the user hovers every stack in the freight manager's
-// warehouse) and comps (every component in the character inventory's storage pane). "Register all" in
-// the head, after the count the part's kind filter (what the scan detects; off: its screen is not read), then
-// the proposals of every location as a compact table with resizable columns, one row per stack (kind,
-// name, quality, amount, location) or component (name, type, size, grade, stats, location), each with
+// warehouse) and comps (every gear item, ship component or FPS gear, in the character inventory's storage
+// pane). "Register all" in the head, after the count the part's kind filter (what the scan detects; off: its
+// screen is not read), then the proposals of every location as a compact table with resizable columns, one
+// row per stack (kind, name, quality, amount, location) or gear tile (kind, name, type, size, grade, stats,
+// pieces, location), each with
 // Register / Discard; what the stored stock holds already stays dimmed without them (also in the overlay;
 // counts and "Register all" only the rest). Registering (one or all, each at
 // its own location) asks first, with a switch per org to share right away. The overlay shows the
@@ -29,7 +30,7 @@ import {
 const props = defineProps<{ part: "stock" | "comps" }>();
 const stock = props.part === "stock";
 // The kinds this part's filter switches
-const partKinds: Kind[] = stock ? ["mats", "items"] : ["comps"];
+const partKinds: Kind[] = stock ? ["mats", "items"] : ["comps", "fps"];
 import { overlayRows, tabCounts } from "../overlay";
 import { catalogResponses, materialName, syncCatalog } from "../refinerySync";
 import { connected, meOrgs } from "../state";
@@ -44,7 +45,7 @@ interface Row {
   type: string;
   size: string;
   grade: string;
-  // A component's stats ("Coolant Rating +12.5 %"), or "Standard" without any gain
+  // A gear item's stats ("Coolant Rating +12.5 %"), or "Standard" without any gain
   detail: string | null;
   // The detail is "Standard": shown dimmed
   standard: boolean;
@@ -88,17 +89,17 @@ const rows = computed<Row[]>(() => stock
   }))
   // No quality (the register dialog's column stays empty)
   : componentProposals.value.map((p): Row => ({
-    kind: "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), ...statsOf(p),
-    locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "", amount: t("inventory.pieces", { n: 1 }), inStock: p.inStock, stack: null, component: p,
+    kind: p.fps ? "fps" : "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), ...statsOf(p),
+    locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "", amount: t("inventory.pieces", { n: p.amount }), inStock: p.inStock, stack: null, component: p,
   })));
 // What is still to register: the counts and "Register all"
 const openRows = computed(() => rows.value.filter((r) => !r.inStock));
 
 // The table's columns (widths and the hidden ones kept per table; no sorting: the newest come first);
-// the last shown one takes the room left. Stacks: kind, quality and amount; components: catalog data and
-// stats. Every one but the name and the actions may be hidden (ColumnsButton in the actions' head)
+// the last shown one takes the room left. Stacks: kind, quality and amount; gear: kind, catalog data, stats
+// and pieces. Every one but the name and the actions may be hidden (ColumnsButton in the actions' head)
 const columns = computed<ColumnSpec[]>(() => [
-  ...(stock ? [{ key: "kind", label: "", title: t("col.kind"), width: 20, fixed: true, sortable: false, hideable: true }] : []),
+  { key: "kind", label: "", title: t("col.kind"), width: 20, fixed: true, sortable: false, hideable: true },
   { key: "name", label: t("debug.col.name"), width: 120, sortable: false },
   ...(stock
     ? [
@@ -110,6 +111,7 @@ const columns = computed<ColumnSpec[]>(() => [
       { key: "size", label: t("col.size"), width: 40, sortable: false, hideable: true },
       { key: "grade", label: t("col.grade"), width: 40, sortable: false, hideable: true },
       { key: "stats", label: t("col.stats"), width: 120, sortable: false, hideable: true },
+      { key: "amount", label: t("col.amount"), width: 50, sortable: false, hideable: true },
     ]),
   { key: "location", label: t("col.location"), width: 80, sortable: false, hideable: true },
   // The action buttons: as wide as an icon button, always; a line before them in the head
@@ -129,8 +131,8 @@ watchEffect(() => {
   overlayRows[props.part] = rows.value
     .filter((r) => r.locationUuid === locationUuid.value)
     .sort((a, b) => (seen.get(b.id) ?? 0) - (seen.get(a.id) ?? 0))
-    // A component: its name and stats; a stack: its name, quality and amount
-    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: r.component ? [] : [r.quality, r.amount], dim: r.inStock }));
+    // Gear: its name and stats (and its pieces when more than one); a stack: its name, quality and amount
+    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: r.component ? (r.component.amount > 1 ? [r.amount] : []) : [r.quality, r.amount], dim: r.inStock }));
   tabCounts[props.part] = openRows.value.length;
 });
 
@@ -340,6 +342,10 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   --kind: var(--accent);
 }
 
+.filter .chip.app {
+  --kind: var(--live);
+}
+
 .filter .chip.active {
   border-style: solid;
   border-color: color-mix(in srgb, var(--kind) 45%, transparent);
@@ -347,7 +353,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   color: var(--kind);
 }
 
-/* One row per stack or component (the table's look: App.vue .table.compact) */
+/* One row per stack or gear tile (the table's look: App.vue .table.compact) */
 .data-row {
   color: var(--text-2);
 }

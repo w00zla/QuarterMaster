@@ -1,6 +1,6 @@
-// The companion app's ship component scan (companion/src/components.ts): tooltips of the character
+// The companion app's gear scan (companion/src/components.ts): tooltips of the character
 // inventory as the OCR delivers them (as in the user's screenshots of 2026-10-18) turned into
-// sightings with converted stats and into proposals, one per tile.
+// sightings with converted stats and into proposals, one per tile; FPS gear and stacks as of 2026-10-22.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { CatalogResponse, CatalogStat, StockBatch } from '../src/webapp/api-types.ts';
@@ -22,7 +22,7 @@ const SPEED = '00000000-0000-4000-8000-0000000000a4';
 const LOC = '00000000-0000-4000-8000-0000000000c1';
 
 const stat = (uuid: string, name: string, base: number | null, kind: CatalogStat['kind'] = 'multiplier', max = 20): CatalogStat =>
-  ({ uuid, name, nameKey: `statname_${name.toLowerCase().replace(/\W/g, '')}`, kind, min: 0, max, base });
+  ({ uuid, name, nameKey: `statname_${name.toLowerCase().replace(/\W/g, '')}`, kind, min: 0, max, base, tooltip: 'value' });
 const coolant = (base: number) => stat(COOLANT, 'Coolant Rating', base, 'multiplier', 20.8);
 const health = (base: number) => stat(HEALTH, 'Integrity', base);
 
@@ -203,7 +203,7 @@ describe('proposals', () => {
   });
 
   it('counts the pieces the stock holds per component and stats: 5 hovered, 4 stored, one new', () => {
-    const p = (id: string, stats: Record<string, string> = {}): ComponentProposal => ({ id, componentUuid: BLIZZARD, label: '', stats, readStats: [] });
+    const p = (id: string, stats: Record<string, string> = {}): ComponentProposal => ({ id, componentUuid: BLIZZARD, label: '', stats, readStats: [], amount: 1, fps: false });
     const batch = (quantity: string, stats: Record<string, string> | null, extra: Partial<StockBatch> = {}): StockBatch => ({
       id: 1, sharedIn: [], part: false, kind: 'item', component: true, stats, subjectUuid: BLIZZARD, material: '', locationUuid: LOC, location: '', state: 'stored',
       quality: 0, quantity, unit: 'pcs', holderUserId: 'u', holderName: null, canChange: true, refine: null, ...extra,
@@ -218,5 +218,76 @@ describe('proposals', () => {
     // Other stats are another component: "12.50" stored matches "12.5" read, the second one is new
     const crafted = [p('g', { [COOLANT]: '12.5' }), p('f', { [COOLANT]: '12.5' })];
     assert.deepEqual([...inStockOf(crafted, [batch('1', { [COOLANT]: '12.50' })], LOC, new Set())], ['f']);
+  });
+});
+
+// FPS gear as the user's screenshots of 2026-10-22 show it (local/screenshots/inventory 4)
+describe('FPS gear', () => {
+  const CQ7 = '00000000-0000-4000-8000-000000000011';
+  const CANUTO = '00000000-0000-4000-8000-000000000012';
+  const SION = '00000000-0000-4000-8000-000000000013';
+  const [DAMAGE, FIRE_RATE, KICK, SMOOTH, MITIGATION, TEMP_MIN] = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'].map((n) => `00000000-0000-4000-8000-0000000000${n}`) as [string, string, string, string, string, string];
+  const fpsStat = (uuid: string, name: string, base: number | null, tooltip: CatalogStat['tooltip'], min: number, max: number): CatalogStat =>
+    ({ uuid, name, nameKey: null, kind: 'multiplier', min, max, base, tooltip });
+  const item = (uuid: string, name: string, type: string, stats: CatalogStat[]): CatalogResponse['materials'][number] => ({
+    uuid, kind: 'item', name, nameKey: null, unit: 'pcs', type, typeLabel: type, component: true, label: name, size: null, gradeLetter: null, itemClass: null, stats,
+  });
+  const base = { locations: [], blueprints: [], blueprintTypes: [], itemTypes: [] } as unknown as Omit<CatalogResponse, 'materials'>;
+  const cat = buildComponentCatalog([{ ...base, materials: [
+    item(CQ7, 'CQ7 Rifle', 'WeaponPersonal', [
+      fpsStat(DAMAGE, 'Impact Force', null, 'change', 0, 7.5), fpsStat(FIRE_RATE, 'Fire Rate', 650, 'value', 0, 12),
+      fpsStat(KICK, 'Recoil Kick', null, 'change', -36, 0), fpsStat(SMOOTH, 'Recoil Smoothness', null, 'negatedChange', -36, 0),
+    ]),
+    item(CANUTO, 'Artimex Arms Canuto', 'Char_Armor_Arms', [fpsStat(MITIGATION, 'Damage Mitigation', 0.3, 'value', 0, 10), fpsStat(TEMP_MIN, 'Min Temp', -61, 'value', 0, 20)]),
+    item(SION, 'Sion Compensator1', 'WeaponAttachment', []),
+    material(BLIZZARD, 'Blizzard', 3, 'A', [coolant(60), health(1800)]),
+  ] }], {});
+
+  it('tells FPS gear from ship components and folds the OCR\'s look-alikes in a title', () => {
+    assert.deepEqual(cat.components.map((c) => c.fps), [true, true, true, false]);
+    assert.deepEqual(findComponents(cat, 'Sion Compensatorl').map((c) => c.uuid), [SION], 'l for 1');
+    assert.deepEqual(findComponents(cat, 'Si0n Compensator1').map((c) => c.uuid), [SION], '0 for O');
+    assert.deepEqual(findComponents(cat, 'Mil/3/A BIizzard').map((c) => c.uuid), [BLIZZARD]);
+  });
+
+  it('reads percent changes as they are (negated where the game negates them), absolute values over the base', () => {
+    const cq7 = cat.components.find((c) => c.uuid === CQ7)!;
+    // The crafted CQ7: 713.49 RPM of 650, +6.11 %, a kick factor of 0.7156 shown as -28.44 % and, negated, +28.44 %
+    const lines = ['Fire Rate: 713.49 RPM', 'Impact Force: +6.11 %', 'Recoil Kick: -28.44 %', 'Recoil Smoothness: +28.44 %'];
+    assert.deepEqual(statsOf(cq7, lines, cat).stats, { [DAMAGE]: '6.1', [FIRE_RATE]: '9.8', [KICK]: '-28.4', [SMOOTH]: '-28.4' });
+    // Unmodified: "-0.00 %" and the base are no gain
+    const plain = statsOf(cq7, ['Fire Rate: 650.00 RPM', 'Impact Force: +0.00 %', 'Recoil Kick: +0.00 %', 'Recoil Smoothness: -0.00 %'], cat);
+    assert.deepEqual([plain.stats, plain.read.length, plain.unreadable], [{}, 4, []]);
+    // Worse than unmodified or beyond the blueprint: not readable
+    assert.equal(statFromTooltip(cq7.stats[2]!, '+5.00 %'), null);
+    assert.equal(statFromTooltip(cq7.stats[0]!, '+9.00 %'), null);
+    // Armor: a share and a negative temperature (a colder minimum is the gain)
+    const canuto = cat.components.find((c) => c.uuid === CANUTO)!;
+    assert.deepEqual(statsOf(canuto, ['Damage Mitigation: 0.30', 'Min Temp: -61.00℃'], cat), { stats: {}, read: [MITIGATION, TEMP_MIN], unreadable: [] });
+    assert.deepEqual(statsOf(canuto, ['Damage Mitigation: 0.33', 'Min Temp: -67.10 ℃'], cat).stats, { [MITIGATION]: '10', [TEMP_MIN]: '10' });
+  });
+
+  it('a stack of attachments: its count on the tile, a new count on the same tile updates it, booked as that many pieces', () => {
+    const scan = new ComponentScan();
+    const stack = (count: number | null): ComponentRead => ({ ...read('Sion Compensatorl', ['Volume: 60 µSCU', 'Type: Ballistic Compensator', 'Attachment Point: Barrel', 'Size: 1']), cell: { row: 5, col: 1, span: 1, rect, count } });
+    for (let at = 0; at < 2; at++) assert.equal(scan.feed(at, stack(2), cat), null);
+    const s = scan.feed(2, stack(2), cat);
+    assert.deepEqual([s?.componentUuid, s?.count, s?.fps], [SION, 2, true]);
+    // One piece taken out: the same sighting, now 1 (after two agreeing reads)
+    assert.equal(scan.feed(3, stack(null), cat), null);
+    assert.equal(scan.feed(4, stack(null), cat)?.count, 1);
+    assert.equal(scan.sightings.size, 1);
+    scan.feed(5, stack(3), cat);
+    scan.feed(6, stack(3), cat);
+    const [p] = proposalsOf(scan.list());
+    assert.deepEqual([p?.amount, p?.fps], [3, true]);
+    assert.deepEqual(addRequest(p!, LOC), { subjectUuid: SION, locationUuid: LOC, quality: 0, amount: '3' });
+    // 2 stored hold no stack of 3, 3 do
+    const batch = (quantity: string): StockBatch => ({
+      id: 1, sharedIn: [], part: false, kind: 'item', component: true, stats: null, subjectUuid: SION, material: '', locationUuid: LOC, location: '', state: 'stored',
+      quality: 0, quantity, unit: 'pcs', holderUserId: 'u', holderName: null, canChange: true, refine: null,
+    });
+    assert.equal(inStockOf([p!], [batch('2')], LOC, new Set()).size, 0);
+    assert.equal(inStockOf([p!], [batch('3')], LOC, new Set()).size, 1);
   });
 });

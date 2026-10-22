@@ -19,6 +19,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../src/stock/material-names.ts", "../src/stock/component-stats.ts","../adminapp/src/components/Icon.vue", "../adminapp/src/components/Dropdown.vue", "../adminapp/src/components/Tooltip.vue", "../adminapp/src/components/ColumnHead.vue", "../adminapp/src/components/HelpTip.vue", "../adminapp/src/tableColumns.ts", "../webapp/src/components/ConfirmDialog.vue", "../webapp/src/components/Picker.vue", "../webapp/src/components/ColumnsButton.vue", "../webapp/src/components/ColumnsDialog.vue"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../src/stock/material-names.ts", "../src/stock/component-stats.ts", "../src/catalog/components.ts","../adminapp/src/components/Icon.vue", "../adminapp/src/components/Dropdown.vue", "../adminapp/src/components/Tooltip.vue", "../adminapp/src/components/ColumnHead.vue", "../adminapp/src/components/HelpTip.vue", "../adminapp/src/tableColumns.ts", "../webapp/src/components/ConfirmDialog.vue", "../webapp/src/components/Picker.vue", "../webapp/src/components/ColumnsButton.vue", "../webapp/src/components/ColumnsDialog.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

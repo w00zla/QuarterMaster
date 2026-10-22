@@ -85,7 +85,7 @@ const view = computed<OverlayView>(() => {
   const m = tab.value;
   const cannot: Record<Tab, boolean> = {
     stock: !kinds.value.has("mats") && !kinds.value.has("items"),
-    comps: !kinds.value.has("comps"),
+    comps: !kinds.value.has("comps") && !kinds.value.has("fps"),
     unlocks: !unlocksOn.value || (!!log.value && !log.value.found),
     refinery: !jobsOn.value,
   };
