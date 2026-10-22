@@ -2,7 +2,7 @@
 // Catalog and localization imports from an uploaded file. Always a dry run first;
 // "Import" only becomes available once the dry run of exactly this file and these
 // options passed. Safeguard overrides need a new dry run.
-import { computed, inject, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, reactive, ref, watch } from "vue";
 import HelpTip from "./HelpTip.vue";
 import Icon from "./Icon.vue";
 import { postFile } from "../api";
@@ -16,13 +16,46 @@ const reloadMeta = inject<() => Promise<void>>("reloadMeta");
 const ENTITY_COLS = ["total", "added", "changed", "unchanged", "revived", "retired"] as const;
 const TEXT_COLS = ["total", "added", "changed", "unchanged", "removed"] as const;
 
+/**
+ * A running request's state for the progress line: the upload's share (XHR), then the seconds the
+ * server has been working on it (no progress from there: the import is one transaction).
+ */
+function useProgress() {
+  const state = reactive({ busy: false, dryRun: true, upload: 0, seconds: 0 });
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let uploadedAt = 0;
+  const stop = () => {
+    clearInterval(timer);
+    state.busy = false;
+  };
+  onBeforeUnmount(stop);
+  return {
+    state,
+    start(dryRun: boolean) {
+      Object.assign(state, { busy: true, dryRun, upload: 0, seconds: 0 });
+      uploadedAt = 0;
+      clearInterval(timer);
+      timer = setInterval(() => {
+        if (uploadedAt) state.seconds = Math.floor((Date.now() - uploadedAt) / 1000);
+      }, 1000);
+    },
+    onUpload(share: number) {
+      state.upload = share;
+      if (share >= 1 && !uploadedAt) uploadedAt = Date.now();
+    },
+    stop,
+  };
+}
+
 // --- catalog ---
 const catalogFile = ref<File | null>(null);
 const force = ref(false);
 const allowDowngrade = ref(false);
-// Replaces the snapshot's label (the readable version, e.g. 4.10.2) when set
+// The readable version (e.g. 4.10.2), required: snapshots carry none since the extractor stopped setting it
 const label = ref("");
-const catalogBusy = ref(false);
+const labelMissing = computed(() => !label.value.trim());
+const catalogRun = useProgress();
+const catalogBusy = computed(() => catalogRun.state.busy);
 const catalogError = ref("");
 const catalogResult = ref<CatalogImportResponse | null>(null);
 // A passed dry run is only valid for the file and options it ran with
@@ -32,14 +65,14 @@ watch([catalogFile, force, allowDowngrade, label], () => {
 });
 
 async function runCatalog(dryRun: boolean) {
-  if (!catalogFile.value) return;
-  catalogBusy.value = true;
+  if (!catalogFile.value || labelMissing.value) return;
+  catalogRun.start(dryRun);
   catalogError.value = "";
   try {
     const r = await postFile<CatalogImportResponse>("/import/catalog", {
       dryRun: dryRun ? 1 : 0, force: force.value ? 1 : 0, allowDowngrade: allowDowngrade.value ? 1 : 0,
       label: label.value.trim(),
-    }, catalogFile.value);
+    }, catalogFile.value, catalogRun.onUpload);
     catalogResult.value = r;
     catalogReady.value = dryRun && r.status === "dry-run";
     if (r.status === "imported") {
@@ -50,7 +83,7 @@ async function runCatalog(dryRun: boolean) {
     catalogResult.value = null;
     catalogError.value = e instanceof Error ? e.message : String(e);
   } finally {
-    catalogBusy.value = false;
+    catalogRun.stop();
   }
 }
 
@@ -60,7 +93,8 @@ const source = ref("");
 const locLang = ref("de");
 const priority = ref("");
 const locForce = ref(false);
-const locBusy = ref(false);
+const locRun = useProgress();
+const locBusy = computed(() => locRun.state.busy);
 const locError = ref("");
 const locResult = ref<LocImportResponse | null>(null);
 const locReady = ref(false);
@@ -71,13 +105,13 @@ const langs = computed(() => meta?.value.langs ?? []);
 
 async function runLoc(dryRun: boolean) {
   if (!locFile.value) return;
-  locBusy.value = true;
+  locRun.start(dryRun);
   locError.value = "";
   try {
     const r = await postFile<LocImportResponse>("/import/localization", {
       source: source.value.trim(), lang: locLang.value.trim(), priority: priority.value.trim(),
       name: locFile.value.name, dryRun: dryRun ? 1 : 0, force: locForce.value ? 1 : 0,
-    }, locFile.value);
+    }, locFile.value, locRun.onUpload);
     locResult.value = r;
     locReady.value = dryRun && r.status === "dry-run";
     if (r.status === "imported") await reloadMeta?.();
@@ -85,7 +119,7 @@ async function runLoc(dryRun: boolean) {
     locResult.value = null;
     locError.value = e instanceof Error ? e.message : String(e);
   } finally {
-    locBusy.value = false;
+    locRun.stop();
   }
 }
 
@@ -118,14 +152,21 @@ const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
           <span class="mono dim name">{{ catalogFile?.name ?? "" }}</span>
         </div>
         <div class="row">
-          <label class="field">Label <input v-model="label" class="input mono short" placeholder="4.10.2" /></label>
+          <label class="field">Label <input v-model="label" class="input mono short" :class="{ missing: catalogFile && labelMissing }" placeholder="4.10.2" required /></label>
           <label class="check"><input v-model="force" type="checkbox" /> Force <HelpTip :text="HELP.forceImport" /></label>
           <label class="check"><input v-model="allowDowngrade" type="checkbox" /> Allow downgrade <HelpTip :text="HELP.allowDowngrade" /></label>
         </div>
         <div class="row">
-          <button type="button" class="btn outline small" :disabled="!catalogFile || catalogBusy" @click="runCatalog(true)">Dry run</button>
+          <button type="button" class="btn outline small" :disabled="!catalogFile || labelMissing || catalogBusy" @click="runCatalog(true)">Dry run</button>
           <button type="button" class="btn primary small" :disabled="!catalogReady || catalogBusy" @click="runCatalog(false)">Import</button>
-          <span v-if="catalogBusy" class="faint">Working…</span>
+          <span v-if="catalogBusy" class="progress">
+            <span class="spinner" />
+            <template v-if="catalogRun.state.upload < 1">
+              Uploading <span class="mono">{{ Math.floor(catalogRun.state.upload * 100) }} %</span>
+              <span class="bar"><span :style="{ width: `${catalogRun.state.upload * 100}%` }" /></span>
+            </template>
+            <template v-else>{{ catalogRun.state.dryRun ? "Dry run" : "Importing" }} · <span class="mono">{{ catalogRun.state.seconds }} s</span></template>
+          </span>
         </div>
         <div v-if="catalogError" class="error">{{ catalogError }}</div>
         <div v-if="catalogResult" class="result">
@@ -188,7 +229,14 @@ const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
         <div class="row">
           <button type="button" class="btn outline small" :disabled="!locFile || !source.trim() || !locLang.trim() || locBusy" @click="runLoc(true)">Dry run</button>
           <button type="button" class="btn primary small" :disabled="!locReady || locBusy" @click="runLoc(false)">Import</button>
-          <span v-if="locBusy" class="faint">Working…</span>
+          <span v-if="locBusy" class="progress">
+            <span class="spinner" />
+            <template v-if="locRun.state.upload < 1">
+              Uploading <span class="mono">{{ Math.floor(locRun.state.upload * 100) }} %</span>
+              <span class="bar"><span :style="{ width: `${locRun.state.upload * 100}%` }" /></span>
+            </template>
+            <template v-else>{{ locRun.state.dryRun ? "Dry run" : "Importing" }} · <span class="mono">{{ locRun.state.seconds }} s</span></template>
+          </span>
         </div>
         <div v-if="locError" class="error">{{ locError }}</div>
         <div v-if="locResult" class="result">
@@ -295,6 +343,53 @@ const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
 
 .input.short {
   width: 70px;
+}
+
+/* A file is chosen, the required label is not */
+.input.missing {
+  box-shadow: inset 0 0 0 1px var(--warn);
+}
+
+.progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-surface-3);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+.bar {
+  width: 120px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-surface-3);
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
 }
 
 .error {

@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { computed, inject, watch } from "vue";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import DataTable from "../components/DataTable.vue";
 import DetailPanel from "../components/DetailPanel.vue";
 import HelpTip from "../components/HelpTip.vue";
 import ImportForms from "../components/ImportForms.vue";
 import Icon from "../components/Icon.vue";
+import Tooltip from "../components/Tooltip.vue";
 import { useFetch } from "../api";
-import { dateTime } from "../format";
+import { dateTime, sourceTag } from "../format";
 import { HELP } from "../help";
-import type { Anomaly, ImportDetail, ImportRow } from "../../../src/adminapp/api-types";
+import type { Anomaly, ImportDetail, ImportRow, LocSource, Meta } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
 interface Counts { total: number; added: number; changed: number; unchanged: number; revived?: number; retired?: number; removed?: number }
@@ -21,6 +22,10 @@ const list = useFetch<ImportRow[]>(() => "/imports", false);
 const selected = computed(() => (route.params.id as string | undefined) || null);
 const detail = useFetch<ImportDetail>(() => (selected.value ? `/imports/${selected.value}` : null), false);
 const summary = computed(() => (detail.data.value?.summary ?? {}) as Summary);
+// Text sources per language, highest priority first; both imports reload the meta, then these
+const sources = useFetch<LocSource[]>(() => "/localization/sources", false);
+const meta = inject<{ value: Meta }>("meta");
+watch(() => meta?.value, () => sources.reload());
 
 // Anomalies grouped by code, in order of first appearance
 const anomalyGroups = computed(() => {
@@ -51,6 +56,7 @@ const LOC_COLS = ["total", "added", "changed", "unchanged", "removed"] as const;
   <div class="view">
     <div class="stack">
     <ImportForms @imported="list.reload()" />
+    <div class="split">
     <section class="panel list-panel">
       <div class="head">
         <Icon name="imports" :size="16" />
@@ -80,6 +86,34 @@ const LOC_COLS = ["total", "added", "changed", "unchanged", "removed"] as const;
         </template>
       </DataTable>
     </section>
+
+    <section class="panel sources">
+      <div class="head">
+        <Icon name="texts" :size="16" />
+        <span class="head-title no-grow">Text sources</span>
+        <HelpTip :text="HELP.textSources" />
+        <span class="head-count">{{ sources.data.value?.length ?? 0 }}</span>
+        <div class="spacer" />
+        <RouterLink to="/texts" class="head-link">Texts</RouterLink>
+      </div>
+      <div v-if="sources.error.value" class="empty-line">{{ sources.error.value }}</div>
+      <div v-else-if="!sources.data.value?.length" class="empty-line">{{ sources.loading.value ? "Loading…" : "No texts imported" }}</div>
+      <div v-else class="sources-body">
+        <table class="mini">
+          <thead><tr><th>Source</th><th>Lang</th><th class="num">Priority</th><th class="num">Texts</th><th>Imported</th></tr></thead>
+          <tbody>
+            <tr v-for="s in sources.data.value" :key="`${s.source}/${s.lang}`">
+              <td><Tooltip :text="s.origin" mono><span class="tag" :class="sourceTag(s.source)">{{ s.source }}</span></Tooltip></td>
+              <td class="mono">{{ s.lang }}</td>
+              <td class="num mono">{{ s.priority }}</td>
+              <td class="num mono">{{ s.keyCount }}</td>
+              <td class="dim">{{ dateTime(s.importedAt) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    </div>
     </div>
 
     <DetailPanel
@@ -161,6 +195,30 @@ const LOC_COLS = ["total", "added", "changed", "unchanged", "removed"] as const;
 </template>
 
 <style scoped>
+/* Catalog imports beside the text sources, below the forms */
+.split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.sources {
+  width: 460px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  max-height: 100%;
+}
+
+.sources-body {
+  overflow: auto;
+  padding: 4px 8px 8px;
+}
+
+.head-link {
+  font-size: 12px;
+}
+
 .warning {
   display: flex;
   align-items: center;

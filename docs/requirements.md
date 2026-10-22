@@ -122,11 +122,13 @@ Two web apps, **separate processes** (and separate from the bot) sharing one cod
 
 - A single superuser via HTTP basic auth.
 - Reachable from outside on its own port through Caddy (`:8443` → `127.0.0.1:3001`), never on the Node port directly.
-- Browses the game catalog (blueprints, resources, items, localization, imports) and runs the catalog and localization imports (file upload, always a dry run first).
+- Rebuilt 2026-10-22 as the operator's control room: is everything running, is it used, do the data hold. A left sidebar in groups (Operations, Community, Stock, Catalog, Sources, Apps); nothing that needs a migration or a mount (decided 2026-10-22: no companion version column, no release or backup mount).
+- **Dashboard**: what needs attention, KPIs (active users, actions per source, orgs, stock, refinery, blueprints), actions per day by source, latest actions, reach, orgs, sources. **Status**: services (catalog, UEX pull, the bot's logs channels), the **user data checks** (stock of retired materials or at retired locations, registered retired blueprints, refinery jobs ready for over a week, jobs outside the UEX refineries) and the catalog's gaps. **Activity**: the whole history with filters.
+- **Orgs** and **Users** (read-only): orgs with bot state, settings (logs, board), roster, what is shared there and their activity; users (also without any org) with channels, stock, refinery jobs, blueprints, history, last web login, companion token. No admin actions on user data (deletion, revoking sessions/tokens): those would need write access to schema `web`.
+- **Stock** and **Refinery**: the stock over all users per subject with its holders; every refinery job with its state.
+- Browses the game catalog (blueprints, materials, items, texts) and runs the catalog and localization imports (file upload, always a dry run first; the catalog import requires the version label, decided 2026-10-22).
+- **UEX**: pull status, refinery terminals with their catalog match, yield bonuses per refinery × ore, refining methods, trade coverage. **Bot**: status texts and the servers' settings.
 - Game texts follow a language picker; the UI itself is English.
-- Tabs **Orgs** and **Users** (built 2026-10-09, read-only): orgs with bot state, settings, roster and what is shared there; users (also without any org) with a rough look at their data (stock per material, refinery jobs, blueprints, latest history, last web login, companion token). No admin actions on user data (deletion, revoking sessions/tokens): those would need write access to schema `web`.
-- Overview panel **User data checks**: stock of retired materials or at retired locations, registered retired blueprints, refinery jobs ready for over a week, jobs outside the UEX refineries.
-- Tab **3rd Party**: the UEX data (pull status, refinery terminals with their catalog match, yield bonuses per refinery × ore, refining methods).
 
 ### User web app (built, not live yet)
 

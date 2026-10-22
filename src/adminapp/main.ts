@@ -10,12 +10,15 @@ import { basicAuth } from 'hono/basic-auth';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { connect } from '../db/client.ts';
+import * as a from './activity.ts';
 import { runImport, summarize, textDiffCounts } from '../catalog/import/apply.ts';
 import { loadSnapshot } from '../catalog/import/load.ts';
 import { parseIniFile, runLocImport } from '../catalog/import/loc-import.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
 import * as q from './queries.ts';
+import { getStatus } from './status.ts';
 import * as s from './status-quotes.ts';
+import * as st from './stock.ts';
 import * as u from './users.ts';
 
 const { ADMINAPP_USER, ADMINAPP_PASSWORD, ADMINAPP_HOST = '127.0.0.1', ADMINAPP_PORT = '3000' } = process.env;
@@ -78,6 +81,7 @@ api.get('/items/:uuid', async (c) => {
 });
 api.get('/localization/sources', async (c) => c.json(await q.getLocSources(db)));
 api.get('/ext/uex', async (c) => c.json(await q.getUex(db, lang(c))));
+api.get('/ext/uex/trade', async (c) => c.json(await q.getUexTrade(db, lang(c))));
 api.get('/localization/search', async (c) => {
   const query = (c.req.query('q') ?? '').trim();
   const limit = Math.min(Math.max(Number(c.req.query('limit')) || 200, 1), 1000);
@@ -100,6 +104,21 @@ api.get('/users/:userId', async (c) => {
   return found(c, id ? await u.getUser(db, id, lang(c)) : null);
 });
 api.get('/checks', async (c) => c.json(await u.getDataChecks(db, lang(c))));
+api.get('/status', async (c) => c.json(await getStatus(db)));
+// --- dashboard and activity (read-only) ---
+api.get('/dashboard', async (c) => {
+  const days = a.DASHBOARD_DAYS.find((d) => String(d) === c.req.query('days')) ?? 30;
+  return c.json(await a.getDashboard(db, lang(c), days));
+});
+api.get('/activity', async (c) => c.json(await a.getActivity(db, lang(c), a.activityFilter((name) => c.req.query(name)))));
+// --- stock and refinery (read-only) ---
+api.get('/stock', async (c) => c.json(await st.getStock(db, lang(c))));
+api.get('/stock/:kind/:uuid', async (c) => {
+  const kind = c.req.param('kind');
+  const id = uuid(c);
+  return found(c, id && (kind === 'resource' || kind === 'item') ? await st.getStockSubject(db, kind, id, lang(c)) : null);
+});
+api.get('/refinery', async (c) => c.json(await st.getRefineryJobs(db, lang(c))));
 // --- imports (write) ----------------------------------------------------------------
 // The file is the raw request body. Writing endpoints require a custom header: a form on
 // another site cannot set it, so the browser's stored basic auth cannot be abused (CSRF).
@@ -114,6 +133,9 @@ const flag = (c: Context, name: string) => c.req.query(name) === '1';
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 api.post('/import/catalog', requireWriteHeader, bodyLimit({ maxSize: 300 * MB }), async (c) => {
+  // The readable version (4.10.2) is required: snapshots carry none (set at import, not at extract)
+  const label = c.req.query('label')?.trim();
+  if (!label) return c.json({ error: 'label is required (the game version, e.g. 4.10.2)' }, 400);
   let loaded;
   try {
     loaded = loadSnapshot(new Uint8Array(await c.req.arrayBuffer()));
@@ -121,8 +143,7 @@ api.post('/import/catalog', requireWriteHeader, bodyLimit({ maxSize: 300 * MB })
     return c.json({ error: message(err) }, 400);
   }
   const { snapshot, sha256 } = loaded;
-  const label = c.req.query('label')?.trim();
-  if (label) snapshot.game.label = label;
+  snapshot.game.label = label;
   const result = await runImport(db, snapshot, sha256, {
     dryRun: c.req.query('dryRun') !== '0',
     force: flag(c, 'force'),

@@ -19,17 +19,39 @@ export async function get<T>(path: string, params: Record<string, string | numbe
   return (await res.json()) as T;
 }
 
-/** Sends a file as raw body to a writing endpoint; throws the server's error message. */
-export async function postFile<T>(path: string, params: Record<string, string | number | undefined>, file: Blob): Promise<T> {
+/**
+ * Sends a file as raw body to a writing endpoint; throws the server's error message. XHR instead of fetch:
+ * only XHR reports the upload's progress (`onUpload` gets 0…1).
+ */
+export function postFile<T>(
+  path: string, params: Record<string, string | number | undefined>, file: Blob, onUpload?: (share: number) => void,
+): Promise<T> {
   const url = new URL(`/api${path}`, window.location.origin);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
-  // The custom header marks the request as coming from this UI (CSRF protection on the server)
-  const res = await fetch(url, { method: "POST", headers: { "X-Quartermaster": "1", "Content-Type": "application/octet-stream" }, body: file });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(res.status, body?.error ?? `Request failed (${res.status})`);
-  }
-  return (await res.json()) as T;
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    // The custom header marks the request as coming from this UI (CSRF protection on the server)
+    xhr.setRequestHeader("X-Quartermaster", "1");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    if (onUpload) {
+      xhr.upload.onprogress = (e) => e.lengthComputable && onUpload(e.loaded / e.total);
+      // Also without a computable length: the upload is through, the server works
+      xhr.upload.onload = () => onUpload(1);
+    }
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // No JSON (e.g. a proxy's error page): the status says enough
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as T);
+      else reject(new ApiError(xhr.status, (body as { error?: string } | null)?.error ?? `Request failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new ApiError(0, "Backend not reachable"));
+    xhr.send(file);
+  });
 }
 
 /** Sends JSON to a writing endpoint; throws the server's error message. Null for an empty answer (204). */

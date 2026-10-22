@@ -56,7 +56,7 @@ function valueOf(r: ResourceRow, key: string): string | number {
     <section class="panel list-panel">
       <div class="head">
         <Icon name="resource" :size="16" />
-        <span class="head-title no-grow">Resources</span>
+        <span class="head-title no-grow">Materials</span>
         <HelpTip :text="HELP.resources" />
         <div class="divider" />
         <div class="chips">
@@ -94,7 +94,7 @@ function valueOf(r: ResourceRow, key: string): string | number {
         :selected="selected"
         :row-class="(r) => ({ retired: r.retired })"
         :numeric="['usedIn']"
-        @select="(r) => router.push(`/resources/${r.uuid}`)"
+        @select="(r) => router.push(`/materials/${r.uuid}`)"
       >
         <template #cell-ore="{ row }"><span v-if="row.isOre" class="tag warn">Ore</span></template>
         <template #cell-usedIn="{ row }"><span :class="{ faint: !row.usedIn }">{{ row.usedIn }}</span></template>
@@ -110,7 +110,7 @@ function valueOf(r: ResourceRow, key: string): string | number {
       :technical="detail.data.value?.key"
       :loading="detail.loading.value && !detail.data.value"
       :error="detail.error.value"
-      @close="router.push('/resources')"
+      @close="router.push('/materials')"
     >
       <template v-if="detail.data.value">
         <section v-if="detail.data.value.description">
@@ -124,7 +124,7 @@ function valueOf(r: ResourceRow, key: string): string | number {
             <dd>
               <template v-if="detail.data.value.isOre">
                 Yes, refines to
-                <RouterLink v-if="detail.data.value.refined" :to="`/resources/${detail.data.value.refined.uuid}`">{{ detail.data.value.refined.name }}</RouterLink>
+                <RouterLink v-if="detail.data.value.refined" :to="`/materials/${detail.data.value.refined.uuid}`">{{ detail.data.value.refined.name }}</RouterLink>
               </template>
               <template v-else>No</template>
             </dd>
@@ -132,7 +132,7 @@ function valueOf(r: ResourceRow, key: string): string | number {
               <dt>Refined from</dt>
               <dd>
                 <template v-for="(o, i) in detail.data.value.ores" :key="o.uuid">
-                  <span v-if="i">, </span><RouterLink :to="`/resources/${o.uuid}`">{{ o.name }}</RouterLink>
+                  <span v-if="i">, </span><RouterLink :to="`/materials/${o.uuid}`">{{ o.name }}</RouterLink>
                 </template>
               </dd>
             </template>

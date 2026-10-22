@@ -9,9 +9,12 @@ import {
 import type {
   BlueprintDetail, BlueprintRow, BlueprintSlot, EntityCount, GameInfo, ImportDetail, ImportRow, ItemDetail, ItemRow,
   LocKeyDetail, LocSearch, LocSource, Meta, Overview, Ref, ResourceDetail, ResourceRow, UexEndpointStatus, UexMethod, UexRefinery, UexResponse,
+  UexTradeResponse,
 } from './api-types.ts';
+import { COMPONENT_TYPES, fpsTypeSql } from '../catalog/components.ts';
 import { locationCatalog } from '../stock/lookup.ts';
 import { refineryMatch, refiningMethods, uexTerminals } from '../ext/refineries.ts';
+import { nameKey, tradeData } from '../ext/trade.ts';
 
 /** Timestamp as ISO 8601 string (the driver would return Postgres' text format here). */
 const iso = (column: string) => sql.raw(`to_json(${column}) #>> '{}'`);
@@ -380,11 +383,16 @@ export async function getLocKey(db: Db, key: string): Promise<LocKeyDetail> {
 // --- 3rd party: UEX --------------------------------------------------------------------------------
 
 /** Pull status, refinery terminals with their catalog match and yield bonuses, methods. */
-export async function getUex(db: Db, lang: string): Promise<UexResponse> {
-  const endpoints = await rows<UexEndpointStatus>(db, sql`
+/** The latest snapshot of every pulled UEX endpoint. */
+export function uexEndpoints(db: Db): Promise<UexEndpointStatus[]> {
+  return rows<UexEndpointStatus>(db, sql`
     SELECT DISTINCT ON (endpoint) endpoint, jsonb_array_length(data) AS rows,
       (count(*) OVER (PARTITION BY endpoint))::int AS snapshots, ${iso('fetched_at')} AS "changedAt", ${iso('checked_at')} AS "checkedAt"
     FROM ext.snapshot WHERE source = 'uex' ORDER BY endpoint, id DESC`);
+}
+
+export async function getUex(db: Db, lang: string): Promise<UexResponse> {
+  const endpoints = await uexEndpoints(db);
   const latest = async (endpoint: string) => (await one<{ data: Record<string, unknown>[] }>(db, sql`
     SELECT data FROM ext.snapshot WHERE source = 'uex' AND endpoint = ${endpoint} ORDER BY id DESC LIMIT 1`))?.data ?? [];
   const [yields, methods] = [await latest('refineries_yields'), await latest('refineries_methods')];
@@ -409,6 +417,46 @@ export async function getUex(db: Db, lang: string): Promise<UexResponse> {
     refineries: refineries.sort((a, b) => a.system.localeCompare(b.system) || a.place.localeCompare(b.place)),
     ores: [...ores].sort((a, b) => a.localeCompare(b)),
     methods: await joinMethods(db, lang, methods),
+  };
+}
+
+/** Trade coverage: what of the catalog the UEX trade data (trade.ts) reach, matched the same way. */
+export async function getUexTrade(db: Db, lang: string): Promise<UexTradeResponse> {
+  const rowCount = new Map((await uexEndpoints(db)).map((e) => [e.endpoint, e.rows]));
+  const names = (await rows<{ name: string }>(db, sql`
+    SELECT c->>'name' AS name FROM ext.snapshot s CROSS JOIN jsonb_array_elements(s.data) c
+    WHERE s.id = (SELECT max(id) FROM ext.snapshot WHERE source = 'uex' AND endpoint = 'commodities') AND c->>'name' IS NOT NULL`))
+    .map((c) => c.name);
+  // The English name as trade.ts matches it; the shown name in the requested language
+  const resources = await rows<{ uuid: string; name: string; nameEn: string; isOre: boolean }>(db, sql`
+    SELECT r.uuid, coalesce(${text(lang, sql`r.name_key`)}, r.key) AS name, coalesce(${text('en', sql`r.name_key`)}, r.key) AS "nameEn",
+      r.is_ore AS "isOre"
+    FROM catalog.resource r WHERE r.retired_at IS NULL`);
+  const items = await rows<{ uuid: string; gear: boolean }>(db, sql`
+    SELECT i.uuid, (i.type IN (${sql.join(COMPONENT_TYPES.map((t) => sql`${t}`), sql`, `)}) OR ${sql.raw(fpsTypeSql('i'))}) AS gear
+    FROM catalog.item i WHERE i.retired_at IS NULL`);
+  const trade = await tradeData(db);
+
+  const resourceKeys = new Set(resources.map((r) => nameKey(r.nameEn)));
+  const commodityKeys = new Set(names.map(nameKey));
+  const unmatched = resources.filter((r) => !commodityKeys.has(nameKey(r.nameEn)));
+  const gear = items.filter((i) => i.gear);
+  return {
+    terminals: rowCount.get('terminals') ?? 0,
+    commodityPrices: rowCount.get('commodities_prices_all') ?? 0,
+    itemPrices: rowCount.get('items_prices_all') ?? 0,
+    commodities: {
+      total: names.length,
+      matched: names.filter((n) => resourceKeys.has(nameKey(n))).length,
+      unmatched: names.filter((n) => !resourceKeys.has(nameKey(n))).sort((a, b) => a.localeCompare(b)),
+    },
+    resources: {
+      total: resources.length,
+      matched: resources.length - unmatched.length,
+      priced: resources.filter((r) => trade.has(r.uuid)).length,
+      unmatched: unmatched.map(({ uuid, name, isOre }) => ({ uuid, name, isOre })).sort((a, b) => a.name.localeCompare(b.name)),
+    },
+    items: { priced: items.filter((i) => trade.has(i.uuid)).length, gear: gear.length, gearPriced: gear.filter((i) => trade.has(i.uuid)).length },
   };
 }
 

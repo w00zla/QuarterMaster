@@ -367,6 +367,20 @@ export interface UexResponse {
   methods: UexMethod[];
 }
 
+/** How far the UEX trade data cover the catalog (`src/ext/trade.ts`: commodities by English name, items by UUID). */
+export interface UexTradeResponse {
+  // Rows of the latest snapshots; 0 without one
+  terminals: number;
+  commodityPrices: number;
+  itemPrices: number;
+  // UEX commodities with a catalog resource of the same name; the others' names, alphabetical
+  commodities: { total: number; matched: number; unmatched: string[] };
+  // Resources not retired: with a matching commodity, with at least one price; the ones without a commodity
+  resources: { total: number; matched: number; priced: number; unmatched: { uuid: string; name: string; isOre: boolean }[] };
+  // Items not retired with at least one price; gear = ship components and FPS gear (src/catalog/components.ts)
+  items: { priced: number; gear: number; gearPriced: number };
+}
+
 // --- users and orgs (read-only: app, bot and the columns of web.session/web.api_token qm_app may read) ---
 
 /** A user's name: the Discord profile of the newest web login (or of the companion token), else the org nickname. */
@@ -387,6 +401,13 @@ export interface OrgRow {
   baseLang: string | null;
   logsChannelId: string | null;
   logsLevel: string | null;
+  // The board (bot.guild); no channel = no board, no message = not posted yet
+  boardChannelId: string | null;
+  boardMessageId: string | null;
+  boardStyle: string | null;
+  // null = the org name / no subtitle
+  boardTitle: string | null;
+  boardSubtitle: string | null;
   membersActive: number;
   membersInactive: number;
   // Batches shared there whose owner is an active member (what the org sees)
@@ -404,10 +425,14 @@ export interface OrgMemberRow extends UserRef {
   rsiHandle: string | null;
 }
 
+/** Items are gear (ship components, FPS gear: src/catalog/components.ts) or harvestables (every other item). */
+export type StockGroup = 'resource' | 'harvestable' | 'gear';
+
 /** Stored stock of one material, summed. */
 export interface MaterialTotal {
   uuid: string;
   name: string;
+  group: StockGroup;
   unit: 'SCU' | 'pcs';
   // Exact decimal text without trailing zeros
   total: string;
@@ -423,7 +448,17 @@ export interface MaterialTotal {
 export interface OrgDetail extends OrgRow {
   members: OrgMemberRow[];
   stock: MaterialTotal[];
+  // The newest 20 history rows naming the org (guild_id)
+  activity: OrgActivityRow[];
 }
+
+export interface OrgActivityRow extends Omit<UserHistoryRow, 'byOther' | 'org'> {
+  actorUserId: string;
+  actorName: string | null;
+}
+
+/** Where an action came from (app.history.source). */
+export type ActivitySource = 'bot' | 'webapp' | 'companion';
 
 export interface UserRow extends UserRef {
   discordUsername: string | null;
@@ -435,11 +470,14 @@ export interface UserRow extends UserRef {
   // Stored batches (refinery jobs apart)
   batches: number;
   resourceScu: string;
-  itemPcs: string;
+  harvestablePcs: string;
+  gearPcs: string;
   refineryJobs: number;
   blueprints: number;
   // Newest history row with the user as actor
   lastActivity: string | null;
+  // Sources of the user's own actions (actor) in the last 30 days, sorted
+  channels: ActivitySource[];
   // Newest web session activity
   lastSeen: string | null;
   companion: boolean;
@@ -454,10 +492,12 @@ export interface UserMembership {
   inactiveSince: string | null;
 }
 
+/** A running refinery job: its batches are refined materials with the expected yield. */
 export interface UserRefineryJob {
   jobId: string;
   location: string;
-  ores: string[];
+  // Largest first
+  materials: { name: string; amount: string; quality: number }[];
   scu: string;
   startedAt: string | null;
   endsAt: string | null;
@@ -483,11 +523,13 @@ export interface UserDetail extends UserRow {
   sessions: number;
   tokenCreatedAt: string | null;
   tokenLastUsedAt: string | null;
+  // The user's own actions (actor) in the last 30 days per source
+  actions: Record<ActivitySource, number>;
   memberships: UserMembership[];
   stock: MaterialTotal[];
   jobs: UserRefineryJob[];
   blueprintList: { uuid: string; name: string }[];
-  // The newest 20 rows with the user as actor, owner or recipient
+  // The newest 50 rows with the user as actor, owner or recipient
   history: UserHistoryRow[];
 }
 
@@ -509,6 +551,33 @@ export interface DataCheck {
   hits: DataCheckHit[];
 }
 
+// --- status: is everything running ---
+
+export type Health = 'ok' | 'warn' | 'err';
+
+/** One logs channel: history rows it would post that the bot has not worked off yet. */
+export interface StatusBotLogs {
+  guildId: string;
+  org: string;
+  level: 'stock' | 'blueprints' | 'all';
+  // false = the bot has not set its mark yet (it does on its next round)
+  marked: boolean;
+  // Rows waiting, counted up to 100
+  pending: number;
+  oldestPendingAt: string | null;
+  state: Health;
+}
+
+export interface StatusResponse {
+  checkedAt: string;
+  game: GameInfo | null;
+  uex: (UexEndpointStatus & { state: Health })[];
+  botLogs: StatusBotLogs[];
+  history: { total: number; newestAt: string | null };
+  // Hits of all user data checks together
+  checkHits: number;
+}
+
 // --- bot status texts ---
 
 export interface StatusQuote {
@@ -516,4 +585,170 @@ export interface StatusQuote {
   text: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// --- dashboard and activity ---
+
+/** One app.history row, names resolved. */
+export interface ActivityRow {
+  id: number;
+  at: string;
+  source: ActivitySource;
+  category: 'stock' | 'refinery' | 'blueprint';
+  action: string;
+  // Who did it, whose data it touched, the new owner of a give
+  actor: UserRef;
+  owner: UserRef;
+  toOwner: UserRef | null;
+  // The org involved (sharing, taking back, the org a give happened in)
+  guildId: string | null;
+  org: string | null;
+  targetKind: 'resource' | 'item' | 'blueprint';
+  targetUuid: string;
+  // Material name in the text language, the blueprint's label
+  target: string;
+  amount: string | null;
+  unit: 'SCU' | 'pcs' | null;
+  quality: number | null;
+  // From details.locationUuid / details.toLocationUuid (a move)
+  location: string | null;
+  toLocation: string | null;
+  details: Record<string, unknown>;
+}
+
+/** Newest first; `next` = the `before` of the next page, null at the end. */
+export interface ActivityResponse {
+  rows: ActivityRow[];
+  next: number | null;
+}
+
+/** Something that needs action, with the page that explains it. */
+export interface AttentionItem {
+  severity: 'warn' | 'err';
+  text: string;
+  to: string;
+}
+
+/** One UTC day (YYYY-MM-DD). */
+export interface DayCount {
+  day: string;
+  count: number;
+}
+
+export interface DaySources {
+  day: string;
+  bot: number;
+  webapp: number;
+  companion: number;
+}
+
+export interface DashboardResponse {
+  checkedAt: string;
+  // Errors first
+  attention: AttentionItem[];
+  kpis: {
+    // Distinct actors in the last 7 days; series: distinct actors per day, the last 30 days
+    activeUsers: { value: number; known: number; series: DayCount[] };
+    // History rows in the last 7 days; series: rows per day, the last 30 days
+    actions: { value: number; bySource: Record<ActivitySource, number>; series: DayCount[] };
+    // Orgs with the bot on the server, distinct active members there
+    orgs: { withBot: number; total: number; activeMembers: number };
+    // Stored batches (refinery jobs apart); exact decimal text
+    stock: { batches: number; owners: number; resourceScu: string; itemPcs: string; gearPcs: string };
+    // Refinery jobs (distinct refine_job): ready = refine_ends_at passed; no end set counts as running
+    refinery: { running: number; ready: number };
+    // app.user_blueprint rows and distinct users; blueprint adds by the companion (history, all time)
+    blueprints: { owned: number; users: number; viaCompanion: number };
+  };
+  // The chosen number of days, oldest first, every day present
+  perDay: DaySources[];
+  // The newest 12 history rows
+  latest: ActivityRow[];
+  // Each step counted on its own (not nested): users without an org count in the later steps
+  reach: { known: number; inOrg: number; holdingData: number; webLogin30d: number; companion30d: number };
+  // Most recently active first
+  orgs: OrgRow[];
+  sources: {
+    game: GameInfo | null;
+    // null state = no data (UEX) / no logs channel (bot); checkedAt = the oldest endpoint's latest check
+    uex: { state: Health | null; checkedAt: string | null; endpoints: number };
+    botLogs: { state: Health | null; channels: number };
+    history: { total: number; newestAt: string | null };
+  };
+}
+
+// --- stock and refinery ---
+
+/** Stored stock of one subject over all users (refinery jobs are not stock yet). */
+export interface StockRow {
+  kind: 'resource' | 'item';
+  uuid: string;
+  name: string;
+  group: StockGroup;
+  // Gear: a ship component or FPS gear, by its item type
+  gear: 'ship' | 'fps' | null;
+  type: string | null;
+  typeLabel: string | null;
+  unit: 'SCU' | 'pcs';
+  // Exact decimal text without trailing zeros
+  total: string;
+  batches: number;
+  owners: number;
+  // Batches of it shared in any org, and the number of orgs it is shared in
+  shared: number;
+  orgs: number;
+  // Materials and harvestables only (gear is stored with quality 0)
+  minQuality: number | null;
+  maxQuality: number | null;
+  // Gear: batches with stats
+  withStats: number;
+}
+
+/** One batch of a subject. */
+export interface StockHolder {
+  batchId: number;
+  owner: UserRef;
+  location: string;
+  quantity: string;
+  // null for gear
+  quality: number | null;
+  // refining = a refinery job's expected yield, not stock yet
+  state: 'stored' | 'refining';
+  // A part its owner split off
+  lot: boolean;
+  // Org names it is shared in (also orgs the owner left)
+  orgs: string[];
+  // Gear: stats as the crafting check shows them ("+12.5 %", "+1")
+  stats: { name: string; value: string }[];
+}
+
+export interface StockSubject {
+  kind: 'resource' | 'item';
+  uuid: string;
+  name: string;
+  group: StockGroup;
+  gear: 'ship' | 'fps' | null;
+  type: string | null;
+  typeLabel: string | null;
+  unit: 'SCU' | 'pcs';
+  // Stored batches first, then refinery jobs
+  holders: StockHolder[];
+}
+
+// open = no end time; overdue = ready for more than OVERDUE_DAYS (users.ts)
+export type RefineryJobState = 'running' | 'ready' | 'overdue' | 'open';
+
+/** A refinery job: the batches sharing one `refine_job`. */
+export interface RefineryJob {
+  jobId: string;
+  owner: UserRef;
+  location: { uuid: string; name: string };
+  // At a UEX refinery (without UEX data every location counts)
+  atRefinery: boolean;
+  startedAt: string | null;
+  endsAt: string | null;
+  state: RefineryJobState;
+  // Expected yields, by name, best quality first
+  materials: { name: string; quantity: string; quality: number }[];
+  scu: string;
 }

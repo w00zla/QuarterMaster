@@ -46,5 +46,11 @@ location bonuses (server-side).
   time = 8 s/SCU × speed 1/2/6 × tier 1/4/16, the 8 s a stopgap: the measured base differs per ore).
   Corrections only by a new migration. `refiningMethods(db, lang)`, used by the admin UI only (no job
   estimates since the refinery books refined materials).
-- Admin UI tab **3rd Party** (`ThirdPartyView.vue`, `GET /api/ext/uex`): pull status per endpoint, refinery
+- Admin UI page **UEX** (`/uex`, `ThirdPartyView.vue`, `GET /api/ext/uex`): pull status per endpoint, refinery
   terminals with their catalog match, yield bonus matrix, methods (UEX ratings and our values joined by code).
+  Trade coverage (`GET /api/ext/uex/trade`, `getUexTrade` in `src/adminapp/queries.ts`, tested in
+  `test/admin-uex-trade.db.test.ts`): terminals and price rows, commodities matched to catalog resources (as
+  `trade.ts` does: `nameKey` of the English name of non-retired resources) and the unmatched names, resources
+  without a commodity, items with a price (by UUID) vs. the gear items (by `components.ts`); "priced" = in
+  `tradeData` (a price > 0 on one side), counts from the newest snapshots. The endpoints' freshness also shows
+  on the admin's Status page.

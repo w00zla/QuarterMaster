@@ -13,6 +13,7 @@ import { useFetch } from "../api";
 import { matches } from "../format";
 import { HELP } from "../help";
 import type { ItemDetail, ItemRow } from "../../../src/adminapp/api-types";
+import { isComponentType, isFpsType } from "../../../src/catalog/components";
 import type { ColumnSpec } from "../tableColumns";
 
 const route = useRoute();
@@ -25,6 +26,13 @@ const search = ref("");
 const type = ref("");
 const onlyInputs = ref(false);
 const showRetired = ref(false);
+// Gear (ship components or FPS gear by item type, src/catalog/components.ts), harvestables (other ingredients), the rest
+type Group = "ship" | "fps" | "harvestable" | "other";
+const group = ref<"" | "gear" | Group>("");
+const groupOf = (r: ItemRow): Group =>
+  isComponentType(r.type) ? "ship" : isFpsType(r.type, r.subType) ? "fps" : r.asInput > 0 ? "harvestable" : "other";
+const inGroup = (r: ItemRow) => !group.value || (group.value === "gear" ? ["ship", "fps"].includes(groupOf(r)) : groupOf(r) === group.value);
+const toggleGroup = (g: typeof group.value) => (group.value = group.value === g ? "" : g);
 
 const typeOptions = computed(() => [
   { value: "", label: "All types" },
@@ -32,11 +40,18 @@ const typeOptions = computed(() => [
     .sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
 ]);
 
-const rows = computed(() => (list.data.value ?? []).filter((r) =>
+// Every filter but the group: the group chips count these
+const filtered = computed(() => (list.data.value ?? []).filter((r) =>
   (showRetired.value || !r.retired)
   && (!type.value || r.type === type.value)
   && (!onlyInputs.value || r.asInput > 0)
   && matches(search.value, r.name, r.className, r.typeLabel, r.subTypeLabel)));
+const rows = computed(() => filtered.value.filter(inGroup));
+const groupCounts = computed(() => {
+  const counts: Record<Group, number> = { ship: 0, fps: 0, harvestable: 0, other: 0 };
+  for (const r of filtered.value) counts[groupOf(r)]++;
+  return counts;
+});
 const retiredCount = computed(() => (list.data.value ?? []).filter((r) => r.retired).length);
 
 const COLUMNS: ColumnSpec[] = [
@@ -77,6 +92,25 @@ function valueOf(r: ItemRow, key: string): string | number {
         <HelpTip :text="HELP.items" />
         <div class="divider" />
         <Dropdown v-model="type" :options="typeOptions" variant="small" />
+        <div class="chips">
+          <button type="button" class="chip" :class="{ active: group === 'gear' }" @click="toggleGroup('gear')">
+            Gear <span class="count">{{ groupCounts.ship + groupCounts.fps }}</span>
+          </button>
+          <button type="button" class="chip" :class="{ active: group === 'ship' }" @click="toggleGroup('ship')">
+            Ship <span class="count">{{ groupCounts.ship }}</span>
+          </button>
+          <button type="button" class="chip" :class="{ active: group === 'fps' }" @click="toggleGroup('fps')">
+            FPS <span class="count">{{ groupCounts.fps }}</span>
+          </button>
+          <button type="button" class="chip" :class="{ active: group === 'harvestable' }" @click="toggleGroup('harvestable')">
+            Harvestables <span class="count">{{ groupCounts.harvestable }}</span>
+          </button>
+          <button type="button" class="chip" :class="{ active: group === 'other' }" @click="toggleGroup('other')">
+            Other <span class="count">{{ groupCounts.other }}</span>
+          </button>
+          <HelpTip :text="HELP.itemGroups" />
+        </div>
+        <div class="divider" />
         <div class="chips">
           <button type="button" class="chip" :class="{ active: onlyInputs }" @click="onlyInputs = !onlyInputs">Ingredients</button>
           <HelpTip :text="HELP.ingredients" />

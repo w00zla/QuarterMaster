@@ -41,6 +41,7 @@ export const HELP = {
 
   // Items
   ingredients: "Only items used as ingredients by at least one active blueprint.",
+  itemGroups: "Gear: ship components (Ship) and FPS weapons, attachments and armor (FPS). Harvestables: other items used as ingredients by an active blueprint. Other: the rest.",
   crafted: "Active blueprints that craft this item.",
   ingredientIn: "Active blueprints using this item as an ingredient.",
 
@@ -55,5 +56,9 @@ export const HELP = {
   catalogImport: "A catalog snapshot (catalog-<channel>-<build>.json.gz) made by the extractor from a game install.",
   forceImport: "Override the safeguards against many retired or changed entries, and re-import identical data. Needs a new dry run.",
   allowDowngrade: "Allow a snapshot of an older game build than the last import. Needs a new dry run.",
+  textSources: "Every text source per language, highest priority first: the game itself (0), the app's own texts and imported text files. Per language and text, the source with the highest priority wins.",
   locImport: "An externally maintained global.ini, e.g. a community translation, as an extra text source. The source with the highest priority wins per text.",
+
+  // UEX
+  tradeCoverage: "How much of the catalog the UEX prices reach. UEX commodities have no game IDs: they match a resource by its English name (case and punctuation ignored). Items match by the game's UUID.",
 } as const;

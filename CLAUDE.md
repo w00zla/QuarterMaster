@@ -48,7 +48,7 @@ node --env-file-if-exists=.env --test test/plan.test.ts                         
 node --env-file-if-exists=.env --test --test-name-pattern="diffTexts" "test/**/*.test.ts"   # single test
 
 pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k"                  # -> local/snapshots/catalog-<channel>-<build>.json.gz
-pnpm catalog:import <snapshot.json.gz> [--label 4.10.2] [--dry-run] [--force] [--allow-downgrade] [--json]
+pnpm catalog:import <snapshot.json.gz> --label 4.10.2 [--dry-run] [--force] [--allow-downgrade] [--json]
 pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry-run] [--force]
 pnpm loc:import --remove --source <name> --lang <code>
 
@@ -119,7 +119,7 @@ docker compose run --rm bot node src/bot/register.ts    # after command changes
 - **Stock** (`docs/stock.md`): every batch belongs to one user, shared into orgs per batch (`stock_share`); refinery jobs are personal work orders holding refined materials (no ores); ship components are items with quality 0 and optional stat gains; `app.history` records every stock, refinery and blueprint action in the same transaction.
 - **Bot** (`docs/bot.md`): discord.js, options search, modals ask, panels show (Components V2, ephemeral); roster from member roles; logs channel from `app.history`; one board message per org kept current via `LISTEN qm_changes`.
 - **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth (PKCE), hashed session cookies, a strict CSP and same-origin checks, role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket messages that only say what changed; the companion authenticates with a per-user API token (`Bearer qmt_…`) and a version header.
-- **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth, catalog browser, imports, read-only user data and checks.
+- **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth; a control room (dashboard, status, activity), read-only user data (orgs, users, stock, refinery), catalog browser, imports, UEX, bot status texts.
 - **Companion** (`docs/companion.md`): Tauri 2 (Rust + Vue); `Game.log` unlocks; scan sessions that capture the game window (DXGI, Windows), read tooltips with PP-OCRv6 (ONNX, compiled in) and turn them into proposals the user registers through the web app's API; a click-through overlay over the game.
 - **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext` (refinery terminals and yield bonuses, refining methods; terminals, commodities, commodity and item prices, not used yet).
 

@@ -41,6 +41,12 @@ export const ICONS = {
   gear: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/><path d="M3 13h18"/><path d="M10 13v2h4v-2"/>',
   texts: '<path d="M4 5h8M8 3v2M5 11c2.5 0 5-2.7 5-6"/><path d="M6 8c1 1.8 2.7 3 5 3"/><path d="m12 21 4-9 4 9M13.5 18h5"/>',
   imports: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/>',
+  // Admin navigation: activity (a pulse), status (a gauge), stock (stacked boxes), the bot, the sidebar toggle
+  activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  status: '<path d="M4 18a8 8 0 1 1 16 0"/><path d="m12 18 4-6"/>',
+  stock: '<rect x="3" y="12" width="8" height="8" rx="1"/><rect x="13" y="12" width="8" height="8" rx="1"/><rect x="8" y="3" width="8" height="8" rx="1"/>',
+  bot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13v2M15 13v2"/>',
+  sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   // Item types
   'type-helmet': '<path d="M4 15a8 8 0 0 1 16 0v4H4z"/><path d="M8 15h8"/>',
   'type-torso': '<path d="M8 3 4 6v6l2 1v8h12v-8l2-1V6l-4-3"/><path d="M8 3a4 4 0 0 0 8 0"/>',

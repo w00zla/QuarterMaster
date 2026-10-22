@@ -3,8 +3,9 @@
 import { computed, ref } from "vue";
 import Icon from "./Icon.vue";
 
-const props = defineProps<{ value: unknown; label?: string }>();
-const open = ref(false);
+// `unfolded`: shown open at first (the activity list's expanded row)
+const props = defineProps<{ value: unknown; label?: string; unfolded?: boolean }>();
+const open = ref(props.unfolded ?? false);
 const copied = ref(false);
 const text = computed(() => JSON.stringify(props.value, null, 2));
 

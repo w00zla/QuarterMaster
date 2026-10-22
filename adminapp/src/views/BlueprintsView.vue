@@ -12,7 +12,7 @@ import TypeLabel from "../components/TypeLabel.vue";
 import { useFetch } from "../api";
 import { duration, matches, quantity } from "../format";
 import { HELP } from "../help";
-import type { BlueprintDetail, BlueprintModifier, BlueprintRow } from "../../../src/adminapp/api-types";
+import type { BlueprintDetail, BlueprintModifier, BlueprintRow, Overview } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
 const route = useRoute();
@@ -20,6 +20,9 @@ const router = useRouter();
 const list = useFetch<BlueprintRow[]>(() => "/blueprints");
 const selected = computed(() => (route.params.uuid as string | undefined) || null);
 const detail = useFetch<BlueprintDetail>(() => (selected.value ? `/blueprints/${selected.value}` : null));
+// The recipe facts above the table
+const overview = useFetch<Overview>(() => "/overview");
+const facts = computed(() => overview.data.value?.facts ?? null);
 
 const search = ref("");
 // Filter chain: category group -> item type -> size; each list only offers what the previous choice leaves
@@ -88,7 +91,7 @@ function modifierRange(range: BlueprintModifier["ranges"][number]): string {
   return `${bounds}: ${JSON.stringify(v)}`;
 }
 const signed = (n: number | undefined) => (n === undefined ? "?" : n >= 0 ? `+${n}` : String(n));
-const inputLink = (kind: string, uuid: string) => `/${kind === "resource" ? "resources" : "items"}/${uuid}`;
+const inputLink = (kind: string, uuid: string) => `/${kind === "resource" ? "materials" : "items"}/${uuid}`;
 </script>
 
 <template>
@@ -118,6 +121,22 @@ const inputLink = (kind: string, uuid: string) => `/${kind === "resource" ? "res
             <Icon name="close" :size="12" />
           </button>
         </div>
+      </div>
+      <div v-if="facts" class="facts">
+        <span class="fact">{{ facts.defaultBlueprints }} default <HelpTip :text="HELP.defaultBlueprint" /></span>
+        <span class="fact">{{ facts.qualityGated }} quality-gated <HelpTip :text="HELP.qualityGated" /></span>
+        <span class="fact">{{ facts.slotChoice }} with slot choice <HelpTip :text="HELP.slotsRequired" /></span>
+        <span class="fact">craft time ⌀ {{ duration(facts.avgCraftSeconds) }}</span>
+        <span v-if="facts.longestCraft" class="fact">
+          longest {{ duration(facts.longestCraft.seconds) }}
+          (<RouterLink :to="`/blueprints/${facts.longestCraft.uuid}`">{{ facts.longestCraft.name }}</RouterLink>)
+        </span>
+        <span class="fact">{{ facts.resourcesInRecipes }} materials · {{ facts.itemsInRecipes }} items in recipes</span>
+        <span v-if="facts.lastImport" class="fact">
+          last import <RouterLink :to="`/imports/${facts.lastImport.id}`">#{{ facts.lastImport.id }}</RouterLink>:
+          <span class="mono">+{{ facts.lastImport.added }} ~{{ facts.lastImport.changed }} −{{ facts.lastImport.retired }}<template v-if="facts.lastImport.revived"> ↺{{ facts.lastImport.revived }}</template></span>
+          <HelpTip :text="HELP.importCounts" />
+        </span>
       </div>
       <div v-if="list.error.value" class="empty-line">{{ list.error.value }}</div>
       <div v-else-if="list.loading.value && !list.data.value" class="empty-line">Loading…</div>
@@ -228,6 +247,22 @@ const inputLink = (kind: string, uuid: string) => `/${kind === "resource" ? "res
 </template>
 
 <style scoped>
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-dim);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .tier-head {
   display: flex;
   align-items: center;

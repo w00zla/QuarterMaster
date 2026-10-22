@@ -18,6 +18,16 @@ export function dateTime(iso: string | null): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** How long ago, coarse: "now", "12 min", "3 h", "5 d". */
+export function ago(iso: string | null, now = Date.now()): string {
+  if (!iso) return "—";
+  const min = Math.floor((now - Date.parse(iso)) / 60_000);
+  if (min < 1) return "now";
+  if (min < 60) return `${min} min`;
+  if (min < 48 * 60) return `${Math.floor(min / 60)} h`;
+  return `${Math.floor(min / (24 * 60))} d`;
+}
+
 // Tag style of a text source: the app's own texts, external files, the game.
 export function sourceTag(source: string): Record<string, boolean> {
   return { app: source === "app", accent: source !== "app" && source !== "game" };

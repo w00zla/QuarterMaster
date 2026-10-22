@@ -8,12 +8,12 @@ import { runImport, summarize } from './apply.ts';
 import { loadSnapshot } from './load.ts';
 import { ENTITY_NAMES } from './plan.ts';
 
-const HELP = `Usage: pnpm catalog:import <snapshot.json[.gz]> [options]
+const HELP = `Usage: pnpm catalog:import <snapshot.json[.gz]> --label <version> [options]
 
+  --label <text>            Required: the game version, e.g. 4.10.2 (snapshots carry none)
   --dry-run                 Run the full import in a transaction and roll it back
   --force                   Override mass-retire/mass-change safeguards, re-import an identical snapshot
   --allow-downgrade         Allow a snapshot older than the last import
-  --label <text>            Human readable version, e.g. 4.10.2 (replaces the snapshot's label)
   --max-retire-ratio <r>    Max share of active rows per entity that may be retired (default 0.1)
   --max-change-ratio <r>    Max share of active rows per entity that may change (default 0.5)
   --json                    Print the result as JSON instead of a report
@@ -35,7 +35,9 @@ async function main(): Promise<number> {
       'help': { type: 'boolean', short: 'h', default: false },
     },
   });
-  if (args.help || positionals.length !== 1) {
+  const label = args.label?.trim();
+  if (args.help || positionals.length !== 1 || !label) {
+    if (!args.help && positionals.length === 1) console.error('--label is required (the game version, e.g. 4.10.2)');
     console.log(HELP);
     return args.help ? 0 : 1;
   }
@@ -58,7 +60,7 @@ async function main(): Promise<number> {
   const file = positionals[0]!;
   const { snapshot, sha256: hash, timings: loadTimings } = loadSnapshot(readFileSync(file));
   Object.assign(timings, loadTimings);
-  if (args.label?.trim()) snapshot.game.label = args.label.trim();
+  snapshot.game.label = label;
 
   const g = snapshot.game;
   log(`Snapshot: ${g.channel} build ${g.build}${g.label ? ` "${g.label}"` : ''} (${g.branch}) extracted ${snapshot.extractedAt}`);

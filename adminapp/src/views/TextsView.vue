@@ -112,7 +112,7 @@ const resultValue = (r: LocSearchRow, key: string) => r[key as keyof LocSearchRo
           :row-key="(r) => r.key"
           :value-of="resultValue"
           :selected="selected"
-          @select="(r) => router.push(`/localisation/${encodeURIComponent(r.key)}`)"
+          @select="(r) => router.push(`/texts/${encodeURIComponent(r.key)}`)"
         >
           <template #cell-key="{ row }"><span class="mono">{{ row.key }}</span></template>
           <template #cell-source="{ row }"><span class="tag" :class="sourceTag(row.source)">{{ row.source }}</span></template>
@@ -126,7 +126,7 @@ const resultValue = (r: LocSearchRow, key: string) => r[key as keyof LocSearchRo
       :title="selected"
       :loading="detail.loading.value && !detail.data.value"
       :error="detail.error.value"
-      @close="router.push('/localisation')"
+      @close="router.push('/texts')"
     >
       <template v-if="detail.data.value">
         <div v-if="!detail.data.value.values.length" class="empty-line">No texts for this key</div>

@@ -11,7 +11,7 @@ import { syncMember } from '../src/bot/roster.ts';
 import { addBlueprint } from '../src/bot/blueprints.ts';
 import { ensureGuild, markGuildLeft, updateGuildSettings } from '../src/bot/settings.ts';
 import { storeSnapshot } from '../src/ext/store.ts';
-import { add, refineStart, type Actor } from '../src/stock/service.ts';
+import { COMPONENT_QUALITY, add, refineStart, type Actor } from '../src/stock/service.ts';
 import { createSession } from '../src/webapp/session.ts';
 import { createApiToken } from '../src/webapp/token.ts';
 import { getDataChecks, getOrg, getOrgs, getUser, getUsers } from '../src/adminapp/users.ts';
@@ -20,6 +20,7 @@ import { U, fixtureSnapshot } from './fixtures.ts';
 const url = process.env.TEST_DATABASE_URL;
 const [G, G2] = ['700000000000000061', '700000000000000062'];
 const ROLE = '710000000000000061';
+const BOARD = '720000000000000061';
 const [OLGA, MIA, SOLO] = ['740000000000000061', '740000000000000062', '740000000000000063'];
 
 describe('admin: users, orgs and data checks (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
@@ -34,14 +35,15 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
 
     await ensureGuild(db, G, 'Alpha Org');
-    const settings = await updateGuildSettings(db, G, { memberRoleIds: [ROLE] });
+    const settings = await updateGuildSettings(db, G, { memberRoleIds: [ROLE], boardChannelId: BOARD, boardStyle: 'table', boardTitle: 'Alpha Board' });
     await ensureGuild(db, G2, 'Beta Org');
     for (const id of [OLGA, MIA]) {
       await syncMember(db, G, settings, id, { userId: id, displayName: `nick${id.slice(-2)}`, roleIds: [ROLE], bot: false });
     }
     await markGuildLeft(db, G2);
 
-    // Olga: web login and companion token, shared stock and a blueprint; Mia: bot only; Solo: no org, a refinery job
+    // Olga: web login and companion token, shared stock, a harvestable, a component and a blueprint; Mia: bot only;
+    // Solo: no org, a refinery job
     const web = connectAs(url, 'qm_web');
     try {
       await createSession(web.db, { id: OLGA, username: 'olga', globalName: 'Olga O.', avatar: null });
@@ -52,7 +54,8 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     }
     await add(db, actor(OLGA, G), { kind: 'resource', uuid: U.metal, locationUuid: U.station, quality: 700, amount: '12.5', org: true });
     await add(db, actor(OLGA), { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 500, amount: '3' });
-    await add(db, actor(MIA, G), { kind: 'resource', uuid: U.metal, locationUuid: U.station, quality: 800, amount: '2', org: true });
+    await add(db, { ...actor(MIA, G), source: 'bot' }, { kind: 'resource', uuid: U.metal, locationUuid: U.station, quality: 800, amount: '2', org: true });
+    await add(db, actor(OLGA), { kind: 'item', uuid: U.output, locationUuid: U.station, quality: COMPONENT_QUALITY, amount: '1' });
     await addBlueprint(db, OLGA, U.blueprint2, 'webapp');
     await refineStart(db, actor(SOLO), { locationUuid: U.station, durationSeconds: 3600, rows: [{ resourceUuid: U.metal, quality: 400, amount: '8' }] });
   });
@@ -64,14 +67,21 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
       ['Alpha Org', 2, 2, 1, true], ['Beta Org', 0, 0, 0, false],
     ]);
     assert.ok(orgs[0]!.lastActivity);
+    assert.deepEqual(orgs.map((o) => [o.boardChannelId, o.boardMessageId, o.boardStyle, o.boardTitle, o.boardSubtitle]), [
+      [BOARD, null, 'table', 'Alpha Board', null], [null, null, 'list', null, null],
+    ]);
 
     const org = (await getOrg(db, G, 'en'))!;
     assert.deepEqual(org.members.map((m) => [m.userId, m.name, m.displayName, m.active]), [
       [OLGA, 'Olga O.', 'nick61', true], [MIA, 'nick62', 'nick62', true],
     ]);
     // Only what is shared there: the metal of both, not Olga's unshared gem
-    assert.deepEqual(org.stock.map((s) => [s.uuid, s.total, s.unit, s.batches, s.owners, s.minQuality, s.maxQuality]), [
-      [U.metal, '14.5', 'SCU', 2, 2, 700, 800],
+    assert.deepEqual(org.stock.map((s) => [s.uuid, s.group, s.total, s.unit, s.batches, s.owners, s.minQuality, s.maxQuality]), [
+      [U.metal, 'resource', '14.5', 'SCU', 2, 2, 700, 800],
+    ]);
+    // History rows naming the org, newest first: the shares of both (the adds name no org)
+    assert.deepEqual(org.activity.map((h) => [h.actorUserId, h.actorName, h.source, h.action, h.amount, h.unit]), [
+      [MIA, 'nick62', 'bot', 'share', '2', 'SCU'], [OLGA, 'Olga O.', 'webapp', 'share', '12.5', 'SCU'],
     ]);
     assert.equal(await getOrg(db, '700000000000000099', 'en'), null);
   });
@@ -80,20 +90,27 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     const users = new Map((await getUsers(db)).map((u) => [u.userId, u]));
     assert.deepEqual([...users.keys()].sort(), [OLGA, MIA, SOLO]);
     const olga = users.get(OLGA)!;
-    assert.deepEqual([olga.name, olga.discordUsername, olga.orgs, olga.batches, olga.resourceScu, olga.itemPcs, olga.blueprints, olga.companion],
-      ['Olga O.', 'olga', ['Alpha Org'], 2, '12.5', '3', 1, true]);
+    // Items split: the gem is a harvestable, the cooler gear
+    assert.deepEqual([olga.name, olga.discordUsername, olga.orgs, olga.batches, olga.resourceScu, olga.harvestablePcs, olga.gearPcs, olga.blueprints, olga.companion],
+      ['Olga O.', 'olga', ['Alpha Org'], 3, '12.5', '3', '1', 1, true]);
     assert.ok(olga.lastSeen && olga.lastActivity);
+    assert.deepEqual(olga.channels, ['webapp']);
     // Bot only: the nickname, no web data
     const mia = users.get(MIA)!;
-    assert.deepEqual([mia.name, mia.discordUsername, mia.lastSeen, mia.companion], ['nick62', null, null, false]);
+    assert.deepEqual([mia.name, mia.discordUsername, mia.lastSeen, mia.companion, mia.channels], ['nick62', null, null, false, ['bot']]);
     // No org: the Discord username of the login; the refinery job is no stored batch
     const solo = users.get(SOLO)!;
     assert.deepEqual([solo.name, solo.orgs, solo.batches, solo.resourceScu, solo.refineryJobs], ['solo', [], 0, '0', 1]);
 
     const detail = (await getUser(db, OLGA, 'en'))!;
     assert.deepEqual([detail.sessions, !!detail.tokenCreatedAt, detail.tokenLastUsedAt], [1, true, null]);
+    // Add and share of the metal, the gem, the cooler, the blueprint
+    assert.deepEqual(detail.actions, { bot: 0, webapp: 5, companion: 0 });
     assert.deepEqual(detail.memberships.map((m) => [m.org, m.displayName, m.active]), [['Alpha Org', 'nick61', true]]);
-    assert.deepEqual(detail.stock.map((s) => [s.uuid, s.total, s.shared]), [[U.metal, '12.5', 1], [U.gem, '3', 0]]);
+    // Resources, harvestables, gear
+    assert.deepEqual(detail.stock.map((s) => [s.uuid, s.group, s.total, s.shared]), [
+      [U.metal, 'resource', '12.5', 1], [U.gem, 'harvestable', '3', 0], [U.output, 'gear', '1', 0],
+    ]);
     assert.deepEqual(detail.blueprintList.map((b) => b.uuid), [U.blueprint2]);
     // Newest first; blueprints without a unit, stock with its own
     assert.deepEqual([detail.history[0]!.category, detail.history[0]!.action, detail.history[0]!.unit], ['blueprint', 'add', null]);
@@ -101,7 +118,7 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     assert.ok(detail.history.every((h) => !h.byOther && h.target));
 
     const job = (await getUser(db, SOLO, 'en'))!.jobs;
-    assert.deepEqual(job.map((j) => [j.scu, j.ores.length, !!j.endsAt]), [['8', 1, true]]);
+    assert.deepEqual(job.map((j) => [j.scu, j.materials.map((m) => [m.amount, m.quality]), !!j.endsAt]), [['8', [['8', 400]], true]]);
     assert.equal(await getUser(db, '740000000000000099', 'en'), null);
   });
 
@@ -122,7 +139,7 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     assert.deepEqual(checks.get('overdueJob')!.map((h) => [h.userId, h.name, h.amount, h.unit]), [[SOLO, 'solo', '8', 'SCU']]);
 
     await db.execute(sql`UPDATE catalog.location SET retired_at = now() WHERE uuid = ${U.station}`);
-    // Every batch sits there: Olga's two, Mia's one, Solo's job
-    assert.equal((await count()).retiredLocation, 4);
+    // Every batch sits there: Olga's three, Mia's one, Solo's job
+    assert.equal((await count()).retiredLocation, 5);
   });
 });
