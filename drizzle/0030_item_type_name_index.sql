@@ -1,0 +1,1 @@
+CREATE INDEX "item_type_name_key_index" ON "catalog"."item" USING btree ("type","name_key");

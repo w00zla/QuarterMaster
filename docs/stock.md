@@ -53,6 +53,13 @@ whole `app`/`bot`/`web` split).
   414 of 1243 in 4.10) only the plain part counts: a blueprint's output first, else the shortest class name;
   items without a name are left as they are (2026-10-19). Not retired; locations per
   `selectableLocationSql()`.
+- **FPS gear** (2026-10-22) counts as gear like the ship components (`componentItemSql`, the same `component`
+  flag and rules): items whose type and sub type are in `FPS_TYPES` (`src/catalog/components.ts`): personal
+  weapons (Small/Medium/Large, knives, gadgets like the multitool, tractor and salvage tools, binoculars),
+  attachments (optics, barrels, underbarrels, multitool heads), mining gadgets, armor (helmet, torso, arms,
+  legs, backpack, undersuit). Nothing stackable: grenades, magazines, medpens and food stay out. The plain-part
+  rule also drops their AI and test variants. The check looks items up by type and name (index of migration
+  `0030`; without it, one evaluation over 4300 items took 1.1 s).
 - Components are `kind = 'item'`, always quality `COMPONENT_QUALITY` (0; others refused with
   `invalidQuality`), instead optional **stats** (migration `0027`: `stats` jsonb on `stock_batch`, part of
   the merge key, and `stock_journal`; in the history's `details.stats`): `{crafted property UUID: text}`,
@@ -61,11 +68,13 @@ whole `app`/`bot`/`web` split).
   component is never recorded worse than a looted one), only the stats their blueprints' slots can improve
   (`componentStats`: Cooler = Coolant Rating + Integrity, …; flat ranges left out), each within its bounds.
 - Bounds (`src/stock/component-stats.ts`, pure, tested in `test/component-stats.test.ts`): `statBounds` per
-  blueprint, min always 0, the max with the planner's unverified `combine` assumption (multipliers multiply,
-  steps add up; community tools disagree; one IcePlunge craft with both slots at Q1000 decides: 26.57 =
-  product, 26.40 = sum), the percent rounded up; `checkStats` drops "0" and sorts the keys (else
-  `invalidStats`), so the same stats merge; `unionBounds` over several blueprints; `statValue`,
-  `statValueText` ("+12.5 %" / "+1").
+  blueprint, from no change to what Q1000 makes of the stat (decided 2026-10-22: each slot's modifier at the
+  end of its highest range): a gain (min 0, e.g. coolant +20 %) or a drop (max 0: recoil 1.4 at Q0 → 0.6 at
+  Q1000 = −40 %, quantum fuel burn −20 %; `statBest` gives the end that counts), combined with the planner's
+  unverified `combine` assumption (multipliers multiply, steps add up; community tools disagree; one
+  IcePlunge craft with both slots at Q1000 decides: 26.57 = product, 26.40 = sum), the percent rounded away
+  from 0; `checkStats` drops "0" and sorts the keys (else `invalidStats`), so the same stats merge;
+  `unionBounds` over several blueprints; `statValue`, `statValueText` ("+12.5 %" / "+1").
 - `add` sets stats, `adjust` changes them (`stats`: the whole new set, `{}` = none, omitted = unchanged;
   other stats re-key the batch with a move_out/move_in pair into an existing batch with those stats, which
   keeps its shares, or a new one, which takes this one's; history adjust with `details.statsFrom`);
@@ -76,7 +85,9 @@ whole `app`/`bot`/`web` split).
   Strength, Quantum Speed (× 1e-6), Quantum Fuel Burn (× 1000), the radar assist distances; null for the
   rest; the companion converts the tooltip's absolute values with it) and marks them `component` with a
   unique `label` ("Name · Cooler · S3 · B Industrial": the type instead of a manufacturer, the class name
-  where that still collides). `loadBatches` marks their batches (`PickableBatch.component`), the summary
+  where that still collides; FPS gear with its sub type and without a size but on attachments: "Name ·
+  Helmets · Light", "Name · Attachment · Barrel · S1"). The bases are read only for the stats an item's
+  blueprints change (the jsonpaths over every gear record took 1.3 s). `loadBatches` marks their batches (`PickableBatch.component`), the summary
   metrics (`stockMetricsSql` in `org-summary.ts`) count them as `components` apart from `items`. The bot does
   not tell them apart yet.
 

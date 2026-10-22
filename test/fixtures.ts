@@ -244,6 +244,42 @@ export const RECORDS: Record<string, unknown> = {
   }),
 };
 
+const gearItem = (name: string, id: string, def: Record<string, unknown>) => rec(`EntityClassDefinition.${name}`, id, {
+  _Type_: 'EntityClassDefinition', Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Size: 1, Grade: 1, ...def } }],
+});
+
+export const FPS = {
+  rifle: '10000000-0000-0000-0000-000000000030',
+  helmet: '10000000-0000-0000-0000-000000000031',
+  optic: '10000000-0000-0000-0000-000000000032',
+  magazine: '10000000-0000-0000-0000-000000000033',
+  grenade: '10000000-0000-0000-0000-000000000034',
+  template: '10000000-0000-0000-0000-000000000035',
+  unnamed: '10000000-0000-0000-0000-000000000036',
+  jacket: '10000000-0000-0000-0000-000000000037',
+};
+
+/** FPS gear outside the blueprints (looted or bought), with what must stay out: stackables, templates,
+ * nameless records, clothing. Kept apart from RECORDS: only the tests that need FPS gear add them. */
+export const FPS_RECORDS: Record<string, unknown> = {
+  'entities/scitem/weapons/fps_weapons/test_rifle.json': gearItem('test_rifle', FPS.rifle,
+    { Type: 'WeaponPersonal', SubType: 'Medium', Size: 3, Localization: { Name: '@item_Nametest_rifle' } }),
+  'entities/scitem/characters/human/armor/test_helmet.json': gearItem('test_helmet', FPS.helmet,
+    { Type: 'Char_Armor_Helmet', SubType: 'Light', Localization: { Name: '@item_Nametest_helmet' } }),
+  'entities/scitem/weapons/weapon_modifier/test_optic.json': gearItem('test_optic', FPS.optic,
+    { Type: 'WeaponAttachment', SubType: 'IronSight', Size: 2, Localization: { Name: '@item_Nametest_optic' } }),
+  'entities/scitem/weapons/magazines/test_rifle_mag.json': gearItem('test_rifle_mag', FPS.magazine,
+    { Type: 'WeaponAttachment', SubType: 'Magazine', Localization: { Name: '@item_Nametest_rifle_mag' } }),
+  'entities/scitem/weapons/throwable/test_grenade.json': gearItem('test_grenade', FPS.grenade,
+    { Type: 'WeaponPersonal', SubType: 'Grenade', Localization: { Name: '@item_Nametest_grenade' } }),
+  'entities/scitem/weapons/fps_weapons/test_rifle_template.json': gearItem('test_rifle_template', FPS.template,
+    { Type: 'WeaponPersonal', SubType: 'Medium', Localization: { Name: '@item_Nametest_rifle' } }),
+  'entities/scitem/weapons/melee/test_knife.json': gearItem('test_knife', FPS.unnamed,
+    { Type: 'WeaponPersonal', SubType: 'Knife', Localization: { Name: '@LOC_PLACEHOLDER' } }),
+  'entities/scitem/characters/human/clothing/test_jacket.json': gearItem('test_jacket', FPS.jacket,
+    { Type: 'Char_Clothing_Torso_1', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_jacket' } }),
+};
+
 export const INI_EN = '\uFEFFitems_commodities_testmetal=Test Metal\r\nitems_commodities_testmetal_ore=Test Metal (Ore)\r\n'
   + 'item_NameTEST_Output=Test Cooler \\n\r\ncrafting_ui_slotname_frame,P=Frame\r\nunrelated_key=Not referenced\r\n'
   // A no-break space after "Class:" as in the QuikCool's text

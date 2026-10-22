@@ -84,7 +84,8 @@ export const item = catalog.table('item', {
   nameKey: text('name_key'),
   descriptionKey: text('description_key'),
   ...lifecycle(),
-}, (t) => [index().on(t.className)]);
+  // The "plain part" check of gear (componentItemSql) looks up items by type and name
+}, (t) => [index().on(t.className), index().on(t.type, t.nameKey)]);
 
 export const blueprintCategory = catalog.table('blueprint_category', {
   uuid: uuid('uuid').primaryKey(),

@@ -108,6 +108,14 @@ describe('tooltip lines', () => {
     assert.equal(statFromTooltip(stat(PIPS, 'Power Pips', 16, 'additive', 2), '19'), null);
   });
 
+  it('mirrors a stat whose improvement is a drop (quantum fuel burn): lower is the gain', () => {
+    const fuel = { ...stat(SPEED, 'Quantum Fuel Burn', 7.55), min: -20, max: 0 };
+    assert.equal(statFromTooltip(fuel, '7.55 per Km'), '0');
+    assert.equal(statFromTooltip(fuel, '6.80 per Km'), '-9.9');
+    assert.equal(statFromTooltip(fuel, '8.00 per Km'), null, 'worse than the base');
+    assert.equal(statFromTooltip(fuel, '5.00 per Km'), null, 'beyond the blueprint');
+  });
+
   it('reads the stats of a component off its lines in any language, ignoring the rest', () => {
     const cat = catalog();
     const blizzard = cat.components.find((c) => c.uuid === BLIZZARD)!;

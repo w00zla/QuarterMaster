@@ -303,7 +303,8 @@ Ship components only (`components.rs`, pure part `components.ts`), read in the c
   names (`CatalogStat.name` per language, `nameKey` in the pack); the absolute value converted to the stored
   gain with `CatalogStat.base` (`statFromTooltip`): an unmodified component reads as ±0; "no stats" only
   when the tooltip had no stat lines (weapons, event items); a value below the base beyond rounding, above
-  the blueprint's bound, unparsable or without a known base = "Stats not readable" (no proposal, listed in
+  the blueprint's bound (mirrored for a stat whose improvement is a drop, e.g. quantum fuel burn, since
+  2026-10-22), unparsable or without a known base = "Stats not readable" (no proposal, listed in
   the debug window with the reason, like unknown or ambiguous titles).
 - A sighting's identity is **page + content row + units + content** (a tile hovered again after a scroll is
   the same sighting, equal components on other tiles stay apart). A tooltip counts only once the cursor

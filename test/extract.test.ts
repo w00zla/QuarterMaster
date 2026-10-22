@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { displayText, isMissingTranslation, locKey, parseGlobalIni } from '../src/catalog/extract/localization.ts';
 import { refPath } from '../src/catalog/extract/records.ts';
 import { snapshotSchema } from '../src/catalog/snapshot.ts';
-import { RECORDS, U, fixtureSnapshot } from './fixtures.ts';
+import { FPS, FPS_RECORDS, RECORDS, U, fixtureSnapshot } from './fixtures.ts';
 
 describe('localization', () => {
   it('parses global.ini with BOM, CRLF, suffixes and "=" in values', () => {
@@ -87,6 +87,13 @@ describe('normalize', () => {
     assert.deepEqual([out.gradeLetter, out.itemClass], ['B', 'Military']);
     assert.deepEqual([s.items.find((i) => i.uuid === U.gem)!.gradeLetter, s.items.find((i) => i.uuid === U.gem)!.itemClass], [null, null]);
     assert.deepEqual(s.manufacturers.map((m) => [m.code, m.descriptionKey]), [['TEST', null]]);
+  });
+
+  it('takes named FPS gear outside the blueprints, but no stackables, templates, nameless records or clothing', () => {
+    const fps = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS });
+    assert.deepEqual(fps.items.map((i) => i.uuid).sort(), [U.output, U.gem, FPS.rifle, FPS.helmet, FPS.optic].sort());
+    const helmet = fps.items.find((i) => i.uuid === FPS.helmet)!;
+    assert.deepEqual([helmet.type, helmet.subType], ['Char_Armor_Helmet', 'Light']);
   });
 
   it('derives blueprint sources from released contracts and event tiers', () => {

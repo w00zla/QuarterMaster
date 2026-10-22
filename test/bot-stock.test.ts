@@ -78,8 +78,15 @@ describe('/qm-gear stats field', () => {
   it('refuses changed lines and values out of bounds, naming the line', () => {
     assert.throws(() => parseStatLines('Coolant Rating (max. +20.0 %): 5', stats), refused('stock.err.statLines'));
     assert.throws(() => parseStatLines('Coolant (max. +20.0 %): 5\nPower Pips (max. +2): 0', stats), refused('stock.err.statLine', { line: 1 }));
-    assert.throws(() => parseStatLines('Coolant Rating (max. +20.0 %): 21\nPower Pips (max. +2): 0', stats), refused('stock.err.statValue', { line: 1, max: '20 %' }));
-    assert.throws(() => parseStatLines('Coolant Rating (max. +20.0 %): 5\nPower Pips (max. +2): 1.5', stats), refused('stock.err.statValue', { line: 2, max: '2' }));
+    assert.throws(() => parseStatLines('Coolant Rating (max. +20.0 %): 21\nPower Pips (max. +2): 0', stats), refused('stock.err.statValue', { line: 1, min: 0, max: '20 %' }));
+    assert.throws(() => parseStatLines('Coolant Rating (max. +20.0 %): 5\nPower Pips (max. +2): 1.5', stats), refused('stock.err.statValue', { line: 2, min: 0, max: '2' }));
     assert.throws(() => parseStatLines('Coolant Rating (max. +20.0 %): -5\nPower Pips (max. +2): 0', stats), refused('stock.err.statValue'));
+  });
+
+  it('shows the best of a stat whose improvement is a drop (recoil) and takes values down to it', () => {
+    const recoil: ComponentStat[] = [{ uuid: 'r', name: 'Recoil Kick', nameKey: null, base: null, kind: 'multiplier', min: -40, max: 0 }];
+    assert.equal(statLines(recoil, null), 'Recoil Kick (max. −40.0 %): 0');
+    assert.deepEqual(parseStatLines('Recoil Kick (max. −40.0 %): -12.5', recoil), { r: '-12.5' });
+    assert.throws(() => parseStatLines('Recoil Kick (max. −40.0 %): 5', recoil), refused('stock.err.statValue', { line: 1, min: -40, max: '0 %' }));
   });
 });

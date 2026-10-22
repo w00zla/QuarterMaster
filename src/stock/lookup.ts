@@ -2,7 +2,8 @@
 // memory per language, reloaded after a newer catalog import) and the batches an actor may change.
 // No Discord here: the bot and the web UI build their own labels from these.
 import { sql, type SQL } from 'drizzle-orm';
-import { ITEM_TYPE_KEY_PREFIX, typeLabel } from '../catalog/labels.ts';
+import { isFpsType } from '../catalog/components.ts';
+import { ITEM_SUBTYPE_KEY_PREFIX, ITEM_TYPE_KEY_PREFIX, typeLabel } from '../catalog/labels.ts';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { itemClassText, locText, rows } from '../db/query.ts';
@@ -64,12 +65,13 @@ export interface MaterialEntry {
   nameEn: string;
   // The game's localization key of the name (lower case)
   nameKey: string | null;
-  // A ship component (an item, no quality); the fields below are set for items only
+  // Gear: a ship component or FPS gear (an item, no quality); the fields below are set for items only
+  // (size: not for FPS gear but attachments)
   component: boolean;
   size: number | null;
   gradeLetter: string | null;
   itemClass: string | null;
-  // Components: unique within the catalog ("Name · Cooler · S3 · B Industrial"); else the name
+  // Gear: unique within the catalog ("Name · Cooler · S3 · B Industrial", "Name · Helmets · Light"); else the name
   label: string;
   // Components: the stats a batch can carry (its blueprints' crafted properties); else none
   stats: ComponentStat[];
@@ -86,7 +88,10 @@ export interface ComponentStat extends StatBounds {
   base: number | null;
 }
 
-/** Item UUID -> crafted property UUID -> the unmodified stat value, for every ship component whose record holds one. */
+/**
+ * Item UUID -> crafted property UUID -> the unmodified stat value, for every gear stat whose record holds one.
+ * Only stats its blueprints change (the only ones shown): spares the jsonpath over every gear record.
+ */
 async function componentBaseValues(db: Db): Promise<Map<string, Map<string, number>>> {
   const paths = sql.join(Object.entries(BASE_PATHS).map(([key, p]) => sql`(${key}, ${p.path}::jsonpath)`), sql`, `);
   const found = await rows<{ item: string; property: string; key: string; raw: string | null }>(db, sql`
@@ -95,7 +100,10 @@ async function componentBaseValues(db: Db): Promise<Map<string, Map<string, numb
     JOIN catalog.raw_record rr ON rr.uuid = i.uuid
     CROSS JOIN (VALUES ${paths}) AS p(key, path)
     JOIN catalog.crafted_property cp ON cp.key = p.key
-    WHERE i.retired_at IS NULL AND ${componentItemSql()}`);
+    WHERE i.retired_at IS NULL AND ${componentItemSql()}
+      AND EXISTS (SELECT 1 FROM catalog.blueprint cb JOIN catalog.blueprint_slot s ON s.blueprint_uuid = cb.uuid
+        CROSS JOIN LATERAL jsonb_array_elements(s.modifiers) m
+        WHERE cb.output_item_uuid = i.uuid AND cb.retired_at IS NULL AND lower(m->>'propertyUuid') = cp.uuid::text)`);
   const bases = new Map<string, Map<string, number>>();
   for (const r of found) {
     const value = baseValue(r.key, r.raw);
@@ -138,21 +146,31 @@ export const blueprintStatNames = importCache(async (db, lang): Promise<Map<stri
 
 /** What can be booked: recipe resources and items, and ship components (same rules as the stock service; never ores). */
 export const materialCatalog = importCache(async (db, lang): Promise<Map<string, MaterialEntry>> => {
-  const found = await rows<Omit<MaterialEntry, 'label' | 'stats'> & { className: string | null; type: string | null; typeText: string | null }>(db, sql`
+  const found = await rows<Omit<MaterialEntry, 'label' | 'stats'> & {
+    className: string | null; type: string | null; typeText: string | null; subType: string | null; subTypeText: string | null;
+  }>(db, sql`
     SELECT 'resource' AS kind, r.uuid, coalesce(${locText(lang, sql`r.name_key`)}, r.key) AS name,
       coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", lower(r.name_key) AS "nameKey", false AS component,
-      NULL::int AS size, NULL AS "gradeLetter", NULL AS "itemClass", NULL AS "className", NULL AS type, NULL AS "typeText"
+      NULL::int AS size, NULL AS "gradeLetter", NULL AS "itemClass", NULL AS "className", NULL AS type, NULL AS "typeText",
+      NULL AS "subType", NULL AS "subTypeText"
     FROM catalog.resource r
     WHERE r.retired_at IS NULL AND EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.resource_uuid = r.uuid)
     UNION ALL
     SELECT 'item', i.uuid, coalesce(${locText(lang, sql`i.name_key`)}, i.class_name),
       coalesce(${locText('en', sql`i.name_key`)}, i.class_name), lower(i.name_key), ${componentItemSql()},
       i.size, i.grade_letter, ${itemClassText(lang, 'i')}, i.class_name, i.type,
-      ${locText(lang, sql`${ITEM_TYPE_KEY_PREFIX} || lower(i.type)`)}
+      ${locText(lang, sql`${ITEM_TYPE_KEY_PREFIX} || lower(i.type)`)}, i.sub_type,
+      ${locText(lang, sql`${ITEM_SUBTYPE_KEY_PREFIX} || lower(i.sub_type)`)}
     FROM catalog.item i
     WHERE i.retired_at IS NULL AND (EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid) OR ${componentItemSql()})`);
+  // FPS gear has no size of note (armor is always 1, weapons 1–5 by kind) but attachments (S1–S4 fit the
+  // weapon): only theirs is kept
+  for (const m of found) if (m.component && m.type !== 'WeaponAttachment' && isFpsType(m.type, m.subType)) m.size = null;
+  // Ship components: "Name · Cooler · S3 · B Industrial"; FPS gear with its sub type:
+  // "Name · Helmets · Light", "Name · Attachment · Barrel · S1"
   const labels = found.map((m) => (m.component
-    ? [m.name, typeLabel(m.type, m.typeText), m.size !== null ? `S${m.size}` : null, [m.gradeLetter, m.itemClass].filter(Boolean).join(' ') || null]
+    ? [m.name, typeLabel(m.type, m.typeText), isFpsType(m.type, m.subType) ? typeLabel(m.subType, m.subTypeText) : null,
+      m.size !== null ? `S${m.size}` : null, [m.gradeLetter, m.itemClass].filter(Boolean).join(' ') || null]
       .filter(Boolean).join(' · ')
     : m.name));
   const counts = new Map<string, number>();
@@ -171,7 +189,7 @@ export const materialCatalog = importCache(async (db, lang): Promise<Map<string,
     .sort((a, b) => Number(a.key === 'GPP_Health_MaxHealth') - Number(b.key === 'GPP_Health_MaxHealth') || a.key.localeCompare(b.key))
     .map(({ key: _k, ...s }) => s);
   // Component labels that still collide get the class name
-  return new Map(found.map(({ className, type: _t, typeText: _x, ...m }, i) => {
+  return new Map(found.map(({ className, type: _t, typeText: _x, subType: _s, subTypeText: _y, ...m }, i) => {
     const label = m.component && counts.get(labels[i]!)! > 1 ? `${labels[i]} · ${className}` : labels[i]!;
     return [m.uuid, { ...m, label, stats: m.component ? statsOf(m.uuid) : [] }];
   }));

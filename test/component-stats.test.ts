@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { statBounds, statValue, statValueText, unionBounds } from '../src/stock/component-stats.ts';
+import { statBest, statBounds, statValue, statValueText, unionBounds } from '../src/stock/component-stats.ts';
 import type { ModifierRange } from '../src/planner/types.ts';
 
 const linear = (lowStart: number, highEnd: number): ModifierRange[] => [
@@ -19,6 +19,22 @@ describe('component stat bounds', () => {
 
   it('adds up the steps of an additive stat (power pips), from no change', () => {
     assert.deepEqual(statBounds([steps([-1, 0, 1]), steps([-1, 0, 1])]), { kind: 'additive', min: 0, max: 2 });
+  });
+
+  it('takes the improvement from Q1000: a drop for recoil and quantum fuel burn, up to no change', () => {
+    // A rifle's recoil kick: 1.4 at Q0, 0.6 at Q1000
+    const recoil: ModifierRange[] = [{ type: 'Linear', startQuality: 0, endQuality: 1000, values: { modifierAtStart: 1.4, modifierAtEnd: 0.6 } }];
+    assert.deepEqual(statBounds([recoil]), { kind: 'multiplier', min: -40, max: 0 });
+    // Quantum fuel burn: 1.2 at Q0, 0.8 at Q1000 (two ranges)
+    const fuel: ModifierRange[] = [
+      { type: 'Linear', startQuality: 0, endQuality: 500, values: { modifierAtStart: 1.2, modifierAtEnd: 1 } },
+      { type: 'Linear', startQuality: 501, endQuality: 1000, values: { modifierAtStart: 1, modifierAtEnd: 0.8 } },
+    ];
+    assert.deepEqual(statBounds([fuel]), { kind: 'multiplier', min: -20, max: 0 });
+    assert.equal(statBest({ kind: 'multiplier', min: -20, max: 0 }), -20);
+    assert.equal(statBest({ kind: 'multiplier', min: 0, max: 20.8 }), 20.8);
+    assert.equal(statValue({ kind: 'multiplier', min: -40, max: 0 }, '-12.5'), '-12.5');
+    assert.equal(statValue({ kind: 'multiplier', min: -40, max: 0 }, '5'), null);
   });
 
   it('leaves out what nothing can improve, unknown and mixed range types', () => {

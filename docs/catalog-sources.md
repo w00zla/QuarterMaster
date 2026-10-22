@@ -279,6 +279,22 @@ Throwaway script, not in the repo. Result:
   - Materials below Q500 (the only ones that lower a stat) cannot be used for crafting at the moment (user, 2026-10-18), although recipe inputs have `minQuality` from 0.
   - Display transformations (`CraftingDisplayTransformation_*`: `Scale`, `ConvertValueToFactorOfBaseValue`, `ConvertFactorToPercentChange`) are documented nowhere; known scales: coolant 1e-6, quantum speed 1e-6.
 - **Ship components beyond the blueprints** (2026-10-18, build 12913470 / 4.10.2): the snapshot takes every named ship item (`entities/scitem/ships/`, no `template` in the path) whose `AttachDef.Type` is in `COMPONENT_TYPES` (`src/catalog/components.ts`), 781 items on top of the 1614 blueprint-referenced ones. `Turret` (249) and `TurretBase` (131) include the turrets built into ships (remote cameras, AI turrets) the player never holds; `Missile` (65) and `MissileLauncher` (149) the ship-fitted ones too. Event items like the "Ardor-3 Salvaged Repeater" are `WeaponGun` items and now in the catalog without stats (no blueprint, no bounds).
+- **FPS gear beyond the blueprints** (2026-10-22, build 12913470 / 4.10.2): the snapshot also takes every named
+  item below `entities/scitem/weapons/` and `entities/scitem/characters/` (no `template` in the path) whose
+  `AttachDef.Type`/`SubType` is in `FPS_TYPES` (`src/catalog/components.ts`): 1931 items on top of the ~1300
+  blueprint outputs (snapshot 24 → 43 MB gz, mostly the armor and weapon raw records, 40–180 KB each). Left
+  out by type: `WeaponPersonal/Grenade`, `WeaponAttachment/Magazine` (also blueprint outputs, in the catalog
+  but not bookable), `FPS_Consumable/*`, `Food`/`Drink`, `Char_Clothing_*`, `Light/Weapon` (unnamed parts of
+  flashlights), `Suit/ThrusterPack`. By folder: carryables (glowsticks are `WeaponPersonal/Gadget`, cutlery
+  `WeaponPersonal/Knife`). Type names have game texts (`item_Type…`), sub types partly (`IronSight` =
+  "Optics Attachment"; `Barrel`, `BottomAttachment`, `Light`, `Heavy` have none in either language: derived
+  from the key).
+- **FPS crafted stats** (blueprints of build 12913470): weapons `GPP_Weapon_Damage`, `GPP_Weapon_FireRate`,
+  `GPP_Weapon_Recoil_{Handling,Kick,Smoothness}` (1.2→0.8 or 1.4→0.6: lower is the improvement), tools
+  `GPP_Weapon_Tractor_*`/`GPP_Weapon_HullScraping_*`; armor `GPP_Armor_DamageMitigation`,
+  `GPP_Armor_TemperatureMax`/`Min`, a few `GPP_Armor_RadiationDissipation`. Three DamageMitigation ranges start
+  at 9 (instead of ~0.9; the Q1000 end is 1.1). No base paths for FPS yet (the companion needs them; armor
+  mitigation sits in a linked `damage/…armor.json`, weapon damage in the ammo record).
 - **Prepared but unused by CIG:** `tiers[]` (always 1), `optionalCosts` (always empty), `research` (always null). The schema should not block them.
 - **Catalog is global**, not per guild. One import affects every server → safeguards matter.
 

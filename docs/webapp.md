@@ -173,10 +173,12 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   average, the figures on hover, Stand dimmed; items without that column), best price
   first, scrolling inside; UEX's averages in the head.
 - **Ausrüstung** (route `/gear`, until 2026-10-20 "Komponenten" at `/components`; `?scope=` like Ressourcen;
-  `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): for now the ship components only, groups named by their `label`, no quality column, filters
+  `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): the ship components and
+  FPS gear (since 2026-10-22; their type reads "Helmets · Light", "Attachment · Barrel": `itemTypes` in
+  `routes.ts` adds the sub type; no size but on attachments), groups named by their `label`, no quality column, filters
   type/size/grade instead of the quality slider; the add form without quality (sends 0) but one slider per
-  stat of the picked component from ±0 to its best (`CatalogMaterial.stats`, reset after each add; only gains
-  are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; without
+  stat of the picked component from ±0 to its best (`CatalogMaterial.stats`, reset after each add; a drop
+  like recoil runs from its best at the left to ±0 at the right; only changes are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; without
   any gain a dimmed "Standard"/"Default"; the
   sliders are `StatSliders.vue`, also in the batch dialog's Adjust, which confirms "from → to"); "Anzahl" in
   pieces instead of "Menge" (each row "1 Stk."); `BatchDialog` leaves the quality out (`withQuality`/`qualityPrefix`).

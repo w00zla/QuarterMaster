@@ -11,7 +11,7 @@ import {
 import type { Db } from '../../db/client.ts';
 import { formatMicros, toMicros } from '../../planner/plan.ts';
 import { formatAmount, parseAmount } from '../../stock/amount.ts';
-import { statsText, statValue, statValueText } from '../../stock/component-stats.ts';
+import { statBest, statsText, statValue, statValueText } from '../../stock/component-stats.ts';
 import {
   activeOrgs, findStock, locationCatalog, materialCatalog, materialTotal, orgNames, pickableBatches, stockList,
   type BatchPick, type ComponentStat, type MaterialEntry, type OrgName, type PickableBatch, type StockFilter,
@@ -258,8 +258,8 @@ export async function bookShare(db: Db, actor: stock.Actor, batchId: number, gui
 
 // --- a component's stats in a modal --------------------------------------------------------------
 
-// "Coolant Rating (max. +20.0 %)": a line's fixed part
-const statHead = (s: ComponentStat) => `${s.name} (max. ${statValueText(s.kind, String(s.max))})`;
+// "Coolant Rating (max. +20.0 %)", "Recoil Kick (max. −40.0 %)": a line's fixed part
+const statHead = (s: ComponentStat) => `${s.name} (max. ${statValueText(s.kind, String(statBest(s)))})`;
 
 /** The stats field: one line per stat the component can carry, "Coolant Rating (max. +20.0 %): 5" (0 = no change). */
 export function statLines(stats: ComponentStat[], current: Record<string, string> | null): string {
@@ -280,7 +280,7 @@ export function parseStatLines(text: string, stats: ComponentStat[]): Record<str
     const colon = row.lastIndexOf(':');
     if (colon < 0 || row.slice(0, colon).trim() !== statHead(s)) throw new UserError('stock.err.statLine', { line: i + 1 });
     const value = statValue(s, row.slice(colon + 1).replace('%', '').trim());
-    if (value === null) throw new UserError('stock.err.statValue', { line: i + 1, max: `${s.max}${s.kind === 'multiplier' ? ' %' : ''}` });
+    if (value === null) throw new UserError('stock.err.statValue', { line: i + 1, min: s.min, max: `${s.max}${s.kind === 'multiplier' ? ' %' : ''}` });
     if (value !== '0') parsed[s.uuid] = value;
   });
   return parsed;

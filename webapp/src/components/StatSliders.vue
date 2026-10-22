@@ -4,9 +4,9 @@ import type { CatalogStat } from "../../../src/webapp/api-types";
 /** A slider's value as stored: one decimal for a percent, whole steps. */
 export const statText = (s: CatalogStat, value: number) => (s.kind === "multiplier" ? value.toFixed(1) : String(Math.round(value)));
 
-/** The sliders' values as a batch's stats: only gains (all at ±0 = {}). */
+/** The sliders' values as a batch's stats: only changes (all at ±0 = {}). */
 export const statsOf = (defs: CatalogStat[], values: Record<string, number>): Record<string, string> =>
-  Object.fromEntries(defs.filter((s) => (values[s.uuid] ?? s.min) > 0).map((s) => [s.uuid, statText(s, values[s.uuid]!)]));
+  Object.fromEntries(defs.filter((s) => (values[s.uuid] ?? 0) !== 0).map((s) => [s.uuid, statText(s, values[s.uuid]!)]));
 
 /** Slider values from a batch's stats (the ones it lacks start at ±0). */
 export const valuesOf = (stats: Record<string, string> | null): Record<string, number> =>
@@ -15,13 +15,14 @@ export const valuesOf = (stats: Record<string, string> | null): Record<string, n
 
 <script setup lang="ts">
 // A component's stats: one slider per stat its blueprint can improve, from ±0 (looted, or crafted
-// without a gain) to the best; name and value above each. `values` is filled by the sliders.
+// without a gain) to the best (a drop like recoil: ±0 at the right end); name and value above each.
+// `values` is filled by the sliders.
 import { statValueText } from "../format";
 
 defineProps<{ defs: CatalogStat[] }>();
 const values = defineModel<Record<string, number>>({ required: true });
 
-const valueOf = (s: CatalogStat) => values.value[s.uuid] ?? s.min;
+const valueOf = (s: CatalogStat) => values.value[s.uuid] ?? 0;
 const set = (s: CatalogStat, e: Event) => (values.value = { ...values.value, [s.uuid]: Number((e.target as HTMLInputElement).value) });
 </script>
 

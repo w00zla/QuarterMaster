@@ -1,5 +1,5 @@
 // Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
-// Ship components: blueprint outputs of the VehicleComponent/VehicleWeapons categories, booked without quality.
+// Gear: ship components (blueprint outputs and looted ones) and FPS gear, booked without quality.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
@@ -13,7 +13,7 @@ import { formatAmount } from '../src/stock/amount.ts';
 import { blueprintStatNames, materialCatalog, stockList } from '../src/stock/lookup.ts';
 import { orgMetrics } from '../src/stock/org-summary.ts';
 import { add, adjust, COMPONENT_QUALITY, StockError, type Actor } from '../src/stock/service.ts';
-import { U, fixtureSnapshot } from './fixtures.ts';
+import { FPS, FPS_RECORDS, RECORDS, U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const G = '940000000000000001';
@@ -30,7 +30,7 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
   before(async () => {
     await prepareDb(url);
     ({ db, close } = connectAs(url, 'qm_app'));
-    const snap = fixtureSnapshot();
+    const snap = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS });
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     // The fixture's blueprint (output: a cooler) becomes a ship component blueprint
     await db.execute(sql`UPDATE catalog.blueprint_category SET key = 'VehicleComponentS2' WHERE uuid = ${U.category}`);
@@ -156,5 +156,18 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     const gem = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).find((p) => p.batch.itemUuid === U.gem)!;
     await assert.rejects(adjust(db, mia, { batchId: gem.batch.id, amount: '3', expected: gem.batch.quantity, stats: { [U.property]: '5' } }),
       (e: unknown) => e instanceof StockError && e.code === 'invalidStats');
+  });
+
+  it('offers FPS gear as gear with its sub type (attachments with their size), and books it like a component', async () => {
+    const materials = await materialCatalog(db, 'en');
+    // No texts in the fixture: the class name and the type keys stand in
+    assert.deepEqual([FPS.rifle, FPS.helmet, FPS.optic].map((u) => [materials.get(u)!.component, materials.get(u)!.label, materials.get(u)!.size]), [
+      [true, 'test_rifle · Weapon Personal · Medium', null],
+      [true, 'test_helmet · Char Armor Helmet · Light', null],
+      [true, 'test_optic · Weapon Attachment · Iron Sight · S2', 2],
+    ]);
+    await add(db, mia, { kind: 'item', uuid: FPS.rifle, locationUuid: U.station, quality: COMPONENT_QUALITY, amount: '1' });
+    const rifle = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).find((p) => p.batch.itemUuid === FPS.rifle)!;
+    assert.equal(rifle.component, true);
   });
 });

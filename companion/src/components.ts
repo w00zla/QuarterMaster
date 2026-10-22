@@ -145,18 +145,20 @@ export function parseNumber(value: string): number | null {
 }
 
 /** The stored gain for a tooltip value: percent over the base (one decimal) or whole steps; "0" for
- * no gain; null when it cannot be: no base known, no number, below the base beyond rounding, or
- * above what the blueprint can make. */
+ * no gain; null when it cannot be: no base known, no number, worse than the base beyond rounding, or
+ * better than what the blueprint can make. A stat whose improvement is a drop (recoil) mirrors this. */
 export function statFromTooltip(stat: CatalogStat, value: string): string | null {
   const v = parseNumber(value);
   if (v === null || stat.base === null || stat.base <= 0) return null;
+  const dir = stat.min < 0 ? -1 : 1;
+  const best = dir * (dir < 0 ? stat.min : stat.max);
   if (stat.kind === "multiplier") {
     const pct = Math.round((v / stat.base - 1) * 1000) / 10;
-    if (pct < -0.5 || pct > stat.max + 0.05) return null;
-    return pct <= 0 ? "0" : String(pct);
+    if (dir * pct < -0.5 || dir * pct > best + 0.05) return null;
+    return dir * pct <= 0 ? "0" : String(pct);
   }
   const steps = Math.round(v - stat.base);
-  if (steps < 0 || steps > stat.max) return null;
+  if (dir * steps < 0 || dir * steps > best) return null;
   return String(steps);
 }
 

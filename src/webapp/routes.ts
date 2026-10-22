@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm';
 import type { Context, Hono } from 'hono';
 import { etag } from 'hono/etag';
 import { z } from 'zod';
+import { isFpsType } from '../catalog/components.ts';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { rows } from '../db/query.ts';
@@ -113,11 +114,14 @@ async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
 }
 
 // Item types (icon and display name) of blueprint outputs and items, per language, from the admin's
-// queries; reloaded after a newer catalog import like the other catalogs
+// queries; reloaded after a newer catalog import like the other catalogs. FPS gear names its sub type
+// too ("Helmets · Light", "Attachment · Barrel")
 const blueprintTypes = importCache(async (db: Db, lang: string) =>
   new Map((await getBlueprints(db, lang)).map((r) => [r.uuid, { type: r.outputType, typeLabel: r.outputTypeLabel }])));
 const itemTypes = importCache(async (db: Db, lang: string) =>
-  new Map((await getItems(db, lang)).map((r) => [r.uuid, { type: r.type, typeLabel: r.typeLabel }])));
+  new Map((await getItems(db, lang)).map((r) => [r.uuid, {
+    type: r.type, typeLabel: isFpsType(r.type, r.subType) && r.subTypeLabel ? `${r.typeLabel} · ${r.subTypeLabel}` : r.typeLabel,
+  }])));
 const noType = { type: null, typeLabel: null };
 
 const langOf = (c: Context): Lang => (c.req.query('lang') === 'de' ? 'de' : 'en');

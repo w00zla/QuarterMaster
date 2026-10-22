@@ -242,7 +242,7 @@ const en = {
   'stock.err.giveSelf': 'You cannot give resources to yourself.',
   'stock.err.statLines': 'The number of stat lines changed. Keep one line per stat, or empty the field for none.',
   'stock.err.statLine': 'Stats line {line}: change only the number after the colon.',
-  'stock.err.statValue': 'Stats line {line}: give a number from 0 to {max} (percent with one decimal at most, power pips whole).',
+  'stock.err.statValue': 'Stats line {line}: give a number from {min} to {max} (percent with one decimal at most, power pips whole).',
 
   'stock.added': '📥 Booked **{amount}** · {what}',
   'stock.removed': '📤 Removed **{amount}** · {what}',
@@ -556,7 +556,7 @@ const de: Record<MessageKey, string> = {
   'stock.err.giveSelf': 'Du kannst dir nicht selbst etwas übergeben.',
   'stock.err.statLines': 'Die Zahl der Wertezeilen hat sich geändert. Lass eine Zeile pro Wert stehen oder leer das Feld für keine Werte.',
   'stock.err.statLine': 'Wertezeile {line}: Ändere nur die Zahl nach dem Doppelpunkt.',
-  'stock.err.statValue': 'Wertezeile {line}: Gib eine Zahl von 0 bis {max} an (Prozent mit höchstens einer Nachkommastelle, Leistungsstufen ganz).',
+  'stock.err.statValue': 'Wertezeile {line}: Gib eine Zahl von {min} bis {max} an (Prozent mit höchstens einer Nachkommastelle, Leistungsstufen ganz).',
 
   'stock.added': '📥 Eingebucht **{amount}** · {what}',
   'stock.removed': '📤 Entnommen **{amount}** · {what}',

@@ -13,7 +13,7 @@
 // actor's source (bot, web app, companion app).
 import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
-import { COMPONENT_TYPES } from '../catalog/components.ts';
+import { COMPONENT_TYPES, fpsTypeSql } from '../catalog/components.ts';
 import type { Db, Tx } from '../db/client.ts';
 import { one, rows } from '../db/query.ts';
 import { refineryLocations } from '../ext/refineries.ts';
@@ -116,14 +116,15 @@ export const selectableLocationSql = (l = 'l') => sql.raw(`((NOT ${l}.hide_in_st
 const notCraftedSql = (x: string) => `NOT EXISTS (SELECT 1 FROM catalog.blueprint cb WHERE cb.output_item_uuid = ${x}.uuid AND cb.retired_at IS NULL)`;
 
 /**
- * The item `uuid` (a column) is a ship component: an item of one of the COMPONENT_TYPES (crafted or
- * not). Of the items sharing a name, type, size and grade (the game's ship-bound, turret, low-poly
- * and derelict variants of one part: 414 of 1243 in 4.10) only one counts, the plain part: a
- * blueprint's output first, else the shortest class name ("KLWE_LaserRepeater_S5", not its
- * "_Idris_M", "_LowPoly" or "_Turret"). Items without a name are left as they are.
+ * The item `uuid` (a column) is gear: a ship component (one of the COMPONENT_TYPES) or FPS gear (FPS_TYPES),
+ * crafted or not. Of the items sharing a name, type, size and grade (the game's ship-bound, turret, low-poly
+ * and derelict variants of one part: 414 of 1243 in 4.10; the AI and test variants of FPS weapons) only
+ * one counts, the plain part: a blueprint's output first, else the shortest class name
+ * ("KLWE_LaserRepeater_S5", not its "_Idris_M", "_LowPoly" or "_Turret"). Items without a name are left
+ * as they are.
  */
 export const componentItemSql = (uuid = 'i.uuid') => sql.raw(`EXISTS (SELECT 1 FROM catalog.item ci
-  WHERE ci.uuid = ${uuid} AND ci.type IN (${COMPONENT_TYPES.map((t) => `'${t}'`).join(', ')})
+  WHERE ci.uuid = ${uuid} AND (ci.type IN (${COMPONENT_TYPES.map((t) => `'${t}'`).join(', ')}) OR ${fpsTypeSql('ci')})
     AND (ci.name_key IS NULL OR NOT EXISTS (SELECT 1 FROM catalog.item o
       WHERE o.retired_at IS NULL AND o.uuid <> ci.uuid AND o.type = ci.type AND o.name_key = ci.name_key
         AND o.size IS NOT DISTINCT FROM ci.size AND o.grade_letter IS NOT DISTINCT FROM ci.grade_letter

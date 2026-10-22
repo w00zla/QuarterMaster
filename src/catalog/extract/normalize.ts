@@ -1,7 +1,7 @@
 // Turns exported DataCore records into a catalog snapshot.
 // Robust by design: unexpected shapes become anomalies, never crashes.
 import { displayText, isMissingTranslation, locKey } from './localization.ts';
-import { isComponentType } from '../components.ts';
+import { isComponentType, isFpsType } from '../components.ts';
 import { isAppKey } from '../labels.ts';
 import { isObj, recordKey, refPath, type DcbRecord, type Obj, type RecordStore } from './records.ts';
 import { blueprintSources } from './sources.ts';
@@ -21,6 +21,8 @@ export const PATHS = {
   globalParams: 'libs/foundry/records/crafting/globalparams/craftingglobalparams.json',
   resourceTypes: 'libs/foundry/records/resourcetypedatabase/resourcetypedatabase.json',
   shipItems: 'libs/foundry/records/entities/scitem/ships/',
+  // FPS weapons, their attachments and gadgets; armor (the rest of both is clothing, props, bodies)
+  fpsItems: ['libs/foundry/records/entities/scitem/weapons/', 'libs/foundry/records/entities/scitem/characters/'],
   starmap: 'libs/foundry/records/starmap/',
   starmapTypes: 'libs/foundry/records/starmap/starmapobjecttypes.json',
 };
@@ -312,17 +314,22 @@ export function normalize(input: NormalizeInput): Snapshot {
   const sources = blueprintSources(store, blueprintUuidByPath, anomaly);
 
   // --- items and manufacturers -------------------------------------------------------
-  // Besides the items the blueprints reference, every named ship item of a component type is in the
-  // catalog (looted and bought components are stock too); templates are no items the game shows
-  for (const path of store.list(PATHS.shipItems)) {
-    if (entityPaths.has(path) || path.includes('template')) continue;
-    const r = store.get(path);
-    const attach = arr(r?._RecordValue_.Components).find((c) => isObj(c) && c._Type_ === 'SAttachableComponentParams');
-    const def = isObj(attach) && isObj(attach.AttachDef) ? attach.AttachDef : null;
-    if (!def || !isComponentType(str(def.Type))) continue;
-    if (!locKey(isObj(def.Localization) ? def.Localization.Name : null)) continue;
-    entityPaths.add(path);
-  }
+  // Besides the items the blueprints reference, every named ship item of a component type and every
+  // named FPS item of a gear type is in the catalog (looted and bought gear is stock too); templates
+  // are no items the game shows
+  const sweep = (paths: string[], isGear: (def: Obj) => boolean) => {
+    for (const path of paths) {
+      if (entityPaths.has(path) || path.includes('template')) continue;
+      const r = store.get(path);
+      const attach = arr(r?._RecordValue_.Components).find((c) => isObj(c) && c._Type_ === 'SAttachableComponentParams');
+      const def = isObj(attach) && isObj(attach.AttachDef) ? attach.AttachDef : null;
+      if (!def || !isGear(def)) continue;
+      if (!locKey(isObj(def.Localization) ? def.Localization.Name : null)) continue;
+      entityPaths.add(path);
+    }
+  };
+  sweep(store.list(PATHS.shipItems), (def) => isComponentType(str(def.Type)));
+  sweep(PATHS.fpsItems.flatMap((p) => store.list(p)), (def) => isFpsType(str(def.Type), str(def.SubType)));
   const manufacturerPaths = new Set<string>();
   const items: Item[] = [...entityPaths].sort().map((path) => {
     const r = store.get(path)!;

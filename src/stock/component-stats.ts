@@ -6,40 +6,46 @@ import type { ModifierRange } from '../planner/types.ts';
 
 export interface StatBounds {
   kind: 'multiplier' | 'additive';
-  // In the stored unit: percent change (multiplier) or steps (additive); min is always 0 (only improvements)
+  // In the stored unit: percent change (multiplier) or steps (additive), from no change to the best:
+  // min is 0 when the best is a gain, max is 0 when it is a drop (recoil, quantum fuel burn)
   min: number;
   max: number;
 }
 
-// One decimal of a percent; rounded up, so the edge stays inside
-const up = (x: number) => Math.ceil(x * 10 - 1e-9) / 10;
+// One decimal of a percent, rounded away from 0, so the edge (rounded the same way) stays inside
+const outward = (x: number) => Math.sign(x) * Math.ceil(Math.abs(x) * 10 - 1e-9) / 10;
 
-/** The modifier values of one slot's ranges, with their kind; null for unknown or mixed types. */
-function slotSpan(ranges: ModifierRange[]): { kind: StatBounds['kind']; min: number; max: number } | null {
+/** One slot's modifier at Q1000 (the end of its highest range), with its kind; null for unknown or mixed types. */
+function slotBest(ranges: ModifierRange[]): { kind: StatBounds['kind']; value: number } | null {
   const kinds = new Set(ranges.map((r) => r.type));
   if (kinds.size !== 1) return null;
   const [type] = kinds;
-  const keys = type === 'Linear' ? ['modifierAtStart', 'modifierAtEnd'] : type === 'LinearIntegerAdditive' ? ['additiveModifierAtStart', 'additiveModifierAtEnd'] : null;
-  if (!keys) return null;
-  const values = ranges.flatMap((r) => keys.map((k) => r.values[k])).filter((v): v is number => typeof v === 'number');
-  if (!values.length) return null;
-  return { kind: type === 'Linear' ? 'multiplier' : 'additive', min: Math.min(...values), max: Math.max(...values) };
+  const key = type === 'Linear' ? 'modifierAtEnd' : type === 'LinearIntegerAdditive' ? 'additiveModifierAtEnd' : null;
+  const top = ranges.reduce<ModifierRange | null>((a, r) => (!a || r.endQuality > a.endQuality ? r : a), null);
+  const value = key && top ? top.values[key] : undefined;
+  if (typeof value !== 'number') return null;
+  return { kind: type === 'Linear' ? 'multiplier' : 'additive', value };
 }
 
 /**
  * What one stat can be on a component crafted from one blueprint: `slots` = per slot the ranges of
  * this stat there. Slots combine as in the crafting check (ASSUMPTION, unverified in game: multipliers
  * multiply, steps add up). Only improvements count (decided 2026-10-18: a crafted component is never
- * recorded worse than a looted one, so the bounds start at no change). Null when nothing can improve
- * it (a flat range) or the data is unknown.
+ * recorded worse than a looted one, so the bounds start at no change). The improvement is what Q1000
+ * makes of it (decided 2026-10-22): a gain for most stats, a drop for recoil (1.4 at Q0, 0.6 at Q1000)
+ * and quantum fuel burn. Null when nothing can improve it (a flat range) or the data is unknown.
  */
 export function statBounds(slots: ModifierRange[][]): StatBounds | null {
-  const spans = slots.map(slotSpan);
-  if (!spans.length || spans.some((s) => !s) || new Set(spans.map((s) => s!.kind)).size !== 1) return null;
-  const kind = spans[0]!.kind;
-  const max = kind === 'multiplier' ? up((spans.reduce((a, s) => a * s!.max, 1) - 1) * 100) : spans.reduce((a, s) => a + s!.max, 0);
-  return max > 0 ? { kind, min: 0, max } : null;
+  const best = slots.map(slotBest);
+  if (!best.length || best.some((s) => !s) || new Set(best.map((s) => s!.kind)).size !== 1) return null;
+  const kind = best[0]!.kind;
+  const change = kind === 'multiplier' ? outward((best.reduce((a, s) => a * s!.value, 1) - 1) * 100) : best.reduce((a, s) => a + s!.value, 0);
+  if (change === 0) return null;
+  return change > 0 ? { kind, min: 0, max: change } : { kind, min: change, max: 0 };
 }
+
+/** The best a stat can be (max for a gain, min for a drop). */
+export const statBest = (bounds: StatBounds): number => (bounds.min < 0 ? bounds.min : bounds.max);
 
 /** Bounds of a stat over several blueprints of one component: the widest; null if they disagree on the kind. */
 export function unionBounds(all: StatBounds[]): StatBounds | null {

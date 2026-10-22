@@ -102,10 +102,11 @@ All root commands are prefixed `qm-`.
   `StockError` codes map to `stock.err.<code>`. Splitting and merging are not in the bot. `/qm-res` offers
   and lists only materials and items, like the web app's resources tab.
 - **`/qm-gear`** (same file, `stockCommandOf` with the area `COMPS`; until 2026-10-20 `/qm-comps`, then
-  `/qm-comp`): "Ausrüstung"/"Gear", for now the ship components, the same subcommands as `/qm-res` (option `component`, `find` without a minimum quality), like the web app's tab Ausrüstung.
+  `/qm-comp`): "Ausrüstung"/"Gear", the ship components and FPS gear (since 2026-10-22, found by their label
+  in the same option; no ship/FPS option, decided 2026-10-22), the same subcommands as `/qm-res` (option `component`, `find` without a minimum quality), like the web app's tab Ausrüstung.
   Named by their unique label (`MaterialEntry.label`), stats instead of a quality (`statsText`). `add` and
   `adjust` carry one multi-line field "Stats" (`statLines`: one line per stat the blueprint can improve,
-  "Coolant Rating (max. +20.0 %): 0", the current values on adjust; `parseStatLines` takes the number after
+  "Coolant Rating (max. +20.0 %): 0", a drop as "Recoil Kick (max. −40.0 %): 0", the current values on adjust; `parseStatLines` takes the number after
   each colon, "%" allowed, an empty field = none) instead of a field per stat: a modal holds at most 5
   elements and tractor beams carry 5 stats. Looted-only components get no such field. Other stats on
   `adjust` answer "Stats changed" with the batch as it is now.
