@@ -15,22 +15,25 @@ export const valuesOf = (stats: Record<string, string> | null): Record<string, n
 
 <script setup lang="ts">
 // A component's stats: one slider per stat its blueprint can improve, from ±0 (looted, or crafted
-// without a gain) to the best (a drop like recoil: ±0 at the right end); name and value above each.
-// `values` is filled by the sliders.
+// without a gain) at the left to the best at the right (a drop like recoil the same way, its values
+// negative); name and value above each. `values` is filled by the sliders.
 import { statValueText } from "../format";
 
 defineProps<{ defs: CatalogStat[] }>();
 const values = defineModel<Record<string, number>>({ required: true });
 
 const valueOf = (s: CatalogStat) => values.value[s.uuid] ?? 0;
-const set = (s: CatalogStat, e: Event) => (values.value = { ...values.value, [s.uuid]: Number((e.target as HTMLInputElement).value) });
+// A drop's slider runs over the amount (0 … 36 for −36 %)
+const sign = (s: CatalogStat) => (s.min < 0 ? -1 : 1);
+const set = (s: CatalogStat, e: Event) =>
+  (values.value = { ...values.value, [s.uuid]: sign(s) * Number((e.target as HTMLInputElement).value) || 0 });
 </script>
 
 <template>
   <div class="stats-row">
     <label v-for="s in defs" :key="s.uuid" class="field stat-field">
       <span class="stat-head"><span>{{ s.name }}</span><span class="stat-value mono">{{ statValueText(s.kind, statText(s, valueOf(s))) }}</span></span>
-      <input type="range" :min="s.min" :max="s.max" :step="s.kind === 'multiplier' ? 0.1 : 1" :value="valueOf(s)" @input="set(s, $event)" />
+      <input type="range" min="0" :max="sign(s) * (s.min < 0 ? s.min : s.max)" :step="s.kind === 'multiplier' ? 0.1 : 1" :value="sign(s) * valueOf(s)" @input="set(s, $event)" />
     </label>
   </div>
 </template>
@@ -40,7 +43,8 @@ const set = (s: CatalogStat, e: Event) => (values.value = { ...values.value, [s.
 .stats-row {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  /* At most two side by side (each at least half the row less the gap), one when narrower than 2 × 160px */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, max(160px, calc((100% - 20px) / 2))), 1fr));
   gap: 12px 20px;
   align-items: start;
 }

@@ -39,7 +39,14 @@ const open = ref(false);
 const active = ref(0);
 const list = ref<HTMLElement | null>(null);
 
+// A suggestion's label "Name · Cooler · S3", "Area18 · ArcCorp · Stanton": the name, then its details dimmed
+const cut = (label: string) => (label.includes(" · ") ? label.indexOf(" · ") : label.length);
+const nameOf = (label: string) => label.slice(0, cut(label));
+const metaOf = (label: string) => label.slice(cut(label));
+
 const selected = computed(() => props.options.find((o) => o.value === props.modelValue) ?? null);
+// The picked entry shown like a suggestion (details dimmed): a layer over the input, whose own text turns transparent
+const shown = computed(() => (!open.value && selected.value && text.value === selected.value.label ? selected.value.label : null));
 watch(selected, (s) => {
   if (!open.value) text.value = s?.label ?? "";
 }, { immediate: true });
@@ -124,7 +131,7 @@ function onKey(e: KeyboardEvent) {
     <input
       v-model="text"
       class="picker-input"
-      :class="{ picked: strong && selected && text === selected.label }"
+      :class="{ picked: strong && selected && text === selected.label, layered: shown }"
       type="text"
       role="combobox"
       autocomplete="off"
@@ -137,6 +144,7 @@ function onKey(e: KeyboardEvent) {
       @blur="close"
       @keydown="onKey"
     />
+    <span v-if="shown" class="picker-shown" aria-hidden="true"><span :class="{ strong }">{{ nameOf(shown) }}</span><span class="meta">{{ metaOf(shown) }}</span></span>
     <button v-if="selected && !disabled" type="button" class="clear" :title="labels.clear" tabindex="-1" @mousedown.prevent @click="clear">
       <Icon name="close" :size="12" />
     </button>
@@ -153,7 +161,7 @@ function onKey(e: KeyboardEvent) {
         @mousedown.prevent
         @click="pick(o)"
       >
-        <span class="label">{{ o.label }}</span>
+        <span class="label">{{ nameOf(o.label) }}<span v-if="metaOf(o.label)" class="meta">{{ metaOf(o.label) }}</span></span>
         <span v-if="o.hint" class="hint">{{ o.hint }}</span>
       </button>
       <div v-if="!matches.length" class="none">{{ labels.noMatch }}</div>
@@ -195,8 +203,30 @@ function onKey(e: KeyboardEvent) {
   font-weight: 600;
 }
 
-.disabled .picker-input {
+.disabled .picker-input,
+.disabled .picker-shown {
   opacity: 0.5;
+}
+
+/* The layer with the picked entry: exactly over the input's text (its padding plus the border) */
+.picker-input.layered {
+  color: transparent;
+}
+
+.picker-shown {
+  position: absolute;
+  inset: 0 28px 0 11px;
+  line-height: var(--h-chip);
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.picker-shown .strong {
+  font-weight: 600;
 }
 
 .clear {
@@ -263,6 +293,10 @@ function onKey(e: KeyboardEvent) {
 
 .label {
   overflow-wrap: anywhere;
+}
+
+.meta {
+  color: var(--text-3);
 }
 
 .hint {

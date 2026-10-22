@@ -178,7 +178,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   `routes.ts` adds the sub type; no size but on attachments), groups named by their `label`, no quality column, filters
   type/size/grade instead of the quality slider; the add form without quality (sends 0) but one slider per
   stat of the picked component from ±0 to its best (`CatalogMaterial.stats`, reset after each add; a drop
-  like recoil runs from its best at the left to ±0 at the right; only changes are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; without
+  like recoil runs the same way, ±0 at the left, its values negative; only changes are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; without
   any gain a dimmed "Standard"/"Default"; the
   sliders are `StatSliders.vue`, also in the batch dialog's Adjust, which confirms "from → to"); "Anzahl" in
   pieces instead of "Menge" (each row "1 Stk."); `BatchDialog` leaves the quality out (`withQuality`/`qualityPrefix`).

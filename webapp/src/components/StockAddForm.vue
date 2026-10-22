@@ -98,14 +98,18 @@ async function submit() {
 
 <template>
   <form class="form" @submit.prevent="submit">
-    <label class="field subject-field">
-      {{ components ? t("field.component") : t("field.resource") }}
-      <Picker v-model="subject" strong :options="components ? componentOptions : materialOptions" :placeholder="components ? t('pick.component') : t('pick.resource')" />
-    </label>
-    <label class="field">
-      {{ t("field.location") }}
-      <Picker v-model="location" :options="locationOptions" :placeholder="t('pick.location')" />
-    </label>
+    <div class="pick-pair" :class="{ 'with-stats': statDefs.length }">
+      <label class="field">
+        {{ components ? t("field.component") : t("field.resource") }}
+        <Picker v-model="subject" strong :options="components ? componentOptions : materialOptions" :placeholder="components ? t('pick.component') : t('pick.resource')" />
+      </label>
+      <label class="field">
+        {{ t("field.location") }}
+        <Picker v-model="location" :options="locationOptions" :placeholder="t('pick.location')" />
+      </label>
+      <!-- The picked component's stats, right of the location, as wide as the pick -->
+      <StatSliders v-if="statDefs.length" v-model="statValues" :defs="statDefs" />
+    </div>
     <label v-if="!components" class="field">
       {{ t("field.quality") }}
       <input v-model="quality" class="input" :class="{ invalid: quality.trim() !== '' && q === null }" type="text" inputmode="numeric" placeholder="0–1000" />
@@ -115,8 +119,6 @@ async function submit() {
       {{ t("field.amount") }}
       <AmountStepper v-model="amount" :unit="unit" :invalid="amount.trim() !== '' && !amt" :label="t('field.amount')" />
     </div>
-    <!-- The picked component's stats, a row of their own -->
-    <StatSliders v-if="statDefs.length" v-model="statValues" :defs="statDefs" />
     <div class="form-actions">
       <div v-if="orgs.length" class="field share-field">
         {{ t("field.sharing") }}
@@ -145,10 +147,31 @@ async function submit() {
   margin-right: auto;
 }
 
-/* The material or component: two grid cells wide (long names and component labels), one on narrow screens */
+/* Material/component and location share three grid cells, the main pick a bit wider (long labels both);
+   on narrow screens one cell each (the stats below them) */
+.pick-pair {
+  display: contents;
+}
+
 @media (min-width: 720px) {
-  .subject-field {
-    grid-column: span 2;
+  .pick-pair {
+    grid-column: span 3;
+    display: grid;
+    grid-template-columns: 8fr 5fr;
+    gap: 12px;
+    align-items: end;
+  }
+
+  /* With stats the whole row: the stats right of the location, as wide as the material/component; the
+     fields at the top (the sliders are taller) */
+  .pick-pair.with-stats {
+    grid-column: 1 / -1;
+    grid-template-columns: 8fr 5fr 8fr;
+    align-items: start;
+  }
+
+  .pick-pair > .stats-row {
+    grid-column: auto;
   }
 }
 
