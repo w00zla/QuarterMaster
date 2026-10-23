@@ -125,8 +125,9 @@ async function main() {
     const locDir = join(work, 'Data/Localization');
     for (const folder of existsSync(locDir) ? readdirSync(locDir) : []) {
       const file = join(locDir, folder, 'global.ini');
-      if (!existsSync(file)) continue;
-      map.set(LANGUAGE_CODES[folder] ?? folder, parseGlobalIni(readFileSync(file, 'utf8')));
+      const lang = LANGUAGE_CODES[folder];
+      if (!lang || !existsSync(file)) continue;
+      map.set(lang, parseGlobalIni(readFileSync(file, 'utf8')));
     }
     return map;
   });

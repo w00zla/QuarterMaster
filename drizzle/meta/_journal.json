@@ -218,6 +218,13 @@
       "when": 1792675341118,
       "tag": "0030_item_type_name_index",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792759660671,
+      "tag": "0031_keep_de_en",
+      "breakpoints": true
     }
   ]
 }

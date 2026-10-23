@@ -573,7 +573,6 @@ export interface StatusResponse {
   game: GameInfo | null;
   uex: (UexEndpointStatus & { state: Health })[];
   botLogs: StatusBotLogs[];
-  history: { total: number; newestAt: string | null };
   // Hits of all user data checks together
   checkHits: number;
 }
@@ -673,7 +672,6 @@ export interface DashboardResponse {
     // null state = no data (UEX) / no logs channel (bot); checkedAt = the oldest endpoint's latest check
     uex: { state: Health | null; checkedAt: string | null; endpoints: number };
     botLogs: { state: Health | null; channels: number };
-    history: { total: number; newestAt: string | null };
   };
 }
 

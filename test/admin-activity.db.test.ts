@@ -156,7 +156,7 @@ describe('admin: dashboard and activity (database)', { skip: url ? false : 'TEST
     assert.equal(d.latest.length, Math.min(12, total));
     assert.deepEqual(d.reach, { known: 3, inOrg: 2, holdingData: 3, webLogin30d: 2, companion30d: 1 });
     assert.deepEqual(d.orgs.map((o) => o.name), ['Alpha Org', 'Beta Org']);
-    assert.deepEqual([!!d.sources.game, d.sources.uex, d.sources.botLogs, d.sources.history.total],
-      [true, { state: null, checkedAt: null, endpoints: 0 }, { state: null, channels: 0 }, total]);
+    assert.deepEqual([!!d.sources.game, d.sources.uex, d.sources.botLogs],
+      [true, { state: null, checkedAt: null, endpoints: 0 }, { state: null, channels: 0 }]);
   });
 });

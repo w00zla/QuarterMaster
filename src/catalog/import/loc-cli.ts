@@ -12,7 +12,7 @@ const HELP = `Usage: pnpm loc:import <global.ini> --source <name> --lang <code> 
        pnpm loc:import --remove --source <name> --lang <code> [--dry-run]
 
   --source <name>           Name of the text source, e.g. community-de ("game" is reserved)
-  --lang <code>             Language code, e.g. de
+  --lang <code>             Language code: de or en
   --priority <n>            Higher wins over lower; game = 0 (default: current, or 100 for a new source)
   --dry-run                 Run in a transaction and roll it back
   --force                   Override safeguards, re-import identical texts

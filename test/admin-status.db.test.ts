@@ -87,8 +87,5 @@ describe('admin: status (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     const s = await getStatus(db);
     const hits = (await getDataChecks(db, 'en')).reduce((n, c) => n + c.hits.length, 0);
     assert.equal(s.checkHits, hits);
-    // The add and its share
-    assert.equal(s.history.total, 2);
-    assert.ok(s.history.newestAt);
   });
 });

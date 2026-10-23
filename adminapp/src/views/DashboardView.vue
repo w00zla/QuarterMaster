@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Is everything running, is it used, do the data hold — at a glance: what needs action, the key figures,
-// actions per day, the latest actions, reach, orgs and the data sources. Every figure links to the page
+// actions per day, the latest actions, the data sources, orgs and reach. Every figure links to the page
 // that explains it. Reloads on Refresh and when the window regains focus.
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
@@ -56,7 +56,7 @@ const share = (part: number, whole: number) => (whole ? `${Math.round((part / wh
       <section class="panel">
         <div class="head">
           <Icon name="warning" :size="16" />
-          <span class="head-title no-grow">Attention</span>
+          <span class="head-title no-grow">Health</span>
           <span v-if="dash.data.value?.attention.length" class="head-count">{{ dash.data.value.attention.length }}</span>
           <div class="spacer" />
           <span v-if="dash.data.value" class="head-count">checked {{ dateTime(dash.data.value.checkedAt) }}</span>
@@ -153,27 +153,30 @@ const share = (part: number, whole: number) => (whole ? `${Math.round((part / wh
             <div v-if="feed !== 'all' && feedRows.error.value" class="empty-line">{{ feedRows.error.value }}</div>
             <div v-else-if="!latest" class="empty-line">Loading…</div>
             <div v-else-if="!latest.length" class="empty-line">No actions</div>
-            <ul v-else class="feed">
-              <li v-for="r in latest" :key="r.id">
-                <span class="when faint" :title="dateTime(r.at)">{{ ago(r.at) }}</span>
-                <span class="what">
-                  <RouterLink :to="`/users/${r.actor.userId}`">{{ r.actor.name ?? r.actor.userId }}</RouterLink>
-                  <span class="dim"> {{ r.action }} </span>
-                  <span>{{ r.target }}</span>
-                  <span v-if="amountText(r)" class="mono dim"> · {{ amountText(r) }}</span>
-                  <template v-if="r.toOwner">
-                    <span class="dim"> → </span><RouterLink :to="`/users/${r.toOwner.userId}`">{{ r.toOwner.name ?? r.toOwner.userId }}</RouterLink>
-                  </template>
-                  <template v-else-if="r.owner.userId !== r.actor.userId">
-                    <span class="dim"> of </span><RouterLink :to="`/users/${r.owner.userId}`">{{ r.owner.name ?? r.owner.userId }}</RouterLink>
-                  </template>
-                  <template v-if="r.org">
-                    <span class="dim"> in </span><RouterLink :to="`/orgs/${r.guildId}`">{{ r.org }}</RouterLink>
-                  </template>
-                </span>
-                <span class="tag">{{ SOURCE_LABEL[r.source] }}</span>
-              </li>
-            </ul>
+            <div v-else class="feed">
+              <table class="mini">
+                <thead><tr><th>Time</th><th>Source</th><th>Action</th><th>By</th><th>Target</th><th class="num">Amount</th><th>Org</th></tr></thead>
+                <tbody>
+                  <tr v-for="r in latest" :key="r.id">
+                    <td class="nowrap faint" :title="dateTime(r.at)">{{ ago(r.at) }}</td>
+                    <td class="nowrap dim">{{ SOURCE_LABEL[r.source] }}</td>
+                    <td class="nowrap">{{ r.action }}</td>
+                    <td>
+                      <RouterLink :to="`/users/${r.actor.userId}`">{{ r.actor.name ?? r.actor.userId }}</RouterLink>
+                      <template v-if="r.toOwner">
+                        <span class="dim"> → </span><RouterLink :to="`/users/${r.toOwner.userId}`">{{ r.toOwner.name ?? r.toOwner.userId }}</RouterLink>
+                      </template>
+                      <template v-else-if="r.owner.userId !== r.actor.userId">
+                        <span class="dim"> for </span><RouterLink :to="`/users/${r.owner.userId}`">{{ r.owner.name ?? r.owner.userId }}</RouterLink>
+                      </template>
+                    </td>
+                    <td>{{ r.target }}</td>
+                    <td class="num mono nowrap">{{ amountText(r) }}</td>
+                    <td><RouterLink v-if="r.guildId" :to="`/orgs/${r.guildId}`">{{ r.org ?? r.guildId }}</RouterLink></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <div class="foot">
               <RouterLink :to="feed === 'all' ? '/activity' : `/activity?category=${feed}`">All activity <Icon name="arrow-right" :size="12" /></RouterLink>
             </div>
@@ -181,20 +184,6 @@ const share = (part: number, whole: number) => (whole ? `${Math.round((part / wh
         </div>
 
         <div class="row-3">
-          <section class="panel">
-            <div class="head">
-              <Icon name="users" :size="16" />
-              <span class="head-title">Reach</span>
-            </div>
-            <div class="pad funnel">
-              <RouterLink v-for="s in reach" :key="s.label" :to="s.to" class="step">
-                <span class="step-label">{{ s.label }}</span>
-                <span class="bar"><span class="fill" :style="{ width: `${s.share * 100}%` }" /></span>
-                <span class="mono num">{{ s.count.toLocaleString() }}</span>
-              </RouterLink>
-            </div>
-          </section>
-
           <section class="panel">
             <div class="head">
               <Icon name="users" :size="16" />
@@ -244,12 +233,21 @@ const share = (part: number, whole: number) => (whole ? `${Math.round((part / wh
                 </RouterLink>
                 <span class="faint"> {{ dash.data.value.sources.botLogs.channels }} channels</span>
               </dd>
-              <dt>History</dt>
-              <dd>
-                <RouterLink to="/activity" class="mono">{{ dash.data.value.sources.history.total.toLocaleString() }}</RouterLink> actions
-                <span class="faint"> · newest {{ dash.data.value.sources.history.newestAt ? `${ago(dash.data.value.sources.history.newestAt)} ago` : "—" }}</span>
-              </dd>
             </dl>
+          </section>
+
+          <section class="panel">
+            <div class="head">
+              <Icon name="users" :size="16" />
+              <span class="head-title">Reach</span>
+            </div>
+            <div class="pad funnel">
+              <RouterLink v-for="s in reach" :key="s.label" :to="s.to" class="step">
+                <span class="step-label">{{ s.label }}</span>
+                <span class="bar"><span class="fill" :style="{ width: `${s.share * 100}%` }" /></span>
+                <span class="mono num">{{ s.count.toLocaleString() }}</span>
+              </RouterLink>
+            </div>
           </section>
         </div>
       </template>
@@ -342,30 +340,11 @@ const share = (part: number, whole: number) => (whole ? `${Math.round((part / wh
 }
 
 .feed {
-  list-style: none;
-  margin: 0;
-  padding: 4px 0;
-  font-size: 13px;
+  overflow-x: auto;
+  padding: 4px 8px 0;
 }
 
-.feed li {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 5px 16px;
-}
-
-.when {
-  width: 44px;
-  flex-shrink: 0;
-  font-size: 12px;
-}
-
-.what {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.nowrap {
   white-space: nowrap;
 }
 

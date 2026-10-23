@@ -172,9 +172,12 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
       const next = fixtureSnapshot();
       next.game.build = 1003;
       next.localization.de!['items_commodities_testmetal'] = 'Testmetall neu';
+      // Languages other than de/en are skipped (older snapshots carry them)
+      next.localization.fr = { items_commodities_testmetal: 'Métal' };
       const r = await runImport(db, next, hashOf(next), OPTIONS);
       assert.deepEqual(r.localization.de && [r.localization.de.changed.length, r.localization.de.removed.length], [1, 0]);
       assert.equal(await count('localization', `source = 'community-de'`), 4);
+      assert.equal(await count('localization_source', `lang = 'fr'`), 0);
     });
 
     it('blocks wrong files and mass removal', async () => {
@@ -189,6 +192,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     it('rejects the reserved game source and removes a source with its texts', async () => {
       await assert.rejects(runLocImport(db, file, { ...LOC, source: 'game' }), /reserved/);
       await assert.rejects(runLocImport(db, file, { ...LOC, source: 'app' }), /reserved/);
+      await assert.rejects(runLocImport(db, file, { ...LOC, lang: 'fr' }), /unsupported language/);
       await assert.rejects(runLocImport(db, { ...file, qm_blueprint_category_x: 'Hijack' }, LOC), /reserved for the app/);
       const parsed = parseIniFile(new TextEncoder().encode('qm_blueprint_category_x=Hijack\r\nitems_commodities_testmetal=Metall\r\n'));
       assert.deepEqual([Object.keys(parsed.texts), parsed.appKeys], [['items_commodities_testmetal'], 1]);

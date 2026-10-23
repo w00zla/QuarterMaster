@@ -3,8 +3,8 @@
 Requirements: `docs/requirements.md` "Admin web UI". Commands: `CLAUDE.md`.
 
 The operator's control room (rebuilt 2026-10-22): is everything running, is it used, do the data hold. The
-catalog browser stays, in its own group. Read-only on user data; the only writing features are the imports and
-the bot's status texts.
+catalog browser stays, in its own group. Read-only on user data; the only writing features are the imports (and
+removing imported text sources) and the bot's status texts.
 
 - **API** (`src/adminapp/main.ts`, Hono): one process, bound to `127.0.0.1` by default (in the container
   `0.0.0.0`, published on the host's loopback only), HTTP basic auth for everything (API and static SPA).
@@ -37,17 +37,17 @@ the bot's status texts.
 ## Operations
 
 - **Dashboard** (`/`, `GET /api/dashboard?days=7|30|90`, `src/adminapp/activity.ts`, tested in
-  `test/admin-activity.db.test.ts`): an attention strip (no catalog import → error, link Imports; UEX without
+  `test/admin-activity.db.test.ts`): a health strip (no catalog import → error, link Imports; UEX without
   data → warning, else one entry with the worst endpoint state; every logs channel not ok; every data check
   with hits, link Status; empty = "All good"), KPI tiles (active users and actions 7 days with 30-day
   sparklines and the share per source, orgs with the bot and their active members, stored batches/SCU/pieces
   and gear pieces, refinery jobs running/ready, blueprints owned and the companion's blueprint adds), actions
-  per day stacked by source, the 12 latest actions, reach (known users, in an org, holding data, web login
-  within 30 days — sessions are deleted after 14 idle days, so in effect 14 —, companion used within 30 days;
-  each step counted on its own, not nested), the orgs and the sources' state. Days are UTC days, the 7-day
-  values rolling. Reloads on Refresh and when the window gets the focus back.
+  per day stacked by source, the 12 latest actions as a table (time, source, action, by, target, amount, org),
+  the sources' state, the orgs and reach (known users, in an org, holding data, web login within 30 days —
+  sessions are deleted after 14 idle days, so in effect 14 —, companion used within 30 days; each step counted
+  on its own, not nested). Days are UTC days, the 7-day values rolling. Reloads on Refresh and when the window gets the focus back.
 - **Status** (`/status`, `GET /api/status`, `src/adminapp/status.ts`, tested in `test/admin-status.db.test.ts`):
-  services (the catalog's game build and import age, the history's size and newest row, the UEX pull per
+  services (the catalog's game build and import age, the UEX pull per
   endpoint: warning after 35 minutes without a check, error after 2 hours; the bot's logs channels: history
   rows the channel would post that the bot has not worked off yet, from `logRows` against
   `bot.guild.logs_after` — the bot keeps no heartbeat —, warning after 2 minutes, error after 10, "No mark"
@@ -104,7 +104,9 @@ the bot's status texts.
 
 - **Imports** (`/imports/:id?`): the forms, the catalog import list with its detail, and the text sources
   (every source × language from `GET /api/localization/sources`, by priority; reloads after an import via the
-  meta reload).
+  meta reload). Imported sources can be deleted (trash icon, browser confirm; `DELETE
+  /api/localization/sources/:source/:lang`, `X-Quartermaster: 1`, like `loc:import --remove`); `game` and `app`
+  cannot. Catalog imports cannot be deleted: catalog rows reference them (first/last seen).
 - **UEX** (`/uex`): see `docs/ext.md`.
 
 ## Apps

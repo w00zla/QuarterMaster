@@ -13,7 +13,7 @@ import { connect } from '../db/client.ts';
 import * as a from './activity.ts';
 import { runImport, summarize, textDiffCounts } from '../catalog/import/apply.ts';
 import { loadSnapshot } from '../catalog/import/load.ts';
-import { parseIniFile, runLocImport } from '../catalog/import/loc-import.ts';
+import { parseIniFile, runLocImport, runLocRemove } from '../catalog/import/loc-import.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
 import * as q from './queries.ts';
 import { getStatus } from './status.ts';
@@ -204,6 +204,18 @@ api.post('/import/localization', requireWriteHeader, bodyLimit({ maxSize: 100 * 
     } satisfies LocImportResponse);
   } catch (err) {
     // Validation errors (source/lang names, empty file, reserved keys)
+    return c.json({ error: message(err) }, 400);
+  }
+});
+
+// Removes an imported text source for one language; the sources game and app are refused
+api.delete('/localization/sources/:source/:lang', requireWriteHeader, async (c) => {
+  try {
+    const removed = await runLocRemove(db, c.req.param('source') ?? '', c.req.param('lang') ?? '', false);
+    if (!removed) return c.json({ error: 'not found' }, 404);
+    await refreshLangs();
+    return c.body(null, 204);
+  } catch (err) {
     return c.json({ error: message(err) }, 400);
   }
 });

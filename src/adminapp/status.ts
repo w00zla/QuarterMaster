@@ -48,10 +48,8 @@ export async function getStatus(db: Db): Promise<StatusResponse> {
     });
   }
 
-  const history = (await one<{ total: number; newestAt: string | null }>(db, sql`
-    SELECT count(*)::int AS total, to_json(max(created_at)) #>> '{}' AS "newestAt" FROM app.history`))!;
   // Names only matter for the hit lists, the count is all this needs
   const checkHits = (await getDataChecks(db, 'en')).reduce((sum, c) => sum + c.hits.length, 0);
 
-  return { checkedAt: new Date(now).toISOString(), game, uex, botLogs, history, checkHits };
+  return { checkedAt: new Date(now).toISOString(), game, uex, botLogs, checkHits };
 }

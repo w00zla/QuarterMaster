@@ -199,6 +199,10 @@ function remove(q: StatusQuote) {
   width: 100%;
 }
 
+.nowrap {
+  white-space: nowrap;
+}
+
 .actions {
   display: flex;
   gap: 8px;

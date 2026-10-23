@@ -2,6 +2,7 @@
 import { and, eq, getTableColumns, inArray, isNull, ne, sql, TransactionRollbackError } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import * as c from '../../db/schema/catalog.ts';
+import { LANGS } from '../extract/localization.ts';
 import type { Snapshot } from '../snapshot.ts';
 import { GAME_PRIORITY, GAME_SOURCE, readSources, readTexts, removeSource, writeTexts } from './localization.ts';
 import {
@@ -66,6 +67,8 @@ export async function runImport(db: Db, snapshot: Snapshot, snapshotSha256: stri
   };
 
   const sets = toEntitySets(snapshot);
+  // Game texts of the kept languages only (older snapshots carry every shipped language)
+  const gameTexts = Object.fromEntries(Object.entries(snapshot.localization).filter(([lang]) => LANGS.includes(lang)));
   let result: ImportResult | undefined;
 
   try {
@@ -84,9 +87,9 @@ export async function runImport(db: Db, snapshot: Snapshot, snapshotSha256: stri
           const existing = new Map<string, ExistingRow>(rows.map((r) => [r.uuid, { contentHash: r.contentHash, retired: r.retiredAt !== null }]));
           diffs[name] = diffEntities(sets[name], existing);
         }
-        // Game texts per language; languages the game no longer ships are removed
+        // Game texts per language; languages the game no longer ships (or the app does not keep) are removed
         const locDiff: Record<string, TextDiff> = {};
-        for (const [lang, texts] of Object.entries(snapshot.localization)) {
+        for (const [lang, texts] of Object.entries(gameTexts)) {
           locDiff[lang] = diffTexts(texts, await readTexts(tx, GAME_SOURCE, lang));
         }
         for (const { lang } of await readSources(tx, { source: GAME_SOURCE })) {
@@ -153,7 +156,7 @@ export async function runImport(db: Db, snapshot: Snapshot, snapshotSha256: stri
 
         const origin = `snapshot ${snapshot.game.channel} ${snapshot.game.build}`;
         for (const [lang, diff] of Object.entries(locDiff)) {
-          const texts = snapshot.localization[lang];
+          const texts = gameTexts[lang];
           if (texts) {
             await writeTexts(tx, { source: GAME_SOURCE, lang, priority: GAME_PRIORITY, origin, contentSha256: textsSha256(texts), diff });
           } else {

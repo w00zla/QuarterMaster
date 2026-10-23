@@ -1,7 +1,7 @@
 // Import of externally maintained global.ini files as an additional localization source.
 import { sql, TransactionRollbackError } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
-import { displayText, isMissingTranslation, parseGlobalIni } from '../extract/localization.ts';
+import { LANGS, displayText, isMissingTranslation, parseGlobalIni } from '../extract/localization.ts';
 import { APP_KEY_PREFIX, isAppKey } from '../labels.ts';
 import { IMPORT_LOCK } from './apply.ts';
 import {
@@ -10,7 +10,6 @@ import {
 import { diffTexts, textsSha256, type TextDiff, type Violation } from './plan.ts';
 
 const SOURCE_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
-const LANG_PATTERN = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 export interface ParsedIni {
   texts: Record<string, string>;
@@ -73,7 +72,7 @@ export function validateSourceAndLang(source: string, lang: string): string[] {
   if (source === GAME_SOURCE) errors.push(`source "${GAME_SOURCE}" is reserved for the catalog import`);
   else if (source === APP_SOURCE) errors.push(`source "${APP_SOURCE}" is reserved for the app's own texts`);
   else if (!SOURCE_PATTERN.test(source)) errors.push(`invalid source name "${source}" (lower case letters, digits, . _ -)`);
-  if (!LANG_PATTERN.test(lang)) errors.push(`invalid language code "${lang}" (e.g. de, pt-BR)`);
+  if (!LANGS.includes(lang)) errors.push(`unsupported language "${lang}" (${LANGS.join(', ')})`);
   return errors;
 }
 

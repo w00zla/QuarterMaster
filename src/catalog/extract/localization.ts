@@ -1,19 +1,13 @@
 // Parsing of the game's global.ini localization files.
 
-// Localization folder name -> language code
+// Localization folder name -> language code; the app keeps German and English only, other folders are skipped
 export const LANGUAGE_CODES: Record<string, string> = {
   'english': 'en',
   'german_(germany)': 'de',
-  'french_(france)': 'fr',
-  'italian_(italy)': 'it',
-  'spanish_(spain)': 'es-ES',
-  'spanish_(latin_america)': 'es-419',
-  'portuguese_(brazil)': 'pt-BR',
-  'japanese_(japan)': 'ja',
-  'korean_(south_korea)': 'ko',
-  'chinese_(simplified)': 'zh-Hans',
-  'chinese_(traditional)': 'zh-Hant',
 };
+
+/** The languages the app keeps texts of (game texts and external sources). */
+export const LANGS: readonly string[] = Object.values(LANGUAGE_CODES);
 
 // Placeholder keys that mean "no text"
 const SENTINEL_KEYS = new Set(['loc_empty', 'loc_placeholder', 'loc_uninitialized']);

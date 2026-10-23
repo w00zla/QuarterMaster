@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Is everything running and do the data hold: services (catalog, UEX pull, the bot's logs channels, history),
+// Is everything running and do the data hold: services (catalog, UEX pull, the bot's logs channels),
 // the user data checks, the catalog's counts and gaps. Ordering: by state, then by name.
 import { RouterLink, useRouter } from "vue-router";
 import HelpTip from "../components/HelpTip.vue";
@@ -77,11 +77,6 @@ const TEXT_ENTITIES: Record<string, string> = {
                 <span class="faint"> · imported {{ ago(status.data.value.game.importedAt) }} ago</span>
               </template>
               <span v-else class="tag err">No import</span>
-            </dd>
-            <dt>History</dt>
-            <dd>
-              {{ status.data.value.history.total.toLocaleString() }} actions
-              <span class="faint"> · newest {{ status.data.value.history.newestAt ? `${ago(status.data.value.history.newestAt)} ago` : "—" }}</span>
             </dd>
           </dl>
 
@@ -193,7 +188,7 @@ const TEXT_ENTITIES: Record<string, string> = {
             <dl class="kv grow">
               <dt>Without a known source <HelpTip :text="HELP.noSource" /></dt>
               <dd>{{ overview.data.value.gaps.noSourceBlueprints }}</dd>
-              <dt>… registered by users <HelpTip :text="HELP.registeredNoSource" /></dt>
+              <dt>Unknown registered by users <HelpTip :text="HELP.registeredNoSource" /></dt>
               <dd :class="{ faint: !overview.data.value.gaps.registeredNoSource.length }">
                 <template v-if="!overview.data.value.gaps.registeredNoSource.length">0</template>
                 <template v-for="(b, i) in overview.data.value.gaps.registeredNoSource" :key="b.uuid">

@@ -245,7 +245,6 @@ export async function getDashboard(db: Db, lang: string, days: number): Promise<
         endpoints: status.uex.length,
       },
       botLogs: { state: worst(status.botLogs.map((g) => g.state)), channels: status.botLogs.length },
-      history: status.history,
     },
   };
 }
