@@ -7,7 +7,7 @@
 //        [--p4k <Data.p4k>] [--starbreaker <bin>] [--blender <bin>] [--out local/icons] [--work local/work/icons]
 // Auf einem anderen Rechner ohne DB und Repo (scripts/icons-bundle.ps1 packt alles): --targets <targets.json>
 // mit der Zielliste, die --write-targets hier aus der DB schreibt; die DB-Module werden dann nicht geladen.
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +27,8 @@ const HELP = `Usage: pnpm icons:render [options]
   --write-targets <file> Zielliste aus der DB schreiben und beenden
   --out <dir>           Ziel, ein PNG je UUID (default: local/icons)
   --work <dir>          Arbeitsverzeichnis: DataCore-Dumps, Exporte, Renders (default: local/work/icons)
-  --chunk <n>           Renders je Blender-Prozess (default 50)`;
+  --chunk <n>           Entities je Block: erst exportieren, dann ein Blender-Prozess (default 50)
+  --parallel <n>        Gleichzeitige StarBreaker-Exporte (default 4; jeder lädt die DataCore für sich)`;
 
 interface Category { type: string; subType: string; requiredTag: unknown }
 interface Target { uuids: string[]; entity: string; type: string; subType: string; worn: boolean }
@@ -105,10 +106,12 @@ async function loadGameTables(bin: string, p4k: string, work: string, force: boo
   const groupsDir = join(dir, 'lightgroups');
   mkdirSync(join(dir, 'rigs'), { recursive: true });
   if (force || !existsSync(configFile)) {
+    console.log('DataCore: Inventar-Tabellen lesen (PlayerChoice_PITConfig) …');
     const { stdout } = await run(bin, ['dcb', 'query', '--p4k', p4k, 'PlayerChoice_PITConfig']);
     writeFileSync(configFile, stdout);
   }
   if (force || !existsSync(groupsDir)) {
+    console.log('DataCore: Licht-Rigs lesen (inventorylightgroup_*) …');
     await run(bin, ['dcb', 'extract', '--p4k', p4k, '--format', 'json', '-o', groupsDir, '--filter', `${LIGHT_GROUPS_PATH}/**`]);
   }
   const params = (JSON.parse(readFileSync(configFile, 'utf8')) as PitConfig)._RecordValue_.inventoryParams;
@@ -233,6 +236,7 @@ async function main() {
       out: { type: 'string', default: 'local/icons' },
       work: { type: 'string', default: 'local/work/icons' },
       chunk: { type: 'string', default: '50' },
+      parallel: { type: 'string', default: '4' },
       help: { type: 'boolean', default: false },
     },
   });
@@ -253,8 +257,10 @@ async function main() {
   const renderDir = join(work, 'render');
   const size = Number(args.size);
   const chunk = Number(args.chunk);
+  const parallel = Math.max(1, Number(args.parallel));
   for (const d of [out, exportRoot, renderDir]) mkdirSync(d, { recursive: true });
 
+  console.log(args.targets ? `Zielliste: ${resolve(args.targets)}` : 'Zielliste aus der DB …');
   let targets = args.targets ? (JSON.parse(readFileSync(resolve(args.targets), 'utf8')) as Target[]) : await loadTargets();
   if (args['write-targets']) {
     writeFileSync(resolve(args['write-targets']), JSON.stringify(targets, null, 1));
@@ -274,68 +280,128 @@ async function main() {
     return;
   }
 
-  // 1. Export (StarBreaker nutzt selbst alle Kerne, daher nacheinander); fertige Renders nur kopieren
+  // Blockweise: einen Block exportieren (StarBreaker nutzt selbst alle Kerne, daher nacheinander), dann
+  // rendern (ein Blender-Prozess je Block). So landen die ersten Icons nach Minuten, nicht nach Stunden.
   const started = Date.now();
   const failures: string[] = [];
-  const jobs: { target: Target; job: Job }[] = [];
   let exported = 0;
-  for (const t of targets) {
-    const png = join(renderDir, `${t.entity}.png`);
-    if (!args.force && existsSync(png)) {
-      for (const uuid of t.uuids) if (!existsSync(join(out, `${uuid}.png`))) copyFileSync(png, join(out, `${uuid}.png`));
-      continue;
-    }
-    let pkg = packageDir(exportRoot, t.entity);
-    if (args.force || !pkg) {
-      const base = ['entity', 'export', '--p4k', p4k, t.entity, exportRoot, '--kind', 'decomposed'];
-      try {
-        try {
-          await run(starbreaker, t.worn ? [...base, '--worn'] : base);
-        } catch (err) {
-          if (!t.worn) throw err;
-          await run(starbreaker, base); // kein getragenes Modell: das Standardmodell nehmen
-        }
-        exported++;
-        if (exported % 25 === 0) console.log(`  exportiert: ${exported}`);
-      } catch (err) {
-        failures.push(`${t.entity}: ${(err as Error).message.split('\n').pop()}`);
-        continue;
-      }
-      pkg = packageDir(exportRoot, t.entity);
-      if (!pkg) {
-        failures.push(`${t.entity}: package directory not found after export`);
-        continue;
-      }
-    }
-    jobs.push({ target: t, job: { src: join(pkg, 'scene.blend'), out: png, pose: tables.pose(t.type, t.subType), rig: tables.rig(t.type, t.subType), size } });
-  }
-  console.log(`Export: ${exported} neu, ${jobs.length} zu rendern, ${failures.length} Fehler (${Math.round((Date.now() - started) / 1000)} s)`);
-
-  // 2. Render in Blöcken, ein Blender-Prozess je Block
   let rendered = 0;
-  for (let i = 0; i < jobs.length; i += chunk) {
-    const block = jobs.slice(i, i + chunk);
-    const jobsFile = join(work, 'jobs.json');
-    writeFileSync(jobsFile, JSON.stringify(block.map((b) => b.job)));
-    let output = '';
-    try {
-      const r = await run(blender, ['-b', '--python', renderScript, '--', '--jobs', jobsFile]);
-      output = `${r.stdout}\n${r.stderr}`;
-    } catch (err) {
-      output = (err as Error).message;
-    }
-    for (const b of block) {
-      if (existsSync(b.job.out)) {
-        rendered++;
-        for (const uuid of b.target.uuids) copyFileSync(b.job.out, join(out, `${uuid}.png`));
+  let skipped = 0;
+  const width = String(targets.length).length;
+  const progress = (i: number, what: string, entity: string, note: string) =>
+    console.log(`[${String(i).padStart(width)}/${targets.length}] ${what.padEnd(6)} ${entity}  ${note}`);
+  const elapsed = () => `${Math.round((Date.now() - started) / 60000)} min`;
+  console.log(`Blender: ${blender}`);
+
+  for (let b0 = 0; b0 < targets.length; b0 += chunk) {
+    const jobs: { index: number; target: Target; job: Job }[] = [];
+    // Exporte parallel: jeder StarBreaker-Aufruf lädt erst die DataCore (~2 s), das überlappt so
+    const block = targets.slice(b0, Math.min(b0 + chunk, targets.length)).map((t, k) => ({ index: b0 + k, t }));
+    const packages = new Map<number, string>();
+    let next = 0;
+    const exportOne = async (i: number, t: Target) => {
+      const png = join(renderDir, `${t.entity}.png`);
+      if (!args.force && existsSync(png)) {
+        for (const uuid of t.uuids) if (!existsSync(join(out, `${uuid}.png`))) copyFileSync(png, join(out, `${uuid}.png`));
+        skipped++;
+        return;
+      }
+      let pkg = packageDir(exportRoot, t.entity);
+      if (args.force || !pkg) {
+        const base = ['entity', 'export', '--p4k', p4k, t.entity, exportRoot, '--kind', 'decomposed'];
+        const t0 = Date.now();
+        try {
+          try {
+            await run(starbreaker, t.worn ? [...base, '--worn'] : base);
+          } catch (err) {
+            if (!t.worn) throw err;
+            await run(starbreaker, base); // kein getragenes Modell: das Standardmodell nehmen
+          }
+          exported++;
+          progress(i + 1, 'export', t.entity, `${((Date.now() - t0) / 1000).toFixed(1)} s`);
+        } catch (err) {
+          failures.push(`${t.entity}: ${(err as Error).message.split('\n').pop()}`);
+          progress(i + 1, 'export', t.entity, 'FEHLER');
+          return;
+        }
+        pkg = packageDir(exportRoot, t.entity);
+        if (!pkg) {
+          failures.push(`${t.entity}: package directory not found after export`);
+          progress(i + 1, 'export', t.entity, 'FEHLER kein Paketverzeichnis');
+          return;
+        }
       } else {
-        const line = output.split('\n').find((l) => l.startsWith('failed: ') && l.includes(b.target.entity));
-        failures.push(`${b.target.entity}: ${line ?? 'no render output'}`);
+        progress(i + 1, 'export', t.entity, 'vorhanden');
+      }
+      packages.set(i, pkg);
+    };
+    await Promise.all(Array.from({ length: Math.min(parallel, block.length) }, async () => {
+      while (next < block.length) {
+        const { index, t } = block[next++]!;
+        await exportOne(index, t);
+      }
+    }));
+    for (const { index, t } of block) {
+      const pkg = packages.get(index);
+      if (!pkg) continue;
+      jobs.push({ index, target: t, job: { src: join(pkg, 'scene.blend'), out: join(renderDir, `${t.entity}.png`), pose: tables.pose(t.type, t.subType), rig: tables.rig(t.type, t.subType), size } });
+    }
+    if (!jobs.length) continue;
+
+    // render.py meldet jedes Item ("icon: <png> …" / "failed: <png> …"), die Zeilen werden live zu Fortschritt
+    const jobsFile = join(work, 'jobs.json');
+    writeFileSync(jobsFile, JSON.stringify(jobs.map((j) => j.job)));
+    const byOut = new Map(jobs.map((j) => [j.job.out.toLowerCase(), j]));
+    const done = new Set<string>();
+    let t0 = Date.now();
+    console.log(`Blender startet für ${jobs.length} Renders …`);
+    const onLine = (line: string) => {
+      const m = /^(icon|failed): (.+?\.png)(?: (.*))?$/.exec(line.trim());
+      if (!m) return;
+      const key = m[2]!.toLowerCase();
+      const j = byOut.get(key);
+      if (!j || done.has(key)) return;
+      done.add(key);
+      if (m[1] === 'icon') {
+        progress(j.index + 1, 'render', j.target.entity, `${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      } else {
+        progress(j.index + 1, 'render', j.target.entity, `FEHLER ${m[3] ?? ''}`);
+        failures.push(`${j.target.entity}: ${m[3] ?? 'render failed'}`);
+      }
+      t0 = Date.now();
+    };
+    await new Promise<void>((resolveRun) => {
+      const child = spawn(blender, ['-b', '--python', renderScript, '--', '--jobs', jobsFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let buffer = '';
+      child.stdout.on('data', (data: Buffer) => {
+        buffer += data.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const l of lines) onLine(l);
+      });
+      child.stderr.on('data', () => {}); // Blenders eigenes Rauschen
+      child.on('close', () => {
+        if (buffer) onLine(buffer);
+        resolveRun();
+      });
+      child.on('error', (err) => {
+        console.log(`Blender konnte nicht starten: ${err.message}`);
+        resolveRun();
+      });
+    });
+    for (const j of jobs) {
+      const failed = failures.some((f) => f.startsWith(`${j.target.entity}: `));
+      if (!failed && existsSync(j.job.out)) {
+        rendered++;
+        for (const uuid of j.target.uuids) copyFileSync(j.job.out, join(out, `${uuid}.png`));
+      } else if (!failed) {
+        failures.push(`${j.target.entity}: no render output (Blender abgebrochen?)`);
+        progress(j.index + 1, 'render', j.target.entity, 'FEHLER kein Bild');
       }
     }
-    console.log(`  gerendert: ${rendered}/${jobs.length}`);
+    console.log(`Block fertig: ${rendered} gerendert, ${skipped} übersprungen, ${failures.length} Fehler, ${elapsed()}`);
   }
-  console.log(`Fertig: ${rendered} Renders, ${failures.length} Fehler, ${Math.round((Date.now() - started) / 1000)} s -> ${out}`);
+  console.log(`Fertig: ${rendered} gerendert, ${skipped} übersprungen, ${exported} exportiert, ${failures.length} Fehler, ${elapsed()} -> ${out}`);
   for (const f of failures) console.log(`  ! ${f}`);
   if (failures.length) process.exitCode = 1;
 }
