@@ -225,6 +225,13 @@
       "when": 1792759660671,
       "tag": "0031_keep_de_en",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792848156454,
+      "tag": "0032_mining",
+      "breakpoints": true
     }
   ]
 }

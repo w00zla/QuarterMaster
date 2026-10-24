@@ -6,7 +6,7 @@ import { LANGS } from '../extract/localization.ts';
 import type { Snapshot } from '../snapshot.ts';
 import { GAME_PRIORITY, GAME_SOURCE, readSources, readTexts, removeSource, writeTexts } from './localization.ts';
 import {
-  ENTITY_NAMES, blueprintChildren, blueprintSourceRows, chunks, diffEntities, diffTexts, evaluateSafeguards, textsSha256, toEntitySets,
+  ENTITY_NAMES, blueprintChildren, blueprintSourceRows, chunks, miningRows, diffEntities, diffTexts, evaluateSafeguards, textsSha256, toEntitySets,
   type EntityDiff, type EntityName, type ExistingRow, type LastImport, type SafeguardOptions, type SafeguardResult, type TextDiff,
 } from './plan.ts';
 
@@ -143,6 +143,11 @@ export async function runImport(db: Db, snapshot: Snapshot, snapshotSha256: stri
         // Derived from the whole snapshot: replaced as a whole
         await tx.delete(c.blueprintSource);
         for (const batch of chunks(blueprintSourceRows(snapshot), 1000)) await tx.insert(c.blueprintSource).values(batch);
+        const mined = miningRows(snapshot);
+        await tx.delete(c.mineable);
+        await tx.delete(c.miningProvider);
+        for (const batch of chunks(mined.providers, 1000)) await tx.insert(c.miningProvider).values(batch);
+        for (const batch of chunks(mined.mineables, 1000)) await tx.insert(c.mineable).values(batch);
 
         // Everything not seen in this import gets retired; must match the diff exactly
         for (const name of ENTITY_NAMES) {

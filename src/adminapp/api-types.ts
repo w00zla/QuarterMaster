@@ -200,6 +200,50 @@ export interface ResourceRow {
   retired: boolean;
 }
 
+// --- mining (catalog.mining_provider, catalog.mineable) ------------------------------------------------
+// GET /api/mining            MiningProviderRow[]
+// GET /api/mining/:uuid      MiningProviderDetail (404 for an unknown provider)
+
+export type MiningMethod = 'ship' | 'roc' | 'fps';
+
+export interface MiningPlace {
+  uuid: string;
+  key: string;
+  // The localized name, else the key
+  name: string;
+  system: string | null;
+}
+
+export interface MiningProviderRow {
+  uuid: string;
+  // The provider preset's record key (HPP_Stanton2c)
+  key: string;
+  places: MiningPlace[];
+  systems: string[];
+  methods: MiningMethod[];
+  resources: number;
+}
+
+export interface MineableDetailRow {
+  method: MiningMethod;
+  resource: Ref;
+  // The gem item the rock breaks into
+  item: Ref | null;
+  // The part's quality factor (1: a rock's rich part, below: its lean part)
+  qualityScale: number;
+  // 0–1 of the method's rocks there holding the part
+  share: number;
+  minPercent: number;
+  maxPercent: number;
+  rarity: string | null;
+  // The values the material's quality bands map the part to, with their 0–1 chances (empty without bands)
+  quality: { min: number; max: number; values: Array<{ value: number; chance: number }> } | null;
+}
+
+export interface MiningProviderDetail extends MiningProviderRow {
+  mineables: MineableDetailRow[];
+}
+
 export interface QualityBand {
   start: number;
   end: number;

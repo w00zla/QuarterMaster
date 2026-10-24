@@ -99,6 +99,12 @@ removing imported text sources) and the bot's status texts.
   in recipes, the last import's changes). Items has group chips Gear (Ship / FPS) · Harvestables (non-gear
   items an active recipe uses) · Other, combined with the other filters (the SPA imports
   `src/catalog/components.ts`, listed in `adminapp/tsconfig.json`).
+- **Mining** (`/mining/:uuid?`, `GET /api/mining[/:uuid]`, `src/adminapp/mining.ts`): every mining provider
+  (`catalog.mining_provider`) with its places (the first two and the count when there are many), systems,
+  methods and resource count; method chips (Ship, ROC, FPS) and the search. The detail lists the yields per
+  method (resource and gem item linked to Materials/Items, share of the method's rocks, content, rarity,
+  quality factor of the part, quality values with their chances) and every place with its system and key. Places and systems as the web app names
+  them (`starMap`). See `docs/catalog-sources.md` "Mining"; its anomalies show in the Imports detail.
 
 ## Sources
 

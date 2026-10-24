@@ -11,15 +11,19 @@ import { logout, me } from "../session";
 import CompanionDialog from "./CompanionDialog.vue";
 import ProfileDialog from "./ProfileDialog.vue";
 
+// The overview on its own, then the data views
+const homeTab: { to: string; label: Key; icon: IconName } = { to: "/", label: "nav.home", icon: "overview" };
 const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
-  { to: "/", label: "nav.home", icon: "overview" },
   { to: "/gear", label: "nav.components", icon: "gear" },
   { to: "/resources", label: "nav.stock", icon: "type-crate" },
   { to: "/refinery", label: "nav.refinery", icon: "drop" },
   { to: "/blueprints", label: "nav.blueprints", icon: "blueprint" },
 ];
 // Tools, after a divider (as in the admin UI)
-const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [{ to: "/crafting", label: "nav.crafting", icon: "crafter" }];
+const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [
+  { to: "/crafting", label: "nav.crafting", icon: "crafter" },
+  { to: "/mining", label: "nav.mining", icon: "pickaxe" },
+];
 
 const profileOpen = ref(false);
 const companionOpen = ref(false);
@@ -40,15 +44,24 @@ onUnmounted(() => {
       <img class="logo" :src="logo" alt="" />
       <span class="wordmark">QUARTER<span class="accent">MASTER</span></span>
     </div>
-    <nav class="tabs">
-      <RouterLink v-for="tab in tabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
-        <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
-      </RouterLink>
-      <span class="tab-divider" />
-      <RouterLink v-for="tab in toolTabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
-        <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
-      </RouterLink>
-    </nav>
+    <!-- Three bars: the overview, the data views, the tools -->
+    <div class="navs">
+      <nav class="tabs">
+        <RouterLink :to="homeTab.to" class="tab" :class="{ active: $route.path === homeTab.to }">
+          <Icon :name="homeTab.icon" :size="16" /> {{ t(homeTab.label) }}
+        </RouterLink>
+      </nav>
+      <nav class="tabs">
+        <RouterLink v-for="tab in tabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
+          <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
+        </RouterLink>
+      </nav>
+      <nav class="tabs">
+        <RouterLink v-for="tab in toolTabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
+          <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
+        </RouterLink>
+      </nav>
+    </div>
     <div class="spacer" />
     <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="desktop" :size="14" /> {{ t("companion.open") }}</button>
     <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
@@ -105,6 +118,12 @@ onUnmounted(() => {
 
 .wordmark .accent {
   color: var(--accent);
+}
+
+.navs {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
 }
 
 .tabs {
@@ -180,13 +199,17 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* Narrow screens: the tabs get a row of their own (scrolling sideways if needed) */
+/* Narrow screens: the tab bars get a row of their own (the data views scrolling sideways if needed) */
 @media (max-width: 900px) {
-  .tabs {
+  .navs {
     order: 10;
     flex-basis: 100%;
-    overflow-x: auto;
     margin-bottom: 8px;
+  }
+
+  .navs .tabs:nth-child(2) {
+    min-width: 0;
+    overflow-x: auto;
   }
 }
 

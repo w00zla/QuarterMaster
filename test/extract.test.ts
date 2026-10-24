@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { displayText, isMissingTranslation, locKey, parseGlobalIni } from '../src/catalog/extract/localization.ts';
+import { partQuality } from '../src/catalog/extract/mining.ts';
 import { refPath } from '../src/catalog/extract/records.ts';
 import { snapshotSchema } from '../src/catalog/snapshot.ts';
 import { FPS, FPS_RECORDS, RECORDS, U, fixtureSnapshot } from './fixtures.ts';
@@ -54,7 +55,7 @@ describe('normalize', () => {
     assert.equal(ore.isOre, true);
     assert.equal(ore.refinedUuid, U.metal);
     assert.deepEqual(ore.craftingData, [{
-      name: 'Default', qualityDistributionUuid: U.distribution, qualityLocationOverrideUuid: null, qualityQuantizationUuid: U.quantization,
+      name: 'Default', qualityDistributionUuid: U.distribution, qualityLocationOverrideUuid: U.qualityOverride, qualityQuantizationUuid: U.quantization,
     }]);
     assert.equal(s.resources.length, 2);
   });
@@ -114,7 +115,7 @@ describe('normalize', () => {
   });
 
   it('normalizes star map objects as locations with parent and type', () => {
-    assert.deepEqual(s.locations.map((l) => l.uuid).sort(), [U.star, U.station, U.orphan].sort());
+    assert.deepEqual(s.locations.map((l) => l.uuid).sort(), [U.star, U.station, U.orphan, U.solarSystem].sort());
     assert.deepEqual(s.locations.find((l) => l.uuid === U.station), {
       uuid: U.station, key: 'Test_Station', nameKey: 'test_station', descriptionKey: 'test_station_desc', parentUuid: U.star,
       type: 'Manmade', navIcon: 'Station', hideInStarmap: false, respawnLocationType: 'Hospital',
@@ -131,8 +132,34 @@ describe('normalize', () => {
   it('keeps every exported record raw, incl. pools, but not the contract records behind the sources', () => {
     assert.ok(s.rawRecords.some((r) => r.uuid === U.pool));
     assert.ok(s.rawRecords.some((r) => r.uuid === U.marker));
-    const sourceOnly = /^(contracts|missionscenarios|missiontype|missiondata|factions|reputation)\//;
+    const sourceOnly = /^(contracts|missionscenarios|missiontype|missiondata|factions|reputation|harvestable|mining|entities\/mineable)\//;
     assert.equal(s.rawRecords.length, Object.keys(RECORDS).filter((p) => !sourceOnly.test(p)).length);
+  });
+
+  it('derives what can be mined where, per provider and method', () => {
+    assert.deepEqual(s.miningProviders, [{ uuid: U.provider, key: 'HPP_Test', locationUuids: [U.station] }]);
+    const base = { providerUuid: U.provider, itemUuid: null, rarity: 'common' };
+    assert.deepEqual(s.mineables, [
+      // Hand mining: the gem rock breaks into the gem item; no quality data for the metal
+      { ...base, method: 'fps', resourceUuid: U.metal, qualityScale: 1, itemUuid: U.gem, share: 1, minPercent: 90, maxPercent: 100, rarity: null, quality: null },
+      // The rich part: the common rock (3 of 4) always, the rare one (1 of 4) half the time. The station's system
+      // overrides the quality (its solar system record, not an ancestor): 1–499 maps to the band value 400
+      {
+        ...base, method: 'ship', resourceUuid: U.ore, qualityScale: 1, share: 0.875, minPercent: 2, maxPercent: 30,
+        quality: { min: 400, max: 400, values: [{ value: 400, chance: 1 }] },
+      },
+      // The lean part (common rock only): quality × 0.49 = 245–490, the band value 400
+      {
+        ...base, method: 'ship', resourceUuid: U.ore, qualityScale: 0.49, share: 0.75, minPercent: 40, maxPercent: 80,
+        quality: { min: 400, max: 400, values: [{ value: 400, chance: 1 }] },
+      },
+    ]);
+    assert.equal(anomaly('unresolved_ref').filter((a) => a.record === 'MineableComposition.RareShipMineables_Test').length, 1);
+    // The provider no container places, the container placed nowhere
+    assert.deepEqual(anomaly('unplaced_provider').map((a) => a.record), ['HarvestableProviderPreset.HPP_Unused']);
+    assert.deepEqual(anomaly('unplaced_container').map((a) => [a.record, a.detail]), [
+      ['objectcontainers/pu/system/test/lost.socpak', 'object container without a star map record uses HPP_Test'],
+    ]);
   });
 
   it('reports anomalies instead of failing', () => {
@@ -153,5 +180,25 @@ describe('normalize', () => {
     assert.equal(s.localization.de!['items_commodities_testmetal'], 'Testmetall');
     assert.equal(s.localization.de!['item_nametest_output'], undefined);
     assert.equal(anomaly('missing_translation').length, 1);
+  });
+});
+
+describe('mining quality', () => {
+  // A ship ore's distribution and the bands of a material (values inside their bands)
+  const bands = [[0, 399, 310], [400, 599, 525], [600, 699, 646], [700, 799, 718], [800, 899, 853], [900, 949, 925], [950, 998, 957], [999, 1000, 1000]]
+    .map(([start, end, mappedValue]) => ({ start: start!, end: end!, mappedValue: mappedValue! }));
+  const d = { min: 501, max: 1000, mean: 500, stddev: 163 };
+
+  it('maps the spawn distribution to the band values with their chances', () => {
+    const q = partQuality(d, 1, bands)!;
+    assert.deepEqual(q.values.map((v) => v.value), [525, 646, 718, 853, 925, 957, 1000]);
+    assert.ok(Math.abs(q.values.reduce((s, v) => s + v.chance, 0) - 1) < 0.001);
+    // Mostly the lowest band: the distribution's peak sits at its lower end
+    assert.ok(q.values[0]!.chance > 0.4 && q.values[0]!.chance > q.values[1]!.chance);
+  });
+
+  it('scales a lean part below 500 and keeps the range without bands', () => {
+    assert.deepEqual(partQuality(d, 0.49, bands)!.values.map((v) => v.value), [310, 525]);
+    assert.deepEqual(partQuality(d, 0.49, []), { min: 245, max: 490, values: [] });
   });
 });

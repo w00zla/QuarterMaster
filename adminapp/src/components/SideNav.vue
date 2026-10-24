@@ -26,6 +26,7 @@ const GROUPS: { label: string; items: { to: string; label: string; icon: IconNam
     { to: "/blueprints", label: "Blueprints", icon: "blueprint" },
     { to: "/materials", label: "Materials", icon: "resource" },
     { to: "/items", label: "Items", icon: "item" },
+    { to: "/mining", label: "Mining", icon: "pickaxe" },
     { to: "/texts", label: "Texts", icon: "texts" },
   ] },
   { label: "Sources", items: [

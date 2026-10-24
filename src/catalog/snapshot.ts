@@ -2,7 +2,7 @@
 // Bump SNAPSHOT_SCHEMA_VERSION on any incompatible change.
 import { z } from 'zod';
 
-export const SNAPSHOT_SCHEMA_VERSION = 4;
+export const SNAPSHOT_SCHEMA_VERSION = 6;
 
 // Game record ids are UUID-shaped but not necessarily RFC-compliant
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -176,6 +176,39 @@ export const locationSchema = z.object({
   respawnLocationType: z.string().nullable(),
 });
 
+// What can be mined where: a harvestable provider preset (the spawn table of a planet, moon or asteroid
+// field) and the star map objects whose object containers use it
+export const miningProviderSchema = z.object({
+  uuid,
+  key: z.string(),
+  locationUuids: z.array(uuid),
+});
+
+// One part of a resource at one provider and mining method: the share of the method's rocks there that hold
+// it, how much of such a rock it is, and the quality it spawns with in the provider's system. A rock holds an
+// ore as a small rich part (qualityScale 1) and a large lean one (0.49, 0.789): one entry each.
+export const mineableSchema = z.object({
+  providerUuid: uuid,
+  method: z.enum(['ship', 'roc', 'fps']),
+  resourceUuid: uuid,
+  // The part's quality factor
+  qualityScale: z.number(),
+  // The item the rock breaks into (FPS and ROC gems: recipes take the item, not the resource)
+  itemUuid: uuid.nullable(),
+  // 0–1 of the method's rocks at the provider holding the part (the rocks' weight times the part's chance)
+  share: z.number(),
+  // Percent of such a rock
+  minPercent: z.number(),
+  maxPercent: z.number(),
+  // From the rock composition's name (common … legendary); ship rocks only
+  rarity: z.string().nullable(),
+  // The quality the part spawns with (the resource's distribution, the system's override, times the factor):
+  // its range and the values the material's quality bands map it to, with their chances (empty without bands)
+  quality: z.object({
+    min: z.number(), max: z.number(), values: z.array(z.object({ value: z.number(), chance: z.number() })),
+  }).nullable(),
+});
+
 export const snapshotSchema = z.object({
   schemaVersion: z.literal(SNAPSHOT_SCHEMA_VERSION),
   game: z.object({
@@ -201,6 +234,8 @@ export const snapshotSchema = z.object({
   blueprints: z.array(blueprintSchema),
   blueprintSources: z.array(blueprintSourceSchema),
   locations: z.array(locationSchema),
+  miningProviders: z.array(miningProviderSchema),
+  mineables: z.array(mineableSchema),
 });
 
 export type Snapshot = z.infer<typeof snapshotSchema>;
@@ -215,6 +250,8 @@ export type QualityQuantization = z.infer<typeof qualityQuantizationSchema>;
 export type Blueprint = z.infer<typeof blueprintSchema>;
 export type BlueprintSource = z.infer<typeof blueprintSourceSchema>;
 export type Location = z.infer<typeof locationSchema>;
+export type MiningProvider = z.infer<typeof miningProviderSchema>;
+export type Mineable = z.infer<typeof mineableSchema>;
 export type BlueprintTier = z.infer<typeof blueprintTierSchema>;
 export type BlueprintSlot = z.infer<typeof blueprintSlotSchema>;
 export type BlueprintInput = z.infer<typeof blueprintInputSchema>;

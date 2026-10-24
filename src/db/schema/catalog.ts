@@ -213,6 +213,44 @@ export const location = catalog.table('location', {
 }, (t) => [index().on(t.parentUuid), index().on(t.navIcon)]);
 
 /**
+ * A harvestable provider preset (the spawn table of a planet, moon or asteroid field) and where it is used
+ * (snapshot `miningProviders`). Derived data: replaced as a whole on every import.
+ */
+export const miningProvider = catalog.table('mining_provider', {
+  uuid: uuid('uuid').primaryKey(),
+  key: text('key').notNull(),
+  // Star map objects (catalog.location, no foreign key like parent_uuid) whose object containers use it
+  locationUuids: uuid('location_uuids').array().notNull(),
+});
+
+/**
+ * What one provider yields per mining method (snapshot `mineables`), per part of a resource (a rock's rich
+ * part, quality_scale 1, and its lean one): the share of the method's rocks there holding it, its percent of
+ * such a rock, the rarity and the quality values it spawns with. Derived data.
+ */
+export const mineable = catalog.table('mineable', {
+  providerUuid: uuid('provider_uuid').notNull().references(() => miningProvider.uuid),
+  method: text('method').notNull(),
+  resourceUuid: uuid('resource_uuid').notNull().references(() => resource.uuid),
+  qualityScale: numeric('quality_scale').notNull(),
+  // The item the rock breaks into (gems: recipes take the item)
+  itemUuid: uuid('item_uuid').references(() => item.uuid),
+  share: numeric('share').notNull(),
+  minPercent: numeric('min_percent').notNull(),
+  maxPercent: numeric('max_percent').notNull(),
+  rarity: text('rarity'),
+  qualityMin: integer('quality_min'),
+  qualityMax: integer('quality_max'),
+  // [{ value, chance }]: the values the quality bands map it to (empty without bands)
+  qualityValues: jsonb('quality_values').notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.providerUuid, t.method, t.resourceUuid, t.qualityScale] }),
+  check('mineable_method', sql`${t.method} IN ('ship', 'roc', 'fps')`),
+  index().on(t.resourceUuid),
+  index().on(t.itemUuid),
+]);
+
+/**
  * One text set per source and language: 'game' (catalog import) or an externally maintained
  * global.ini (localization import). The source with the highest priority wins per key.
  */

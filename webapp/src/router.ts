@@ -4,6 +4,7 @@ import ComponentsView from "./views/ComponentsView.vue";
 import CraftingView from "./views/CraftingView.vue";
 import HistoryView from "./views/HistoryView.vue";
 import HomeView from "./views/HomeView.vue";
+import MiningView from "./views/MiningView.vue";
 import RefineryView from "./views/RefineryView.vue";
 import StockView from "./views/StockView.vue";
 
@@ -16,6 +17,7 @@ export const router = createRouter({
     { path: "/refinery", component: RefineryView },
     { path: "/blueprints", component: BlueprintsView },
     { path: "/crafting", component: CraftingView },
+    { path: "/mining", component: MiningView },
     { path: "/history", component: HistoryView },
     { path: "/:rest(.*)*", redirect: "/" },
   ],

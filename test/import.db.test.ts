@@ -49,7 +49,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('raw_record'), base.rawRecords.length);
     assert.equal(await count('localization', `source = 'game' AND lang = 'de'`), 1);
     assert.equal(await count('localization', `source = 'game' AND lang = 'en'`), 7);
-    assert.equal(await count('location'), 3);
+    assert.equal(await count('location'), 4);
     const [station] = await db.execute<{ parent: string; nav: string }>(
       sql`SELECT parent_uuid AS parent, nav_icon AS nav FROM catalog.location WHERE uuid = ${U.station}`);
     assert.deepEqual([station!.parent, station!.nav], [U.star, 'Station']);
@@ -62,6 +62,16 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
       FROM catalog.blueprint_source WHERE blueprint_uuid = ${U.blueprint2} ORDER BY source_index`);
     assert.deepEqual(sources.map((s) => [s.i, s.kind, s.chance, s.systems, s.event]), [
       [0, 'event', null, [], 'TestEvent'], [1, 'mission', '0.5', [U.star], 'Test'],
+    ]);
+    // Mining: the provider with its places, what it yields per method
+    assert.equal(await count('mining_provider'), 1);
+    const mined = await db.execute<{ method: string; scale: string; share: string; item: string | null; qmin: number | null; values: unknown }>(sql`
+      SELECT method, quality_scale::text AS scale, share::text, item_uuid AS item, quality_min AS qmin, quality_values AS values
+      FROM catalog.mineable ORDER BY method, quality_scale DESC`);
+    assert.deepEqual(mined.map((m) => [m.method, m.scale, m.share, m.item, m.qmin, m.values]), [
+      ['fps', '1', '1', U.gem, null, []],
+      ['ship', '1', '0.875', null, 400, [{ value: 400, chance: 1 }]],
+      ['ship', '0.49', '0.75', null, 400, [{ value: 400, chance: 1 }]],
     ]);
   });
 
@@ -78,6 +88,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     next.blueprints[0]!.tiers[0]!.slots[0]!.inputs[0]!.quantity = 0.05;
     next.locations = next.locations.filter((l) => l.uuid !== U.orphan);
     next.blueprintSources = next.blueprintSources.filter((s) => s.kind === 'mission');
+    next.mineables = next.mineables.filter((m) => m.method === 'ship');
     // Small sets: retiring 1 of 2 blueprints must not trip the ratio safeguard (absolute minimum)
     const r = await runImport(db, next, hashOf(next), OPTIONS);
     assert.equal(r.status, 'imported');
@@ -86,8 +97,9 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('blueprint_input', `quantity = 0.05`), 1);
     assert.deepEqual(r.diffs.location.retired, [U.orphan]);
     assert.equal(await count('location', 'retired_at IS NOT NULL'), 1);
-    // Sources are replaced as a whole
+    // Sources and mining data are replaced as a whole
     assert.equal(await count('blueprint_source'), 1);
+    assert.equal(await count('mineable'), 2);
 
     const again = fixtureSnapshot();
     again.game.build = 1002;

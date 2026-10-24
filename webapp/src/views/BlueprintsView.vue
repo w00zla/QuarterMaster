@@ -8,6 +8,7 @@ import type {
 } from "../../../src/webapp/api-types";
 import DataTable from "../../../adminapp/src/components/DataTable.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
+import { typeIcon } from "../../../adminapp/src/typeIcons";
 import type { ColumnSpec, useTableColumns } from "../../../adminapp/src/tableColumns";
 import { useRouter } from "vue-router";
 import { api } from "../api";
@@ -18,7 +19,6 @@ import ColumnsButton from "../components/ColumnsButton.vue";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
-import TypeLabel from "../components/TypeLabel.vue";
 import UnlocksDialog from "../components/UnlocksDialog.vue";
 import Picker from "../components/Picker.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
@@ -290,10 +290,12 @@ onUnmounted(() => {
         @select="craft"
       >
         <template #cell-name="{ row }">
+          <!-- The type's icon before the name, as in the stock lists; its name in the type column -->
+          <Icon :name="row.bp?.type ? typeIcon(row.bp.type) : 'blueprint'" :size="15" class="name-icon" />
           <InfoTip kind="blueprint" :uuid="row.uuid"><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span></InfoTip>
           <span v-if="row.bp?.retired" class="tag err">{{ t("bp.retired") }}</span>
         </template>
-        <template #cell-type="{ row }"><TypeLabel :type="row.bp?.type" :label="row.bp?.typeLabel" /></template>
+        <template #cell-type="{ row }"><span class="type-text" :title="row.bp?.type ?? undefined">{{ row.bp?.typeLabel ?? "" }}</span></template>
         <template #cell-size="{ row }">{{ row.bp?.size ?? "—" }}</template>
         <template #cell-grade="{ row }">{{ row.bp?.gradeLetter ?? "—" }}</template>
         <template #cell-stats="{ row }"><span class="stats" :title="row.bp?.stats.join(', ')">{{ row.bp?.stats.join(", ") }}</span></template>
@@ -357,5 +359,18 @@ onUnmounted(() => {
 .stats {
   color: var(--text-3);
   font-size: 12px;
+}
+
+.name-icon {
+  vertical-align: -2px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  opacity: 0.8;
+}
+
+.type-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

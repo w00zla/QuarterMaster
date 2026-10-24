@@ -4,6 +4,8 @@ import { displayText, isMissingTranslation, locKey } from './localization.ts';
 import { isComponentType, isFpsType } from '../components.ts';
 import { isAppKey } from '../labels.ts';
 import { isObj, recordKey, refPath, type DcbRecord, type Obj, type RecordStore } from './records.ts';
+import { mining } from './mining.ts';
+import type { ContainerScan } from './socpak.ts';
 import { blueprintSources } from './sources.ts';
 import {
   SNAPSHOT_SCHEMA_VERSION,
@@ -42,6 +44,8 @@ export interface NormalizeInput {
   localizations: Map<string, Map<string, string>>;
   game: Snapshot['game'];
   extractor: Snapshot['extractor'];
+  // Where the harvestable providers are used (socpak.ts scanContainers); none: no mining data
+  containers?: ContainerScan;
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
@@ -432,6 +436,9 @@ export function normalize(input: NormalizeInput): Snapshot {
     });
   }
 
+  // --- mining --------------------------------------------------------------------------
+  const mined = mining(store, input.containers ?? { places: new Map(), unplaced: [] }, locations, [...resources.values()], new Set(items.map((i) => i.uuid)), anomaly);
+
   // --- raw records and localization --------------------------------------------------
   const rawRecords: RawRecord[] = [...rawPaths].sort().flatMap((path) => {
     const r: DcbRecord | null = store.get(path);
@@ -491,5 +498,7 @@ export function normalize(input: NormalizeInput): Snapshot {
     blueprints,
     blueprintSources: sources,
     locations,
+    miningProviders: mined.miningProviders,
+    mineables: mined.mineables,
   };
 }

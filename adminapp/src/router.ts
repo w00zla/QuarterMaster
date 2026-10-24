@@ -9,6 +9,7 @@ import RefineryView from "./views/RefineryView.vue";
 import BlueprintsView from "./views/BlueprintsView.vue";
 import ResourcesView from "./views/ResourcesView.vue";
 import ItemsView from "./views/ItemsView.vue";
+import MiningView from "./views/MiningView.vue";
 import TextsView from "./views/TextsView.vue";
 import ImportsView from "./views/ImportsView.vue";
 import ThirdPartyView from "./views/ThirdPartyView.vue";
@@ -37,6 +38,7 @@ export const router = createRouter({
     { path: "/materials/:uuid?", name: "materials", component: ResourcesView, meta: { title: "Materials" } },
     { path: "/resources/:uuid?", redirect: (to) => `/materials/${to.params.uuid ?? ""}` },
     { path: "/items/:uuid?", name: "items", component: ItemsView, meta: { title: "Items" } },
+    { path: "/mining/:uuid?", name: "mining", component: MiningView, meta: { title: "Mining" } },
     { path: "/texts/:key?", name: "texts", component: TextsView, meta: { title: "Texts" } },
     { path: "/localisation/:key?", redirect: (to) => `/texts/${to.params.key ?? ""}` },
     { path: "/imports/:id?", name: "imports", component: ImportsView, meta: { title: "Imports" } },

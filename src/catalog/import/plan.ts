@@ -105,6 +105,17 @@ export function blueprintSourceRows(s: Snapshot) {
   });
 }
 
+/** Mining providers and what they yield, as table rows. */
+export function miningRows(s: Snapshot) {
+  return {
+    providers: s.miningProviders,
+    mineables: s.mineables.map(({ quality, ...m }) => ({
+      ...m, qualityScale: String(m.qualityScale), share: String(m.share), minPercent: String(m.minPercent), maxPercent: String(m.maxPercent),
+      qualityMin: quality?.min ?? null, qualityMax: quality?.max ?? null, qualityValues: quality?.values ?? [],
+    })),
+  };
+}
+
 // --- integrity -------------------------------------------------------------------------
 
 /** Hard errors that make a snapshot unusable. Not overridable. */
@@ -153,6 +164,17 @@ export function checkIntegrity(s: Snapshot): string[] {
     const what = `blueprint source ${src.contractKey ?? src.eventKey} (${src.poolKey})`;
     ref(blueprints.has(src.blueprintUuid), `${what}: unknown blueprint ${src.blueprintUuid}`);
     for (const l of [...src.localityUuids, ...src.locationUuids]) ref(locations.has(l), `${what}: unknown location ${l}`);
+  }
+  const providers = new Set<string>();
+  for (const p of s.miningProviders) {
+    if (providers.has(p.uuid)) errors.push(`duplicate mining provider uuid ${p.uuid}`);
+    providers.add(p.uuid);
+    for (const l of p.locationUuids) ref(locations.has(l), `mining provider ${p.key}: unknown location ${l}`);
+  }
+  for (const m of s.mineables) {
+    ref(providers.has(m.providerUuid), `mineable ${m.resourceUuid}: unknown mining provider ${m.providerUuid}`);
+    ref(resources.has(m.resourceUuid), `mineable: unknown resource ${m.resourceUuid}`);
+    ref(!m.itemUuid || items.has(m.itemUuid), `mineable ${m.resourceUuid}: unknown item ${m.itemUuid}`);
   }
   for (const [name, n] of [
     ['blueprints', s.blueprints.length], ['resources', s.resources.length], ['items', s.items.length], ['locations', s.locations.length],

@@ -162,12 +162,74 @@ BlueprintPoolRecord.blueprintRewards[]          blueprintRecord, weight (all 1.0
   agree completely; SCMDB lacks the RoX tiers and drops the 2 null entries. It annotates CIG data errors but
   keeps the values.
 
+### Mining
+
+What can be mined where (`src/catalog/extract/mining.ts` and `socpak.ts`, snapshot `miningProviders` and
+`mineables`, tables `catalog.mining_provider` and `catalog.mineable`; built 2026-10-24, build 12913470):
+
+```
+object container (socpak = ZIP)     <name>.xml: <Child name="….socpak" starMapRecord="<StarMapObject uuid>">
+└ .soc (CryXmlB, binary)            HarvestableProviderComponent … the provider's record GUID (as text)
+HarvestableProviderPreset           harvestable/providerpresets/system/<system>/hpp_<body>.json, …/asteroidfield/…
+└ harvestableGroups[]               groupName SpaceShip_Mineables (ship) | GroundVehicle_Mineables (ROC) |
+  │                                 FPS_Mineables (hand); Salvage_*, Harvestables: no mining
+  └ harvestables[]                  harvestable -> HarvestablePreset, relativeProbability (weight in the group)
+    HarvestablePreset.entityClass -> entities/mineable/<rock>.json
+      Components[MineableParams].composition -> MineableComposition (mining/rockcompositionpresets/…)
+      Components[…].entityClassOverride.entityClass -> the item the rock breaks into (FPS/ROC gems)
+    MineableComposition.compositionArray[]   mineableElement, min/maxPercentage, probability, qualityScale
+    MineableElement.resourceType            the resource (ore, raw material, gem)
+```
+
+- **Where a provider is used is not in the DataCore**: a container's parent lists it with `starMapRecord`; a
+  container without one takes the nearest ancestor's (Lagrange child clouds). One container placed at several
+  objects (an asteroid base layout in many clusters) links to all of them. Containers with no record above them
+  are not placed (6: `ellis3`, `preludetonyx/pyro1_ptn`, the Nyx rings, Akiro, Aaron Halo's own container).
+  Three providers get their location by key (`PROVIDER_LOCATIONS`: Glaciem and Keeger rings, Akiro Cluster);
+  Aaron Halo has no star map object of its own: its provider appears through the 51 asteroid mining bases
+  that use it. Providers no container uses are left out (unused presets: Lagrange G, "occupied", resource rush,
+  the two asteroid cluster yields, ship graveyard, derelicts).
+- Anomalies: `unplaced_provider` (a provider with mining groups that no container places: left out; 6 on build
+  12913470) and `unplaced_container` (a container without a star map record above it whose providers did not
+  get a place by key: 3, `ellis3`, `pyro1_ptn`, `aaronhalo`); rocks with a missing preset, entity, composition
+  or element are `unresolved_ref`. The admin's Imports detail lists them with the others.
+- Build 12913470: 574 containers, 41 providers, 710 mineables (one per provider, method, resource and part; every
+  ROC/FPS one with its item). Planets and moons by their own container (`stanton2c.socpak` -> `Stanton2c`, Yela), the
+  Lagrange clouds as `Stanton2_L3_01` ("CRU L3-A"). Pyro VI uses Yela's belt provider (`HPP_Stanton2c_Belt`).
+- **Parts** (2026-10-24): a ship rock holds an ore as a small rich part (`qualityScale` 1, e.g. 2.8–6.8 %) and a
+  large lean one (`qualityScale` 0.49 or 0.789, e.g. 39–83 %); `qualityScale` multiplies the part's quality
+  (`int(Q × scale)`, as ScDataDumper, SC-Market's research and sc-holotable describe it; the wiki's floor of 245
+  is 501 × 0.49). One mineable per provider, method, resource and factor (`quality_scale` in the key); a part
+  listed twice in one rock (corundum, silicon) counts once (chance 1 − Π(1 − p)).
+- **share**: per part the weight of the rocks of all the group's rocks times the part's `probability` (the
+  chance it is in a rock, 0.02–1); **min/maxPercent** over its entries; **rarity** from the composition's name
+  (`commonshipmineables_…` … `legendaryshipmineables_…`, ship rocks only). `groupProbability` (6 / 12.5 / 25 /
+  35) weighs the groups against each other (sc-holotable: the share of spawns per method); not used, each
+  method is compared within itself.
+- **quality**: the resource's `ResourceTypeCraftingData` distribution (`CraftingQualityDistributionNormal`:
+  min, max, mean, stddev), the override for the system the provider's places lie in (`…_qualityoverride_pyro`),
+  cut to min … max and rounded, times the part's factor, then mapped by the material's quality bands
+  (`CraftingQualityQuantizationRecord`: the band holding it gives its `mappedValue`; since 4.8 the game spawns
+  only these, the wiki's "predefined values"). Stored as `quality_values` [{ value, chance }] with the range
+  (`partQuality`, the normal CDF after Abramowitz–Stegun). Yela's Taranite: rich 525 (46 %), 646 (32 %), 718
+  (16 %), 853 (5 %), rarer above; lean 310 (95 %), 525 (5 %). Gems: 201–1000 around 201, mostly the lowest band.
+- The overrides point at the system's `…SolarSystem` record (`PyroSolarSystem`), a root of its own, not an
+  ancestor of the system's places (they hang below `PyroStar`): a star `XStar` also stands for `XSolarSystem`.
+  So the values differ only by system (Pyro has its own for nearly every ore and gem; Stanton and Nyx share the
+  default). The RCD overrides of single QV Breaker Stations in Nyx (legendary ores, Torite) reach no mined
+  place: no provider is placed there.
+- Not covered: the slot presets of caves, contested zones and asteroid bases (`harvestable/slotpresets/`),
+  where Carinite, Sadaryx and Saldynium come from; creature parts. Refinery yield bonuses are not in the game
+  files (a type `RefineryCompetencies` exists, no record uses it; the `Refinery` entity has empty params, the
+  refinery containers hold nothing about it): they stay with UEX.
+
 ---
 
 ## Implementation
 
 ```
 Data.p4k --StarBreaker--> DataCore records (JSON) --normalize--> snapshot (.json.gz) --catalog:import--> Postgres "catalog"
+         --StarBreaker--> object containers (socpak) --scan--^ (where the mining providers are used)
 external global.ini ------------------------------------------------------------------loc:import-----> Postgres "catalog"
 ```
 
@@ -175,14 +237,16 @@ Commands (`pnpm catalog:extract`, `catalog:import`, `loc:import`): `CLAUDE.md`. 
 admin web UI (upload, dry run first), using the same functions as the CLIs.
 
 - **The snapshot format (`src/catalog/snapshot.ts`, Zod) is the contract** between extractor and importer.
-  It is versioned via `SNAPSHOT_SCHEMA_VERSION` (currently 4, since the blueprint sources; an older snapshot must be extracted again);
+  It is versioned via `SNAPSHOT_SCHEMA_VERSION` (currently 6, since the mining parts; an older snapshot must be extracted again);
   extractor implementations are meant to be swappable behind it (scunpacked-data is the documented fallback
   source). `src/catalog/import/load.ts` reads and checks a snapshot (gzip detected by content) for the CLI
   and the API.
 - **Extractor** (`src/catalog/extract/`): `cli.ts` shells out to the StarBreaker CLI (`p4k extract` for
   `Game2.dcb` + all `global.ini`, then `dcb extract --format json` for selected record subtrees; `--filter`
   globs match record *file paths*). `RecordStore` lazily reads records by lower-cased path; references between
-  records are `file://…/libs/foundry/records/…` paths resolved via `refPath()`. `normalize.ts` must never crash
+  records are `file://…/libs/foundry/records/…` paths resolved via `refPath()`. It also extracts the star systems'
+  object containers (`Data/ObjectContainers/PU/system/**/*.socpak`, 574 files, ~330 MB) and scans them
+  (`socpak.ts`) before normalizing; see "Mining". `normalize.ts` must never crash
   on unexpected shapes: unknown types, `null` list entries and dangling references become `anomalies` in the
   snapshot. Items and manufacturers are included when referenced by a blueprint, plus every named ship item
   (`entities/scitem/ships/`, no `template` in its path) whose type is in `COMPONENT_TYPES`
@@ -200,8 +264,8 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 
 | Path | Content |
 |---|---|
-| `src/catalog/extract/` | extractor: StarBreaker wrapper, record store, `global.ini` parser, normalizer, CLI |
-| `src/catalog/snapshot.ts` | snapshot format (Zod), `SNAPSHOT_SCHEMA_VERSION` (4) |
+| `src/catalog/extract/` | extractor: StarBreaker wrapper, record store, `global.ini` parser, normalizer, blueprint sources (`sources.ts`), object containers (`socpak.ts`), mining (`mining.ts`), CLI |
+| `src/catalog/snapshot.ts` | snapshot format (Zod), `SNAPSHOT_SCHEMA_VERSION` (6) |
 | `src/catalog/import/` | catalog import (`load.ts` read + check, `plan.ts` pure logic, `apply.ts` DB, `cli.ts`), localization import (`loc-import.ts`, `loc-cli.ts`) |
 | `src/catalog/labels.ts` | app texts (key prefix `qm_`), category groups, item type/class keys, derived names |
 | `src/db/schema/catalog.ts` | Drizzle schema, Postgres schema `catalog` |
@@ -219,6 +283,10 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 - `location`: every `StarMapObject` with `parent_uuid` (no foreign key: rows of one import reference each other in any order; the integrity check ensures every parent is in the snapshot), `type`, `nav_icon`, `hide_in_starmap`, `respawn_location_type`. Names via `name_key`.
 - Recipe tables `blueprint_tier` (incl. `required_slots` for "N of M slots"), `blueprint_slot` (modifiers as `jsonb`), `blueprint_input` (`kind` resource/item, `quantity` as `NUMERIC`): replaced as a whole when their blueprint changes.
 - `blueprint_source` (migration `0029`): the snapshot's `blueprintSources`, numbered per blueprint (`source_index`), replaced as a whole on every import (derived, nothing references it). See "Blueprint sources".
+- `mining_provider` and `mineable` (migration `0032`): the snapshot's `miningProviders` (with the star map objects
+  using them, `location_uuids`, no foreign key) and `mineables` (per provider, method, resource and part
+  `quality_scale`: share, percent range, rarity, item, quality range and `quality_values`), replaced as a whole on
+  every import (derived). See "Mining".
 - Localization:
   - `localization_source` (source, lang, priority, origin, hash, key count; lang `de` or `en`): `game` = priority 0, written by the catalog import; external sources default to 100.
   - `localization` (source, lang, key, value).

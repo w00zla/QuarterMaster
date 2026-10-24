@@ -56,6 +56,8 @@ export interface CatalogMaterial {
   itemClass: string | null;
   // Components: the stats a batch can carry, in the game tooltip's order; else none
   stats: CatalogStat[];
+  // The game data says where it is mined (GET /api/mining/:uuid)
+  minable: boolean;
 }
 
 export interface CatalogStat {
@@ -487,6 +489,72 @@ export interface MaterialInfo {
   usedIn: number;
   // UEX prices; null = none
   prices: PriceSummary | null;
+}
+
+// --- mining (catalog.mining_provider, catalog.mineable; &lang=de|en) ---------------------------------
+// GET /api/mining         MiningIndexResponse
+// GET /api/mining/:uuid   MiningResponse: a mined resource, a refined one (from its ores) or an item (a gem)
+
+export type MiningMethod = 'ship' | 'roc' | 'fps';
+
+export interface MiningResource {
+  // The mined resource (ore, raw material, gem)
+  uuid: string;
+  name: string;
+  // What it refines into (ores); null for what is used as mined
+  refinedUuid: string | null;
+  refined: string | null;
+  // The item a gem rock breaks into (recipes take it)
+  itemUuid: string | null;
+  methods: MiningMethod[];
+}
+
+export interface MiningIndexResponse {
+  resources: MiningResource[];
+}
+
+/** The quality a part spawns with: its range and the values the material's quality bands map it to (0–1 chances; empty without bands). */
+export interface MiningQuality {
+  min: number;
+  max: number;
+  values: Array<{ value: number; chance: number }>;
+}
+
+export interface MiningRow {
+  // The mined resource (several for a refined material from more than one ore)
+  ore: string;
+  // The place's name; null for a group of instanced places (group, count)
+  place: string | null;
+  // A moon's planet
+  parent: string | null;
+  system: string | null;
+  // 'miningBase': asteroid mining bases, 'qvStation': QV extraction stations (the same layout in many places)
+  group: 'miningBase' | 'qvStation' | null;
+  count: number;
+  method: MiningMethod;
+  // Percent of the method's rocks there holding the ore (its rich part's share)
+  share: number;
+  // common, uncommon, rare, epic, legendary (ship rocks)
+  rarity: string | null;
+  // The rock's parts of the ore: the rich one (factor 1) first, then the lean ones
+  parts: MiningPart[];
+}
+
+/** One part of an ore in a rock. */
+export interface MiningPart {
+  // Quality factor: 1 = the rich part, below 1 a lean part (quality × factor)
+  qualityScale: number;
+  // Percent of the method's rocks there holding the part
+  share: number;
+  // Percent of such a rock
+  minPercent: number;
+  maxPercent: number;
+  quality: MiningQuality | null;
+}
+
+export interface MiningResponse {
+  name: string;
+  rows: MiningRow[];
 }
 
 // --- trading (UEX community prices in aUEC per SCU or piece) --------------------------------------

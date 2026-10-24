@@ -15,6 +15,7 @@ import { runImport, summarize, textDiffCounts } from '../catalog/import/apply.ts
 import { loadSnapshot } from '../catalog/import/load.ts';
 import { parseIniFile, runLocImport, runLocRemove } from '../catalog/import/loc-import.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
+import { getMiningProvider, getMiningProviders } from './mining.ts';
 import * as q from './queries.ts';
 import { getStatus } from './status.ts';
 import * as s from './status-quotes.ts';
@@ -78,6 +79,11 @@ api.get('/items', async (c) => c.json(await q.getItems(db, lang(c))));
 api.get('/items/:uuid', async (c) => {
   const id = uuid(c);
   return found(c, id ? await q.getItem(db, id, lang(c)) : null);
+});
+api.get('/mining', async (c) => c.json(await getMiningProviders(db, lang(c))));
+api.get('/mining/:uuid', async (c) => {
+  const id = uuid(c);
+  return found(c, id ? await getMiningProvider(db, id, lang(c)) : null);
 });
 api.get('/localization/sources', async (c) => c.json(await q.getLocSources(db)));
 api.get('/ext/uex', async (c) => c.json(await q.getUex(db, lang(c))));

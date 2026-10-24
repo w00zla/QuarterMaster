@@ -10,6 +10,11 @@ export const HELP = {
   qualityTables: "Quality bands per material: 0–1000 split into 8 ranges, each with a mapped value. Stored from the game data, not used by the app yet.",
   rawRecords: "The unmodified game records everything else is derived from, kept so new data can be used without extracting again.",
 
+  // Mining
+  mining: "Spawn tables of planets, moons and asteroid fields (harvestable providers) from the game data, placed by the object containers that use them. Per provider what ship, ROC and hand mining find there.",
+  miningPlaces: "Star map objects whose object containers use this spawn table. Asteroid mining bases and QV stations share one layout, hence the long lists.",
+  miningYields: "One row per part of a resource: a rock holds an ore as a small rich part (factor ×1) and a large lean one (×0.49, ×0.789: its quality times the factor). Rocks: share of the method's rocks there holding the part (rock weight × the part's chance). Content: percent of such a rock. Rarity from the rock's composition (ship rocks). Quality: the values the material's quality bands map the part's spawn quality to (the resource's distribution, the system's override where there is one), with their chances.",
+
   // Lifecycle
   retired: "No longer in the game data. Kept so existing references stay valid; it comes back if the game brings it back.",
   imports: "Catalog imports in which this entry was first and last seen.",

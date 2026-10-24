@@ -5,8 +5,10 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { gzipSync } from 'node:zlib';
 import { LANGUAGE_CODES, parseGlobalIni } from './localization.ts';
+import { MINING_PATHS } from './mining.ts';
 import { normalize } from './normalize.ts';
 import { RecordStore } from './records.ts';
+import { scanContainerFiles } from './socpak.ts';
 import { exportedCount, starbreaker, starbreakerVersion } from './starbreaker.ts';
 import { snapshotSchema } from '../snapshot.ts';
 
@@ -29,7 +31,15 @@ const DCB_FILTERS = [
   'libs/foundry/records/missiondata/pu_missionlocality/**',
   'libs/foundry/records/factions/**',
   'libs/foundry/records/reputation/**',
+  // Mining: provider presets (spawn tables), rock compositions and elements, the rock entities
+  'libs/foundry/records/harvestable/**',
+  'libs/foundry/records/mining/**',
+  'libs/foundry/records/entities/mineable/**',
 ];
+
+// Object containers of the star systems: where the harvestable providers are used (socpak.ts)
+const CONTAINER_FILTER = 'Data/ObjectContainers/PU/system/**/*.socpak';
+const CONTAINER_DIR = 'Data/ObjectContainers/PU/system';
 
 const HELP = `Usage: pnpm catalog:extract [options]
 
@@ -108,6 +118,7 @@ async function main() {
     await step('Extract Game2.dcb + global.ini', async () => {
       await starbreaker(bin, ['p4k', 'extract', '--p4k', p4k, '-o', work, '--filter', '**/Game2.dcb']);
       await starbreaker(bin, ['p4k', 'extract', '--p4k', p4k, '-o', work, '--filter', '**/global.ini']);
+      await starbreaker(bin, ['p4k', 'extract', '--p4k', p4k, '-o', work, '--filter', CONTAINER_FILTER]);
     });
     const dcb = join(work, 'Data/Game2.dcb');
     if (!existsSync(dcb)) throw new Error('Game2.dcb not found after extraction');
@@ -133,8 +144,17 @@ async function main() {
   });
   if (!localizations.has('en')) throw new Error('English global.ini missing');
 
+  const store = new RecordStore(recordsDir);
+  const containers = await step('Scan object containers', () => {
+    const providers = new Set(store.list(MINING_PATHS.providers).map((p) => store.get(p)!._RecordId_));
+    const dir = join(work, CONTAINER_DIR);
+    const files = existsSync(dir) ? readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.socpak')).map((f) => join(dir, f)) : [];
+    if (!files.length) throw new Error(`No object containers in ${dir}`);
+    return { files: files.length, ...scanContainerFiles(files, providers) };
+  });
+
   const snapshot = await step('Normalize', () =>
-    normalize({ store: new RecordStore(recordsDir), localizations, game, extractor: { version: pkg.version, starbreaker: sbVersion } }));
+    normalize({ store, localizations, game, extractor: { version: pkg.version, starbreaker: sbVersion }, containers }));
 
   await step('Validate snapshot', () => {
     const result = snapshotSchema.safeParse(snapshot);
@@ -173,6 +193,10 @@ async function main() {
     ['locations', snapshot.locations.length],
     ['  stations', snapshot.locations.filter((l) => l.navIcon === 'Station').length],
     ['  landing zones', snapshot.locations.filter((l) => l.navIcon === 'LandingZone').length],
+    ['object containers', containers.files],
+    ['  not placed (providers left out)', containers.unplaced.length],
+    ['mining providers', snapshot.miningProviders.length],
+    ['mineables', snapshot.mineables.length],
   ];
   for (const [label, n] of rows) console.log(`  ${String(n).padStart(7)}  ${label}`);
   console.log('\nLocalization (keys with text):');

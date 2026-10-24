@@ -20,7 +20,7 @@ import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
 import type { StockBatch } from "../../../src/webapp/api-types";
-import { blueprints } from "../catalog";
+import { blueprints, materials } from "../catalog";
 import { craftingUi, toggleIn, warningText } from "../crafting";
 import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../../../src/planner/stock";
 import { duration, qty, unitText } from "../format";
@@ -31,6 +31,7 @@ import ChipButton from "./ChipButton.vue";
 import CoverageTag from "./CoverageTag.vue";
 import StockBatchList from "./StockBatchList.vue";
 import TypeLabel from "./TypeLabel.vue";
+import MiningDialog from "./MiningDialog.vue";
 import UnlocksDialog from "./UnlocksDialog.vue";
 
 // stock: everything you can see; owners: whether you have the blueprint and who has it in each of your
@@ -108,6 +109,9 @@ const unit = (kind: string) => unitText(kind === "resource" ? "SCU" : "pcs");
 const minQuality = (s: EntryResult["slots"][number]) => Math.max(MIN_QUALITY, ...s.inputs.map((i) => i.minQuality));
 
 const unlocksOpen = ref(false);
+// Where a needed resource is mined (its ores, or the gem rock of an item)
+const miningOf = ref<{ uuid: string; name: string; target: number } | null>(null);
+const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
 </script>
 
 <template>
@@ -222,11 +226,21 @@ const unlocksOpen = ref(false);
             <span class="need-name">{{ c.need.name }}</span>
             <span class="mono need-total" :title="t('crafting.need')">{{ qty(c.need.total, c.unit) }}</span>
             <span class="need-tag"><CoverageTag :coverage="c" :loading="!stock" /></span>
+            <button
+              type="button"
+              class="icon-btn need-mine"
+              :title="t('mining.open')"
+              :disabled="!minable(c.need.uuid)"
+              @click="miningOf = { uuid: c.need.uuid, name: c.need.name, target: c.need.quality }"
+            >
+              <Icon name="pickaxe" :size="14" />
+            </button>
           </div>
           <StockBatchList :rows="c.batches" />
         </div>
         <div v-if="!coverages.length" class="faint">—</div>
       </div>
+      <MiningDialog v-if="miningOf" :uuid="miningOf.uuid" :name="miningOf.name" :target="miningOf.target" @close="miningOf = null" />
     </div>
 
     <!-- Who has the blueprint: you, then each of your orgs with its members who registered it -->
@@ -408,7 +422,7 @@ const unlocksOpen = ref(false);
 /* The material's line, underlined also when nobody holds it (the first batch below draws no line) */
 .need-line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 12ch 15ch;
+  grid-template-columns: minmax(0, 1fr) 12ch 15ch 20px;
   gap: 12px;
   align-items: center;
   padding-bottom: 4px;
@@ -425,7 +439,13 @@ const unlocksOpen = ref(false);
 
 /* Owners: the org (or "you"), its members wrapping in the wide middle, the count or state at the right */
 .need-line.owner-line {
-  grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 15ch;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) 15ch 20px;
+}
+
+/* Where it is mined; grey when the game data knows no place (kept in place: no layout jumps) */
+.need-mine:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .owner-names {

@@ -56,7 +56,8 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 
 - `GET /api/catalog?lang`: bookable materials with unit, the `component` flag, `label`, size, grade letter
   and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag,
-  yield bonuses and the star map `key` (as Game.log names it, for the companion); blueprints (`unlockable`: a
+  yield bonuses and the star map `key` (as Game.log names it, for the companion); materials `minable` (the
+  mining data answers for it: a mined resource, a refined one from its ores, or a gem item); blueprints (`unlockable`: a
   row in `catalog.blueprint_source`); each material and location with its loc `nameKey` (the companion looks it up in
   the player's language pack). From the shared in-memory catalogs; no ores, no refining methods.
 - Stock: `/api/stock` personal = everything you own incl. shared, org = what its active members shared (with
@@ -80,6 +81,13 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   with a count, event tiers; odds = weight of the pool's total, reduced, plus `chance` below 1; the system of
   a locality or bound place is the star above it, roots without one (solar system records, the Nyx asteroid
   field) by the star key their key starts with; bound places that are no system are listed after it),
+  `GET /api/mining` (every mined resource with what it refines into, its gem item and methods) and
+  `GET /api/mining/:uuid` (where a mined resource, the ores of a refined one or a gem item is mined;
+  `mining.ts`, SQL in `mining-query.ts`: one row per place, method and ore with the ore's `parts` in the rock
+  (the rich part first, then the lean ones with `qualityScale` below 1; each with share, content and quality),
+  largest share first; a moon shows
+  its planet; asteroid mining bases and QV extraction stations, the same layout in many places, are one row per
+  system with their count; see `docs/catalog-sources.md` "Mining"),
   `/api/crafting/*` (the admin's catalog queries and `loadPlannerData`), `GET /api/history` (see
   `docs/stock.md` "History").
 - Writes go through the stock service with an `Actor` from the roster. `guildId` in a write = the org
@@ -201,7 +209,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   within; same filters as Ressourcen. `RefineryStartForm`: station, duration (all three fields empty = "duration
   open") and rows of resource, quality and expected yield (no method, no estimates). `RefineryDoneDialog`
   stores the whole job, each row's amount starting from its expected yield.
-- **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold; an org
+- **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold with the type's icon before them (the type column its name only); an org
   shows every blueprint its active members registered with who has it. A click on a row puts it into the
   crafting check (`addToCrafting`) and opens the tab. The last column (fixed, both scopes) holds the
   "Freischaltung" button (`ChipButton`, disabled without an unlock; its click never reaches the row): it opens
@@ -209,7 +217,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   head: count, systems, rank span, best chance), every row listed (title with the game's placeholders as "…",
   rank, systems · bound place, markers Kette/Illegal/Annahme/event, chance), the list scrolls inside with a
   sticky head row; event tiers with event, points and chance. Wording in `webapp/src/unlocks.ts`.
-- **Crafting** (after a divider in the tab bar): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
+- **Crafting** (the third tab bar, the tools, with Bergbau; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
   field that stop at the slot's minimum (`withQualityFloor`; the track keeps the full 0–1000 scale). Below the
@@ -224,7 +232,26 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   registered it ("niemand" without) and their count; from `GET /api/blueprints` and
   `GET /api/orgs/:g/blueprints` per org, loaded once per view and on blueprints/members/profile/resync
   messages. The chips line under the name ends with a divider and the "Freischaltung" button (as in the
-  Blueprints list).
+  Blueprints list). Each material line of the Resources panel ends with a pickaxe icon button (grey without
+  mining data) that opens `MiningDialog.vue` with the `MiningTable` (see Bergbau) against the material's target
+  quality (the need's `quality`): a green chip "Ziel-Qualität 600" first in the toolbar (changeable, 500–1000 in
+  steps of 50, not written back to the card), the card dims the values below it, shows those reaching it in green and
+  adds per system "≥ 600" (the chance a part reaches it, "nie" when never).
+- **Bergbau** ("Mining", route `/mining`, the tab right of Crafting): `MiningView`, one section per mining
+  feature; the first, "Fundorte" ("Where to mine", locate icon), holds a picker over the mined resources (ores,
+  raw materials, gems; what an ore refines into searched too) and the `MiningTable` (layout A of the concept
+  https://claude.ai/artifact/ERWoBH6j1SZi5oD5g5zj1x, the same in the dialog): a toolbar with a system and a
+  method filter (`Dropdown` chips like the stock's, "Alle Systeme"/"Alle Methoden"; shared with the dialog for the
+  session), then `MiningQualityCard` with the quality once: per part of the ore (rich part, "Rest ×0,49") its
+  content range and one bar per set of systems with the same values ("Stanton · Nyx", "Pyro": the game's values
+  differ only by system), a thin bar (segments by chance) with every value of half a percent and more below it in plain text (wrapping where narrow),
+  colored by level (grey below 500, the accent from dim to full, gold at 1000; no level marks: too wide), then
+  the shared `DataTable` (resizable, sortable, widths per browser: `qm.webapp.columns.mining`, `…mining-ores` with
+  the ore column), one row per place, method and ore: place (a moon with its planet, grouped places with their
+  count), system, method (Schiff/ROC/Hand), the ore when the rows come from several, share of the method's rocks
+  there ("Häufigkeit", with a bar in the color of the rock's rarity class, the class in its tooltip, and a help tooltip in the head; not "Anteil": next to "Gehalt" both would read as a share; rarity has no column of its own: two columns read alike), the parts' content ("Gehalt (gut · Rest)", the lean ones dimmed, a help tooltip); no
+  quality column (the system says which bar applies). Wording, the card's grouping and filters in
+  `webapp/src/mining.ts`.
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
 - Info cards: hovering a blueprint name or a material shows game data from `GET /api/info/...`
   (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records).

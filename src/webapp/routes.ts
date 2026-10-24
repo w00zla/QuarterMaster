@@ -24,6 +24,8 @@ import { listHistory } from './history.ts';
 import { registerTradeRoutes, stockValues } from './trade.ts';
 import { materialTrade } from '../ext/trade.ts';
 import { loadUnlocks, registerUnlockRoutes, unlockSummary } from './unlocks.ts';
+import { registerMiningRoutes } from './mining.ts';
+import { minableUuids } from './mining-query.ts';
 import { unlockableBlueprints } from './unlock-query.ts';
 import { refineryMatch } from '../ext/refineries.ts';
 import type {
@@ -210,11 +212,13 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
     const [bpTypes, types, bpStats] = [await blueprintTypes(db, lang), await itemTypes(db, lang), await blueprintStatNames(db, lang)];
     const unlockable = await unlockableBlueprints(db);
+    const minable = await minableUuids(db);
     const refineries = await refineryMatch(db);
     return c.json({
       materials: [...materials.values()].map((m) => ({
         uuid: m.uuid, kind: m.kind, name: m.name, nameKey: m.nameKey, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
         component: m.component, label: m.label, size: m.size, gradeLetter: m.gradeLetter, itemClass: m.itemClass, stats: m.stats,
+        minable: minable.has(m.uuid),
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
@@ -501,7 +505,8 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     return ok(c);
   });
 
-  // --- blueprint unlocks, trading (UEX) -----------------------------------------------------------
+  // --- blueprint unlocks, mining, trading (UEX) ---------------------------------------------------
   registerUnlockRoutes(api, db);
+  registerMiningRoutes(api, db);
   registerTradeRoutes(api, db);
 }

@@ -40,6 +40,10 @@ export const U = {
   locality: '10000000-0000-0000-0000-00000000001e',
   scenario: '10000000-0000-0000-0000-00000000001f',
   progress: '10000000-0000-0000-0000-000000000020',
+  provider: '10000000-0000-0000-0000-000000000022',
+  unusedProvider: '10000000-0000-0000-0000-000000000023',
+  solarSystem: '10000000-0000-0000-0000-00000000002f',
+  qualityOverride: '10000000-0000-0000-0000-000000000039',
 };
 
 const R = 'libs/foundry/records/';
@@ -110,7 +114,7 @@ export const RECORDS: Record<string, unknown> = {
           properties: [null, {
             _Type_: 'ResourceTypeCraftingData', name: 'Default',
             qualityDistribution: { _Type_: 'CraftingQualityDistribution_RecordRef', qualityDistributionRecord: ref('crafting/qualitydistribution/test.json') },
-            qualityLocationOverride: null,
+            qualityLocationOverride: { _Type_: 'CraftingQualityLocationOverride_RecordRef', locationOverrideRecord: ref('crafting/qualitydistribution/test_override.json') },
             qualityQuantization: { _Type_: 'CraftingQualityQuantization_RecordRef', qualityQuantizationRecord: ref('crafting/qualityquantization/quantization_test.json') },
           }],
         }],
@@ -124,7 +128,18 @@ export const RECORDS: Record<string, unknown> = {
       { _Type_: 'CraftingQualityQuantizationBand', start: 500, end: 1000, mappedValue: 900 },
     ] },
   }),
-  'crafting/qualitydistribution/test.json': rec('CraftingQualityDistributionRecord.Test', U.distribution, { _Type_: 'CraftingQualityDistributionRecord' }),
+  'crafting/qualitydistribution/test.json': rec('CraftingQualityDistributionRecord.Test', U.distribution, {
+    _Type_: 'CraftingQualityDistributionRecord',
+    qualityDistribution: { _Type_: 'CraftingQualityDistributionNormal', min: 501, max: 1000, mean: 500, stddev: 150 },
+  }),
+  // The system's override: its solar system record is a root of its own, not the station's ancestor
+  'crafting/qualitydistribution/test_override.json': rec('CraftingQualityLocationOverrideRecord.Test_Override', U.qualityOverride, {
+    _Type_: 'CraftingQualityLocationOverrideRecord',
+    locationOverride: { _Type_: 'CraftingQualityLocationOverride', locationOverrideList: [{
+      _Type_: 'CraftingQualityLocationOverrideEntry', location: ref('starmap/pu/testsolarsystem.json'),
+      qualityDistribution: { _Type_: 'CraftingQualityDistributionNormal', min: 1, max: 499, mean: 300, stddev: 50 },
+    }] },
+  }),
   'crafting/craftedproperties/gpp_test.json': rec('CraftingGameplayPropertyDef.GPP_Test', U.property, {
     _Type_: 'CraftingGameplayPropertyDef', propertyName: '@StatName_GPP_Test', unitFormat: '@StatUnit_Test',
     displayTransformation: { _Type_: 'CraftingDisplayTransformation_Scale', scale: 0.001 }, nameOverrides: [],
@@ -173,6 +188,7 @@ export const RECORDS: Record<string, unknown> = {
       { _RecordId_: U.typeStation, _RecordName_: `StarMapObjectType.${U.typeStation}`, _Type_: 'StarMapObjectType', name: 'Manmade' },
     ],
   }),
+  'starmap/pu/testsolarsystem.json': starMapObject('TestSolarSystem', U.solarSystem, {}),
   'starmap/pu/system/test/teststar.json': starMapObject('TestStar', U.star, { type: starMapType(U.typeStar), navIcon: 'Star' }),
   'starmap/pu/station/test_station.json': starMapObject('Test_Station', U.station, {
     description: '@Test_Station_Desc', parent: ref('starmap/pu/system/test/teststar.json'), type: starMapType(U.typeStation),
@@ -238,6 +254,74 @@ export const RECORDS: Record<string, unknown> = {
   'factions/factionreputation/test_faction.json': rec('FactionReputation.Test', U.faction, { _Type_: 'FactionReputation', displayName: '@Test_Faction' }),
   'reputation/standings/test_rank1.json': rec('SReputationStandingParams.Test_Rank1', U.rank, {
     _Type_: 'SReputationStandingParams', displayName: '@test_rank1', minReputation: 800,
+  }),
+  // Mining: a provider with ship rocks (a common one holding the ore twice, a rare one) and a gem rock for
+  // hand mining; salvage is no mining; a provider no object container uses
+  'harvestable/providerpresets/system/test/hpp_test.json': rec('HarvestableProviderPreset.HPP_Test', U.provider, {
+    _Type_: 'HarvestableProviderPreset',
+    harvestableGroups: [
+      { _Type_: 'HarvestableElementGroup', groupName: 'SpaceShip_Mineables', groupProbability: 6, harvestables: [
+        { _Type_: 'HarvestableElement', harvestable: ref('harvestable/harvestablepresets/mining_common_test.json'), relativeProbability: 3 },
+        { _Type_: 'HarvestableElement', harvestable: ref('harvestable/harvestablepresets/mining_rare_test.json'), relativeProbability: 1 },
+      ] },
+      { _Type_: 'HarvestableElementGroup', groupName: 'FPS_Mineables', groupProbability: 25, harvestables: [
+        { _Type_: 'HarvestableElement', harvestable: ref('harvestable/harvestablepresets/fpsmining_test_gem.json'), relativeProbability: 1 },
+      ] },
+      { _Type_: 'HarvestableElementGroup', groupName: 'Salvage_FreshDerelicts', groupProbability: 1, harvestables: [
+        { _Type_: 'HarvestableElement', harvestable: ref('harvestable/harvestablepresets/salvage_test.json'), relativeProbability: 1 },
+      ] },
+    ],
+  }),
+  'harvestable/providerpresets/system/test/hpp_unused.json': rec('HarvestableProviderPreset.HPP_Unused', U.unusedProvider, {
+    _Type_: 'HarvestableProviderPreset',
+    harvestableGroups: [{ _Type_: 'HarvestableElementGroup', groupName: 'SpaceShip_Mineables', harvestables: [
+      { _Type_: 'HarvestableElement', harvestable: ref('harvestable/harvestablepresets/mining_common_test.json'), relativeProbability: 1 },
+    ] }],
+  }),
+  'harvestable/harvestablepresets/mining_common_test.json': rec('HarvestablePreset.Mining_Common_Test', '10000000-0000-0000-0000-000000000024', {
+    _Type_: 'HarvestablePreset', entityClass: ref('entities/mineable/mineablerock_common_test.json'),
+  }),
+  'harvestable/harvestablepresets/mining_rare_test.json': rec('HarvestablePreset.Mining_Rare_Test', '10000000-0000-0000-0000-000000000025', {
+    _Type_: 'HarvestablePreset', entityClass: ref('entities/mineable/mineablerock_rare_test.json'),
+  }),
+  'harvestable/harvestablepresets/fpsmining_test_gem.json': rec('HarvestablePreset.FPSMining_Test_Gem', '10000000-0000-0000-0000-000000000026', {
+    _Type_: 'HarvestablePreset', entityClass: ref('entities/mineable/mineablerock_fps_test_gem.json'),
+  }),
+  'entities/mineable/mineablerock_common_test.json': rec('EntityClassDefinition.MineableRock_Common_Test', '10000000-0000-0000-0000-000000000027', {
+    _Type_: 'EntityClassDefinition', Components: [{ _Type_: 'MineableParams', composition: ref('mining/rockcompositionpresets/commonshipmineables_test.json') }],
+  }),
+  'entities/mineable/mineablerock_rare_test.json': rec('EntityClassDefinition.MineableRock_Rare_Test', '10000000-0000-0000-0000-000000000028', {
+    _Type_: 'EntityClassDefinition', Components: [{ _Type_: 'MineableParams', composition: ref('mining/rockcompositionpresets/rareshipmineables_test.json') }],
+  }),
+  'entities/mineable/mineablerock_fps_test_gem.json': rec('EntityClassDefinition.MineableRock_FPS_Test_Gem', '10000000-0000-0000-0000-000000000029', {
+    _Type_: 'EntityClassDefinition', Components: [
+      null,
+      { _Type_: 'MineableParams', composition: ref('mining/rockcompositionpresets/fps_composition_test_gem.json') },
+      { _Type_: 'EntityComponentBreakable', entityClassOverride: { _Type_: 'BreakableEntityClassParams', entityClass: ref('entities/scitem/carryables/test_gem.json') } },
+    ],
+  }),
+  'mining/rockcompositionpresets/commonshipmineables_test.json': rec('MineableComposition.CommonShipMineables_Test', '10000000-0000-0000-0000-00000000002a', {
+    _Type_: 'MineableComposition', compositionArray: [
+      { _Type_: 'MineableCompositionPart', mineableElement: ref('mining/mineableelements/test_ore.json'), minPercentage: 2, maxPercentage: 6 },
+      { _Type_: 'MineableCompositionPart', mineableElement: ref('mining/mineableelements/test_ore.json'), minPercentage: 40, maxPercentage: 80, probability: 1, qualityScale: 0.49 },
+    ],
+  }),
+  'mining/rockcompositionpresets/rareshipmineables_test.json': rec('MineableComposition.RareShipMineables_Test', '10000000-0000-0000-0000-00000000002b', {
+    _Type_: 'MineableComposition', compositionArray: [
+      { _Type_: 'MineableCompositionPart', mineableElement: ref('mining/mineableelements/test_ore.json'), minPercentage: 10, maxPercentage: 30, probability: 0.5 },
+      { _Type_: 'MineableCompositionPart', mineableElement: ref('mining/mineableelements/gone.json'), minPercentage: 1, maxPercentage: 2 },
+    ],
+  }),
+  'mining/rockcompositionpresets/fps_composition_test_gem.json': rec('MineableComposition.FPS_Composition_Test_Gem', '10000000-0000-0000-0000-00000000002c', {
+    _Type_: 'MineableComposition', compositionArray: [
+      { _Type_: 'MineableCompositionPart', mineableElement: ref('mining/mineableelements/test_gem.json'), minPercentage: 90, maxPercentage: 100 },
+    ],
+  }),
+  'mining/mineableelements/test_ore.json': rec('MineableElement.Test_Ore', '10000000-0000-0000-0000-00000000002d', {
+    _Type_: 'MineableElement', resourceType: { _RecordName_: 'ResourceType.Ore_TestMetal', _RecordId_: U.ore },
+  }),
+  'mining/mineableelements/test_gem.json': rec('MineableElement.Test_Gem', '10000000-0000-0000-0000-00000000002e', {
+    _Type_: 'MineableElement', resourceType: { _RecordName_: 'ResourceType.TestMetal', _RecordId_: U.metal },
   }),
   'scitemmanufacturer/scitemmanufacturer.test.json': rec('SCItemManufacturer.TEST', U.manufacturer, {
     _Type_: 'SCItemManufacturer', Code: 'TEST', Localization: { Name: '@manufacturer_NameTEST', Description: '@LOC_EMPTY' },
@@ -311,5 +395,10 @@ export function fixtureSnapshot(records: Record<string, unknown> = RECORDS): Sna
     localizations: new Map([['en', parseGlobalIni(INI_EN)], ['de', parseGlobalIni(INI_DE)]]),
     game: { channel: 'LIVE', build: 1000, branch: 'test', version: '1.0', label: null, manifest: {} },
     extractor: { version: 'test', starbreaker: 'test' },
+    // The test provider is used by an object container at the station and by one placed nowhere
+    containers: {
+      places: new Map([[U.provider, new Set([U.station])]]),
+      unplaced: [{ container: 'objectcontainers/pu/system/test/lost.socpak', providers: [U.provider] }],
+    },
   });
 }

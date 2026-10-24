@@ -28,8 +28,9 @@ const props = defineProps<{
   subtitle?: string;
   icon: IconName;
   buttons: ConfirmButton[];
-  // A dialog with a table in its body: wider still
+  // A dialog with a table in its body: wider still; xxl for a wide table with more above it (the mining places)
   xl?: boolean;
+  xxl?: boolean;
 }>();
 const emit = defineEmits<{ choose: [value: string] }>();
 
@@ -58,7 +59,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <div class="backdrop">
-      <div class="dialog" :class="{ wide: !!$slots.default, xl }" role="dialog" aria-modal="true" :aria-label="title">
+      <div class="dialog" :class="{ wide: !!$slots.default, xl, xxl }" role="dialog" aria-modal="true" :aria-label="title">
         <div class="head">
           <Icon :name="icon" :size="18" />
           <div class="titles">
@@ -120,6 +121,10 @@ onUnmounted(() => {
 
 .dialog.xl {
   width: min(900px, 100%);
+}
+
+.dialog.xxl {
+  width: min(1240px, 100%);
 }
 
 .head,
