@@ -13,7 +13,7 @@ Where things are described (read the matching file before working in an area):
 | File | Content |
 |---|---|
 | `docs/requirements.md` | product requirements, role model, interaction and display rules, localization |
-| `docs/catalog-sources.md` | game data sources, the catalog pipeline (extract → snapshot → import), the `catalog` schema, data quirks |
+| `docs/catalog-sources.md` | game data sources, the catalog pipeline (extract → snapshot → import), the `catalog` schema, data quirks, the icon renderer |
 | `docs/stock.md` | stock service, rights, sharing, refinery jobs, what is bookable (ship components, stats), history, crafting check |
 | `docs/bot.md` | schemas `app`/`bot`/`web`, the bot's structure, commands, roster, logs channel, board |
 | `docs/webapp.md` | user web app: backend, login, sessions, API, realtime, SPA views and building blocks, security measures |
@@ -51,6 +51,9 @@ pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k"                  # -> local
 pnpm catalog:import <snapshot.json.gz> --label 4.10.2 [--dry-run] [--force] [--allow-downgrade] [--json]
 pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry-run] [--force]
 pnpm loc:import --remove --source <name> --lang <code>
+pnpm icons:render [--sample n] [--filter <s>] [--force] [--dry-run]   # icons for the app's gear items and the ore chunks: StarBreaker fork (local/starbreaker-fy) -> Blender + addon (local/blender) -> local/icons/<uuid>.png; needs $SC_DATA_P4K and the DB
+pnpm icons:render --write-targets <f> | --targets <f>                  # the target list from the DB / run without the DB (the bundle)
+scripts/icons-bundle.ps1            # packs node, Blender, StarBreaker, the CLI and targets.json into local/icons-bundle/ for another Windows PC (run.cmd there; docs/catalog-sources.md "Icons")
 
 pnpm adminapp            # admin API + built UI on 127.0.0.1:3000 (basic auth from .env)
 pnpm adminapp:watch      # the same, restarting on source changes

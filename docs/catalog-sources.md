@@ -314,6 +314,47 @@ Throwaway script, not in the repo. Result:
 
 ---
 
+## Icons (`pnpm icons:render`)
+
+Inventory-style icons for everything the app books: the gear items (`componentItemSql`, ship components and FPS
+gear, no consumables) and the ore chunks (`catalog.resource.data.rttThumbnailEntityClass`: 25 thumbnail
+entities, an ore and its refined material share one). `Data.p4k` holds no 2D item images (`displayIcon` is
+empty or a generic loadout icon; the commodity logos under `ui/sharedassets/commoditylogos/` are category
+pictures with gaps), so the icons are rendered from the models:
+
+1. **Export:** StarBreaker `entity export <class_name> --kind decomposed` (`--worn` for armour: the worn model
+   instead of the loot crate) writes `Packages/<name>_LOD1_TEX2/scene.blend` plus a shared `Data/` tree. The
+   **fleetyards fork** (`local/starbreaker-fy/`, MIT, built from github.com/fleetyards/StarBreaker main; commit in
+   `COMMIT`) is required: the 0.3.2 release misplaces weapon magazines and its addon does not stack LayerBlend
+   layers. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable
+   detail texture as base colour, and the vertex colours are blend masks.
+2. **Render:** `src/icons/render.py` in a portable Blender (`local/blender/<version>/`, config and the fork's
+   `blender_addon/starbreaker_addon` under its `portable/`; addon and exporter must match). The addon rebuilds the
+   materials (`starbreaker.refresh_materials`, called explicitly: its load handler needs timers that background
+   mode lacks). Eevee, 16 samples, Standard view transform, transparent film, 256 px.
+3. **Pose and light from the game:** `PlayerChoice_PITConfig.inventoryParams` (`dcb query`) gives
+   `defaultOrientation` (90, 0, 0) plus an offset per item type/sub type (45 entries) and a light group per
+   category (39 entries, default `inventorylightgroup_other`); the groups are entities under
+   `libs/foundry/records/entities/lights/scene/inventory/` (53, `dcb extract`, directory globs only) with
+   key/rim/fill projector lights. The model is turned by Euler XYZ of default + offset, the cell is then Y-up
+   with the camera on −Z and screen-up −Y (not mirrored: rifle muzzle to the right, as in game); the rig sits at
+   the cell centre turned by (90, 180, 0), each projector shining along its local +X, Blender spots at 100 W per
+   game intensity unit, ambient 0.15. The item is scaled so its largest extent is 0.7 m (the game fits it into
+   the cell; the rig's lights stand ~1 m out, a 3 m cooler would have them inside). Matching: type + sub type
+   exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
+   renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
+4. **Output:** one render per entity (`local/work/icons/render/<class>.png`), copied to
+   `local/icons/<uuid>.png` per catalog UUID. Exports and renders are reused unless `--force`; `--filter` re-renders
+   single entities. ~2 s export + ~2 s render per entity (Blender runs 50 per process), the full set (~3800
+   entities) takes 4–5 h. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
+   packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
+   Windows PC (`run.cmd`, needs only `Data.p4k`).
+
+Open: where the icons live for the apps (static, `COMPANION_DIR`-like folder, DB) and the fan-content question
+before they ship; in-game comparison for the types without an orientation entry (radar, EMP, QDMP, tractor
+beam, container, shield); the `requiredTag` entries (sidearms get the primary weapons rig); paint variants
+sharing a model are rendered separately.
+
 ## Open points
 
 - Meaning of the quality band `mappedValue`.
