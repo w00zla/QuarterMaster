@@ -67,4 +67,12 @@ describe('mining rows', () => {
     ], names, infos);
     assert.deepEqual(rows.map((r) => [r.ore, r.parts[0]!.quality === null]), [['Other (Ore)', true], ['Taranite (Raw)', false]]);
   });
+
+  it('carries the ore\'s uuid and thumbnail hash (null without one)', () => {
+    const rows = miningRows([
+      row({ locationUuids: [MOON] }),
+      row({ oreUuid: 'other', ore: 'Other (Ore)', locationUuids: [MOON] }),
+    ], names, infos, new Map(), new Map([['ore', '0123abcd']]));
+    assert.deepEqual(rows.map((r) => [r.oreUuid, r.thumb]), [['other', null], ['ore', '0123abcd']]);
+  });
 });

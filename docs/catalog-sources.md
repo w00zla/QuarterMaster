@@ -409,7 +409,8 @@ pictures with gaps), so the icons are rendered from the models:
    key/rim/fill projector lights. The model is turned by Euler XYZ of default + offset, the cell is then Y-up
    with the camera on −Z and screen-up −Y (not mirrored: rifle muzzle to the right, as in game); the rig sits at
    the cell centre turned by (90, 180, 0), each projector shining along its local +X, Blender spots at 30 W per
-   game intensity unit (100 W burnt white materials out under the Standard view transform), ambient 0.15. The item is scaled so its largest extent is 0.7 m (the game fits it into
+   game intensity unit (100 W burnt white materials out under the Standard view transform), ambient 0.5 (the rigs' fill light is
+   0.1: with 0.15 dark materials drowned in their shadows). The item is scaled so its largest extent is 0.7 m (the game fits it into
    the cell; the rig's lights stand ~1 m out, a 3 m cooler would have them inside). Matching: type + sub type
    exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
@@ -419,9 +420,16 @@ pictures with gaps), so the icons are rendered from the models:
    entities) takes 4–5 h. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
    packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
    Windows PC (`run.cmd`, needs only `Data.p4k`).
+5. **Pack:** `pnpm icons:pack [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
+   every `<uuid>.png` into three AVIFs (`src/thumbs.ts`: s 40, m 96, l 256 px; quality 45, trimmed to the content
+   with a small transparent border) named `<uuid>.<hash>.avif` (hash: SHA-256 of the PNG, 8 hex) plus
+   `thumbs.json` `{uuid: hash}`; unchanged ones are skipped, stale files deleted. Full set: ~2 min, ~23 MB (S
+   ~0.9 KB, M ~1.8 KB, L ~3.8 KB each; the PNGs average 50 KB). Measured against PNG, 8-bit PNG and WebP: AVIF is
+   the smallest from 96 px up and even with WebP at 40 px. Upload: `scripts/push-thumbs.sh`
+   (`docs/deploy.md` § 8), served by the web app (`docs/webapp.md` "Thumbnails").
 
-Open: where the icons live for the apps (static, `COMPANION_DIR`-like folder, DB) and the fan-content question
-before they ship; in-game comparison for the types without an orientation entry (radar, EMP, QDMP, tractor
+Fan content of this kind is fine (the Star Citizen wiki renders its thumbnails the same way). Open: in-game
+comparison for the types without an orientation entry (radar, EMP, QDMP, tractor
 beam, container, shield); the `requiredTag` entries (sidearms get the primary weapons rig); paint variants
 sharing a model are rendered separately.
 

@@ -30,7 +30,9 @@ import { me } from "../session";
 import ChipButton from "./ChipButton.vue";
 import CoverageTag from "./CoverageTag.vue";
 import StockBatchList from "./StockBatchList.vue";
+import Thumb from "./Thumb.vue";
 import TypeLabel from "./TypeLabel.vue";
+import { blueprintThumb } from "../thumbs";
 import MiningDialog from "./MiningDialog.vue";
 import UnlocksDialog from "./UnlocksDialog.vue";
 
@@ -118,7 +120,7 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
   <div class="entry">
     <div class="entry-head">
       <div class="head-line">
-        <Icon :name="typeIcon(recipe?.outputType)" :size="18" class="entry-icon" />
+        <Thumb v-bind="blueprintThumb(result.blueprintUuid)" size="m" :px="36" :icon="typeIcon(recipe?.outputType)" :icon-size="18" class="entry-icon" />
         <span class="entry-name">{{ result.name }}</span>
         <div class="spacer" />
         <span class="count">
@@ -321,6 +323,11 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
 .entry-icon {
   flex-shrink: 0;
   color: var(--text-2);
+}
+
+/* Without a thumbnail: the type icon at full strength, as before */
+.entry-icon :deep(.thumb-icon) {
+  opacity: 1;
 }
 
 .entry-name {

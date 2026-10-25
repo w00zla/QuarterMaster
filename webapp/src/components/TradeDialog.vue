@@ -7,7 +7,7 @@ import type { TradeOffer, TradeResponse } from "../../../src/webapp/api-types";
 import DataTable from "../../../adminapp/src/components/DataTable.vue";
 import type { ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
-import { priceTime, uec } from "../format";
+import { auec, priceTime, uec } from "../format";
 import { t } from "../i18n";
 import { toastError } from "../toasts";
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
@@ -62,8 +62,8 @@ function valueOf(r: TradeOffer, key: string): string | number {
 const averages = computed(() => {
   const p = data.value?.prices;
   return [
-    p?.sell?.avg != null ? `⌀ ${t("trade.sell")} ${uec(p.sell.avg)}` : null,
-    p?.buy?.avg != null ? `⌀ ${t("trade.buy")} ${uec(p.buy.avg)}` : null,
+    p?.sell?.avg != null ? `⌀ ${t("trade.sell")} ${auec(p.sell.avg)}` : null,
+    p?.buy?.avg != null ? `⌀ ${t("trade.buy")} ${auec(p.buy.avg)}` : null,
   ].filter(Boolean).join(" · ");
 });
 

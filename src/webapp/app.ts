@@ -2,6 +2,7 @@
 // Discord login, sessions and the JSON API. Built by createApp so tests can drive it without a server.
 // Design and rationale: docs/webapp.md.
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { getConnInfo } from '@hono/node-server/conninfo';
@@ -21,6 +22,8 @@ import { HttpError, registerRoutes } from './routes.ts';
 import {
   ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, validateSession, type Session,
 } from './session.ts';
+import { thumbIndex } from './thumbs.ts';
+import { THUMB_FILE, THUMB_SIZES } from '../thumbs.ts';
 import { apiTokenInfo, createApiToken, validateApiToken } from './token.ts';
 
 export interface WebappConfig {
@@ -32,6 +35,8 @@ export interface WebappConfig {
   distDir: string | null;
   // Companion app release (companion.json + files, see companion.ts); null/missing = none
   companionDir?: string | null;
+  // Item thumbnails (s/, m/, l/ and thumbs.json, see thumbs.ts); null/missing = none
+  thumbsDir?: string | null;
   // Per window: auth and apiIp per client address (IPv6 per /64), apiUser per logged-in user
   rateLimit?: { windowMs: number; auth: number; apiIp: number; apiUser: number };
 }
@@ -69,6 +74,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
   };
   const sessionToken = (c: Context) => getCookie(c, SESSION_COOKIE, 'host');
   const release = companionRelease(config.companionDir ?? null);
+  const thumbs = thumbIndex(config.thumbsDir ?? null);
 
   app.use('*', secureHeaders({
     contentSecurityPolicy: {
@@ -202,7 +208,7 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
   api.use('*', bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: 'request too large' }, 413) }));
 
   api.get('/me', async (c) => c.json(await getMe(db, c.get('session'))));
-  registerRoutes(api, db);
+  registerRoutes(api, db, thumbs);
 
   api.get('/companion', (c) => {
     const current = release();
@@ -273,6 +279,23 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     c.header('Content-Disposition', `attachment; filename="${entry.file.replace(/"/g, '')}"`);
     c.header('Cache-Control', 'no-store');
     return c.body(Readable.toWeb(createReadStream(join(config.companionDir, entry.file))) as ReadableStream);
+  });
+
+  // --- item thumbnails (public, no login: game renders like the wiki's; the name carries a content hash) ---
+  app.get('/thumbs/:size/:file', async (c) => {
+    const size = c.req.param('size');
+    const file = c.req.param('file');
+    const m = THUMB_FILE.exec(file);
+    if (!config.thumbsDir || !Object.hasOwn(THUMB_SIZES, size) || !m || thumbs().get(m[1]!) !== m[2]) return c.text('Not found', 404);
+    let body: Buffer;
+    try {
+      body = await readFile(join(config.thumbsDir, size, file));
+    } catch {
+      return c.text('Not found', 404);
+    }
+    c.header('Content-Type', 'image/avif');
+    c.header('Cache-Control', IMMUTABLE);
+    return c.body(new Uint8Array(body));
   });
 
   // --- SPA --------------------------------------------------------------------------------

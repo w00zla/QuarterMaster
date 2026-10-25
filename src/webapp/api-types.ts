@@ -58,6 +58,8 @@ export interface CatalogMaterial {
   stats: CatalogStat[];
   // The game data says where it is mined (GET /api/mining/:uuid)
   minable: boolean;
+  // Its thumbnail's hash (src/thumbs.ts: thumbPath(size, uuid, thumb)); null = none, show the type icon
+  thumb: string | null;
 }
 
 export interface CatalogStat {
@@ -117,6 +119,9 @@ export interface CatalogBlueprint {
   stats: string[];
   // The game data has a source for it (GET /api/unlocks/:uuid)
   unlockable: boolean;
+  // The item it crafts and that item's thumbnail hash (thumbPath(size, outputUuid, thumb)); null = none
+  outputUuid: string | null;
+  thumb: string | null;
 }
 
 export interface CatalogResponse {
@@ -523,6 +528,9 @@ export interface MiningQuality {
 export interface MiningRow {
   // The mined resource (several for a refined material from more than one ore)
   ore: string;
+  // Its uuid and thumbnail hash (thumbPath(size, oreUuid, thumb); null = none): ores are no catalog materials
+  oreUuid: string;
+  thumb: string | null;
   // The place's name; null for a group of instanced places (group, count)
   place: string | null;
   // A moon's planet
@@ -684,6 +692,8 @@ export interface HistoryEntry {
   org: string | null;
   // Material or blueprint
   target: string;
+  // Its uuid (the thumbnail: the catalog's materials or blueprints by uuid, CatalogMaterial.thumb / CatalogBlueprint.thumb)
+  targetUuid: string;
   unit: 'SCU' | 'pcs' | null;
   // Exact decimal text without trailing zeros; null where the action has none
   amount: string | null;

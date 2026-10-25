@@ -67,6 +67,8 @@ const en = {
   "common.close": "Close",
   "columns.title": "Columns",
   "columns.choose": "Choose columns",
+  "view.toThumbs": "Show larger",
+  "view.toCompact": "Show compact",
   "common.loading": "Loading…",
   "common.noMatch": "No matches.",
   "common.checkTitle": "Check and confirm",
@@ -476,6 +478,8 @@ const de: Record<Key, string> = {
   "common.close": "Schließen",
   "columns.title": "Spalten",
   "columns.choose": "Spalten wählen",
+  "view.toThumbs": "Größer anzeigen",
+  "view.toCompact": "Kompakt anzeigen",
   "common.loading": "Lädt…",
   "common.noMatch": "Keine Treffer.",
   "common.checkTitle": "Prüfen und bestätigen",
@@ -838,3 +842,5 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
 
 /** Texts of the column chooser (ColumnsButton.vue, shared with the companion). */
 export const columnsTexts = () => ({ choose: t("columns.choose"), title: t("columns.title"), close: t("common.close") });
+// The list view toggle's tooltips (ViewToggle.vue)
+export const viewTexts = () => ({ toThumbs: t("view.toThumbs"), toCompact: t("view.toCompact") });

@@ -18,6 +18,8 @@ export interface BlueprintEntry {
   gradeLetter: string | null;
   itemClass: string | null;
   manufacturerCode: string | null;
+  // The item it crafts (its thumbnail); null when the game data names none
+  outputUuid: string | null;
   isDefault: boolean;
   retired: boolean;
   categoryLabel: string | null;
@@ -63,7 +65,7 @@ export const blueprintCatalog = importCache(async (db: Db, lang: Lang): Promise<
     SELECT b.uuid, b.key,
       coalesce(${locText(lang, sql`i.name_key`)}, i.class_name, b.key) AS name,
       coalesce(${locText('en', sql`i.name_key`)}, i.class_name, b.key) AS "nameEn",
-      i.size, i.grade_letter AS "gradeLetter", ${itemClassText(lang, 'i')} AS "itemClass", m.code AS "manufacturerCode",
+      i.size, i.grade_letter AS "gradeLetter", ${itemClassText(lang, 'i')} AS "itemClass", m.code AS "manufacturerCode", b.output_item_uuid AS "outputUuid",
       b.is_default AS "isDefault", b.retired_at IS NOT NULL AS retired, c.key AS category, ${categoryText(lang)} AS "categoryLabel"
     FROM catalog.blueprint b
     LEFT JOIN catalog.item i ON i.uuid = b.output_item_uuid

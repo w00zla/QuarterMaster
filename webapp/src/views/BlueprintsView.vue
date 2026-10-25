@@ -16,13 +16,17 @@ import { addToCrafting } from "../crafting";
 import { blueprints, catalog } from "../catalog";
 import ChipButton from "../components/ChipButton.vue";
 import ColumnsButton from "../components/ColumnsButton.vue";
+import Thumb from "../components/Thumb.vue";
+import TypeLabel from "../components/TypeLabel.vue";
+import ViewToggle from "../components/ViewToggle.vue";
+import { blueprintThumb } from "../thumbs";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
 import InfoTip from "../components/InfoTip.vue";
 import UnlocksDialog from "../components/UnlocksDialog.vue";
 import Picker from "../components/Picker.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
-import { columnsTexts, lang, t } from "../i18n";
+import { columnsTexts, lang, t, viewTexts } from "../i18n";
 import { memberLabel, orgOf } from "../orgs";
 import { takeQuery } from "../deepLink";
 import { coalesced, onServerMessage } from "../realtime";
@@ -149,6 +153,9 @@ const columns = computed<ColumnSpec[]>(() => [
 const unlocksOf = ref<Row | null>(null);
 // The table's column state, for the column chooser right of the filters
 const table = shallowRef<{ table: ReturnType<typeof useTableColumns> } | null>(null);
+// The view 'thumbs': the thumbnail column instead of the small one before the name
+const thumbView = computed(() => table.value?.table.view.value === "thumbs");
+const bpIcon = (r: Row) => (r.bp?.type ? typeIcon(r.bp.type) : "blueprint");
 
 function valueOf(r: Row, key: string): string | number {
   switch (key) {
@@ -273,6 +280,7 @@ onUnmounted(() => {
         <Dropdown v-model="type" :options="typeOptions" variant="chip" />
         <Dropdown v-model="size" :options="sizeOptions" variant="chip" />
         <Dropdown v-if="org" v-model="member" :options="memberOptions" variant="chip" />
+        <ViewToggle v-if="table?.table" :table="table.table" :texts="viewTexts()" :size="22" />
         <ColumnsButton v-if="table?.table" :table="table.table" :texts="columnsTexts()" :size="22" />
         <span class="spacer" />
         <span class="head-count">{{ rows.length }} / {{ allRows.length }}</span>
@@ -292,15 +300,18 @@ onUnmounted(() => {
         :value-of="valueOf"
         :numeric="['size']"
         :empty-text="t('common.noMatch')"
+        thumbs
         @select="craft"
       >
+        <template #cell-thumb="{ row }">
+          <span class="thumb-cell"><InfoTip kind="blueprint" :uuid="row.uuid"><Thumb v-bind="blueprintThumb(row.uuid)" size="m" :px="48" :icon="bpIcon(row)" :icon-size="24" /></InfoTip></span>
+        </template>
         <template #cell-name="{ row }">
-          <!-- The type's icon before the name, as in the stock lists; its name in the type column -->
-          <Icon :name="row.bp?.type ? typeIcon(row.bp.type) : 'blueprint'" :size="15" class="name-icon" />
-          <InfoTip kind="blueprint" :uuid="row.uuid"><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span></InfoTip>
+          <!-- The crafted item's thumbnail before the name (the type's icon without one), as in the stock lists -->
+          <InfoTip kind="blueprint" :uuid="row.uuid"><Thumb v-if="!thumbView" v-bind="blueprintThumb(row.uuid)" size="s" :px="20" :icon="bpIcon(row)" :icon-size="15" class="name-icon" /><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span></InfoTip>
           <span v-if="row.bp?.retired" class="tag err">{{ t("bp.retired") }}</span>
         </template>
-        <template #cell-type="{ row }"><span class="type-text" :title="row.bp?.type ?? undefined">{{ row.bp?.typeLabel ?? "" }}</span></template>
+        <template #cell-type="{ row }"><TypeLabel :type="row.bp?.type" :label="row.bp?.typeLabel" /></template>
         <template #cell-size="{ row }">{{ row.bp?.size ?? "—" }}</template>
         <template #cell-grade="{ row }">{{ row.bp?.gradeLetter ?? "—" }}</template>
         <template #cell-stats="{ row }"><span class="stats" :title="row.bp?.stats.join(', ')">{{ row.bp?.stats.join(", ") }}</span></template>
@@ -367,15 +378,6 @@ onUnmounted(() => {
 }
 
 .name-icon {
-  vertical-align: -2px;
-  flex-shrink: 0;
   margin-right: 6px;
-  opacity: 0.8;
-}
-
-.type-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 </style>

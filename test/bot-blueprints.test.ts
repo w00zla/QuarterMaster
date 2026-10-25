@@ -7,7 +7,7 @@ import { listPage, whoPage } from '../src/bot/commands/blueprints.ts';
 let n = 0;
 const entry = (over: Partial<BlueprintEntry>): Omit<BlueprintEntry, 'label'> => ({
   uuid: `u${++n}`, key: `BP_CRAFT_k${n}`, name: 'Thing', nameEn: 'Thing', size: null, gradeLetter: null, itemClass: null,
-  manufacturerCode: null, isDefault: false, retired: false, categoryLabel: 'Armor', ...over,
+  manufacturerCode: null, outputUuid: null, isDefault: false, retired: false, categoryLabel: 'Armor', ...over,
 });
 
 describe('blueprint labels', () => {

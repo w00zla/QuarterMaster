@@ -28,7 +28,7 @@ const health = (base: number) => stat(HEALTH, 'Integrity', base);
 
 const material = (uuid: string, name: string, size: number, gradeLetter: string, stats: CatalogStat[]): CatalogResponse['materials'][number] => ({
   uuid, kind: 'item', name, nameKey: `item_name_${name.toLowerCase()}`, unit: 'pcs', type: 'Cooler', typeLabel: 'Cooler', component: true,
-  label: `${name} · Cooler · S${size} · ${gradeLetter} Military`, size, gradeLetter, itemClass: 'Military', stats, minable: false,
+  label: `${name} · Cooler · S${size} · ${gradeLetter} Military`, size, gradeLetter, itemClass: 'Military', stats, minable: false, thumb: null,
 });
 
 function responses(): CatalogResponse[] {
@@ -39,7 +39,7 @@ function responses(): CatalogResponse[] {
     material(SOVEREIGN, 'Sovereign IP-10', 1, 'B', [stat(PIPS, 'Power Pips', 16, 'additive', 2), health(400)]),
     material(ATLAS, 'Atlas', 1, 'A', [stat(SPEED, 'Quantum Speed', 259.0545), health(200)]),
     // A resource: never a component
-    { uuid: '00000000-0000-4000-8000-0000000000f1', kind: 'resource', name: 'Blizzard', nameKey: null, unit: 'SCU', type: null, typeLabel: null, component: false, label: 'Blizzard', size: null, gradeLetter: null, itemClass: null, stats: [], minable: false },
+    { uuid: '00000000-0000-4000-8000-0000000000f1', kind: 'resource', name: 'Blizzard', nameKey: null, unit: 'SCU', type: null, typeLabel: null, component: false, label: 'Blizzard', size: null, gradeLetter: null, itemClass: null, stats: [], minable: false, thumb: null },
   ];
   const de = en.map((m) => ({ ...m, stats: m.stats.map((s) => ({ ...s, name: s.uuid === COOLANT ? 'Kühlleistung' : s.uuid === HEALTH ? 'Integrität' : s.name })) }));
   const base = { locations: [], blueprints: [], blueprintTypes: [], itemTypes: [] } as unknown as Omit<CatalogResponse, 'materials'>;
@@ -230,7 +230,7 @@ describe('FPS gear', () => {
   const fpsStat = (uuid: string, name: string, base: number | null, tooltip: CatalogStat['tooltip'], min: number, max: number): CatalogStat =>
     ({ uuid, name, nameKey: null, kind: 'multiplier', min, max, base, tooltip });
   const item = (uuid: string, name: string, type: string, stats: CatalogStat[]): CatalogResponse['materials'][number] => ({
-    uuid, kind: 'item', name, nameKey: null, unit: 'pcs', type, typeLabel: type, component: true, label: name, size: null, gradeLetter: null, itemClass: null, stats, minable: false,
+    uuid, kind: 'item', name, nameKey: null, unit: 'pcs', type, typeLabel: type, component: true, label: name, size: null, gradeLetter: null, itemClass: null, stats, minable: false, thumb: null,
   });
   const base = { locations: [], blueprints: [], blueprintTypes: [], itemTypes: [] } as unknown as Omit<CatalogResponse, 'materials'>;
   const cat = buildComponentCatalog([{ ...base, materials: [

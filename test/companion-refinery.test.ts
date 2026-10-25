@@ -16,7 +16,7 @@ const ARC = '00000000-0000-4000-8000-0000000000c2';
 
 const material = (uuid: string, name: string, nameKey: string) =>
   ({ uuid, kind: 'resource' as const, name, nameKey, unit: 'SCU' as const, type: null, typeLabel: null,
-    component: false, label: name, size: null, gradeLetter: null, itemClass: null, stats: [], minable: false });
+    component: false, label: name, size: null, gradeLetter: null, itemClass: null, stats: [], minable: false, thumb: null });
 const location = (uuid: string, label: string, nameKey: string, refinery = true) =>
   ({ uuid, key: nameKey.toUpperCase(), label, short: label.split(' · ')[0]!, nameKey, refinery, yields: {} });
 

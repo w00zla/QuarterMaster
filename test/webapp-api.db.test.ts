@@ -365,6 +365,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     assert.deepEqual([move!.actor.name, move!.holder!.name, move!.toHolder!.name, move!.org, move!.amount, move!.unit, move!.quality],
       [`n${MIA.slice(-2)}`, `n${MIA.slice(-2)}`, `n${MAX.slice(-2)}`, 'Feature Org', '1', 'SCU', 333]);
     assert.ok(move!.target !== U.metal && move!.location !== U.station, 'names, not UUIDs');
+    assert.equal(move!.targetUuid, U.metal);
     // The recipient sees the give, other members of the org only the share; someone outside it nothing
     assert.ok(since((await get<HistoryResponse>(MAX, '/history')).body).some((e) => e.id === move!.id));
     const olga = since((await get<HistoryResponse>(OLGA, '/history')).body);

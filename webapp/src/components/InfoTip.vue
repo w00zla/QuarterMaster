@@ -2,6 +2,13 @@
 import type { BlueprintInfo, MaterialInfo, PriceRange, PriceSummary } from "../../../src/webapp/api-types";
 // Loaded cards, per language: hovering the same entry again costs nothing
 const cache = new Map<string, Promise<BlueprintInfo | MaterialInfo>>();
+
+// The card open right now. Leaving its anchor closes it a moment later: moving to another anchor of the
+// same entry (the thumbnail and the name in two cells of a row) keeps it open instead of closing and
+// reopening it.
+const HANDOVER_MS = 150;
+interface OpenCard { key: string; close: () => void; timer?: ReturnType<typeof setTimeout> }
+let open: OpenCard | null = null;
 </script>
 
 <script setup lang="ts">
@@ -12,9 +19,11 @@ import { computed, nextTick, onUnmounted, ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { api } from "../api";
+import { thumbPath } from "../../../src/thumbs";
 import { materials } from "../catalog";
-import { duration, priceRange, priceTime, qty, uec } from "../format";
+import { auec, duration, priceRange, priceTime, qty } from "../format";
 import { lang, t } from "../i18n";
+import { blueprintThumb, materialThumb, preloadThumb } from "../thumbs";
 import { bestText, kindCount, markerClass, markerText } from "../unlocks";
 
 const props = defineProps<{ kind: "blueprint" | "material"; uuid: string }>();
@@ -41,15 +50,34 @@ function load() {
   return found;
 }
 
+// The L thumbnail left of the card's text (a blueprint: the item it crafts); none without a hash
+const thumb = computed(() => (props.kind === "blueprint" ? blueprintThumb(props.uuid) : materialThumb(props.uuid)));
+const thumbSrc = computed(() => (thumb.value.hash ? thumbPath("l", thumb.value.uuid, thumb.value.hash) : null));
+
+const entryKey = () => `${props.kind}:${props.uuid}`;
+// This instance's own open card (an entry of `open`)
+let mine: OpenCard | null = null;
+
 function enter() {
   hovering = true;
+  // The same entry's card is still open (its anchor just left): it stays, this anchor takes it over
+  if (open?.key === entryKey()) {
+    clearTimeout(open.timer);
+    open.timer = undefined;
+    return;
+  }
+  // Loading starts with the hover: the image is there when the card opens
+  preloadThumb("l", thumb.value);
   clearTimeout(timer);
   timer = setTimeout(async () => {
     try {
       const loaded = await load();
       if (!hovering) return;
+      if (open && open !== mine) open.close();
       info.value = loaded;
       pos.value = null;
+      mine = { key: entryKey(), close: closeMine };
+      open = mine;
       await nextTick();
       place();
     } catch {
@@ -58,10 +86,23 @@ function enter() {
   }, DELAY_MS);
 }
 
+function closeMine() {
+  info.value = null;
+  if (mine) clearTimeout(mine.timer);
+  if (open === mine) open = null;
+  mine = null;
+}
+
 function leave() {
   hovering = false;
   clearTimeout(timer);
-  info.value = null;
+  const shown = open;
+  if (shown?.key === entryKey()) {
+    clearTimeout(shown.timer);
+    shown.timer = setTimeout(() => shown.close(), HANDOVER_MS);
+  } else if (mine) {
+    closeMine();
+  }
 }
 
 function place() {
@@ -74,7 +115,10 @@ function place() {
   pos.value = { left: Math.max(left, MARGIN), top: Math.max(top, MARGIN) };
 }
 
-onUnmounted(() => clearTimeout(timer));
+onUnmounted(() => {
+  clearTimeout(timer);
+  if (mine) closeMine();
+});
 
 const bp = computed(() => (props.kind === "blueprint" ? (info.value as BlueprintInfo | null) : null));
 const mat = computed(() => (props.kind === "material" ? (info.value as MaterialInfo | null) : null));
@@ -88,7 +132,7 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
   .filter((s): s is readonly [string, PriceRange] => s[1] !== null)
   .map(([label, range]) => ({
     label, range,
-    extra: range.avg !== null ? `⌀ ${uec(range.avg)}` : t(range.terminals === 1 ? "trade.terminal" : "trade.terminals", { n: range.terminals }),
+    extra: range.avg !== null ? `⌀ ${auec(range.avg)}` : t(range.terminals === 1 ? "trade.terminal" : "trade.terminals", { n: range.terminals }),
   }));
 </script>
 
@@ -99,69 +143,73 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
       v-if="info"
       ref="card"
       class="info-card"
+      :class="{ 'with-thumb': thumbSrc }"
       role="tooltip"
       :style="pos ? { left: `${pos.left}px`, top: `${pos.top}px` } : { left: '0px', top: '0px', visibility: 'hidden' }"
     >
-      <template v-if="bp">
-        <div class="title">
-          <Icon :name="bp.type ? typeIcon(bp.type) : 'blueprint'" :size="15" />
-          <span>{{ bp.name }}</span>
-          <span v-if="bp.isDefault" class="tag accent">{{ t("info.default") }}</span>
-          <span v-if="bp.retired" class="tag err">{{ t("bp.retired") }}</span>
-        </div>
-        <div v-if="itemLine(bp)" class="meta">{{ itemLine(bp) }}</div>
-        <dl class="kv">
-          <template v-if="bp.category"><dt>{{ t("bp.col.category") }}</dt><dd>{{ bp.category }}</dd></template>
-          <template v-if="bp.craftSeconds !== null"><dt>{{ t("info.craftTime") }}</dt><dd>{{ duration(bp.craftSeconds) }}</dd></template>
-          <template v-if="bp.requiredSlots < bp.slots.length"><dt>{{ t("info.slots") }}</dt><dd>{{ t("info.slotsOf", { n: bp.requiredSlots, m: bp.slots.length }) }}</dd></template>
-        </dl>
-        <div v-if="bp.slots.length" class="section">{{ t("info.ingredients") }}</div>
-        <ul v-if="bp.slots.length" class="inputs">
-          <li v-for="(s, n) in bp.slots" :key="n">
-            <span class="slot">{{ s.name ?? t("info.slot", { n: n + 1 }) }}</span>
-            <span>
-              <template v-for="(i, k) in s.inputs" :key="k">
-                <span v-if="k" class="faint"> / </span>{{ i.name }} <span class="dim">{{ qty(i.quantity, i.kind === "resource" ? "SCU" : "pcs") }}</span><span v-if="i.minQuality" class="dim"> · Q≥{{ i.minQuality }}</span>
-              </template>
-            </span>
-          </li>
-        </ul>
-        <!-- Freischaltung: eine Zeile je Art, Marker nur wenn alle Quellen sie haben, rechts die beste Chance -->
-        <div class="section">{{ t("unlock.title") }}</div>
-        <ul v-if="bp.unlocks.length" class="unlocks">
-          <li v-for="u in bp.unlocks" :key="u.kind">
-            <span>{{ kindCount(u.kind, u.count) }}</span>
-            <span v-for="m in u.markers" :key="m" class="tag" :class="markerClass(m)">{{ markerText(m) }}</span>
-            <span class="unlock-odds">{{ bestText(u) }}</span>
-          </li>
-        </ul>
-        <div v-else class="dim">{{ t("unlock.none") }}</div>
-      </template>
-
-      <template v-else-if="mat">
-        <div class="title">
-          <Icon :name="mat.kind === 'resource' ? 'resource' : typeIcon(mat.type)" :size="15" />
-          <span>{{ mat.name }}</span>
-          <span v-if="mat.isOre" class="tag warn">{{ t("info.ore") }}</span>
-        </div>
-        <div v-if="mat.kind === 'resource' ? mat.group : itemLine(mat)" class="meta">{{ mat.kind === "resource" ? mat.group : itemLine(mat) }}</div>
-        <p v-if="mat.description" class="description">{{ mat.description }}</p>
-        <dl class="kv">
-          <template v-if="mat.refined"><dt>{{ t("info.refinedTo") }}</dt><dd>{{ mat.refined }}</dd></template>
-          <template v-if="mat.ores.length"><dt>{{ t("info.fromOre") }}</dt><dd>{{ mat.ores.join(", ") }}</dd></template>
-          <!-- Ausrüstung ist nie Zutat eines Bauplans: keine Zeile dafür -->
-          <template v-if="!materials.get(uuid)?.component"><dt>{{ t("info.usedIn") }}</dt><dd>{{ t("info.blueprints", { n: mat.usedIn }) }}</dd></template>
-        </dl>
-        <!-- UEX-Preise: Spanne über die Terminals, dahinter der UEX-Durchschnitt (Gegenstände: die Zahl der Terminals) -->
-        <template v-if="mat.prices">
-          <div class="section price-head"><span>{{ t("trade.prices") }}</span><span class="source">UEX · {{ priceTime(mat.prices.date) }}</span></div>
+      <img v-if="thumbSrc" class="card-thumb" :src="thumbSrc" width="128" height="128" alt="" />
+      <div class="card-body">
+        <template v-if="bp">
+          <div class="title">
+            <Icon :name="bp.type ? typeIcon(bp.type) : 'blueprint'" :size="15" />
+            <span>{{ bp.name }}</span>
+            <span v-if="bp.isDefault" class="tag accent">{{ t("info.default") }}</span>
+            <span v-if="bp.retired" class="tag err">{{ t("bp.retired") }}</span>
+          </div>
+          <div v-if="itemLine(bp)" class="meta">{{ itemLine(bp) }}</div>
           <dl class="kv">
-            <template v-for="s in priceSides(mat.prices)" :key="s.label">
-              <dt>{{ s.label }}</dt><dd>{{ priceRange(s.range) }} <span class="dim">· {{ s.extra }}</span></dd>
-            </template>
+            <template v-if="bp.category"><dt>{{ t("bp.col.category") }}</dt><dd>{{ bp.category }}</dd></template>
+            <template v-if="bp.craftSeconds !== null"><dt>{{ t("info.craftTime") }}</dt><dd>{{ duration(bp.craftSeconds) }}</dd></template>
+            <template v-if="bp.requiredSlots < bp.slots.length"><dt>{{ t("info.slots") }}</dt><dd>{{ t("info.slotsOf", { n: bp.requiredSlots, m: bp.slots.length }) }}</dd></template>
           </dl>
+          <div v-if="bp.slots.length" class="section">{{ t("info.ingredients") }}</div>
+          <ul v-if="bp.slots.length" class="inputs">
+            <li v-for="(s, n) in bp.slots" :key="n">
+              <span class="slot">{{ s.name ?? t("info.slot", { n: n + 1 }) }}</span>
+              <span>
+                <template v-for="(i, k) in s.inputs" :key="k">
+                  <span v-if="k" class="faint"> / </span>{{ i.name }} <span class="dim">{{ qty(i.quantity, i.kind === "resource" ? "SCU" : "pcs") }}</span><span v-if="i.minQuality" class="dim"> · Q≥{{ i.minQuality }}</span>
+                </template>
+              </span>
+            </li>
+          </ul>
+          <!-- Freischaltung: eine Zeile je Art, Marker nur wenn alle Quellen sie haben, rechts die beste Chance -->
+          <div class="section">{{ t("unlock.title") }}</div>
+          <ul v-if="bp.unlocks.length" class="unlocks">
+            <li v-for="u in bp.unlocks" :key="u.kind">
+              <span>{{ kindCount(u.kind, u.count) }}</span>
+              <span v-for="m in u.markers" :key="m" class="tag" :class="markerClass(m)">{{ markerText(m) }}</span>
+              <span class="unlock-odds">{{ bestText(u) }}</span>
+            </li>
+          </ul>
+          <div v-else class="dim">{{ t("unlock.none") }}</div>
         </template>
-      </template>
+
+        <template v-else-if="mat">
+          <div class="title">
+            <Icon :name="mat.kind === 'resource' ? 'resource' : typeIcon(mat.type)" :size="15" />
+            <span>{{ mat.name }}</span>
+            <span v-if="mat.isOre" class="tag warn">{{ t("info.ore") }}</span>
+          </div>
+          <div v-if="mat.kind === 'resource' ? mat.group : itemLine(mat)" class="meta">{{ mat.kind === "resource" ? mat.group : itemLine(mat) }}</div>
+          <p v-if="mat.description" class="description">{{ mat.description }}</p>
+          <dl class="kv">
+            <template v-if="mat.refined"><dt>{{ t("info.refinedTo") }}</dt><dd>{{ mat.refined }}</dd></template>
+            <template v-if="mat.ores.length"><dt>{{ t("info.fromOre") }}</dt><dd>{{ mat.ores.join(", ") }}</dd></template>
+            <!-- Ausrüstung ist nie Zutat eines Bauplans: keine Zeile dafür -->
+            <template v-if="!materials.get(uuid)?.component"><dt>{{ t("info.usedIn") }}</dt><dd>{{ t("info.blueprints", { n: mat.usedIn }) }}</dd></template>
+          </dl>
+          <!-- UEX-Preise: Spanne über die Terminals, dahinter der UEX-Durchschnitt (Gegenstände: die Zahl der Terminals) -->
+          <template v-if="mat.prices">
+            <div class="section price-head"><span>{{ t("trade.prices") }}</span><span class="source">UEX · {{ priceTime(mat.prices.date) }}</span></div>
+            <dl class="kv">
+              <template v-for="s in priceSides(mat.prices)" :key="s.label">
+                <dt>{{ s.label }}</dt><dd>{{ priceRange(s.range) }}&nbsp;aUEC <span class="dim">· {{ s.extra }}</span></dd>
+              </template>
+            </dl>
+          </template>
+        </template>
+      </div>
     </div>
   </Teleport>
 </template>
@@ -177,8 +225,7 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
   width: max-content;
   max-width: min(380px, calc(100vw - 16px));
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 14px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
@@ -187,6 +234,33 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
   font-size: 12px;
   color: var(--text-2);
   pointer-events: none;
+}
+
+/* The thumbnail left of the text: the text keeps its width */
+.info-card.with-thumb {
+  max-width: min(522px, calc(100vw - 16px));
+}
+
+.card-thumb {
+  flex-shrink: 0;
+  width: 128px;
+  height: 128px;
+  object-fit: contain;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Narrow screens: the thumbnail above the text */
+@media (max-width: 560px) {
+  .info-card.with-thumb {
+    flex-direction: column;
+    max-width: min(380px, calc(100vw - 16px));
+  }
 }
 
 .title {

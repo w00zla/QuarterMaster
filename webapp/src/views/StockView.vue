@@ -21,14 +21,18 @@ import { materials } from "../catalog";
 import RangeSlider from "../components/RangeSlider.vue";
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import { sortRows, THUMB_COLUMN, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import ColumnsButton from "../components/ColumnsButton.vue";
+import Thumb from "../components/Thumb.vue";
+import TypeLabel from "../components/TypeLabel.vue";
+import ViewToggle from "../components/ViewToggle.vue";
+import { materialThumb, thumbColumnFlag } from "../thumbs";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
 import StockAddForm from "../components/StockAddForm.vue";
 import { compareBatches, ownerText, Q_TIER_MAX, qMark, qTier, qty, sharedText, statsText, tierMark, tierQualities, uec } from "../format";
-import { columnsTexts, lang, t } from "../i18n";
+import { columnsTexts, lang, t, viewTexts } from "../i18n";
 import { ensureMembers, memberLabel, members, orgOf } from "../orgs";
 import { takeQuery } from "../deepLink";
 import { coalesced, onServerMessage } from "../realtime";
@@ -128,6 +132,7 @@ const batches = computed(() => (data.value?.batches ?? []).filter((b) => b.compo
 // A component's group shows its plain name; type, size and grade have their own columns
 const nameOf = (b: StockBatch) => (b.component ? materials.value.get(b.subjectUuid)?.name ?? b.material : b.material);
 const typeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.typeLabel ?? t("filter.noType");
+const typeCodeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.type;
 const sizeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.size;
 const gradeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.gradeLetter;
 const classOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.itemClass;
@@ -150,8 +155,11 @@ const filtered = computed(() => {
 });
 
 // --- the table: one group per material (header with the total), its batches below ------------
-// Every column but the name and the actions may be hidden (ColumnsButton right of the filters)
+// Every column but the name and the actions may be hidden (ColumnsButton right of the filters); the view
+// 'thumbs' (ViewToggle) puts the thumbnail column first
+const thumbCol = thumbColumnFlag();
 const columns = computed<ColumnSpec[]>(() => [
+  ...(thumbCol.on.value ? [THUMB_COLUMN] : []),
   { key: "material", label: props.components ? t("stock.col.component") : t("stock.col.material"), width: 200 },
   ...(props.components
     ? [
@@ -185,11 +193,13 @@ const columns = computed<ColumnSpec[]>(() => [
 const cols = props.components
   ? useTableColumns("qm.webapp.columns.components", columns, { key: "amount", dir: "desc" })
   : useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
+thumbCol.follow(cols.view);
+const thumbView = computed(() => cols.view.value === "thumbs");
 const shown = computed(() => new Set(cols.columns.value.map((c) => c.key)));
 const on = (key: string) => shown.value.has(key);
-// Cells of a group row before the empty ones: name, (type, size, grade, class | quality,) total, (stats, empty,)
-// UEC values; the trade button comes after them
-const LEAD = new Set(["material", "type", "size", "grade", "class", "quality", "amount", "stats", "uecSell", "uecBuy", "uecSellAvg", "uecBuyAvg"]);
+// Cells of a group row before the empty ones: (thumbnail,) name, (type, size, grade, class | quality,) total,
+// (stats, empty,) UEC values; the trade button comes after them
+const LEAD = new Set(["thumb", "material", "type", "size", "grade", "class", "quality", "amount", "stats", "uecSell", "uecBuy", "uecSellAvg", "uecBuyAvg"]);
 const groupRest = computed(() => cols.columns.value.filter((c) => !LEAD.has(c.key) && c.key !== "trade").length);
 
 // The UEC columns' prices: best sell (highest), best buy (lowest), UEX's averages
@@ -347,6 +357,7 @@ function open(batch: StockBatch, action: BatchAction) {
           <Dropdown v-model="gradeFilter" variant="chip" :options="gradeOptions" />
         </template>
         <RangeSlider v-else v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :detail="tierQualities" :label="t('field.quality')" />
+        <ViewToggle :table="cols" :texts="viewTexts()" :size="22" />
         <ColumnsButton :table="cols" :texts="columnsTexts()" :size="22" />
         <span class="spacer" />
         <span class="head-count">{{ filtered.length }} / {{ batches.length }}</span>
@@ -354,18 +365,21 @@ function open(batch: StockBatch, action: BatchAction) {
 
       <div v-if="!data" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!batches.length" class="empty-line">{{ t("stock.empty") }}</div>
-      <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+      <div v-else class="table" :class="{ 'view-thumbs': thumbView }" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
         <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
         <template v-for="g in groups" :key="g.uuid">
           <!-- The material's row: its name, and its total under the amounts -->
           <div class="row data-row group-row">
+            <span v-if="thumbView" class="thumb-cell">
+              <InfoTip kind="material" :uuid="g.uuid"><Thumb v-bind="materialThumb(g.uuid)" size="m" :px="48" :icon="materialIcon(g.uuid)" :icon-size="24" /></InfoTip>
+            </span>
             <span class="group-name">
-              <Icon :name="materialIcon(g.uuid)" :size="15" class="type-icon" />
-              <InfoTip kind="material" :uuid="g.uuid">{{ g.material }}</InfoTip>
+              <!-- One info card for the thumbnail and the name: no gap in between that closes it -->
+              <InfoTip kind="material" :uuid="g.uuid"><span class="name-tip"><Thumb v-if="!thumbView" v-bind="materialThumb(g.uuid)" size="s" :px="20" :icon="materialIcon(g.uuid)" :icon-size="15" />{{ g.material }}</span></InfoTip>
             </span>
             <template v-if="components">
-              <span v-if="on('type')" class="cell">{{ typeOf(g.rows[0]!) }}</span>
+              <span v-if="on('type')" class="cell"><TypeLabel :type="typeCodeOf(g.rows[0]!)" :label="typeOf(g.rows[0]!)" /></span>
               <span v-if="on('size')" class="num">{{ sizeOf(g.rows[0]!) ?? "—" }}</span>
               <span v-if="on('grade')">{{ gradeOf(g.rows[0]!) ?? "—" }}</span>
               <span v-if="on('class')" class="cell">{{ classOf(g.rows[0]!) ?? "—" }}</span>
@@ -378,6 +392,7 @@ function open(batch: StockBatch, action: BatchAction) {
             <span class="sep trade"><ChipButton :label="t('trade.button')" :disabled="!prices[g.uuid]" @click="trade = { uuid: g.uuid, name: g.material }" /></span>
           </div>
           <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
+            <span v-if="thumbView" />
             <span />
             <template v-if="components"><span v-if="on('type')" /><span v-if="on('size')" /><span v-if="on('grade')" /><span v-if="on('class')" /></template>
             <span v-else-if="on('quality')" class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
@@ -438,15 +453,16 @@ function open(batch: StockBatch, action: BatchAction) {
   gap: 8px;
 }
 
-.type-icon {
-  flex-shrink: 0;
-  opacity: 0.8;
-}
-
 .group-name,
 .group-total {
   font-size: 14px;
   font-weight: 600;
+}
+
+/* The larger list view: a little larger too */
+.view-thumbs .group-name,
+.view-thumbs .group-total {
+  font-size: 15px;
 }
 
 /* UEX values: secondary figures, in the mono face and quieter than the amounts; the material's total a

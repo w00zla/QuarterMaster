@@ -24,6 +24,9 @@ export const qty = (quantity: string, unit: Unit) => `${quantity} ${unitText(uni
 /** A UEX price or value (aUEC, no unit text) in the language's format: whole, below 10 with up to 2 decimals. */
 export const uec = (n: number) => new Intl.NumberFormat(lang.value, { maximumFractionDigits: Math.abs(n) < 10 ? 2 : 0 }).format(n);
 
+/** The same with the currency, where there is room for it (cards, dialogs; not the main tables): "6.500 aUEC" */
+export const auec = (n: number) => `${uec(n)}\u00a0aUEC`;
+
 /** "6.500 – 10.000", one price when all terminals agree. */
 export const priceRange = (r: { min: number; max: number }) => (r.min === r.max ? uec(r.min) : `${uec(r.min)} – ${uec(r.max)}`);
 

@@ -7,7 +7,7 @@ import type { OkResponse, RefineryRemoveRequest, StockBatch, StockListResponse }
 import { formatMicros, toMicros } from "../../../src/planner/plan";
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import { sortRows, THUMB_COLUMN, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
 import Dropdown from "../components/Dropdown.vue";
@@ -17,9 +17,12 @@ import RefineryDoneDialog from "../components/RefineryDoneDialog.vue";
 import RefineryStartForm from "../components/RefineryStartForm.vue";
 import RefineryTimeDialog from "../components/RefineryTimeDialog.vue";
 import BatchDialog from "../components/BatchDialog.vue";
+import Thumb from "../components/Thumb.vue";
+import ViewToggle from "../components/ViewToggle.vue";
 import { signedBonus, yieldValue } from "../catalog";
 import { compareBatches, hm, Q_TIER_MAX, qMark, qText, qTier, qty, tierMark, tierQualities } from "../format";
-import { lang, t } from "../i18n";
+import { lang, t, viewTexts } from "../i18n";
+import { materialThumb, thumbColumnFlag } from "../thumbs";
 import { coalesced, onServerMessage } from "../realtime";
 import { toast, toastError } from "../toasts";
 
@@ -117,7 +120,10 @@ const filtered = computed(() => {
 });
 
 // --- the table: one group per job (station, total yield, time left), its materials below -----------
+// The view 'thumbs' (ViewToggle) puts the thumbnail column first (the materials' thumbnails)
+const thumbCol = thumbColumnFlag();
 const columns = computed<ColumnSpec[]>(() => [
+  ...(thumbCol.on.value ? [THUMB_COLUMN] : []),
   { key: "material", label: t("refinery.col.job"), width: 240 },
   { key: "quality", label: t("stock.col.quality"), width: 130 },
   { key: "amount", label: t("refinery.col.expected"), width: 120 },
@@ -126,6 +132,8 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "actions", label: "", width: 110, sortable: false, fixed: true, sep: true },
 ]);
 const cols = useTableColumns("qm.webapp.columns.refinery", columns, { key: "ready", dir: "asc" });
+thumbCol.follow(cols.view);
+const thumbView = computed(() => cols.view.value === "thumbs");
 
 function rowValue(b: StockBatch, key: string): string | number {
   switch (key) {
@@ -231,18 +239,20 @@ const bonusText = (b: StockBatch) => {
         </label>
         <Dropdown v-model="locationFilter" variant="chip" :options="locationOptions" />
         <RangeSlider v-model:low="qualityLow" v-model:high="qualityHigh" :min="0" :max="Q_TIER_MAX" :step="1" :format="tierMark" :detail="tierQualities" :label="t('field.quality')" />
+        <ViewToggle :table="cols" :texts="viewTexts()" :size="22" />
         <span class="spacer" />
         <span class="head-count">{{ filtered.length }} / {{ jobs.length }}</span>
       </div>
 
       <div v-if="!data" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!jobs.length" class="empty-line">{{ t("refinery.none") }}</div>
-      <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+      <div v-else class="table" :class="{ 'view-thumbs': thumbView }" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-if="!groups.length" class="empty-line">{{ t("stock.noMatch") }}</div>
         <template v-for="j in groups" :key="j.id">
           <!-- The job's row: station, total yield, time left, finishing or removing it -->
           <div class="row data-row group-row">
+            <span v-if="thumbView" />
             <span class="group-name">
               <Icon name="drop" :size="15" class="type-icon" />
               <span class="cell">{{ j.location }}</span>
@@ -262,9 +272,12 @@ const bonusText = (b: StockBatch) => {
             </span>
           </div>
           <div v-for="b in j.rows" :key="b.id" class="row data-row batch-row">
+            <span v-if="thumbView" class="thumb-cell">
+              <InfoTip kind="material" :uuid="b.subjectUuid"><Thumb v-bind="materialThumb(b.subjectUuid)" size="m" :px="48" icon="resource" :icon-size="24" /></InfoTip>
+            </span>
             <span class="material-name">
-              <Icon name="resource" :size="14" class="type-icon" />
-              <InfoTip kind="material" :uuid="b.subjectUuid">{{ b.material }}</InfoTip>
+              <!-- One info card for the thumbnail and the name: no gap in between that closes it -->
+              <InfoTip kind="material" :uuid="b.subjectUuid"><span class="name-tip"><Thumb v-if="!thumbView" v-bind="materialThumb(b.subjectUuid)" size="s" :px="20" icon="resource" :icon-size="14" />{{ b.material }}</span></InfoTip>
             </span>
             <span class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
@@ -325,6 +338,16 @@ const bonusText = (b: StockBatch) => {
 .group-total {
   font-size: 14px;
   font-weight: 600;
+}
+
+/* The larger list view: a little larger too */
+.view-thumbs .group-name,
+.view-thumbs .group-total {
+  font-size: 15px;
+}
+
+.view-thumbs .material-name {
+  font-size: 14px;
 }
 
 .group-name {

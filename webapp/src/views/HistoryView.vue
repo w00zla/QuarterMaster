@@ -7,11 +7,16 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { HistoryEntry, HistoryResponse } from "../../../src/webapp/api-types";
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { sortRows, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import { sortRows, THUMB_COLUMN, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { api } from "../api";
+import { blueprints, materials } from "../catalog";
 import Dropdown from "../components/Dropdown.vue";
+import Thumb from "../components/Thumb.vue";
+import ViewToggle from "../components/ViewToggle.vue";
 import { actionLabel, actionText, categoryText, detailsText, personText, sourceText, when } from "../history";
-import { lang, t } from "../i18n";
+import { lang, t, viewTexts } from "../i18n";
+import { blueprintThumb, materialThumb, thumbColumnFlag } from "../thumbs";
 import { coalesced, onServerMessage } from "../realtime";
 import { me } from "../session";
 import { toastError } from "../toasts";
@@ -118,7 +123,10 @@ onUnmounted(() => {
   reload.cancel();
 });
 
+// The view 'thumbs' (ViewToggle) puts the thumbnail column (the target's) first
+const thumbCol = thumbColumnFlag();
 const columns = computed<ColumnSpec[]>(() => [
+  ...(thumbCol.on.value ? [THUMB_COLUMN] : []),
   { key: "at", label: t("history.col.at"), width: 140 },
   { key: "source", label: t("history.col.source"), width: 110 },
   { key: "category", label: t("history.col.category"), width: 110 },
@@ -128,6 +136,18 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "details", label: t("history.col.details"), width: 260, sortable: false },
 ]);
 const cols = useTableColumns("qm.webapp.columns.history", columns, { key: "at", dir: "desc" });
+thumbCol.follow(cols.view);
+const thumbView = computed(() => cols.view.value === "thumbs");
+
+// The target's thumbnail (a blueprint shows its item), else the icon of its type
+const targetThumb = (e: HistoryEntry) => (e.category === "blueprint" ? blueprintThumb(e.targetUuid) : materialThumb(e.targetUuid));
+function targetIcon(e: HistoryEntry) {
+  if (e.category === "blueprint") {
+    const type = blueprints.value.get(e.targetUuid)?.type;
+    return type ? typeIcon(type) : "blueprint";
+  }
+  return e.unit === "pcs" ? typeIcon(materials.value.get(e.targetUuid)?.type) : "resource";
+}
 
 function valueOf(e: HistoryEntry, key: string): string | number {
   switch (key) {
@@ -155,18 +175,20 @@ const rows = computed(() => sortRows(entries.value ?? [], cols.sort.value, value
         <Dropdown v-model="categoryFilter" variant="chip" :options="categoryOptions" />
         <Dropdown v-model="actionFilter" variant="chip" :options="actionOptions" />
         <Dropdown v-model="byFilter" variant="chip" :options="byOptions" />
+        <ViewToggle :table="cols" :texts="viewTexts()" :size="22" />
       </div>
       <div v-if="!entries" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!entries.length" class="empty-line">{{ t(filtered ? "stock.noMatch" : "history.none") }}</div>
-      <div v-else class="table" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+      <div v-else class="table" :class="{ 'view-thumbs': thumbView }" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
         <ColumnHead :columns="columns" :sort="cols.sort.value" @sort="cols.toggleSort" @resize="cols.startResize" @reset="cols.resetWidth" />
         <div v-for="e in rows" :key="e.id" class="row data-row">
+          <span v-if="thumbView" class="thumb-cell"><Thumb v-bind="targetThumb(e)" size="m" :px="48" :icon="targetIcon(e)" :icon-size="24" /></span>
           <span class="cell mono">{{ when(e.at) }}</span>
           <span class="cell">{{ sourceText(e) }}</span>
           <span class="cell">{{ categoryText(e) }}</span>
           <span class="cell">{{ actionText(e) }}</span>
           <span class="cell" :class="{ faint: e.actor.userId === me?.userId }">{{ personText(e.actor) }}</span>
-          <span class="cell target">{{ e.target }}</span>
+          <span class="cell target"><Thumb v-if="!thumbView" v-bind="targetThumb(e)" size="s" :px="20" :icon="targetIcon(e)" :icon-size="15" class="target-thumb" />{{ e.target }}</span>
           <span class="cell" :title="detailsText(e)">{{ detailsText(e) }}</span>
         </div>
         <div v-if="more" class="more">
@@ -193,6 +215,10 @@ const rows = computed(() => sortRows(entries.value ?? [], cols.sort.value, value
 
 .target {
   font-weight: 600;
+}
+
+.target-thumb {
+  margin-right: 6px;
 }
 
 .faint {

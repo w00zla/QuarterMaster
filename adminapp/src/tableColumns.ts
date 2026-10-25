@@ -3,6 +3,8 @@
 import { computed, onScopeDispose, ref, toValue, watch, type MaybeRefOrGetter } from "vue";
 
 export type SortDir = "asc" | "desc";
+// The list view: compact rows (a small thumbnail next to the name) or taller rows with a thumbnail column
+export type TableView = "compact" | "thumbs";
 export interface SortState {
   key: string;
   dir: SortDir;
@@ -36,6 +38,9 @@ export interface ColumnSpec {
   title?: string;
 }
 
+// The thumbnail column of the view 'thumbs' (first, empty head; the web app's thumbnails at 48 CSS px)
+export const THUMB_COLUMN: ColumnSpec = { key: "thumb", label: "", width: 48, sortable: false, fixed: true };
+
 const MIN_WIDTH = 40;
 
 // Natural ordering: "button2" < "button10", case-insensitive.
@@ -47,6 +52,7 @@ interface Stored {
   hidden?: string[];
   // Columns hidden by default that the user switched on
   shown?: string[];
+  view?: TableView;
 }
 
 function load(storageKey: string): Stored {
@@ -112,6 +118,8 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     { immediate: true },
   );
   const storedSort = cols.value.some((c) => c.key === stored.sort?.key) ? stored.sort! : defaultSort;
+  const view = ref<TableView>(stored.view === "thumbs" ? "thumbs" : "compact");
+  const toggleView = () => (view.value = view.value === "compact" ? "thumbs" : "compact");
   const sort = ref<SortState>({ ...storedSort });
 
   const filler = computed(() => fillerKey(cols.value));
@@ -202,10 +210,11 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   }
 
   watch(
-    [widths, sort, hidden],
+    [widths, sort, hidden, view],
     () => {
       try {
         const keep: Stored = { widths: widths.value, sort: sort.value };
+        if (view.value !== "compact") keep.view = view.value;
         // Hidden by default needs no entry: only what the user switched on is kept for those
         const off = [...hidden.value].filter((k) => !byDefault.has(k));
         if (off.length) keep.hidden = off;
@@ -218,7 +227,7 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
     { deep: true },
   );
 
-  return { widths, template, minWidth, sort, toggleSort, startResize, resetWidth, observe, columns: cols, all, hidden, toggleHidden };
+  return { widths, template, minWidth, sort, toggleSort, startResize, resetWidth, observe, columns: cols, all, hidden, toggleHidden, view, toggleView };
 }
 
 // Stable sort by the current column; `valueOf` yields the cell value for a

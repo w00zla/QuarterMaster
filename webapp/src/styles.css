@@ -324,3 +324,49 @@
 .qcell > :last-child {
   text-align: right;
 }
+
+/* The list view "Thumbnails" (ViewToggle): taller rows of one height, larger text, the thumbnail column
+   first (THUMB_COLUMN, M thumbnails at 48 px) */
+.table.view-thumbs {
+  font-size: 15px;
+}
+
+.table.view-thumbs > .data-row {
+  min-height: 48px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+/* Sub-rows without a thumbnail (the batches under a material): lower, about a compact row's height */
+.table.view-thumbs > .batch-row:not(:has(> .thumb-cell)) {
+  min-height: 34px;
+}
+
+/* The separator before the actions keeps running over the full row height */
+.table.view-thumbs > .data-row > .sep {
+  margin-top: -1px;
+  margin-bottom: -1px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+/* The thumbnail column's cell: the image alone, no line box around it */
+.thumb-cell {
+  display: flex;
+  align-items: center;
+}
+
+/* Thumbnail and name under one info card (InfoTip), spaced like the name cell's items */
+.name-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* An info card (InfoTip) around a thumbnail alone: no line box around the image */
+.info-anchor:has(> .thumb:only-child) {
+  display: inline-flex;
+  flex-shrink: 0;
+  vertical-align: middle;
+}

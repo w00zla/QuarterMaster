@@ -19,10 +19,11 @@ const quality = (r: MineableRow): MiningQuality | null =>
 
 /**
  * One row per place (instanced places grouped), method and ore, with the ore's parts in the rock (the rich
- * one first); the largest share first.
+ * one first); the largest share first. `thumbs`: thumbnail hash per uuid (the ore's).
  */
 export function miningRows(
   found: MineableRow[], names: Map<string, StarMapPlace>, infos: Map<string, PlaceInfo>, areas = new Map<string, string>(),
+  thumbs: ReadonlyMap<string, string> = new Map(),
 ): MiningRow[] {
   const out = new Map<string, { row: MiningRow; places: Set<string>; scales: Set<number> }>();
   for (const r of found) {
@@ -39,7 +40,7 @@ export function miningRows(
       const system = place?.system ?? null;
       const key = JSON.stringify([r.oreUuid, r.method, group ?? uuid, system]);
       const entry = out.get(key) ?? {
-        row: { ore: r.ore, place: group ? null : place?.name ?? info?.key ?? uuid, parent, system, group, count: 0, method: r.method, share: 0, rarity: r.rarity, parts: [] },
+        row: { ore: r.ore, oreUuid: r.oreUuid, thumb: thumbs.get(r.oreUuid) ?? null, place: group ? null : place?.name ?? info?.key ?? uuid, parent, system, group, count: 0, method: r.method, share: 0, rarity: r.rarity, parts: [] },
         places: new Set<string>(), scales: new Set<number>(),
       };
       entry.places.add(uuid);
@@ -61,7 +62,7 @@ export function miningRows(
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 
-export function registerMiningRoutes(api: Hono<Env>, db: Db) {
+export function registerMiningRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap<string, string> = () => new Map()) {
   api.get('/mining', async (c) => {
     const lang = c.req.query('lang') === 'de' ? 'de' : 'en';
     const resources = (await minedResources(db, lang)).sort((a, b) => a.name.localeCompare(b.name));
@@ -74,7 +75,7 @@ export function registerMiningRoutes(api: Hono<Env>, db: Db) {
     const lang = c.req.query('lang') === 'de' ? 'de' : 'en';
     const name = await subjectName(db, id.data, lang);
     if (!name) throw new HttpError(404, 'notFound');
-    const rows = miningRows(await mineablesOf(db, id.data, lang), await starMap(db, lang), await placeInfos(db), await placeAreas(db, lang));
+    const rows = miningRows(await mineablesOf(db, id.data, lang), await starMap(db, lang), await placeInfos(db), await placeAreas(db, lang), thumbs());
     return c.json({ name, rows } satisfies MiningResponse);
   });
 }

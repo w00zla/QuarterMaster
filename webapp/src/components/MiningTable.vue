@@ -3,18 +3,20 @@
 // then the system and method filters like the stock's), the quality card once for all places, then the
 // shared DataTable (resizable, sortable) with one row per place, method and ore; its content column lists
 // the rock's parts of the ore (the rich one, then the lean ones dimmed).
-import { computed } from "vue";
+import { computed, shallowRef } from "vue";
 import type { MiningRow } from "../../../src/webapp/api-types";
 import DataTable from "../../../adminapp/src/components/DataTable.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import type { ColumnSpec } from "../../../adminapp/src/tableColumns";
-import { t } from "../i18n";
+import type { ColumnSpec, useTableColumns } from "../../../adminapp/src/tableColumns";
+import { t, viewTexts } from "../i18n";
 import {
   methodOptions, methodText, MINING_METHODS, miningFilter, partLabel, placeText, rangeText, rarityColor, rarityText, shareText, shown, systemOptions,
   targetOptions,
 } from "../mining";
 import Dropdown from "./Dropdown.vue";
 import MiningQualityCard from "./MiningQualityCard.vue";
+import Thumb from "./Thumb.vue";
+import ViewToggle from "./ViewToggle.vue";
 
 const props = defineProps<{ rows: MiningRow[] }>();
 // The target quality (the crafting dialog); null: none, no chip
@@ -57,6 +59,10 @@ const contentTitle = (r: MiningRow) => r.parts.map((p) => `${partLabel(p.quality
 const shareTitle = (r: MiningRow) => [shareText(r), r.rarity ? rarityText(r.rarity) : null].filter(Boolean).join(" · ");
 
 const rowKey = (r: MiningRow) => [r.ore, r.method, r.place ?? r.group, r.system].join("|");
+
+// The table's column state (the view toggle in the toolbar); the view 'thumbs' shows the ore's thumbnail first
+const table = shallowRef<{ table: ReturnType<typeof useTableColumns> } | null>(null);
+const thumbView = computed(() => table.value?.table.view.value === "thumbs");
 </script>
 
 <template>
@@ -68,12 +74,14 @@ const rowKey = (r: MiningRow) => [r.ore, r.method, r.place ?? r.group, r.system]
       </span>
       <Dropdown v-model="miningFilter.system" variant="chip" :options="systemOptions()" />
       <Dropdown v-model="miningFilter.method" variant="chip" :options="methodOptions()" />
+      <ViewToggle v-if="table?.table" :table="table.table" :texts="viewTexts()" :size="22" />
     </div>
 
     <div v-if="!rows.length" class="empty-line">{{ t("mining.none") }}</div>
     <template v-else>
       <MiningQualityCard :rows="visible" :target="target" />
       <DataTable
+        ref="table"
         :storage-key="multiOre ? 'qm.webapp.columns.mining-ores' : 'qm.webapp.columns.mining'"
         :columns="columns"
         :rows="visible"
@@ -82,7 +90,11 @@ const rowKey = (r: MiningRow) => [r.ore, r.method, r.place ?? r.group, r.system]
         :value-of="valueOf"
         :numeric="['share']"
         :empty-text="t('mining.noMatch')"
+        thumbs
       >
+        <template #cell-thumb="{ row }">
+          <span class="thumb-cell"><Thumb :uuid="row.oreUuid" :hash="row.thumb" size="m" :px="48" icon="resource" :icon-size="24" /></span>
+        </template>
         <template #cell-place="{ row }">
           <span class="place" :title="placeTitle(row)">
             {{ placeText(row) }}
@@ -90,7 +102,9 @@ const rowKey = (r: MiningRow) => [r.ore, r.method, r.place ?? r.group, r.system]
             <span v-if="row.group" class="faint">· {{ t("mining.places", { n: row.count }) }}</span>
           </span>
         </template>
-        <template #cell-ore="{ row }"><span :title="row.ore">{{ row.ore }}</span></template>
+        <template #cell-ore="{ row }">
+          <span :title="row.ore"><Thumb v-if="!thumbView" :uuid="row.oreUuid" :hash="row.thumb" size="s" :px="20" icon="resource" :icon-size="14" class="ore-thumb" />{{ row.ore }}</span>
+        </template>
         <template #cell-system="{ row }"><span class="mono-cell" :title="row.system ?? undefined">{{ row.system ?? "—" }}</span></template>
         <template #cell-method="{ row }"><span class="tag">{{ methodText(row.method) }}</span></template>
         <template #cell-share="{ row }">
@@ -160,6 +174,10 @@ const rowKey = (r: MiningRow) => [r.ore, r.method, r.place ?? r.group, r.system]
 .mining :deep(.data-row) {
   cursor: default;
   user-select: text;
+}
+
+.ore-thumb {
+  margin-right: 6px;
 }
 
 .place {

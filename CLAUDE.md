@@ -54,6 +54,7 @@ pnpm loc:import --remove --source <name> --lang <code>
 pnpm icons:render [--sample n] [--filter <s>] [--force] [--dry-run]   # icons for the app's gear items and the ore chunks: StarBreaker fork (local/starbreaker-fy) -> Blender + addon (local/blender) -> local/icons/<uuid>.png; needs $SC_DATA_P4K and the DB
 pnpm icons:render --write-targets <f> | --targets <f>                  # the target list from the DB / run without the DB (the bundle)
 scripts/icons-bundle.ps1            # packs node, Blender, StarBreaker, the CLI and targets.json into local/icons-bundle/ for another Windows PC (run.cmd there; docs/catalog-sources.md "Icons")
+pnpm icons:pack [--in <dir>] [--out <dir>] [--force]                  # the PNGs -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)
 
 pnpm adminapp            # admin API + built UI on 127.0.0.1:3000 (basic auth from .env)
 pnpm adminapp:watch      # the same, restarting on source changes
@@ -89,11 +90,12 @@ Deployment (`compose.yaml`, run on the VM from the checkout; `.env` there holds 
 
 ```sh
 scripts/deploy.sh                                       # on the VM, after a push (scripts/push-deploy.sh runs it): pg_dump to backups/ -> tag :previous -> build --pull, pull db -> stop bot/admin/ext/webapp -> migrate (fails: back to :previous) -> DB roles -> up
+scripts/push-thumbs.sh <user@host>                      # local: local/thumbs/ into the VM's checkout (tar over ssh, manifest last, stale files deleted)
 scripts/backup.sh [rsync target]                        # pg_dump to backups/, copy to the target if given, delete local dumps > KEEP_DAYS (14); daily via deploy/quartermaster-backup.{service,timer}
 docker compose run --rm bot node src/bot/register.ts    # after command changes
 ```
 
-`.env` (from `.env.example`) holds `DATABASE_URL`, `TEST_DATABASE_URL`, `ADMINAPP_USER`, `ADMINAPP_PASSWORD`, `ADMINAPP_HOST`, `ADMINAPP_PORT`, `DISCORD_TOKEN`, `DISCORD_APP_ID`, `DISCORD_DEV_GUILD_ID`, `DISCORD_CLIENT_SECRET`, `WEBAPP_ORIGIN`, `WEBAPP_HOST`, `WEBAPP_PORT`, `WEBAPP_TRUST_PROXY`, `COMPANION_DIR`, `UEX_TOKEN`. The DB integration tests **drop and recreate** the `ext`, `web`, `bot`, `app`, `catalog` and `drizzle` schemas in `TEST_DATABASE_URL` — never point it at a real database.
+`.env` (from `.env.example`) holds `DATABASE_URL`, `TEST_DATABASE_URL`, `ADMINAPP_USER`, `ADMINAPP_PASSWORD`, `ADMINAPP_HOST`, `ADMINAPP_PORT`, `DISCORD_TOKEN`, `DISCORD_APP_ID`, `DISCORD_DEV_GUILD_ID`, `DISCORD_CLIENT_SECRET`, `WEBAPP_ORIGIN`, `WEBAPP_HOST`, `WEBAPP_PORT`, `WEBAPP_TRUST_PROXY`, `COMPANION_DIR`, `THUMBS_DIR`, `UEX_TOKEN`. The DB integration tests **drop and recreate** the `ext`, `web`, `bot`, `app`, `catalog` and `drizzle` schemas in `TEST_DATABASE_URL` — never point it at a real database.
 
 ## Runtime conventions
 

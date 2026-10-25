@@ -12,9 +12,20 @@ qm.example.com {
 		-Server
 	}
 
-	# Caddy drops a client's own X-Forwarded-For and sets the real address (the app reads the last
-	# entry, WEBAPP_TRUST_PROXY=1)
-	reverse_proxy 127.0.0.1:3000
+	# Item thumbnails straight from the checkout (scripts/push-thumbs.sh), without Node: public, the file
+	# names carry a content hash, so they are cached for good. Path of the checkout as on the VM.
+	handle_path /thumbs/* {
+		root * /opt/sc-quartermaster/local/thumbs
+		header Cache-Control "public, max-age=31536000, immutable"
+		header X-Content-Type-Options nosniff
+		file_server
+	}
+
+	handle {
+		# Caddy drops a client's own X-Forwarded-For and sets the real address (the app reads the last
+		# entry, WEBAPP_TRUST_PROXY=1)
+		reverse_proxy 127.0.0.1:3000
+	}
 }
 
 qm.example.com:8443 {

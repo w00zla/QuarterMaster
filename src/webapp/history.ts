@@ -100,6 +100,7 @@ export async function listHistory(db: Db, userId: string, lang: Lang, before?: n
       actor: person(r.actorUserId, r.actorName),
       org: r.org,
       target: blueprint ? blueprints.byUuid.get(r.targetUuid)?.label ?? r.targetUuid : material(r.targetUuid),
+      targetUuid: r.targetUuid,
       unit: blueprint ? null : r.targetKind === 'resource' ? 'SCU' : 'pcs',
       amount: amount(d.amount),
       quality: d.quality ?? null,

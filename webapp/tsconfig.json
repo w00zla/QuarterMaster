@@ -19,6 +19,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../src/stock/amount.ts", "../src/stock/quality.ts", "../src/stock/component-stats.ts","../adminapp/src/components/Icon.vue", "../adminapp/src/components/DataTable.vue", "../adminapp/src/components/ColumnHead.vue", "../adminapp/src/tableColumns.ts", "../adminapp/src/typeIcons.ts", "../src/planner/plan.ts", "../src/planner/types.ts", "../src/planner/stock.ts"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "../src/webapp/api-types.ts", "../src/thumbs.ts", "../src/stock/amount.ts", "../src/stock/quality.ts", "../src/stock/component-stats.ts","../adminapp/src/components/Icon.vue", "../adminapp/src/components/DataTable.vue", "../adminapp/src/components/ColumnHead.vue", "../adminapp/src/tableColumns.ts", "../adminapp/src/typeIcons.ts", "../src/planner/plan.ts", "../src/planner/types.ts", "../src/planner/stock.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

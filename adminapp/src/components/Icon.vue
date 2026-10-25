@@ -10,6 +10,8 @@ export const ICONS = {
   'chevron-right': '<path d="m9 6 6 6-6 6"/>',
   'chevron-left': '<path d="m15 6-6 6 6 6"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/>',
+  // The larger list view: two tall rows, each a picture and its line
+  'list-large': '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><path d="M14 7.5h7M14 16.5h7"/>',
   log: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>',
   warning: '<path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',

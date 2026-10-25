@@ -119,6 +119,24 @@ in the Tauri updater format (`version`, `platforms.windows-x86_64` with the setu
 signature), 404 without a setup. Token requests must send `X-QM-Companion: <version>`: older than
 the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no manifest = no check.
 
+### Thumbnails (`thumbs.ts`, `src/thumbs.ts`)
+
+`THUMBS_DIR` (default `local/thumbs`) holds the item thumbnails from `pnpm icons:pack`
+(`docs/catalog-sources.md` "Icons"): `s/`, `m/`, `l/` (40, 96, 256 px AVIF, shown at 20, 48, 128 CSS px) with
+`<uuid>.<hash>.avif` each and `thumbs.json` `{uuid: hash}` (re-read when it changes; a broken one keeps the
+previous). The hash is the first 8 hex of the source PNG's SHA-256: a URL never changes its content.
+`GET /thumbs/<s|m|l>/<uuid>.<hash>.avif` serves only what the manifest names, without login (game renders,
+fan content like the wiki's), `Cache-Control: public, max-age=31536000, immutable`: every image crosses
+the line once per device. The catalog carries the hash (`CatalogMaterial.thumb`; `CatalogBlueprint.outputUuid`
+and `thumb` for the crafted item): no hash = no request (the type icon stays), so no 404s. Mining rows carry
+the ore's (`MiningRow.oreUuid`, `thumb`: ores are no catalog materials), history entries their `targetUuid`
+(the SPA looks it up in the catalog). Clients build the
+path with `thumbPath(size, uuid, hash)` from `src/thumbs.ts` (the companion prefixes its server). Same
+origin: the CSP is unchanged; Vite proxies `/thumbs` in dev. In production Caddy serves `/thumbs/*` straight from
+the same directory (`docs/Caddyfile.example`, without the manifest check); the route is what dev and a setup
+without that block use. Where the SPA shows them: "Layout and building
+blocks".
+
 ### Realtime (`realtime.ts`)
 
 - Triggers (`app.notify_change`) on `member`, `org` (name, roles), `bot.guild` (presence), `stock_batch` and
@@ -183,7 +201,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
 - **Ausrüstung** (route `/gear`, until 2026-10-20 "Komponenten" at `/components`; `?scope=` like Ressourcen;
   `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): the ship components and
   FPS gear (since 2026-10-22; their type reads "Helmets · Light", "Attachment · Barrel": `itemTypes` in
-  `routes.ts` adds the sub type; no size but on attachments), groups named by their `label`, no quality column, filters
+  `routes.ts` adds the sub type; the type column with its icon, `TypeLabel`; no size but on attachments), groups named by their `label`, no quality column, filters
   type/size/grade instead of the quality slider; the add form without quality (sends 0) but one slider per
   stat of the picked component from ±0 to its best (`CatalogMaterial.stats`, reset after each add; a drop
   like recoil runs the same way, ±0 at the left, its values negative; only changes are sent); a Stats column ("Coolant Rating +5.0 % · Integrity +2.0 %", `statsText` in `format.ts`; without
@@ -209,7 +227,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   within; same filters as Ressourcen. `RefineryStartForm`: station, duration (all three fields empty = "duration
   open") and rows of resource, quality and expected yield (no method, no estimates). `RefineryDoneDialog`
   stores the whole job, each row's amount starting from its expected yield.
-- **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold with the type's icon before them (the type column its name only); an org
+- **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold with the crafted item's thumbnail before them (the type column the type's icon and name, `TypeLabel`); an org
   shows every blueprint its active members registered with who has it. A click on a row puts it into the
   crafting check (`addToCrafting`) and opens the tab. The last column (fixed, both scopes) holds the
   "Freischaltung" button (`ChipButton`, disabled without an unlock; its click never reaches the row): it opens
@@ -299,6 +317,19 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
   Error codes mapped in `i18n.ts`; amounts validated with the server's own `parseAmount`.
 - Icons on tabs, buttons and panel heads like BindSight (extra icons in the shared
   `adminapp/src/components/Icon.vue`); no counters in panel heads (only next to filters).
+- Item thumbnails (`Thumb.vue`, lookups in `webapp/src/thumbs.ts`: a material by its uuid, a blueprint by the
+  item it crafts): a fixed box, `<img>` lazy; without a hash or when loading fails the type icon in the same
+  box. The S thumbnail (20 px) stands where the type icon stood before the name: Ressourcen/Ausrüstung group
+  rows, Raffinerie material rows, Blueprints names, History targets, the Bergbau table's ore column. The
+  Crafting card's head shows the crafted item's M thumbnail at 36 px (the type icon stays in the tag line).
+  Info cards (`InfoTip.vue`) show the L thumbnail at 128 px left of the text (above it below 560 px wide),
+  loading from the start of the hover, so it is there when the card opens.
+- List views: every table (Ressourcen, Ausrüstung, Raffinerie, Blueprints, History, Bergbau) has the view
+  toggle (`ViewToggle.vue`, right of the column chooser or the last filter): "Kompakt" (default) or
+  "Thumbnails" (`.table.view-thumbs`: rows at least 48 px, 14 px text, a first column with an empty head,
+  `THUMB_COLUMN`, the M thumbnail at 48 px instead of the small one before the name; Ressourcen/Ausrüstung on
+  group rows only, Raffinerie on material rows only). Kept per table with its columns (`useTableColumns`
+  `view`); `DataTable` adds the column with `thumbs` (cells from `#cell-thumb`).
 
 ## Security measures
 

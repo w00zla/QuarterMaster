@@ -198,7 +198,7 @@ function listResponse(found: PickableBatch[], viewer: string, viewerOrgs: Set<st
   return { batches, totals: Object.fromEntries([...sums].map(([k, v]) => [k, formatMicros(v)])) };
 }
 
-export function registerRoutes(api: Hono<Env>, db: Db) {
+export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap<string, string> = () => new Map()) {
   // --- catalog ------------------------------------------------------------------------------
   // The same for everyone until the next import or UEX change, ~1 MB per language: the ETag (a hash of the
   // body) answers an unchanged catalog with 304; the browser and the companion keep it and revalidate.
@@ -214,11 +214,12 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
     const unlockable = await unlockableBlueprints(db);
     const minable = await minableUuids(db);
     const refineries = await refineryMatch(db);
+    const thumb = thumbs();
     return c.json({
       materials: [...materials.values()].map((m) => ({
         uuid: m.uuid, kind: m.kind, name: m.name, nameKey: m.nameKey, unit: unitOf(m.kind), ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
         component: m.component, label: m.label, size: m.size, gradeLetter: m.gradeLetter, itemClass: m.itemClass, stats: m.stats,
-        minable: minable.has(m.uuid),
+        minable: minable.has(m.uuid), thumb: thumb.get(m.uuid) ?? null,
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
@@ -229,7 +230,7 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
       blueprints: blueprints.entries.map((e) => ({
         uuid: e.uuid, label: e.label, name: e.name, ...(bpTypes.get(e.uuid) ?? noType), size: e.size, gradeLetter: e.gradeLetter, itemClass: e.itemClass,
         manufacturerCode: e.manufacturerCode, category: e.categoryLabel, isDefault: e.isDefault, retired: e.retired, stats: bpStats.get(e.uuid) ?? [],
-        unlockable: unlockable.has(e.uuid),
+        unlockable: unlockable.has(e.uuid), outputUuid: e.outputUuid, thumb: (e.outputUuid && thumb.get(e.outputUuid)) ?? null,
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     } satisfies CatalogResponse);
@@ -507,6 +508,6 @@ export function registerRoutes(api: Hono<Env>, db: Db) {
 
   // --- blueprint unlocks, mining, trading (UEX) ---------------------------------------------------
   registerUnlockRoutes(api, db);
-  registerMiningRoutes(api, db);
+  registerMiningRoutes(api, db, thumbs);
   registerTradeRoutes(api, db);
 }

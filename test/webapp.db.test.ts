@@ -522,6 +522,41 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     });
   });
 
+  describe('item thumbnails', () => {
+    const UUID = '0b6c4c0e-1f4a-4c5e-9d3a-2a1f0c9e8d7b';
+    const thumbsDir = (manifest: Record<string, string> = { [UUID]: 'a1b2c3d4' }) => {
+      const dir = mkdtempSync(join(tmpdir(), 'qm-thumbs-'));
+      for (const size of ['s', 'm', 'l']) {
+        mkdirSync(join(dir, size));
+        writeFileSync(join(dir, size, `${UUID}.a1b2c3d4.avif`), `avif-${size}`);
+        writeFileSync(join(dir, size, `${UUID}.ffffffff.avif`), 'stale');
+      }
+      writeFileSync(join(dir, 'thumbs.json'), JSON.stringify(manifest));
+      return dir;
+    };
+
+    it('serves the manifest’s files without login, cached for good', async () => {
+      app = build({ thumbsDir: thumbsDir() });
+      const res = await app.request(`/thumbs/m/${UUID}.a1b2c3d4.avif`);
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'avif-m');
+      assert.equal(res.headers.get('content-type'), 'image/avif');
+      assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    });
+
+    it('answers 404 for other hashes, sizes, names and without a manifest', async () => {
+      app = build({ thumbsDir: thumbsDir() });
+      for (const path of [`m/${UUID}.ffffffff.avif`, `x/${UUID}.a1b2c3d4.avif`, `constructor/${UUID}.a1b2c3d4.avif`,
+        'm/thumbs.json', `m/..%2Fthumbs.json`, `m/${UUID.toUpperCase()}.a1b2c3d4.avif`]) {
+        assert.equal((await app.request(`/thumbs/${path}`)).status, 404, path);
+      }
+      app = build({ thumbsDir: thumbsDir({}) });
+      assert.equal((await app.request(`/thumbs/s/${UUID}.a1b2c3d4.avif`)).status, 404, 'not in the manifest');
+      app = build();
+      assert.equal((await app.request(`/thumbs/s/${UUID}.a1b2c3d4.avif`)).status, 404, 'no thumbnails');
+    });
+  });
+
   it('builds SQL from templates only (no sql.raw in the web app)', () => {
     const dir = new URL('../src/webapp/', import.meta.url);
     for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts'))) {
