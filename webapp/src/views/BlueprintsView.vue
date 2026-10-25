@@ -176,31 +176,35 @@ const label = (uuid: string) => blueprints.value.get(uuid)?.label ?? t("bp.unkno
 
 // The blueprint waiting for the remove confirmation
 const pending = ref<string | null>(null);
-// The add panel below the head: picking a blueprint adds it, an added one closes the panel
+// The add panel below the head: pick a blueprint, then "Add"; the panel stays open for the next one
 const addOpen = ref(false);
 // Clear: a new picker drops the typed search
 const pickerKey = ref(0);
-watch(adding, (uuid) => {
-  if (!uuid) return;
+function clearPick() {
   adding.value = null;
-  void send("add", uuid);
-});
+  pickerKey.value++;
+}
+async function addPicked() {
+  if (adding.value && (await send("add", adding.value))) clearPick();
+}
 const confirmButtons = computed<ConfirmButton[]>(() => [
   { label: t("common.cancel"), kind: "outline", value: "cancel" },
   { label: t("common.confirm"), kind: "danger", value: "confirm", disabled: busy.value },
 ]);
 
-async function send(action: "add" | "remove", uuid: string) {
-  if (busy.value) return;
+/** Adds or removes; true when it went through. */
+async function send(action: "add" | "remove", uuid: string): Promise<boolean> {
+  if (busy.value) return false;
   busy.value = true;
   try {
     const body: BlueprintRequest = { uuid };
     await api<OkResponse>(`/blueprints/${action}`, { method: "POST", body });
     toast(t(action === "add" ? "bp.added" : "bp.removed", { name: label(uuid) }));
-    if (action === "add") addOpen.value = false;
     void loadMine();
+    return true;
   } catch (e) {
     toastError(e);
+    return false;
   } finally {
     busy.value = false;
   }
@@ -252,7 +256,8 @@ onUnmounted(() => {
         <div class="form single">
           <Picker :key="pickerKey" v-model="adding" :options="addOptions" :placeholder="t('pick.blueprint')" />
           <div class="form-actions">
-            <button type="button" class="btn outline" @click="pickerKey++"><Icon name="close" :size="14" /> {{ t("common.clear") }}</button>
+            <button type="button" class="btn outline" @click="clearPick"><Icon name="close" :size="14" /> {{ t("common.clear") }}</button>
+            <button type="button" class="btn primary" :disabled="!adding || busy" @click="addPicked"><Icon name="plus" :size="14" /> {{ t("bp.add") }}</button>
           </div>
         </div>
       </div>
