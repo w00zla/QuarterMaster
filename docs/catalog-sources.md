@@ -399,15 +399,17 @@ pictures with gaps), so the icons are rendered from the models:
 2. **Render:** `src/icons/render.py` in a portable Blender (`local/blender/<version>/`, config and the fork's
    `blender_addon/starbreaker_addon` under its `portable/`; addon and exporter must match). The addon rebuilds the
    materials (`starbreaker.refresh_materials`, called explicitly: its load handler needs timers that background
-   mode lacks). Eevee, 16 samples, Standard view transform, transparent film, 256 px.
+   mode lacks). Eevee, 16 samples, Standard view transform, transparent film, 256 px. Ray tracing on, with
+   raytraced refraction (dithered) for the `SB_GlassPBR` materials: they are pure transmission, without it Eevee
+   only refracts the grey world and visors render as flat grey.
 3. **Pose and light from the game:** `PlayerChoice_PITConfig.inventoryParams` (`dcb query`) gives
    `defaultOrientation` (90, 0, 0) plus an offset per item type/sub type (45 entries) and a light group per
    category (39 entries, default `inventorylightgroup_other`); the groups are entities under
    `libs/foundry/records/entities/lights/scene/inventory/` (53, `dcb extract`, directory globs only) with
    key/rim/fill projector lights. The model is turned by Euler XYZ of default + offset, the cell is then Y-up
    with the camera on −Z and screen-up −Y (not mirrored: rifle muzzle to the right, as in game); the rig sits at
-   the cell centre turned by (90, 180, 0), each projector shining along its local +X, Blender spots at 100 W per
-   game intensity unit, ambient 0.15. The item is scaled so its largest extent is 0.7 m (the game fits it into
+   the cell centre turned by (90, 180, 0), each projector shining along its local +X, Blender spots at 30 W per
+   game intensity unit (100 W burnt white materials out under the Standard view transform), ambient 0.15. The item is scaled so its largest extent is 0.7 m (the game fits it into
    the cell; the rig's lights stand ~1 m out, a 3 m cooler would have them inside). Matching: type + sub type
    exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.

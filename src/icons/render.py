@@ -26,7 +26,7 @@ def parse_args():
     p.add_argument('--size', type=int, default=512)
     p.add_argument('--pose', type=lambda s: [float(x) for x in s.split(',')], default=None)
     p.add_argument('--rig', type=os.path.abspath, default=None, help='Licht-Rig des Spiels (JSON aus der CLI)')
-    p.add_argument('--light-scale', type=float, default=100.0, help='Watt je Spiel-Intensität')
+    p.add_argument('--light-scale', type=float, default=30.0, help='Watt je Spiel-Intensität')
     p.add_argument('--fit', type=float, default=0.7, help='Pose-Modus: größte Box-Kante in m, auf die das Item skaliert wird')
     p.add_argument('--mirror', action='store_true', help='Kamera auf +Z statt -Z (Bild spiegeln)')
     p.add_argument('--az', type=float, default=20.0)
@@ -179,6 +179,13 @@ def render(job, a):
     # Render: Eevee, transparenter Film, Standard-Farbkurve (AgX würde entsättigen)
     scene.render.engine = 'BLENDER_EEVEE'
     scene.eevee.taa_render_samples = a.samples
+    # Glas (Visiere): SB_GlassPBR ist reine Transmission; ohne Raytracing bricht Eevee nur die graue Welt
+    # und das Visier wird eine flache graue Fläche. Mit Raytracing-Refraktion sieht man ins Helminnere.
+    scene.eevee.use_raytracing = True
+    for m in bpy.data.materials:
+        if m.node_tree and any(getattr(n, 'node_tree', None) and n.node_tree.name.startswith('SB_GlassPBR') for n in m.node_tree.nodes):
+            m.use_raytrace_refraction = True
+            m.surface_render_method = 'DITHERED'
     scene.render.film_transparent = True
     scene.render.image_settings.file_format = 'PNG'
     scene.render.image_settings.color_mode = 'RGBA'
