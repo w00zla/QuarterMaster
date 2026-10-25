@@ -4,15 +4,24 @@
 // with the four modes, each its icon above its count (as wide as "999"; the shown one highlighted; a
 // warning instead of the count when its filters are all off or the log is missing); next to it the
 // location line (clipped at its end), then the newest rows, 20 px each, as many as fit (more than that:
-// the last one fades out). No hint texts: without rows only the location shows.
+// the last one fades out). The display "thumbs" (settings) shows the newest item as a taller top row (its
+// thumbnail, the name above its details, the amount right) and the item's small thumbnail after each
+// row's tag; the refinery keeps rows only. No hint texts: without rows only the location shows.
 // Everything comes as text in the UI language from the main window ("overlay-view", on every change
 // and when this page asks).
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import Icon from "../../adminapp/src/components/Icon.vue";
+import Thumb from "./components/Thumb.vue";
 import type { OverlayView } from "./overlay";
 
 const view = ref<OverlayView | null>(null);
+// The top row: its details below the name (the columns before the amount too), the amount on the right
+const topDetail = computed(() => {
+  const top = view.value?.top;
+  return top ? [top.detail, ...top.cols.slice(0, -1)].filter(Boolean).join(" · ") : "";
+});
+const topAmount = computed(() => view.value?.top?.cols.at(-1) ?? null);
 
 onMounted(async () => {
   await listen<OverlayView>("overlay-view", (e) => (view.value = e.payload));
@@ -27,10 +36,22 @@ onMounted(async () => {
         <Icon :name="view.placeMissing ? 'warning' : 'locate'" :size="12" />
         <span>{{ view.place }}</span>
       </div>
+      <div v-if="view.top" class="top" :class="{ dim: view.top.dim }">
+        <Thumb v-if="view.top.thumb" :item="view.top.thumb" size="m" :px="44" />
+        <div class="lines">
+          <span class="top-name">{{ view.top.name }}</span>
+          <span class="top-sub">
+            <span class="tag" :class="[view.top.cls, { icon: view.top.icon }]"><Icon v-if="view.top.icon" :name="view.top.icon" :size="10" />{{ view.top.tag }}</span>
+            <span class="top-detail">{{ topDetail }}</span>
+          </span>
+        </div>
+        <span v-if="topAmount" class="num top-amount">{{ topAmount }}</span>
+      </div>
       <!-- More rows than fit: the last one fades out -->
       <div class="rows" :class="{ more: view.more }">
         <div v-for="(r, i) in view.rows" :key="i" class="row" :class="{ dim: r.dim }">
           <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="10" />{{ r.tag }}</span>
+          <Thumb v-if="view.display === 'thumbs'" :item="r.thumb" size="s" :px="16" />
           <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
           <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
         </div>
@@ -142,6 +163,66 @@ body,
 
 .mode.warn {
   color: var(--warn);
+}
+
+/* The display "thumbs": the newest item, two lines with larger text next to its thumbnail */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 60px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  color: var(--text-2);
+}
+
+.lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.top-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.top-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.top-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top .tag {
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+.top-amount {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.top.dim,
+.top.dim .top-name,
+.top.dim .top-amount {
+  color: var(--text-3);
 }
 
 .rows {

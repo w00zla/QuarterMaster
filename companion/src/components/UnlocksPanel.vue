@@ -4,7 +4,8 @@
 // counts only the unregistered ones (also those not in the catalog), the overlay all of them like the list. New ones are registered one by one right away
 // (ambiguous ones after picking the variant) or all at once after a confirmation. In the head after the
 // count the filter "Unlocks" (off: Game.log's unlocks are not read, state.ts), then the old logs' scan
-// progress while it runs; each row with the same icon-only badge.
+// progress while it runs; each row with the same icon-only badge and the crafted item's thumbnail (in front of
+// the name, or in the display "thumbs", ViewToggle next to the column chooser, larger in a column of its own).
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -12,17 +13,20 @@ import type { BlueprintListResponse, OkResponse } from "../../../src/webapp/api-
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
-import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import { useTableColumns, type ColumnSpec, type TableView } from "../../../adminapp/src/tableColumns";
 import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
+import ViewToggle from "../../../webapp/src/components/ViewToggle.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { scanBackups } from "../backend";
 import { unlockRows, type UnlockState } from "../debugReport";
-import { columnsTexts, langRef, t, type Key } from "../i18n";
+import { columnsTexts, langRef, t, viewTexts, type Key } from "../i18n";
 import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
 import { overlayRows, tabCounts, type OverlayRow } from "../overlay";
 import { catalogResponses } from "../refinerySync";
 import { api, connected, loadLog, log, toggleUnlocks, unlocksOn } from "../state";
+import { thumbRef, type ThumbRef } from "../thumbs";
 import { toast, toastError } from "../toasts";
+import Thumb from "./Thumb.vue";
 
 type RowState = UnlockState;
 interface Row {
@@ -43,6 +47,8 @@ const catalogs = computed(() => {
 const index = computed(() => buildIndex(catalogs.value));
 // Labels in the UI language ("Name · S3 · B Industrial · CHCO")
 const labels = computed(() => new Map((catalogs.value[0] ?? []).map((b) => [b.uuid, b.label])));
+// The crafted item's thumbnail per blueprint
+const thumbs = computed(() => new Map((catalogs.value[0] ?? []).map((b) => [b.uuid, thumbRef(b.outputUuid, b.thumb)])));
 const owned = ref(new Set<string>());
 // Picked candidates of ambiguous rows, rows being registered one by one (by logged name)
 const picked = ref<Record<string, string>>({});
@@ -77,12 +83,20 @@ const rows = allRows;
 // The rows not registered (new, ambiguous, not in the catalog: the game unlocked it all the same): the counts
 const openRows = computed(() => rows.value.filter((r) => r.state === "new" || r.state === "pick" || r.state === "unknown"));
 
+/** The thumbnail of the item a row's blueprint crafts: the picked or registered one, else the first match;
+ * none without a match (not in the catalog). */
+function thumbOf(row: Row): ThumbRef | null {
+  const uuid = (row.state === "pick" ? picked.value[row.name] : undefined)
+    ?? row.matches.find((c) => owned.value.has(c.uuid))?.uuid ?? row.candidates[0]?.uuid ?? row.matches[0]?.uuid;
+  return uuid ? (thumbs.value.get(uuid) ?? null) : null;
+}
+
 // The scan overlay shows every unlock, newest first: the ones to register (new, ambiguous) with their tag,
 // the others dimmed with the blueprint icon only (the state texts are too wide for the tile)
 watchEffect(() => {
   overlayRows.unlocks = rows.value.map((r): OverlayRow => r.state === "new" || r.state === "pick"
-    ? { tag: t(r.state === "new" ? "state.new" : "state.pick"), cls: r.state === "new" ? "ok" : "warn", name: r.name, detail: null, cols: [] }
-    : { tag: "", icon: "blueprint", cls: "", name: r.name, detail: null, cols: [], dim: true });
+    ? { tag: t(r.state === "new" ? "state.new" : "state.pick"), cls: r.state === "new" ? "ok" : "warn", name: r.name, detail: null, cols: [], thumb: thumbOf(r) }
+    : { tag: "", icon: "blueprint", cls: "", name: r.name, detail: null, cols: [], dim: true, thumb: thumbOf(r) });
   tabCounts.unlocks = openRows.value.length;
 });
 
@@ -186,16 +200,19 @@ async function measureStatus() {
   ctx.font = `600 12px ${family}`;
   const button = ctx.measureText(t("unlocks.add")).width + BUTTON_EXTRA;
   ctx.font = `600 11px ${family}`;
-  // Its title and the column chooser's button after it
-  const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1 + COLUMNS_BUTTON;
+  // Its title and the display toggle's and column chooser's buttons after it
+  const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1 + 2 * COLUMNS_BUTTON;
   statusWidth.value = Math.ceil(Math.max(...texts, pick, button, head));
 }
 const COLUMNS_BUTTON = 16 + 4;
 
 // The table's columns (widths and the hidden ones kept; no sorting: the newest first), like the web app's
 // tables: the blueprint takes the room left, the unlock time resizes, the status (the actions, with the
-// column chooser in its head) is as wide as its widest content
+// column chooser in its head) is as wide as its widest content. The display "thumbs" puts the thumbnail
+// column first (`view` mirrors the table's, which owns it)
+const view = ref<TableView>("compact");
 const columns = computed<ColumnSpec[]>(() => [
+  ...(view.value === "thumbs" ? [{ key: "thumb", label: "", width: 48, fixed: true, sortable: false }] : []),
   { key: "kind", label: "", title: t("col.kind"), width: 16, fixed: true, sortable: false, hideable: true },
   { key: "name", label: t("col.blueprint"), width: 120, sortable: false, fill: true },
   { key: "at", label: t("col.at"), width: 170, sortable: false, hideable: true },
@@ -203,6 +220,7 @@ const columns = computed<ColumnSpec[]>(() => [
 ]);
 // The compact rows' column gap (.table.compact in App.vue)
 const table = useTableColumns("qm.companion.unlocks.columns", columns, { key: "at", dir: "desc" }, 8);
+watch(table.view, (v) => (view.value = v), { immediate: true });
 const shown = computed(() => new Set(table.columns.value.map((c) => c.key)));
 const cols = computed(() => ({ "--cols": table.template.value, "--cols-min": `${table.minWidth.value}px` }));
 
@@ -250,13 +268,16 @@ watch(connected, (c) => {
     </div>
     <div v-if="!rows.length" class="empty-line">{{ t("unlocks.empty") }}</div>
     <!-- The web app's table, compact (App.vue): the columns always fit its width (measured on it) -->
-    <div v-else class="table compact" :ref="table.observe" :style="cols">
+    <div v-else class="table compact" :class="{ thumbs: view === 'thumbs' }" :ref="table.observe" :style="cols">
       <ColumnHead :columns="table.columns.value" :sort="table.sort.value" @resize="table.startResize" @reset="table.resetWidth">
-        <template #col-state><span class="spacer" /><ColumnsButton :table="table" :texts="columnsTexts()" /></template>
+        <template #col-state>
+          <span class="spacer" /><ViewToggle :table="table" :texts="viewTexts()" /><ColumnsButton :table="table" :texts="columnsTexts()" />
+        </template>
       </ColumnHead>
       <div v-for="row in rows" :key="row.name" class="row item" :class="{ done: row.state !== 'new' && row.state !== 'pick' }">
+        <Thumb v-if="view === 'thumbs'" :item="thumbOf(row)" size="m" :px="48" />
         <span v-if="shown.has('kind')" class="tag kind"><Icon name="blueprint" :size="11" /></span>
-        <span class="name" :title="row.candidates.length === 1 ? label(row.candidates[0]!) : row.name">{{ row.name }}</span>
+        <span class="name" :title="row.candidates.length === 1 ? label(row.candidates[0]!) : row.name"><Thumb v-if="view === 'compact'" :item="thumbOf(row)" size="s" :px="18" class="lead" />{{ row.name }}</span>
         <span v-if="shown.has('at')" class="faint">{{ when(row.at) }}</span>
         <span class="state-cell">
           <Tooltip v-if="row.state === 'new'" :text="lockTip">

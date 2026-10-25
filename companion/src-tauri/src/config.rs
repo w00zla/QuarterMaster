@@ -2,7 +2,7 @@
 //! `%APPDATA%\com.w00zla.quartermaster.companion\config.json` on Windows,
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
 //! Quartermaster server, the user's API token, the SC channel folder whose
-//! `Game.log` is followed, the UI language, the automatic tab switch and the scan overlay's position and hotkeys. The server is fixed in the app; only a `server` entry
+//! `Game.log` is followed, the UI language, the automatic tab switch and the scan overlay's position, display and hotkeys. The server is fixed in the app; only a `server` entry
 //! in the file changes it (e.g. a dev server, read at start), the settings UI
 //! does not show it and saving never writes or overwrites that entry.
 
@@ -45,6 +45,10 @@ pub struct Config {
     /// "bottom-left", "bottom-center" or "bottom-right".
     #[serde(default = "default_overlay_position")]
     pub overlay_position: String,
+    /// How the overlay shows its rows: "thumbs" (the latest item as a taller top row with its thumbnail,
+    /// the window a bit higher) or "compact" (rows only).
+    #[serde(default = "default_overlay_display")]
+    pub overlay_display: String,
     /// The overlay's hotkeys as accelerators ("Alt+Shift+KeyQ", the on/off default); empty = none (the mode's default).
     #[serde(default = "default_hotkey_overlay")]
     pub hotkey_overlay: String,
@@ -58,8 +62,14 @@ pub struct Config {
 
 pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
+pub const OVERLAY_DISPLAYS: [&str; 2] = ["thumbs", "compact"];
+
 fn default_overlay_position() -> String {
     "top-left".into()
+}
+
+fn default_overlay_display() -> String {
+    "thumbs".into()
 }
 
 fn default_hotkey_overlay() -> String {
@@ -78,6 +88,7 @@ impl Default for Config {
             game_dir: default_game_dir(),
             language: String::new(),
             overlay_position: default_overlay_position(),
+            overlay_display: default_overlay_display(),
             hotkey_overlay: default_hotkey_overlay(),
             hotkey_mode: String::new(),
             auto_tab: true,
@@ -158,6 +169,7 @@ mod tests {
         assert_eq!(c.game_dir, DEFAULT_GAME_DIR);
         // Missing in files written before it existed: on
         assert!(c.auto_tab);
+        assert_eq!(c.overlay_display, "thumbs");
     }
 
     #[test]

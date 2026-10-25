@@ -62,7 +62,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   dev, read at start). Config as JSON in the app config dir like BindSight
   (`%APPDATA%\com.w00zla.quartermaster.companion\config.json`): Access Key (pasted from the web app's
   Companion dialog), LIVE folder, UI language (`de`, `en` or empty = the system's; `langRef` in `i18n.ts`
-  is reactive, the debug window re-reads it on `config-changed`), the overlay's position and hotkeys.
+  is reactive, the debug window re-reads it on `config-changed`), the overlay's position, display and hotkeys.
   Saving keeps the file's `server` entry as it is: the default is never written, a hand edit while the app
   runs is not overwritten.
 - Every API call goes through the Rust `api` command (only `/api/…`, GET/POST; no CORS) with
@@ -70,6 +70,15 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   ETag in the app cache dir (`%LOCALAPPDATA%\com.w00zla.quartermaster.companion\api\<path>.json`,
   `server::cached_api`) and sent with `If-None-Match`; a 304 answers the kept body (the ETag hashes the
   content: another server or user never gets a wrong one; a broken file only costs the transfer).
+- **Item thumbnails** (2026-10-25; names and sizes in `src/thumbs.ts`, the server side in `docs/webapp.md`
+  "Thumbnails"): only for catalog entries with a hash (`CatalogMaterial.thumb`, `CatalogBlueprint.thumb` of
+  its `outputUuid`); without one nothing is asked and the row looks as before. Rust `thumb(size, uuid, hash)`
+  (s|m|l, UUID and 8-hex hash checked) answers a `data:image/avif;base64,…` URL (the CSP stays: `img-src`
+  has `data:`, not the server) from `%LOCALAPPDATA%com.w00zla.quartermaster.companion	humbs<size><uuid>.<hash>.avif`,
+  else fetched from the configured origin's public `/thumbs/…` (no token, the API's client and user agent)
+  and kept there for good (temp file, renamed when complete: a URL's content never changes). Frontend
+  `thumbs.ts`: one promise per image and window for the session (a failure is asked again by the next
+  element), `Thumb.vue` a fixed square that stays empty while loading or without an image (nothing moves).
 - No reload button (removed 2026-10-19): a restart of the app loads catalog, stock, jobs and blueprints
   afresh.
 - Thin lines: every API call that runs longer than 400 ms shows a "Loading…" tag in the scan row (after
@@ -148,7 +157,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   and scroll only their rows (head and column titles stay).
 - Settings dialog (`SettingsDialog.vue`): Access Key, language, the automatic tab switch (a switch), game folder, the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
-  place as tooltip; the hotkeys "Hotkey Overlay an/aus" and "… Modus wechseln"; the UI says "Modus" for tab and overlay view alike), in the head's right end
+  place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
+  `overlayDisplay`, applied once saved); the hotkeys "Hotkey Overlay an/aus" and "… Modus wechseln"; the UI says "Modus" for tab and overlay view alike), in the head's right end
   a small "Debug" button for the debug window (secondary for the user; what it does as tooltip; the dialog
   closes once the window is open; `ConfirmDialog`'s `head` slot). Labels left, controls right like
   BindSight's settings.
@@ -157,7 +167,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   (new blue, finished green, not at the terminal yellow), an icon-only link badge (accent: registered as a
   job, dimmed: not yet), the time left and the end, the total yield in SCU at the right; the materials
   as compact rows in the columns of one head above the cards (material, quality, amount and the column
-  chooser's column; see "Tables"). German "Eintragen" for registering everywhere.
+  chooser's column; see "Tables"), each with the S thumbnail (18 px) in front of the name (no display toggle). German "Eintragen" for registering everywhere.
 - **Tables** (Components, Resources, the refinery's materials, Blueprints; 2026-10-20): the web app's
   (`useTableColumns` + `ColumnHead` from `adminapp/src`, ui.css `.table`/`.row`/`.cols-head`, the table
   measured with `observe`: the columns always fit, growing takes the free room and then narrows the
@@ -171,6 +181,12 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   a switch per hideable column (all but the name and the actions), applied and kept right away. The
   location in the mono face (like the overlay's). Lists in dialogs scroll inside them (max. 40–50 vh) and
   show the table's shown columns in its order.
+- **Display per table** (Gear, Resources, Blueprints; 2026-10-25): `ViewToggle.vue` (shared with the web
+  app, tooltip "Thumbnails anzeigen" / "Kompakt anzeigen") left of the column chooser, kept with the
+  table's columns (`useTableColumns` `view`, default compact). Compact: today's rows plus the S thumbnail
+  (18 px, the 24 px rows keep their height) in front of the name; the kind and blueprint badges stay.
+  Thumbnails: a column first with the M thumbnail (48 px), rows 48 px high, 13 px text. Blueprints show the
+  crafted item's (the picked, registered or first match; none when not in the catalog).
 
 ## Scan
 
@@ -499,7 +515,7 @@ FP16 and a tone map would be the fix); rotated monitors untested.
 game since.
 
 - A frameless, transparent, click-through, non-focusable window holding the mode's panel as a
-  compact fixed-size read-only tile (340×190 logical px, slightly see-through; layout "C" of the concept
+  compact fixed-size read-only tile (340×190 logical px, 340×210 in the display "Thumbnails", slightly see-through; layout "C" of the concept
   https://claude.ai/artifact/1CK7QBiMpLcj7n4efMeybn with the rail on the right, 2026-10-20): a narrow rail
   on the right with the four modes top down, each its icon above its count, exactly as wide as "999"
   (`3ch`, tabular digits; the shown one highlighted; a warning instead of the count when its filters are
@@ -507,6 +523,13 @@ game since.
   mode (mono face, clipped at its end; "No location picked" in warn colour), then the newest rows at 20 px
   without lines between (the inventory's kind badges as small icons), 8 fit; more than that: the last one
   fades out. No hint texts: without rows only the location line.
+- **Display** (settings "Darstellung", 2026-10-25; `overlayLayout.ts`, the height in `overlay.rs` follows the
+  config with the next tick): "Kompakt" is the look above. "Thumbnails" (default) shows the newest row as a
+  60 px top row (the M thumbnail at 44 px when the item has one, the name at 14 px above its tag and
+  details at 12 px, the amount right) and 6 rows below it, each with the S thumbnail (16 px) after its tag.
+  The refinery has no single newest item: rows only (9, with the first material's thumbnail).
+  `OverlayRow.thumb` carries uuid and hash from the panels; the overlay page loads the images itself
+  (`thumb` is allowed in every window: the app has no command allowlist).
 - A thread puts it every 250 ms at the configured place (`overlayPosition`: top-left (default), top-center,
   top-right, bottom-left, bottom-center, bottom-right, six buttons in the settings laid out where they are;
   24 px margin, scaled with the game monitor's DPI) of the game window's client area as `HWND_TOPMOST`,
@@ -515,7 +538,7 @@ game since.
 - `WDA_EXCLUDEFROMCAPTURE` keeps it out of the desktop duplication, set **before** the click-through makes
   it layered (a layered window refuses it with error 8; a failure is logged: the OCR would read it).
 - On/off is not stored (off at every start); switched in the scan row or by hotkey (the settings hold
-  only position and hotkeys). Showing it switches the scan on (locked in the scan row while it is shown), hiding it switches
+  only position, display and hotkeys). Showing it switches the scan on (locked in the scan row while it is shown), hiding it switches
   the scan off only if it started it. The mode is the main window's tab, one and the same (since
   2026-10-20; before, the overlay had its own and the two drifted apart). By itself: the screen the scan
   sees (warehouse: Stock, character inventory: Components, terminal: Refinery; nothing in view: it stays) and a blueprint

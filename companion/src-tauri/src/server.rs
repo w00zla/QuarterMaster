@@ -3,13 +3,16 @@
 //! says the app's version (`X-QM-Companion`); an outdated app gets 426 with
 //! the new release's links, which the frontend shows instead of working. Errors are
 //! short codes the frontend translates (`noToken`, `invalidToken`,
-//! `invalidServer`, …) or a message for anything else.
+//! `invalidServer`, …) or a message for anything else. Item thumbnails come from the server's public
+//! `/thumbs/…` and are kept in the app's cache (`thumb`).
 
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use base64::Engine;
 use reqwest::header::{ETAG, IF_NONE_MATCH};
 use reqwest::{Client, Method, StatusCode, Url};
 use serde::{Deserialize, Serialize};
@@ -179,6 +182,60 @@ pub async fn download(
     result
 }
 
+// --- item thumbnails ---------------------------------------------------------------------------
+
+/// The path of a thumbnail below the server's `/thumbs/` and the cache dir (`<size>/<uuid>.<hash>.avif`,
+/// as `src/thumbs.ts` names it); None for anything but a size s|m|l, a catalog UUID and an 8-hex hash.
+fn thumb_file(size: &str, uuid: &str, hash: &str) -> Option<String> {
+    let uuid = uuid.to_ascii_lowercase();
+    let hex = |s: &str| s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    let groups: Vec<&str> = uuid.split('-').collect();
+    let uuid_ok = groups.len() == 5 && groups.iter().zip([8, 4, 4, 4, 12]).all(|(g, n)| g.len() == n && hex(g));
+    let hash_ok = hash.len() == 8 && hex(hash);
+    (matches!(size, "s" | "m" | "l") && uuid_ok && hash_ok).then(|| format!("{size}/{uuid}.{hash}.avif"))
+}
+
+// Temp files of downloads running side by side (main window and overlay may ask for the same one)
+static THUMB_PART: AtomicU64 = AtomicU64::new(0);
+
+/// An item thumbnail as a `data:` URL (the webview's CSP allows those, not the server): from `dir` (the
+/// app's cache) or, missing there, from the server's public `/thumbs/…` (no token: the web app serves
+/// them to everyone), then kept in `dir` for good (a URL's content never changes; written to a temp file
+/// first, renamed when complete).
+pub async fn thumb(client: &Client, origin: &str, size: &str, uuid: &str, hash: &str, dir: &Path) -> Result<String, String> {
+    let rel = thumb_file(size, uuid, hash).ok_or("invalidThumb")?;
+    let file = dir.join(&rel);
+    let bytes = match std::fs::read(&file) {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        _ => {
+            let res = client.get(format!("{origin}/thumbs/{rel}")).send().await.map_err(|e| {
+                log::debug!("thumbnail {rel}: {e}");
+                "network".to_string()
+            })?;
+            if res.status() != StatusCode::OK {
+                return Err(format!("HTTP {}", res.status().as_u16()));
+            }
+            let bytes = res.bytes().await.map_err(|_| "network".to_string())?.to_vec();
+            if bytes.is_empty() {
+                return Err("emptyThumb".into());
+            }
+            let part = file.with_extension(format!("{}.part", THUMB_PART.fetch_add(1, Ordering::Relaxed)));
+            let kept = file
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&part, &bytes))
+                .and_then(|()| std::fs::rename(&part, &file));
+            if let Err(e) = kept {
+                // Shown all the same; only fetched again next time
+                log::warn!("{}: {e}", file.display());
+                let _ = std::fs::remove_file(&part);
+            }
+            bytes
+        }
+    };
+    Ok(format!("data:image/avif;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +257,23 @@ mod tests {
         let dir = Path::new("cache");
         assert_eq!(kept_file(dir, "/api/catalog?lang=de"), dir.join("_api_catalog_lang_de.json"));
         assert_ne!(kept_file(dir, "/api/catalog?lang=de"), kept_file(dir, "/api/catalog?lang=en"));
+    }
+
+    #[test]
+    fn thumb_files_only_for_valid_parts() {
+        let uuid = "0a1b2c3d-4e5f-6789-abcd-ef0123456789";
+        assert_eq!(thumb_file("s", uuid, "deadbeef").unwrap(), format!("s/{uuid}.deadbeef.avif"));
+        assert_eq!(thumb_file("l", &uuid.to_uppercase(), "00ff00ff").unwrap(), format!("l/{uuid}.00ff00ff.avif"));
+        for (size, uuid, hash) in [
+            ("x", uuid, "deadbeef"),
+            ("m", "../../etc", "deadbeef"),
+            ("m", "0a1b2c3d-4e5f-6789-abcd-ef012345678", "deadbeef"),
+            ("m", "0a1b2c3d4e5f-6789-abcd-ef0123456789-", "deadbeef"),
+            ("m", uuid, "DEADBEEF"),
+            ("m", uuid, "deadbee"),
+            ("m", uuid, "deadbee/"),
+        ] {
+            assert_eq!(thumb_file(size, uuid, hash), None, "{size} {uuid} {hash}");
+        }
     }
 }

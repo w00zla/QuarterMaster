@@ -2,7 +2,8 @@
 // The refinery sync's proposals (refinerySync.ts; the scan is in the scan row, ScanBar.vue), in the
 // head after the count the filter "Jobs" (off: the scan does not read the terminal): one card each in three lines: the
 // job badge (icon-only), the station and the actions; the state (a colour per state) with the time left
-// as the terminal shows it and the end; the materials as compact rows like the inventory's table. A new running job: Register (the time left as its
+// as the terminal shows it and the end; the materials as compact rows like the inventory's table, each with
+// its thumbnail in front of the name. A new running job: Register (the time left as its
 // duration, so the end stays the game's) or Discard; "Register all" in the head after a confirmation.
 // A finished job, registered or not: Store (the terminal's yields). A job no read of the station showed: Remove (after a
 // confirmation) or Keep. Matched running jobs are updated without asking.
@@ -17,9 +18,10 @@ import { columnsTexts, langRef, t } from "../i18n";
 import { overlayRows, tabCounts } from "../overlay";
 import { fromMicro, toMicro } from "../inventory";
 import { cscuToScu, type Proposal } from "../refinery";
-import { accept, dismiss, jobsOn, materialName, proposals, stationName, toggleJobs } from "../refinerySync";
+import { accept, dismiss, jobsOn, materialName, materialThumb, proposals, stationName, toggleJobs } from "../refinerySync";
 import { connected } from "../state";
 import { toast } from "../toasts";
+import Thumb from "./Thumb.vue";
 
 const busy = ref(new Set<string>());
 const setBusy = (id: string, on: boolean) => {
@@ -85,7 +87,7 @@ const KIND = {
   missing: { tag: "refinery.kind.missing", cls: "warn", action: "refinery.remove", icon: "trash", button: "outline", done: "refinery.removed" },
 } as const;
 
-// The scan overlay shows one line per card: station, materials, the end
+// The scan overlay shows one line per card: station, materials, the end; the first material's thumbnail
 watchEffect(() => {
   overlayRows.refinery = proposals.value.map((p) => {
     const end = endOf(p);
@@ -95,6 +97,7 @@ watchEffect(() => {
       name: stationName(p.locationUuid),
       detail: rows(p).map((x) => materialName(x.uuid)).join(", "),
       cols: end === null ? [] : [t("refinery.readyAt", { time: time(end) })],
+      thumb: rows(p)[0] ? materialThumb(rows(p)[0]!.uuid) : null,
     };
   });
   tabCounts.refinery = proposals.value.length;
@@ -217,7 +220,7 @@ async function registerAll(value: string) {
           <!-- 3: the materials in the columns of the head (the last one empty: the chooser's) -->
           <div class="mats">
             <div v-for="(x, i) in rows(p)" :key="i" class="row">
-              <span class="row-name">{{ materialName(x.uuid) }}</span>
+              <span class="row-name"><Thumb :item="materialThumb(x.uuid)" size="s" :px="18" class="lead" />{{ materialName(x.uuid) }}</span>
               <span v-if="shown.has('quality')" class="num">{{ x.quality }}</span>
               <span v-if="shown.has('amount')" class="num">{{ x.scu }} SCU</span>
               <span />

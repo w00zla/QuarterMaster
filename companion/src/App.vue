@@ -259,4 +259,18 @@ onMounted(async () => {
   margin: -4px 0 -4px -4px;
   padding: 4px 0 4px 4px;
 }
+
+/* The display "thumbs" (ViewToggle): taller rows for the 48 px thumbnail column, larger text */
+.table.compact.thumbs {
+  font-size: 13px;
+}
+
+.table.compact.thumbs .row:not(.cols-head) {
+  min-height: 48px;
+}
+
+/* The small thumbnail in front of a name: it never makes the 24 px rows higher */
+.thumb.lead {
+  margin: -4px 6px -4px 0;
+}
 </style>

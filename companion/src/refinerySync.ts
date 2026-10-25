@@ -6,7 +6,7 @@
 // inventory scan (inventorySync.ts). The filter "Jobs" (kept, on by default) decides whether the scan
 // reads the terminal at all; the scan itself is in scan.ts.
 import { listen } from "@tauri-apps/api/event";
-import { ref, shallowRef, watch } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import type { CatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
 import { gameNames } from "./backend";
 import { t } from "./i18n";
@@ -15,6 +15,7 @@ import {
   type Job, type OverviewEvent, type Proposal, type SyncCatalog, type Update, type VisitEvent,
 } from "./refinery";
 import { api, config, connected } from "./state";
+import { thumbRef } from "./thumbs";
 import { toast, toastError } from "./toasts";
 
 // Completed orders already stored, with when (kept: the terminal shows them until they are collected in
@@ -96,6 +97,10 @@ async function loadJobs() {
 
 export const stationName = (uuid: string) => syncCatalog.value?.stationNames.get(uuid) ?? "?";
 export const materialName = (uuid: string) => syncCatalog.value?.materialNames.get(uuid) ?? "?";
+// The catalog's thumbnail hashes per material and item (the same in both languages)
+const thumbHashes = computed(() => new Map((catalogResponses.value?.en.materials ?? []).map((m) => [m.uuid, m.thumb])));
+/** A material's or item's thumbnail, null when the catalog has none. */
+export const materialThumb = (uuid: string) => thumbRef(uuid, thumbHashes.value.get(uuid));
 
 // One event at a time: a read waits for the writes of the one before
 let queue = Promise.resolve();

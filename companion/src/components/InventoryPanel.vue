@@ -6,7 +6,8 @@
 // screen is not read), then the proposals of every location as a compact table with resizable columns, one
 // row per stack (kind, name, quality, amount, location) or gear tile (kind, name, type, size, grade, stats,
 // pieces, location), each with
-// Register / Discard; what the stored stock holds already stays dimmed without them (also in the overlay;
+// Register / Discard; the item's thumbnail in front of the name, or in the display "thumbs" (ViewToggle
+// next to the column chooser) larger in a column of its own; what the stored stock holds already stays dimmed without them (also in the overlay;
 // counts and "Register all" only the rest). Registering (one or all, each at
 // its own location) asks first, with a switch per org to share right away. The overlay shows the
 // current location's only. The sightings behind the proposals, also the incomplete ones, are in the
@@ -15,12 +16,13 @@ import { computed, ref, watch, watchEffect } from "vue";
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
-import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import { useTableColumns, type ColumnSpec, type TableView } from "../../../adminapp/src/tableColumns";
 import { statValueText } from "../../../src/stock/component-stats";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import type { ComponentProposal } from "../components";
 import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
-import { columnsTexts, langRef, t } from "../i18n";
+import ViewToggle from "../../../webapp/src/components/ViewToggle.vue";
+import { columnsTexts, langRef, t, viewTexts } from "../i18n";
 import type { Proposal } from "../inventory";
 import {
   accept, acceptComponent, componentProposals, componentSightings, dismiss, KIND_CLASS, KIND_ICON, kinds, locationUuid, proposals,
@@ -32,9 +34,11 @@ const stock = props.part === "stock";
 // The kinds this part's filter switches
 const partKinds: Kind[] = stock ? ["mats", "items"] : ["comps", "fps"];
 import { overlayRows, tabCounts } from "../overlay";
-import { catalogResponses, materialName, syncCatalog } from "../refinerySync";
+import { catalogResponses, materialName, materialThumb, syncCatalog } from "../refinerySync";
 import { connected, meOrgs } from "../state";
+import type { ThumbRef } from "../thumbs";
 import { toast } from "../toasts";
+import Thumb from "./Thumb.vue";
 
 // One row per proposal: a stack (materials, items) or a component
 interface Row {
@@ -57,6 +61,7 @@ interface Row {
   inStock: boolean;
   stack: Listed<Proposal> | null;
   component: Listed<ComponentProposal> | null;
+  thumb: ThumbRef | null;
 }
 
 const locationName = (uuid: string) => syncCatalog.value?.locations.find((l) => l.uuid === uuid)?.short ?? "?";
@@ -86,19 +91,24 @@ const rows = computed<Row[]>(() => stock
   ? proposals.value.map((p): Row => ({
     kind: p.unit === "SCU" ? "mats" : "items", id: p.id, name: materialName(p.materialUuid), type: "", size: "", grade: "", detail: null, standard: false,
     locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: String(p.quality), amount: amount(p.amount, p.unit), inStock: p.inStock, stack: p, component: null,
+    thumb: materialThumb(p.materialUuid),
   }))
   // No quality (the register dialog's column stays empty)
   : componentProposals.value.map((p): Row => ({
     kind: p.fps ? "fps" : "comps", id: p.id, name: catalogMaterials.value.get(p.componentUuid)?.name ?? p.label, ...described(p.componentUuid), ...statsOf(p),
     locationUuid: p.locationUuid, location: locationName(p.locationUuid), quality: "", amount: t("inventory.pieces", { n: p.amount }), inStock: p.inStock, stack: null, component: p,
+    thumb: materialThumb(p.componentUuid),
   })));
 // What is still to register: the counts and "Register all"
 const openRows = computed(() => rows.value.filter((r) => !r.inStock));
 
 // The table's columns (widths and the hidden ones kept per table; no sorting: the newest come first);
 // the last shown one takes the room left. Stacks: kind, quality and amount; gear: kind, catalog data, stats
-// and pieces. Every one but the name and the actions may be hidden (ColumnsButton in the actions' head)
+// and pieces. Every one but the name and the actions may be hidden (ColumnsButton in the actions' head).
+// The display "thumbs" puts the thumbnail column first (`view` mirrors the table's, which owns it)
+const view = ref<TableView>("compact");
 const columns = computed<ColumnSpec[]>(() => [
+  ...(view.value === "thumbs" ? [{ key: "thumb", label: "", width: 48, fixed: true, sortable: false }] : []),
   { key: "kind", label: "", title: t("col.kind"), width: 20, fixed: true, sortable: false, hideable: true },
   { key: "name", label: t("debug.col.name"), width: 120, sortable: false },
   ...(stock
@@ -121,6 +131,7 @@ const columns = computed<ColumnSpec[]>(() => [
 // The compact rows' column gap (.table.compact in App.vue)
 const ROW_GAP = 8;
 const cols = useTableColumns(`qm.companion.${props.part}.columns`, columns, { key: "name", dir: "asc" }, ROW_GAP);
+watch(cols.view, (v) => (view.value = v), { immediate: true });
 const shown = computed(() => new Set(cols.columns.value.map((c) => c.key)));
 const what = (r: Row) => [r.name, r.detail ?? r.quality, r.amount].join(" · ");
 const tagClass: Record<Kind, string> = KIND_CLASS;
@@ -132,7 +143,7 @@ watchEffect(() => {
     .filter((r) => r.locationUuid === locationUuid.value)
     .sort((a, b) => (seen.get(b.id) ?? 0) - (seen.get(a.id) ?? 0))
     // Gear: its name and stats (and its pieces when more than one); a stack: its name, quality and amount
-    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: r.component ? (r.component.amount > 1 ? [r.amount] : []) : [r.quality, r.amount], dim: r.inStock }));
+    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: r.component ? (r.component.amount > 1 ? [r.amount] : []) : [r.quality, r.amount], dim: r.inStock, thumb: r.thumb }));
   tabCounts[props.part] = openRows.value.length;
 });
 
@@ -226,13 +237,21 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
     </div>
     <!-- The web app's table, compact (App.vue): it scrolls, its column titles stick to its top; the columns
          always fit its width (measured on it), the actions stay in view -->
-    <div v-else class="table compact" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
+    <div
+      v-else
+      class="table compact"
+      :class="{ thumbs: view === 'thumbs' }"
+      :ref="cols.observe"
+      :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }"
+    >
       <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth">
+        <template #col-register><ViewToggle :table="cols" :texts="viewTexts()" /></template>
         <template #col-drop><ColumnsButton :table="cols" :texts="columnsTexts()" /></template>
       </ColumnHead>
       <div v-for="r in rows" :key="r.id" class="row data-row" :class="{ done: r.inStock }">
+        <Thumb v-if="view === 'thumbs'" :item="r.thumb" size="m" :px="48" />
         <span v-if="shown.has('kind')" class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
-        <span class="cell row-name">{{ r.name }}</span>
+        <span class="cell row-name"><Thumb v-if="view === 'compact'" :item="r.thumb" size="s" :px="18" class="lead" />{{ r.name }}</span>
         <span v-if="shown.has('quality')" class="num">{{ r.quality }}</span>
         <span v-if="shown.has('amount')" class="num">{{ r.amount }}</span>
         <span v-if="shown.has('type')" class="cell">{{ r.type }}</span>

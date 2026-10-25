@@ -2,7 +2,9 @@
 // Rust with the configured server and token: no CORS in the way).
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
+import type { ThumbSize } from "../../src/thumbs";
 import type { CompanionOutdated, CompanionPlatform } from "../../src/webapp/api-types";
+import type { OverlayDisplay } from "./overlayLayout";
 
 export interface Config {
   server: string;
@@ -13,6 +15,8 @@ export interface Config {
   language: string;
   // The scan overlay: where in the game window it sits, its hotkeys ("Ctrl+Shift+KeyQ", "" = none)
   overlayPosition: OverlayPosition;
+  // How it shows its rows: "thumbs" (the latest item as a taller top row with its thumbnail) or "compact"
+  overlayDisplay: OverlayDisplay;
   hotkeyOverlay: string;
   hotkeyMode: string;
   // The tab (= the overlay's mode) switches by itself: with the screen the scan sees, with a new blueprint unlock
@@ -101,6 +105,8 @@ export const getGameFront = () => call<boolean>("get_game_front");
 export const setOverlayWindow = (on: boolean) => call<void>("set_overlay", { on });
 // Texts of these loc keys (lower case) in the player's active language pack (global.ini); missing keys are left out
 export const gameNames = (keys: string[]) => call<Record<string, string>>("game_names", { keys });
+// An item thumbnail as a data: URL (the app's cache, else the server's /thumbs/…; thumbs.ts keeps them per session)
+export const thumbData = (size: ThumbSize, uuid: string, hash: string) => call<string>("thumb", { size, uuid, hash });
 
 // Set when the server refused this version (426): the app does no work until updated
 export const outdated = ref<CompanionOutdated | null>(null);

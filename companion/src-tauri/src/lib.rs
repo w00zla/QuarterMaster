@@ -179,7 +179,7 @@ fn get_config(state: State) -> Config {
     state.lock().unwrap().config.clone()
 }
 
-/// Saves token, game folder, language and the overlay's position and hotkeys; the server stays as
+/// Saves token, game folder, language and the overlay's position, display and hotkeys; the server stays as
 /// loaded (only the config file changes it). Invalid hotkeys refuse the save (the ones before stay).
 /// Every window hears about it (`config-changed`).
 #[tauri::command]
@@ -193,6 +193,9 @@ fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config
     }
     if !config::OVERLAY_POSITIONS.contains(&config.overlay_position.as_str()) {
         config.overlay_position = Config::default().overlay_position;
+    }
+    if !config::OVERLAY_DISPLAYS.contains(&config.overlay_display.as_str()) {
+        config.overlay_display = Config::default().overlay_display;
     }
     #[cfg(windows)]
     overlay::set_hotkeys(&app, &config.hotkey_overlay, &config.hotkey_mode)?;
@@ -310,6 +313,16 @@ async fn api(
         return server::cached_api(&http, &origin, &config.token, &path, &dir).await;
     }
     server::api(&http, &origin, &config.token, &method, &path, body, None).await
+}
+
+/// An item thumbnail (`size` s|m|l, catalog UUID, content hash) as a `data:` URL: from the app's cache dir
+/// (`thumbs/`), else fetched from the configured server and kept there (`server::thumb`).
+#[tauri::command]
+async fn thumb(app: AppHandle, http: tauri::State<'_, reqwest::Client>, size: String, uuid: String, hash: String) -> Result<String, String> {
+    let server = app.state::<Mutex<AppData>>().lock().unwrap().config.server.clone();
+    let origin = server::origin(&server)?;
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
+    server::thumb(&http, &origin, &size, &uuid, &hash, &dir).await
 }
 
 #[derive(Serialize)]
@@ -520,7 +533,8 @@ async fn set_overlay(app: AppHandle, on: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
         let overlay = app.state::<overlay::Overlay>().inner().clone();
-        overlay::set(&app, &overlay, on)
+        let display = app.state::<Mutex<AppData>>().lock().unwrap().config.overlay_display.clone();
+        overlay::set(&app, &overlay, on, &display)
     }
     #[cfg(not(windows))]
     {
@@ -611,7 +625,9 @@ pub fn run() {
                 let overlay = overlay::Overlay::default();
                 let handle = app.handle().clone();
                 overlay::spawn(app.handle().clone(), overlay.clone(), move || {
-                    handle.state::<Mutex<AppData>>().lock().unwrap().config.overlay_position.clone()
+                    let state = handle.state::<Mutex<AppData>>();
+                    let data = state.lock().unwrap();
+                    (data.config.overlay_position.clone(), data.config.overlay_display.clone())
                 });
                 app.manage(overlay);
                 app.manage(overlay::Hotkeys::default());
@@ -643,6 +659,7 @@ pub fn run() {
             set_unlock_scan,
             scan_backups,
             api,
+            thumb,
             app_info,
             download_update,
             install_update,

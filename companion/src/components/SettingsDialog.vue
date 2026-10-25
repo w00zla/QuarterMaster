@@ -2,7 +2,7 @@
 // API token (created in the web app's Companion dialog and pasted here), game folder, the UI
 // language and the automatic tab switch (overlay.ts); saving checks the connection and reloads the log state (the path may have changed). The
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
-// position (six icon-only buttons on a drawn monitor) and hotkeys, saved (on/off is the scan row's
+// position (six icon-only buttons on a drawn monitor), display (compact or thumbnails) and hotkeys, saved (on/off is the scan row's
 // toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes the
 // dialog), small left of it the app's version.
 import { computed, onMounted, ref } from "vue";
@@ -12,6 +12,7 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { appInfo, openDebugWindow, setConfig, type OverlayPosition } from "../backend";
+import type { OverlayDisplay } from "../overlayLayout";
 import { t } from "../i18n";
 import { applyConfig, config, loadLog, refreshConnection } from "../state";
 import { errorText, toast, toastError } from "../toasts";
@@ -24,6 +25,7 @@ const gameDir = ref(config.value?.gameDir ?? "");
 const language = ref(config.value?.language ?? "");
 const autoTab = ref(config.value?.autoTab ?? true);
 const overlayPosition = ref<OverlayPosition>(config.value?.overlayPosition ?? "top-left");
+const overlayDisplay = ref<OverlayDisplay>(config.value?.overlayDisplay ?? "thumbs");
 const hotkeyOverlay = ref(config.value?.hotkeyOverlay ?? "");
 const hotkeyMode = ref(config.value?.hotkeyMode ?? "");
 const busy = ref(false);
@@ -43,6 +45,10 @@ const languageOptions = computed(() => [
   { value: "de", label: t("lang.de") },
   { value: "en", label: t("lang.en") },
 ]);
+const displayOptions = computed(() => [
+  { value: "thumbs", label: t("overlay.display.thumbs") },
+  { value: "compact", label: t("overlay.display.compact") },
+]);
 // The places where they are: top row, then bottom row
 const POSITIONS: OverlayPosition[] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
@@ -51,6 +57,7 @@ const changed = computed(() => token.value.trim() !== (config.value?.token ?? ""
   || language.value !== (config.value?.language ?? "")
   || autoTab.value !== (config.value?.autoTab ?? true)
   || overlayPosition.value !== config.value?.overlayPosition
+  || overlayDisplay.value !== (config.value?.overlayDisplay ?? "thumbs")
   || hotkeyOverlay.value !== config.value?.hotkeyOverlay
   || hotkeyMode.value !== config.value?.hotkeyMode);
 const buttons = computed<ConfirmButton[]>(() => [
@@ -68,6 +75,7 @@ async function save() {
       gameDir: gameDir.value.trim(),
       language: language.value,
       overlayPosition: overlayPosition.value,
+      overlayDisplay: overlayDisplay.value,
       hotkeyOverlay: hotkeyOverlay.value,
       hotkeyMode: hotkeyMode.value,
       autoTab: autoTab.value,
@@ -146,6 +154,10 @@ async function pickFolder() {
             </div>
             <div class="stand" />
           </div>
+        </div>
+        <div class="line between">
+          <span class="label">{{ t("settings.overlayDisplay") }}</span>
+          <Dropdown v-model="overlayDisplay" :options="displayOptions" variant="outline" />
         </div>
         <div class="line between">
           <span class="label">{{ t("settings.hotkeyOverlay") }}</span>

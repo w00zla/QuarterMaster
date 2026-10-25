@@ -6,7 +6,8 @@
 // settings turned that off (`autoTab`); by hand with
 // a click on a tab or the mode hotkey, stepping through them. Each panel
 // puts its rows into `overlayRows`; the overlay gets them as one read-only view (texts in the UI
-// language) on every change and when it asks. Off at every start.
+// language, thumbnail references) on every change and when it asks, laid out for the configured display
+// (overlayLayout.ts). Off at every start.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, reactive, ref, watch } from "vue";
 import type { IconName } from "../../adminapp/src/components/Icon.vue";
@@ -14,9 +15,11 @@ import { setOverlayWindow } from "./backend";
 import { unlockRows } from "./debugReport";
 import { t } from "./i18n";
 import { kinds, locationUuid } from "./inventorySync";
+import { overlayLayout, type OverlayDisplay } from "./overlayLayout";
 import { jobsOn, syncCatalog } from "./refinerySync";
 import { scanOn, screenTab, setScanOn } from "./scan";
 import { config, log, unlocksOn } from "./state";
+import type { ThumbRef } from "./thumbs";
 import { toastError } from "./toasts";
 
 // The main window's tabs (= the overlay's modes) in the order the mode hotkey steps through them;
@@ -49,6 +52,8 @@ export interface OverlayRow {
   cols: string[];
   // Registered or in stock already: dimmed like in the panel
   dim?: boolean;
+  // The item's thumbnail (the display "thumbs" shows it); none = without
+  thumb?: ThumbRef | null;
 }
 
 /** A mode in the overlay's head: its icon and count, whether it is shown, whether it cannot work (its
@@ -60,8 +65,11 @@ export interface OverlayTab {
   warn: boolean;
 }
 
-/** What the overlay shows: the location (in every mode), the modes, the newest rows. */
+/** What the overlay shows: the location (in every mode), the modes, the newest rows (the display "thumbs":
+ * the newest as a top row of its own, the others below). */
 export interface OverlayView {
+  display: OverlayDisplay;
+  top: OverlayRow | null;
   place: string;
   // No location picked: the place warns
   placeMissing: boolean;
@@ -75,8 +83,6 @@ export interface OverlayView {
 export const overlayRows = reactive<Record<Tab, OverlayRow[]>>({ stock: [], comps: [], unlocks: [], refinery: [] });
 // How many rows each panel's table lists (shown in its tab)
 export const tabCounts = reactive<Record<Tab, number>>({ stock: 0, comps: 0, unlocks: 0, refinery: 0 });
-// As many as the overlay's fixed tile shows below its location line (overlay.rs: 22 px line + 8 × 20 px)
-const MAX_ROWS = 8;
 
 // Like the web app's navigation
 export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "gear", unlocks: "blueprint", refinery: "drop" };
@@ -93,8 +99,13 @@ const view = computed<OverlayView>(() => {
   // The location in every mode
   const placeMissing = !locationUuid.value;
   const place = placeMissing ? t("overlay.noLocation") : (syncCatalog.value?.locations.find((l) => l.uuid === locationUuid.value)?.short ?? "?");
+  // As many as the overlay's fixed tile shows below its location line
+  const display: OverlayDisplay = config.value?.overlayDisplay === "compact" ? "compact" : "thumbs";
+  const layout = overlayLayout(display, m === "refinery");
   const all = overlayRows[m];
-  return { place, placeMissing, tabs, rows: all.slice(0, MAX_ROWS), more: all.length > MAX_ROWS };
+  const top = layout.top ? (all[0] ?? null) : null;
+  const rest = layout.top ? all.slice(1) : all;
+  return { display, top, place, placeMissing, tabs, rows: rest.slice(0, layout.rows), more: rest.length > layout.rows };
 });
 
 const publish = () => {

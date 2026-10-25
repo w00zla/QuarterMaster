@@ -78,6 +78,9 @@ const en = {
   "scan.stopTip": "Stop the scan",
   "settings.overlay": "Scan overlay",
   "settings.overlayPosition": "Position",
+  "settings.overlayDisplay": "Display",
+  "overlay.display.compact": "Compact",
+  "overlay.display.thumbs": "Thumbnails",
   "settings.hotkeyOverlay": "Hotkey overlay on/off",
   "settings.hotkeyMode": "Hotkey overlay switch mode",
   "overlay.pos.top-left": "Top left",
@@ -114,6 +117,8 @@ const en = {
   "inventory.kind.fps": "FPS gear",
   "columns.title": "Columns",
   "columns.choose": "Choose columns",
+  "view.toThumbs": "Show larger",
+  "view.toCompact": "Show compact",
   "col.kind": "Kind",
   "inventory.locations": "Locations",
   "filter.on": "Scanned",
@@ -363,6 +368,9 @@ const de: Record<Key, string> = {
   "scan.stopTip": "Scan stoppen",
   "settings.overlay": "Scan-Overlay",
   "settings.overlayPosition": "Position",
+  "settings.overlayDisplay": "Darstellung",
+  "overlay.display.compact": "Kompakt",
+  "overlay.display.thumbs": "Thumbnails",
   "settings.hotkeyOverlay": "Hotkey Overlay an/aus",
   "settings.hotkeyMode": "Hotkey Overlay Modus wechseln",
   "overlay.pos.top-left": "Oben links",
@@ -399,6 +407,8 @@ const de: Record<Key, string> = {
   "inventory.kind.fps": "FPS-Ausrüstung",
   "columns.title": "Spalten",
   "columns.choose": "Spalten wählen",
+  "view.toThumbs": "Größer anzeigen",
+  "view.toCompact": "Kompakt anzeigen",
   "col.kind": "Art",
   "inventory.locations": "Standorte",
   "filter.on": "Wird gescannt",
@@ -590,3 +600,6 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
 
 /** Texts of the column chooser shared with the web app (ColumnsButton.vue). */
 export const columnsTexts = () => ({ choose: t("columns.choose"), title: t("columns.title"), close: t("common.close") });
+
+/** Texts of the display toggle shared with the web app (ViewToggle.vue). */
+export const viewTexts = () => ({ toThumbs: t("view.toThumbs"), toCompact: t("view.toCompact") });
