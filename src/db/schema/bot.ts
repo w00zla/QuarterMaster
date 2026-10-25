@@ -1,7 +1,7 @@
 // Discord bot configuration and state. The data the bot works on (orgs, roster, stock,
 // blueprints) lives in schema `app`; nothing in `app` references this schema.
 import { sql } from 'drizzle-orm';
-import { bigint, check, pgSchema, text, timestamp } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, pgSchema, text, timestamp } from 'drizzle-orm/pg-core';
 import { appUser, createdAt, org, snowflake, updatedAt } from './app.ts';
 
 export const bot = pgSchema('bot');
@@ -18,6 +18,8 @@ export const guild = bot.table('guild', {
   // The last app.history row the logs channel has handled (posted or skipped); NULL = start at the newest
   // row, never post the past (set again whenever channel or level change)
   logsAfter: bigint('logs_after', { mode: 'number' }),
+  // Lines about an item (or a blueprint's crafted item) carry its thumbnail where one is configured
+  logsThumbs: boolean('logs_thumbs').notNull().default(true),
   // The board: one message the bot keeps current with what the org offers; NULL = no board
   boardChannelId: text('board_channel_id'),
   // The board message in that channel; NULL = not posted yet (posted on the next round)

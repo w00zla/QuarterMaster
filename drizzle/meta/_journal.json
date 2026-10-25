@@ -232,6 +232,13 @@
       "when": 1792848156454,
       "tag": "0032_mining",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792928180821,
+      "tag": "0033_logs_thumbs",
+      "breakpoints": true
     }
   ]
 }

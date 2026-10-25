@@ -9,6 +9,7 @@ const settings: GuildSettings = {
   baseLang: 'de',
   logsChannelId: '200000000000000001',
   logsLevel: 'stock',
+  logsThumbs: true,
   boardChannelId: '200000000000000002',
   boardStyle: 'table',
   boardTitle: 'Red *Hollow*',
@@ -52,14 +53,17 @@ describe('/qm-setup', () => {
   it('has one preselected select per setting', () => {
     const rows = selectsOf(setupPanel(settings, 'de', { logs: null, board: null }));
     assert.deepEqual(rows.map((c) => c.custom_id), [
-      'qm-setup:memberRoles', 'qm-setup:baseLang', 'qm-setup:logsChannel', 'qm-setup:logsLevel', 'qm-setup:boardChannel', 'qm-setup:boardStyle', 'qm-setup:boardTitle',
+      'qm-setup:memberRoles', 'qm-setup:baseLang', 'qm-setup:logsChannel', 'qm-setup:logsLevel', 'qm-setup:logsThumbs', 'qm-setup:boardChannel', 'qm-setup:boardStyle', 'qm-setup:boardTitle',
     ]);
-    const [member, lang, channel, level, board, style] = rows;
+    const [member, lang, channel, level, thumbs, board, style] = rows;
     assert.deepEqual((board!.default_values as { id: string }[]).map((v) => v.id), [settings.boardChannelId]);
     assert.deepEqual((style!.options as { label: string; value: string; default: boolean }[]).map((o) => [o.value, o.label, o.default]), [
       ['list', 'Board: Liste', false], ['table', 'Board: Tabelle', true],
     ]);
-    assert.deepEqual([rows[6]!.custom_id, rows[6]!.label], ['qm-setup:boardTitle', 'Board-Titel']);
+    assert.deepEqual([rows[7]!.custom_id, rows[7]!.label], ['qm-setup:boardTitle', 'Board-Titel']);
+    assert.deepEqual((thumbs!.options as { label: string; value: string; default: boolean }[]).map((o) => [o.value, o.label, o.default]), [
+      ['on', 'Logs: mit Item-Bildern', true], ['off', 'Logs: ohne Bilder', false],
+    ]);
     assert.deepEqual((member!.default_values as { id: string }[]).map((v) => v.id), settings.memberRoleIds);
     assert.deepEqual((channel!.default_values as { id: string }[]).map((v) => v.id), [settings.logsChannelId]);
     assert.deepEqual((lang!.options as { value: string; default: boolean }[]).filter((o) => o.default).map((o) => o.value), ['de']);
@@ -98,6 +102,9 @@ describe('/qm-setup', () => {
     assert.equal(patchFor('baseLang', ['fr']), null);
     assert.deepEqual(patchFor('logsLevel', ['blueprints']), { logsLevel: 'blueprints' });
     assert.equal(patchFor('logsLevel', ['org']), null);
+    assert.deepEqual(patchFor('logsThumbs', ['off']), { logsThumbs: false });
+    assert.deepEqual(patchFor('logsThumbs', ['on']), { logsThumbs: true });
+    assert.equal(patchFor('logsThumbs', ['maybe']), null);
     assert.equal(patchFor('nope', ['x']), null);
   });
 });

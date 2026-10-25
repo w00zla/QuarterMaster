@@ -15,6 +15,7 @@ import { bySubcommand, type BotCommand, type CommandContext } from '../registry.
 import { accessOf, memberInfo, searchMembers } from '../roster.ts';
 import { findGuildSettings } from '../settings.ts';
 import { escapeMarkdown } from '../markdown.ts';
+import { addHead, thumbUrl } from '../thumbs.ts';
 import { customId, panel, webAppButton, webAppPath, webAppRow } from '../ui.ts';
 
 const NAME = 'qm-bp';
@@ -25,9 +26,11 @@ const WHO_PAGE_SIZE = 60;
 /**
  * A panel: head, body lines, and (several pages) the page line plus ◀ ▶ buttons whose custom IDs
  * `<action>:<key>:<page>` load that page; the web app link (to `link`, a deep link path) sits in the same row.
+ * `thumb`: a thumbnail URL beside the head.
  */
-function listPanel(lang: Lang, head: string, body: string[], paging: { action: string; key: string; current: number; pages: number } | null, link: string) {
-  const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(head));
+function listPanel(lang: Lang, head: string, body: string[], paging: { action: string; key: string; current: number; pages: number } | null, link: string,
+  thumb: string | null = null) {
+  const container = addHead(new ContainerBuilder(), head, thumb);
   if (body.length) {
     container.addSeparatorComponents(new SeparatorBuilder())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(body.join('\n')));
@@ -91,12 +94,12 @@ export function listPage(entries: BlueprintEntry[], ownerName: string, ownerId: 
   return listPanel(lang, tr('bp.list.title', { name, count: sorted.length }), lines, { action: 'list', key: ownerId, current, pages }, link);
 }
 
-/** One page of the org members who registered a blueprint (names alphabetical), as a panel; links to its crafting check. */
-export function whoPage(names: string[], bp: Pick<BlueprintEntry, 'uuid' | 'label'>, page: number, lang: Lang) {
+/** One page of the org members who registered a blueprint (names alphabetical), as a panel with the crafted item's thumbnail; links to its crafting check. */
+export function whoPage(names: string[], bp: Pick<BlueprintEntry, 'uuid' | 'label'> & { outputUuid?: string | null }, page: number, lang: Lang) {
   const { pages, current } = pageOf(names.length, WHO_PAGE_SIZE, page);
   const shown = names.slice(current * WHO_PAGE_SIZE, (current + 1) * WHO_PAGE_SIZE).map((n) => escapeMarkdown(n)).join(', ');
   return listPanel(lang, t(lang, 'bp.who.some', { name: escapeMarkdown(bp.label), count: names.length }), [shown],
-    { action: 'who', key: bp.uuid, current, pages }, webAppPath.crafting(bp.uuid));
+    { action: 'who', key: bp.uuid, current, pages }, webAppPath.crafting(bp.uuid), thumbUrl(bp.outputUuid));
 }
 
 /** The list for an org member; other people only while they are active members of this org. */
@@ -202,7 +205,8 @@ export const blueprintsCommand: BotCommand = {
     const names = await whoHas(ctx.db, access.guildId, bp.uuid);
     // Everyone may have removed it since the panel was shown
     if (!names.length) {
-      await ctx.interaction.update(listPanel(ctx.lang, ctx.t('bp.who.none', { name: escapeMarkdown(bp.label) }), [], null, webAppPath.crafting(bp.uuid)));
+      await ctx.interaction.update(listPanel(ctx.lang, ctx.t('bp.who.none', { name: escapeMarkdown(bp.label) }), [], null, webAppPath.crafting(bp.uuid),
+        thumbUrl(bp.outputUuid)));
       return;
     }
     await ctx.interaction.update(whoPage(names, bp, Number(page) || 0, ctx.lang));

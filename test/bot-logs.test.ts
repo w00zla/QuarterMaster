@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { logLine, messagesOf, type LogNames, type LogRow } from '../src/bot/logs.ts';
+import { logLine, messagesOf, packSections, sectionMessage, type LogNames, type LogRow } from '../src/bot/logs.ts';
 
 const names: LogNames = { material: () => 'Quantanium', location: (u) => (u === 'L2' ? 'Baijini Point' : 'Area18'), blueprint: () => 'Arclight' };
 const row = (r: Partial<LogRow>): LogRow => ({
@@ -50,5 +50,53 @@ describe('logs channel lines', () => {
     assert.deepEqual(messagesOf([line, line, line]).map((m) => m.length), [1801, 900]);
     assert.deepEqual(messagesOf([]), []);
     assert.equal(messagesOf(['y'.repeat(2500)])[0]!.length, 2000);
+  });
+});
+
+describe('logs channel with thumbnails', () => {
+  const T = 'https://qm.example/thumbs/l/x.avif';
+  const item = (id: number, thumb: string | null, line = `line ${id}`) => ({ id, line, thumb });
+  // Every component of a message, nested ones included
+  const count = (blocks: Parameters<typeof sectionMessage>[0]) => {
+    let n = 0;
+    type Node = { components?: Node[]; accessory?: Node };
+    const walk = (c: Node) => {
+      n++;
+      c.components?.forEach(walk);
+      if (c.accessory) walk(c.accessory);
+    };
+    sectionMessage(blocks).components.forEach((c) => walk(c.toJSON() as Node));
+    return n;
+  };
+
+  it('makes a section per line with a thumbnail and joins the lines without one in order', () => {
+    const [m, ...rest] = packSections([item(1, null), item(2, null), item(3, T), item(4, null)]);
+    assert.equal(rest.length, 0);
+    assert.deepEqual(m!.blocks, [{ text: 'line 1\nline 2', thumb: null }, { text: 'line 3', thumb: T }, { text: 'line 4', thumb: null }]);
+    assert.equal(m!.lastId, 4);
+    assert.equal(count(m!.blocks), 5);
+    const json = sectionMessage(m!.blocks);
+    assert.deepEqual(json.allowedMentions, { parse: [] });
+    assert.deepEqual(json.components.map((c) => c.toJSON().type), [10, 9, 10]);
+  });
+
+  it('keeps each message within 40 components', () => {
+    const messages = packSections(Array.from({ length: 30 }, (_, i) => item(i + 1, T)));
+    assert.deepEqual(messages.map((m) => m.blocks.length), [13, 13, 4]);
+    assert.deepEqual(messages.map((m) => m.lastId), [13, 26, 30]);
+    for (const m of messages) assert.ok(count(m.blocks) <= 40);
+    // A text display after 13 sections still fits (40 components), a section no longer
+    const mixed = packSections([...Array.from({ length: 13 }, (_, i) => item(i + 1, T)), item(14, null), item(15, null), item(16, T)]);
+    assert.deepEqual(mixed.map((m) => m.blocks.length), [14, 1]);
+    assert.equal(count(mixed[0]!.blocks), 40);
+  });
+
+  it('keeps each message within 4000 characters of text and cuts overlong lines', () => {
+    const line = 'x'.repeat(1500);
+    const messages = packSections([item(1, T, line), item(2, null, line), item(3, null, line)]);
+    assert.deepEqual(messages.map((m) => m.blocks.map((b) => b.text.length)), [[1500, 1500], [1500]]);
+    assert.deepEqual(messages.map((m) => m.lastId), [2, 3]);
+    assert.equal(packSections([item(1, T, 'y'.repeat(5000))])[0]!.blocks[0]!.text.length, 2000);
+    assert.deepEqual(packSections([]), []);
   });
 });

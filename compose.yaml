@@ -74,6 +74,11 @@ services:
       DISCORD_APP_ID: ${DISCORD_APP_ID:?set DISCORD_APP_ID in .env}
       # Link to the user web app in the bot's panels (empty: no link)
       WEBAPP_ORIGIN: ${WEBAPP_ORIGIN:-}
+      # Item thumbnails: which exist (the web app's thumbs.json), where Discord fetches them (empty: WEBAPP_ORIGIN/thumbs)
+      THUMBS_DIR: /thumbs
+      THUMBS_URL: ${THUMBS_URL:-}
+    volumes:
+      - ./local/thumbs:/thumbs:ro
 
   # Pulls the third-party data (UEX) into schema ext every 15 minutes; no port
   ext:

@@ -14,6 +14,8 @@ export interface GuildSettings {
   baseLang: Lang;
   logsChannelId: string | null;
   logsLevel: LogsLevel;
+  // Log lines with the item's thumbnail beside them (where thumbnails are configured)
+  logsThumbs: boolean;
   boardChannelId: string | null;
   boardStyle: BoardStyle;
   // NULL = the org name
@@ -81,6 +83,7 @@ export async function findGuildSettings(db: Db, guildId: string): Promise<GuildS
       baseLang: guild.baseLang,
       logsChannelId: guild.logsChannelId,
       logsLevel: guild.logsLevel,
+      logsThumbs: guild.logsThumbs,
       boardChannelId: guild.boardChannelId,
       boardStyle: guild.boardStyle,
       boardTitle: guild.boardTitle,
@@ -94,19 +97,19 @@ export async function findGuildSettings(db: Db, guildId: string): Promise<GuildS
 }
 
 export async function updateGuildSettings(db: Db, guildId: string, patch: Partial<GuildSettings>): Promise<GuildSettings> {
-  const { memberRoleIds, baseLang, logsChannelId, logsLevel, boardChannelId, boardStyle, boardTitle, boardSubtitle } = patch;
+  const { memberRoleIds, baseLang, logsChannelId, logsLevel, logsThumbs, boardChannelId, boardStyle, boardTitle, boardSubtitle } = patch;
   await db.transaction(async (tx) => {
     if (memberRoleIds !== undefined) {
       await tx.update(org).set({ memberRoleIds, updatedAt: sql`now()` }).where(eq(org.guildId, guildId));
     }
-    if ([baseLang, logsChannelId, logsLevel, boardChannelId, boardStyle, boardTitle, boardSubtitle].some((v) => v !== undefined)) {
+    if ([baseLang, logsChannelId, logsLevel, logsThumbs, boardChannelId, boardStyle, boardTitle, boardSubtitle].some((v) => v !== undefined)) {
       // A new logs channel or level starts at the newest history row: the past is never posted
       const logsAfter = logsChannelId !== undefined || logsLevel !== undefined
         ? sql`(SELECT coalesce(max(id), 0) FROM app.history)` : undefined;
       // Another board channel gets a new message (the old one stays where it was)
       const boardMessageId = boardChannelId !== undefined
         ? sql`CASE WHEN ${guild.boardChannelId} IS DISTINCT FROM ${boardChannelId} THEN NULL ELSE ${guild.boardMessageId} END` : undefined;
-      await tx.update(guild).set({ baseLang, logsChannelId, logsLevel, logsAfter, boardChannelId, boardMessageId, boardStyle, boardTitle, boardSubtitle,
+      await tx.update(guild).set({ baseLang, logsChannelId, logsLevel, logsAfter, logsThumbs, boardChannelId, boardMessageId, boardStyle, boardTitle, boardSubtitle,
         updatedAt: sql`now()` })
         .where(eq(guild.guildId, guildId));
     }

@@ -19,6 +19,7 @@ import { localizedDescription, t, type Lang } from '../i18n.ts';
 import { escapeMarkdown } from '../markdown.ts';
 import { formatDuration } from '../refinery-lines.ts';
 import type { BotCommand } from '../registry.ts';
+import { addHead, thumbUrl } from '../thumbs.ts';
 import { customId, panel, textField, textValue, webAppButton, webAppPath } from '../ui.ts';
 import { parseQuality } from './stock.ts';
 
@@ -76,7 +77,8 @@ function statText(s: StatResult): string {
 const statMark = (s: StatResult) => (s.favorable === null ? '⚪' : s.favorable ? '🟢' : '🔴');
 
 export interface CheckView {
-  bp: Pick<BlueprintEntry, 'uuid' | 'label'>;
+  // outputUuid: the crafted item, its thumbnail beside the head
+  bp: Pick<BlueprintEntry, 'uuid' | 'label'> & { outputUuid?: string | null };
   recipe: PlannerRecipe;
   result: EntryResult;
   coverages: Coverage[];
@@ -85,7 +87,7 @@ export interface CheckView {
   defaultQuality: number;
 }
 
-/** The check as a panel: head, materials against the stock, stats, warnings; "Change" reopens the modal. */
+/** The check as a panel: head (with the crafted item's thumbnail), materials against the stock, stats, warnings; "Change" reopens the modal. */
 export function checkPanel(lang: Lang, v: CheckView) {
   const tr = (key: Parameters<typeof t>[1], vars?: Parameters<typeof t>[2]) => t(lang, key, vars);
   const { recipe, result } = v;
@@ -114,8 +116,7 @@ export function checkPanel(lang: Lang, v: CheckView) {
   // The quality floor keeps belowMin away; the retired head tag says that already
   const warnings = result.warnings.filter((w) => w.code !== 'retired').map((w) => `⚠️ ${warningText(lang, w)}`);
 
-  const container = new ContainerBuilder()
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(head.join('\n')))
+  const container = addHead(new ContainerBuilder(), head.join('\n'), thumbUrl(v.bp.outputUuid))
     .addSeparatorComponents(new SeparatorBuilder())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent([...body, ...warnings].join('\n')));
   const buttons = [new ButtonBuilder().setCustomId(customId(NAME, 'edit', v.bp.uuid, result.count, v.quality ?? DEFAULT_Q))

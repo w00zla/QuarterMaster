@@ -44,6 +44,13 @@ Requirements and the interaction model: `docs/requirements.md` ("Roles & permiss
   `ReplyContent.flags` = `IsComponentsV2`, the router adds Ephemeral). Submitting a modal books (it is the
   confirmation; the amount it showed goes along as `expected`); the refinery start has a preview first.
   Results take 2–3 lines and repeat nothing.
+- **Thumbnails** (`thumbs.ts`): `thumbUrl(uuid)` gives the public URL of a catalog UUID's large item thumbnail
+  (`l`, Discord shows it at ~85 px and enlarges it on click) or null. Which UUIDs have one comes from
+  `THUMBS_DIR/thumbs.json` (the web app's `thumbIndex`, in memory, re-read on change; default `local/thumbs`);
+  the URL base is `THUMBS_URL`, else `WEBAPP_ORIGIN` + `/thumbs` unless that is localhost/127.0.0.1 (Discord
+  cannot reach it); neither = no thumbnails anywhere. The bot uploads nothing: Discord fetches each URL once and
+  caches it. Shown as a section accessory beside a head (`addHead`), only where a URL exists; not in lists or
+  the board.
 - The router defers a command that has not replied after 2 s (Discord's limit is 3 s), **except
   subcommands listed in `modalSubcommands`** (`''` = a command without subcommands): a modal is only allowed
   as the first answer, so those must answer within 3 s (only cached lookups and single-row reads before
@@ -83,21 +90,23 @@ All root commands are prefixed `qm-`.
 
 - **`/qm-setup`** (`commands/setup.ts`, `settings.ts`): admins only (`default_member_permissions` Manage
   Server plus an own check on every interaction), an ephemeral Components V2 panel with one section per area
-  (👥 members, 🌐 language, 📜 logs, 📋 board) and six selects (member roles, base language, `#logs` channel,
-  logs level `off`/`stock`/`blueprints`/`all`, board channel, board style `list`/`table`) plus a "Board title"
+  (👥 members, 🌐 language, 📜 logs, 📋 board) and seven selects (member roles, base language, `#logs` channel,
+  logs level `off`/`stock`/`blueprints`/`all`, pictures in the logs on/off (`logs_thumbs`, default on), board channel, board style `list`/`table`) plus a "Board title"
   button (modal: title, empty = the org name, and an optional subtitle). Each change is saved at once and
   redraws the panel; shows whether the bot has View/Send/Embed/Attach in the `#logs` channel and View/Send in
   the board channel. A change of language, board channel, style or title re-renders that board.
 - **`/qm-bp`** (`commands/blueprints.ts`, `blueprints.ts`): add/remove/list/who; list (20 per page) and who
-  (60 names per page) are panels, paging in the custom ID. The blueprint catalog with labels is cached per
+  (60 names per page, the crafted item's thumbnail beside its head) are panels, paging in the custom ID. The blueprint catalog with labels is cached per
   language (`importCache`), because autocomplete must answer within 3 s; autocomplete values are blueprint
   UUIDs, free text that was not picked is refused. Autocomplete handlers get `(interaction, lang, db)` and
   must not write.
 - **`/qm-res`** (`commands/stock.ts`; until 2026-10-20 `/qm-stock`): `add material location` (modal: amount, quality, "Share in"
   checkboxes of your active orgs, this server's ticked), `remove|adjust|share batch`, `move batch to`,
   `give batch member` (own roster autocomplete, active members only), each a modal with the batch as its head
-  and the amount prefilled ("all", adjust: the current amount, "0" allowed); `list [material]` (panel:
-  Personal / this org / All, 20 lines per page) and `find material [min_quality]`. The booking logic
+  and the amount prefilled ("all", adjust: the current amount, "0" allowed); the result after a modal shows the
+  thumbnail of the batch's material or item beside its text (then a Components V2 message, plain without one);
+  `list [material]` (panel: Personal / this org / All, 20 lines per page) and `find material [min_quality]` (the
+  material's thumbnail beside its text). The booking logic
   (`bookAdd`, `bookChange`, `bookShare`, `listLines`) takes no Discord objects and is tested on its own.
   `StockError` codes map to `stock.err.<code>`. Splitting and merging are not in the bot. `/qm-res` offers
   and lists only materials and items, like the web app's resources tab.
@@ -119,7 +128,7 @@ All root commands are prefixed `qm-`.
   Discord / English / Deutsch); the `app_user` row is only created when there is something to store.
 - **`/qm-crafting blueprint`** (`commands/crafting.ts`; no org needed): the web app's crafting check for one
   blueprint: a modal with count (1–99) and one material quality per slot (empty = the game default, raised to
-  each slot's minimum), then a panel with the needs per material against your stock plus what is shared in
+  each slot's minimum), then a panel (the crafted item's thumbnail beside its head) with the needs per material against your stock plus what is shared in
   your active orgs (stored only), stats, warnings, buttons "Change" and the `/crafting?add=` deep link.
 - **`/qm-help`** (`commands/help.ts`): every other command and its subcommands with their localized
   descriptions; commands with `default_member_permissions` only for users holding those permissions.
@@ -130,7 +139,10 @@ Polls `app.history` every 30 s per server with a channel and a level other than 
 `stock` = share/unshare/give with `guild_id` = the server, and stock add/remove/adjust/move/merge/give whose
 `details.sharedIn` holds it; `blueprints` = blueprint add/remove by the server's active members; `all` =
 both). One line per row in the server's base language (`logLine`, people as mentions, `allowedMentions`
-none), packed into messages of ≤ 2000 characters; then `logs_after` moves forward (only if `/qm-setup` did not
+none), packed into messages of ≤ 2000 characters. With thumbnails (`thumbs.ts`) and the server's pictures on (`/qm-setup`) a row whose material, item or
+crafted item has one becomes a Components V2 section with it beside the line, consecutive rows without one share
+a text display, packed by `packSections` within 40 components and 4000 characters per message (no thumbnail
+among a round's rows: plain messages as before); then `logs_after` moves forward (only if `/qm-setup` did not
 reset it meanwhile). Components show their label and stats instead of a quality; an adjust that changed
 their stats shows old → new stats. A new channel or level sets `logs_after` to the newest row, so the past is never posted.
 Discord errors other than an unusable channel are retried next round; an unusable channel's lines are skipped.

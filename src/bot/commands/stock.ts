@@ -26,6 +26,7 @@ import { bySubcommand, type BotCommand, type CommandContext } from '../registry.
 import { accessOf, memberInfo, searchMembers } from '../roster.ts';
 import { findGuildSettings } from '../settings.ts';
 import { escapeMarkdown } from '../markdown.ts';
+import { addHead, thumbSection, thumbUrl } from '../thumbs.ts';
 import { customId, panel, textField, textValue, webAppButton, webAppPath } from '../ui.ts';
 
 const PAGE_SIZE = 20;
@@ -386,11 +387,17 @@ async function listPanel(area: Area, db: Db, actor: { userId: string; guildId: s
   return panel(container);
 }
 
-/** The reply after a booking: what happened, a button to the list and the web app link. */
-function bookedReply(area: Area, text: string, lang: Lang) {
+/**
+ * The reply after a booking: what happened, a button to the list and the web app link. With a thumbnail of the
+ * batch's material or item (`uuid`) a Components V2 message: the text beside it, the buttons below.
+ */
+function bookedReply(area: Area, text: string, lang: Lang, uuid?: string | null) {
   const mine = new ButtonBuilder().setCustomId(customId(area.name, 'mine'))
     .setLabel(t(lang, area.components ? 'comps.btn.yours' : 'stock.btn.yourStock')).setStyle(ButtonStyle.Secondary);
-  return { content: text, components: [linkRow(area, lang, 'personal', mine)!], allowedMentions: { parse: [] } };
+  const row = linkRow(area, lang, 'personal', mine)!;
+  const thumb = thumbUrl(uuid);
+  if (thumb) return { components: [thumbSection(text, thumb), row], flags: MessageFlags.IsComponentsV2 as number, allowedMentions: { parse: [] } };
+  return { content: text, components: [row], allowedMentions: { parse: [] } };
 }
 
 // --- input -----------------------------------------------------------------------------------
@@ -472,7 +479,7 @@ function typedStats(interaction: ModalSubmitInteraction, entry: MaterialEntry | 
 
 async function onModal(area: Area, interaction: ModalSubmitInteraction, db: Db, lang: Lang) {
   const [, action, ...rest] = interaction.customId.split(':');
-  const reply = (text: string) => bookedReply(area, text, lang);
+  const reply = (text: string, uuid: string | null | undefined) => bookedReply(area, text, lang, uuid);
   await answer(interaction, lang, async () => {
     const access = await requireMember(db, interaction);
     const actor = actorOf(access);
@@ -484,32 +491,37 @@ async function onModal(area: Area, interaction: ModalSubmitInteraction, db: Db, 
       const shareIn = [...interaction.fields.getCheckboxGroup('share')];
       if (area.components) {
         const stats = typedStats(interaction, (await materialCatalog(db, lang)).get(uuid));
-        return reply(await bookAdd(db, actor, { kind, uuid, locationUuid, quality: stock.COMPONENT_QUALITY, amount, shareIn, stats }, lang));
+        return reply(await bookAdd(db, actor, { kind, uuid, locationUuid, quality: stock.COMPONENT_QUALITY, amount, shareIn, stats }, lang), uuid);
       }
       const quality = parseQuality(textValue(interaction, 'quality'));
       if (quality === null) throw new UserError('stock.err.invalidQuality');
-      return reply(await bookAdd(db, actor, { kind, uuid, locationUuid, quality, amount, shareIn }, lang));
+      return reply(await bookAdd(db, actor, { kind, uuid, locationUuid, quality, amount, shareIn }, lang), uuid);
     }
     if (action === 'share') {
-      return reply(await bookShare(db, actor, Number(rest[0]), [...interaction.fields.getCheckboxGroup('share')], lang));
+      const batchId = Number(rest[0]);
+      const text = await bookShare(db, actor, batchId, [...interaction.fields.getCheckboxGroup('share')], lang);
+      const shared = (await describe(db, actor, batchId, lang))?.batch;
+      return reply(text, shared && (shared.resourceUuid ?? shared.itemUuid));
     }
     const [id, expected, target] = rest as [string, string, string | undefined];
     const batchId = Number(id);
     const batch = (await describe(db, actor, batchId, lang))?.batch;
     if (!batch) throw new UserError('stock.err.batchNotFound');
     const amount = checkAmount(textValue(interaction, 'amount'), batch.kind, action === 'adj');
-    if (action === 'rm') return reply(await bookChange(db, actor, { op: 'remove', batchId, amount, expected }, lang));
+    // The thumbnail of what the batch holds (also after a give or when it went empty)
+    const uuid = batch.resourceUuid ?? batch.itemUuid;
+    if (action === 'rm') return reply(await bookChange(db, actor, { op: 'remove', batchId, amount, expected }, lang), uuid);
     if (action === 'adj') {
       const stats = area.components ? typedStats(interaction, (await materialCatalog(db, lang)).get(batch.itemUuid!)) : undefined;
-      return reply(await bookChange(db, actor, { op: 'adjust', batchId, amount, expected, stats }, lang));
+      return reply(await bookChange(db, actor, { op: 'adjust', batchId, amount, expected, stats }, lang), uuid);
     }
-    if (action === 'mv') return reply(await bookChange(db, actor, { op: 'move', batchId, amount, expected, toLocationUuid: target! }, lang));
+    if (action === 'mv') return reply(await bookChange(db, actor, { op: 'move', batchId, amount, expected, toLocationUuid: target! }, lang), uuid);
     if (action === 'give') {
       const entry = await rosterEntry(db, access.guildId, target!);
       if (!entry?.active) throw new UserError('stock.err.holderNotMember');
       return reply(await bookChange(db, actor, {
         op: 'give', batchId, amount, expected, toOwnerUserId: target!, toOwnerName: entry.displayName,
-      }, lang));
+      }, lang), uuid);
     }
     throw new Error(`Unexpected modal ${interaction.customId}`);
   });
@@ -669,9 +681,9 @@ function stockCommandOf(area: Area): BotCommand {
           p.sharedIn.length ? `${ctx.t('stock.org')} (${escapeMarkdown(p.holderName ?? '?')})` : ctx.t('stock.personal'),
         ].filter(Boolean).join(' · ')}`);
         if (found.length > MAX_FIND) lines.push(ctx.t('bp.who.more', { count: found.length - MAX_FIND }));
-        const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(found.length
+        const container = addHead(new ContainerBuilder(), found.length
           ? [ctx.t('stock.find.title', { material: name, min: minText, count: found.length }), ...lines].join('\n')
-          : ctx.t('stock.find.none', { material: name, min: minText })));
+          : ctx.t('stock.find.none', { material: name, min: minText }), thumbUrl(material.uuid));
         // Your own batches and this org's: the web app's "All" holds both
         const row = linkRow(area, ctx.lang, 'all');
         if (row) container.addActionRowComponents(row);

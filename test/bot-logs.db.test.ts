@@ -1,7 +1,10 @@
 // Runs against TEST_DATABASE_URL only; the web, bot, app and catalog schemas there are dropped and recreated.
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { DiscordAPIError, type Client } from 'discord.js';
+import { DiscordAPIError, MessageFlags, type Client } from 'discord.js';
 import { type Db } from '../src/db/client.ts';
 import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
@@ -182,5 +185,52 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
       `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** Q950 · Test Station`,
       `📕 ${olga} trägt Bauplan aus: **${de}**`,
     ]);
+  });
+
+  it('posts lines with a thumbnail as Components V2 sections, and plain text without any', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'qm-thumbs-'));
+    const env = { THUMBS_URL: process.env.THUMBS_URL, THUMBS_DIR: process.env.THUMBS_DIR };
+    try {
+      writeFileSync(join(dir, 'thumbs.json'), JSON.stringify({ [U.metal]: 'deadbeef' }));
+      process.env.THUMBS_URL = 'https://cdn.example/t/';
+      process.env.THUMBS_DIR = dir;
+      const sent = new Map<string, { content?: string; flags?: number; components?: { toJSON(): unknown }[] }[]>([[CHANNEL_G, []], [CHANNEL_H, []]]);
+      const client = { channels: { fetch: async (id: string) => ({ isSendable: () => true, send: async (m: never) => void sent.get(id)!.push(m) }) } };
+      const poster = new LogsPoster(client as unknown as Client, db, quiet);
+      await poster.round(); // catch up with the history so far
+      sent.forEach((list) => (list.length = 0));
+      // G (level blueprints): the blueprint only, it has no thumbnail; H (all): the blueprint and the shared metal
+      await addBlueprint(db, OLGA, U.blueprint2, 'bot');
+      const b = (await add(db, mia, { ...metal, quality: 960, amount: '1' })).batch!;
+      await share(db, mia, { batchId: b.id, guildIds: [H] });
+      await poster.round();
+      const [g] = sent.get(CHANNEL_G)!;
+      assert.equal(sent.get(CHANNEL_G)!.length, 1);
+      assert.match(g!.content!, /^📘 /);
+      assert.equal(g!.components, undefined);
+      const [h, ...more] = sent.get(CHANNEL_H)!;
+      assert.equal(more.length, 0);
+      assert.equal(h!.content, undefined);
+      assert.ok(h!.flags! & MessageFlags.IsComponentsV2);
+      const json = h!.components!.map((c) => c.toJSON()) as { type: number; content?: string; components?: { content: string }[]; accessory?: { media: { url: string } } }[];
+      assert.deepEqual(json.map((c) => c.type), [10, 9]);
+      assert.match(json[0]!.content!, /^📘 /);
+      assert.equal(json[1]!.components![0]!.content, `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** Q960 · Test Station`);
+      assert.equal(json[1]!.accessory!.media.url, `https://cdn.example/t/l/${U.metal}.deadbeef.avif`);
+      // Pictures switched off in /qm-setup: the same line as plain text
+      await updateGuildSettings(db, H, { logsThumbs: false });
+      sent.forEach((list) => (list.length = 0));
+      await share(db, mia, { batchId: b.id, guildIds: [] });
+      await poster.round();
+      const [plain] = sent.get(CHANNEL_H)!;
+      assert.match(plain!.content!, /Testmetall/);
+      assert.equal(plain!.components, undefined);
+    } finally {
+      for (const [k, v] of Object.entries(env)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

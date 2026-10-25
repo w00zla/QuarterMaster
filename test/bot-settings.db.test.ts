@@ -23,7 +23,7 @@ describe('bot guild settings (database)', { skip: url ? false : 'TEST_DATABASE_U
 
   it('creates org and bot settings with defaults on first use, idempotently', async () => {
     const first = await ensureGuild(db, G, 'Test Org');
-    assert.deepEqual(first, { memberRoleIds: [], baseLang: 'en', logsChannelId: null, logsLevel: 'stock', boardChannelId: null, boardStyle: 'list', boardTitle: null, boardSubtitle: null });
+    assert.deepEqual(first, { memberRoleIds: [], baseLang: 'en', logsChannelId: null, logsLevel: 'stock', logsThumbs: true, boardChannelId: null, boardStyle: 'list', boardTitle: null, boardSubtitle: null });
     await ensureGuild(db, G, 'Renamed Org');
     const [row] = await db.execute<{ name: string }>(sql`SELECT name FROM app.org WHERE guild_id = ${G}`);
     assert.equal(row!.name, 'Renamed Org');
@@ -32,12 +32,13 @@ describe('bot guild settings (database)', { skip: url ? false : 'TEST_DATABASE_U
   it('updates roles in app.org and bot settings in bot.guild, leaving the rest alone', async () => {
     await updateGuildSettings(db, G, { memberRoleIds: ['400000000000000001', '400000000000000002'] });
     await updateGuildSettings(db, G, { baseLang: 'de', logsChannelId: '500000000000000001' });
-    const s = await updateGuildSettings(db, G, { logsLevel: 'off' });
+    const s = await updateGuildSettings(db, G, { logsLevel: 'off', logsThumbs: false });
     assert.deepEqual(s, {
       memberRoleIds: ['400000000000000001', '400000000000000002'],
       baseLang: 'de',
       logsChannelId: '500000000000000001',
       logsLevel: 'off',
+      logsThumbs: false,
       boardChannelId: null,
       boardStyle: 'list',
       boardTitle: null,

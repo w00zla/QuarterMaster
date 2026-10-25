@@ -3,8 +3,9 @@
 // of the history row); level `blueprints` the blueprints its active members add or remove; `all` both.
 // Unshared stock and refinery jobs are private and never posted. The source is app.history; `bot.guild.logs_after` marks the last row
 // handled, so a restart neither loses nor repeats lines (the mark moves after each message; a crash between
-// a post and its mark repeats at most that message).
-import { DiscordAPIError, RESTJSONErrorCodes, type Client } from 'discord.js';
+// a post and its mark repeats at most that message). Rows whose material, item or crafted item has a thumbnail
+// (src/bot/thumbs.ts) are posted as Components V2 sections with it beside the line; without any, plain text.
+import { DiscordAPIError, MessageFlags, RESTJSONErrorCodes, TextDisplayBuilder, type Client } from 'discord.js';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { rows } from '../db/query.ts';
@@ -15,6 +16,7 @@ import { blueprintCatalog } from './blueprints.ts';
 import { t, type Lang, type MessageKey } from './i18n.ts';
 import { escapeMarkdown } from './markdown.ts';
 import type { LogsLevel } from './settings.ts';
+import { thumbSection, thumbUrl } from './thumbs.ts';
 
 export interface LogRow {
   id: number;
@@ -36,6 +38,9 @@ export interface LogRow {
 const BATCH = 50;
 // Discord's limit per message
 const MAX_MESSAGE = 2000;
+// Discord's limits per Components V2 message: components (nested ones included) and text over all text displays
+const MAX_COMPONENTS = 40;
+const MAX_V2_TEXT = 4000;
 
 /** This org's rows after `after` for the level, oldest first. */
 export function logRows(db: Db, guildId: string, after: number, level: Exclude<LogsLevel, 'off'>, limit = BATCH): Promise<LogRow[]> {
@@ -62,6 +67,8 @@ export interface LogNames {
   stats?: (uuid: string, stats: Record<string, string> | undefined) => string | null;
   location: (uuid: string | undefined) => string;
   blueprint: (uuid: string) => string;
+  // The thumbnail URL of what a row is about (a blueprint: its crafted item); null without one
+  thumb?: (r: LogRow) => string | null;
 }
 
 /** One line for a row as the channel of `guildId` shows it; people as mentions (rendered as names, never pinging). */
@@ -126,6 +133,56 @@ export function messagesOf(lines: string[]): string[] {
   return packRows(lines.map((line, id) => ({ id, line }))).map((m) => m.text);
 }
 
+/** A part of a Components V2 log message: one row's line beside its thumbnail, or consecutive lines without one. */
+export interface LogBlock { text: string; thumb: string | null }
+
+/**
+ * Lines with and without thumbnails packed into as few Components V2 messages as Discord takes: a line with a
+ * thumbnail is a section (section, text display, thumbnail: 3 components), consecutive lines without one share
+ * one text display; at most 40 components and 4000 characters of text per message. `lastId` as in packRows.
+ */
+export function packSections(items: { id: number; line: string; thumb: string | null }[]): { blocks: LogBlock[]; lastId: number }[] {
+  const messages: { blocks: LogBlock[]; lastId: number }[] = [];
+  let blocks: LogBlock[] = [];
+  let components = 0;
+  let chars = 0;
+  let lastId = 0;
+  for (const { id, line, thumb } of items) {
+    // At most 2000 like a plain message: a single line always fits into an empty message
+    const text = line.length > MAX_MESSAGE ? `${line.slice(0, MAX_MESSAGE - 1)}…` : line;
+    const joins = () => !thumb && blocks.length > 0 && blocks[blocks.length - 1]!.thumb === null;
+    const fits = () => (joins() ? chars + 1 + text.length <= MAX_V2_TEXT
+      : components + (thumb ? 3 : 1) <= MAX_COMPONENTS && chars + text.length <= MAX_V2_TEXT);
+    if (blocks.length && !fits()) {
+      messages.push({ blocks, lastId });
+      blocks = [];
+      components = 0;
+      chars = 0;
+    }
+    if (joins()) {
+      const prev = blocks[blocks.length - 1]!;
+      blocks[blocks.length - 1] = { text: `${prev.text}\n${text}`, thumb: null };
+      chars += 1 + text.length;
+    } else {
+      blocks.push({ text, thumb });
+      components += thumb ? 3 : 1;
+      chars += text.length;
+    }
+    lastId = id;
+  }
+  if (blocks.length) messages.push({ blocks, lastId });
+  return messages;
+}
+
+/** A packed message as Components V2 (sections and text displays), pinging nobody. */
+export function sectionMessage(blocks: LogBlock[]) {
+  return {
+    components: blocks.map((b) => (b.thumb ? thumbSection(b.text, b.thumb) : new TextDisplayBuilder().setContent(b.text))),
+    flags: MessageFlags.IsComponentsV2 as number,
+    allowedMentions: { parse: [] },
+  };
+}
+
 /** Catalog names in `lang`, retired ones too. */
 async function namesFor(db: Db, lang: Lang, logRowsList: LogRow[]): Promise<LogNames> {
   const [materials, locations, blueprints] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang)];
@@ -147,6 +204,8 @@ async function namesFor(db: Db, lang: Lang, logRowsList: LogRow[]): Promise<LogN
     location: (uuid) => (uuid ? locations.get(uuid)?.short ?? missing.get(uuid) ?? '?' : '?'),
     // The catalog holds retired blueprints too
     blueprint: (uuid) => blueprints.byUuid.get(uuid)?.label ?? '?',
+    // A blueprint shows the item it crafts
+    thumb: (r) => thumbUrl(r.targetKind === 'blueprint' ? blueprints.byUuid.get(r.targetUuid)?.outputUuid : r.targetUuid),
   };
 }
 
@@ -158,7 +217,7 @@ class UnusableChannel extends Error {}
 
 type Log = (message: string, err?: unknown) => void;
 
-interface LogsGuild { guildId: string; channelId: string; lang: Lang; level: Exclude<LogsLevel, 'off'>; after: number | null }
+interface LogsGuild { guildId: string; channelId: string; lang: Lang; level: Exclude<LogsLevel, 'off'>; after: number | null; thumbs: boolean }
 
 /** Polls the history and posts each org's new lines into its logs channel. */
 export class LogsPoster {
@@ -190,7 +249,8 @@ export class LogsPoster {
     this.running = true;
     try {
       const guilds = await rows<LogsGuild>(this.db, sql`
-        SELECT guild_id AS "guildId", logs_channel_id AS "channelId", base_lang AS lang, logs_level AS level, logs_after::int AS after
+        SELECT guild_id AS "guildId", logs_channel_id AS "channelId", base_lang AS lang, logs_level AS level, logs_after::int AS after,
+          logs_thumbs AS thumbs
         FROM bot.guild WHERE logs_channel_id IS NOT NULL AND logs_level <> 'off' AND left_at IS NULL`);
       for (const g of guilds) {
         try {
@@ -217,10 +277,10 @@ export class LogsPoster {
     const last = found[found.length - 1]!.id;
     const names = await namesFor(this.db, g.lang, found);
     // A row that cannot be worded is skipped, it must not stop the server's log for good
-    const items: { id: number; line: string }[] = [];
+    const items: { id: number; line: string; thumb: string | null }[] = [];
     for (const r of found) {
       try {
-        items.push({ id: r.id, line: logLine(r, g.guildId, names, g.lang) });
+        items.push({ id: r.id, line: logLine(r, g.guildId, names, g.lang), thumb: g.thumbs ? names.thumb?.(r) ?? null : null });
       } catch (err) {
         this.log(`Logs for guild ${g.guildId}: history row ${r.id} skipped`, err);
       }
@@ -237,8 +297,12 @@ export class LogsPoster {
     try {
       const channel = await this.client.channels.fetch(g.channelId);
       if (!channel?.isSendable()) throw new UnusableChannel(`Logs channel ${g.channelId} of guild ${g.guildId} cannot take messages`);
-      for (const m of packRows(items)) {
-        await channel.send({ content: m.text, allowedMentions: { parse: [] } });
+      // A thumbnail among the lines: Components V2 sections; none (or none configured): plain text messages
+      const messages = items.some((i) => i.thumb)
+        ? packSections(items).map((m) => ({ payload: sectionMessage(m.blocks), lastId: m.lastId }))
+        : packRows(items).map((m) => ({ payload: { content: m.text, allowedMentions: { parse: [] } }, lastId: m.lastId }));
+      for (const m of messages) {
+        await channel.send(m.payload);
         if (!(await advance(m.lastId))) return;
       }
     } catch (err) {

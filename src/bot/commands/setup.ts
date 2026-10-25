@@ -88,6 +88,8 @@ export function setupPanel(s: GuildSettings, lang: Lang, check: { logs: ChannelC
       row(new StringSelectMenuBuilder().setCustomId(`${NAME}:logsLevel`).setPlaceholder(tr('setup.pick.logsLevel'))
         // The select shows only the chosen label, so it names what it is about
         .addOptions(LOGS_LEVELS.map((l) => ({ label: `${tr('setup.logs')}: ${tr(`setup.level.${l}`)}`, value: l, default: l === s.logsLevel })))),
+      row(new StringSelectMenuBuilder().setCustomId(`${NAME}:logsThumbs`).setPlaceholder(tr('setup.pick.logsThumbs'))
+        .addOptions((['on', 'off'] as const).map((v) => ({ label: tr(`setup.thumbs.${v}`), value: v, default: (v === 'on') === s.logsThumbs })))),
     ]],
     [section('setup.section.board', `-# ${tr('setup.boardInfo')}`, !!s.boardChannelId && status(check.board)), [
       row(new ChannelSelectMenuBuilder().setCustomId(`${NAME}:boardChannel`).setPlaceholder(tr('setup.pick.boardChannel'))
@@ -137,6 +139,7 @@ export function patchFor(field: string, values: string[]): Partial<GuildSettings
     case 'logsChannel': return { logsChannelId: values[0] ?? null };
     case 'boardChannel': return { boardChannelId: values[0] ?? null };
     case 'boardStyle': return (BOARD_STYLES as readonly string[]).includes(values[0] ?? '') ? { boardStyle: values[0] as BoardStyle } : null;
+    case 'logsThumbs': return values[0] === 'on' || values[0] === 'off' ? { logsThumbs: values[0] === 'on' } : null;
     case 'logsLevel': return (LOGS_LEVELS as readonly string[]).includes(values[0] ?? '') ? { logsLevel: values[0] as GuildSettings['logsLevel'] } : null;
     default: return null;
   }

@@ -1,0 +1,1 @@
+ALTER TABLE "bot"."guild" ADD COLUMN "logs_thumbs" boolean DEFAULT true NOT NULL;
