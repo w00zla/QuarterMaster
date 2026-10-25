@@ -65,12 +65,11 @@ const total = (p: Proposal) => fromMicro(rows(p).reduce((sum, x) => sum + toMicr
 const registered = (p: Proposal) => p.kind === "store" || p.kind === "missing";
 
 // The materials' columns, one head for every card (widths and the hidden ones kept), like the web app's
-// tables: the material takes the room left, quality and amount resize; the last column holds the chooser
+// tables: the material takes the room left, quality and amount resize (the column chooser in the panel head)
 const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: t("col.material"), width: 120, sortable: false, fill: true },
   { key: "quality", label: t("col.quality"), width: 40, sortable: false, hideable: true },
   { key: "amount", label: t("col.amount"), width: 88, sortable: false, hideable: true },
-  { key: "actions", label: "", width: 26, fixed: true, sortable: false },
 ]);
 // The compact rows' column gap (.table.compact in App.vue)
 const ROW_GAP = 8;
@@ -162,6 +161,7 @@ async function registerAll(value: string) {
   <section class="panel refinery">
     <div class="head">
       <span class="head-title no-grow">{{ t("refinery.title") }} <span class="head-count">{{ proposals.length }}</span></span>
+      <ColumnsButton :table="cols" :texts="columnsTexts()" :size="22" />
       <!-- What the scan detects: off, the terminal is not read -->
       <div class="chips filter">
         <Tooltip :text="t(jobsOn ? 'filter.on' : 'filter.off')">
@@ -182,9 +182,7 @@ async function registerAll(value: string) {
     <!-- The web app's table, compact (App.vue): the jobs scroll, the materials' column titles stick to its
          top; the columns always fit its width (measured on it) -->
     <div v-else class="table compact" :ref="cols.observe" :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }">
-      <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth">
-        <template #col-actions><ColumnsButton :table="cols" :texts="columnsTexts()" /></template>
-      </ColumnHead>
+      <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth" />
       <div class="jobs">
         <div v-for="p in proposals" :key="p.id" class="job">
           <!-- 1: the job badge, the station, the actions -->
@@ -217,13 +215,12 @@ async function registerAll(value: string) {
             </template>
             <span class="num total">{{ total(p) }} SCU</span>
           </div>
-          <!-- 3: the materials in the columns of the head (the last one empty: the chooser's) -->
+          <!-- 3: the materials in the columns of the head -->
           <div class="mats">
             <div v-for="(x, i) in rows(p)" :key="i" class="row">
               <span class="row-name"><Thumb :item="materialThumb(x.uuid)" size="s" :px="18" class="lead" />{{ materialName(x.uuid) }}</span>
               <span v-if="shown.has('quality')" class="num">{{ x.quality }}</span>
               <span v-if="shown.has('amount')" class="num">{{ x.scu }} SCU</span>
-              <span />
             </div>
           </div>
         </div>
@@ -318,10 +315,9 @@ async function registerAll(value: string) {
   color: var(--text-3);
 }
 
-/* The total yield, aligned with the materials' amount column (the chooser's column and its gap after it) */
+/* The total yield, aligned with the materials' amount column */
 .total {
   margin-left: auto;
-  margin-right: 34px;
   color: var(--text);
 }
 

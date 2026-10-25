@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The icon button that opens the column chooser (ColumnsDialog.vue): in the companion in the head of a
-// table's action column, in the web app right of the filter chips. Shared by both: texts come in.
+// The icon button that opens the column chooser (ColumnsDialog.vue): in the companion in the panel head
+// left of the filter chips, in the web app right of them. Shared by both: texts come in.
 import { ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";

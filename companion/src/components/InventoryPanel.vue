@@ -6,8 +6,8 @@
 // screen is not read), then the proposals of every location as a compact table with resizable columns, one
 // row per stack (kind, name, quality, amount, location) or gear tile (kind, name, type, size, grade, stats,
 // pieces, location), each with
-// Register / Discard; the item's thumbnail in front of the name, or in the display "thumbs" (ViewToggle
-// next to the column chooser) larger in a column of its own; what the stored stock holds already stays dimmed without them (also in the overlay;
+// Register / Discard; the item's thumbnail in front of the name, or in the display "thumbs" larger
+// in a column of its own; what the stored stock holds already stays dimmed without them (also in the overlay;
 // counts and "Register all" only the rest). Registering (one or all, each at
 // its own location) asks first, with a switch per org to share right away. The overlay shows the
 // current location's only. The sightings behind the proposals, also the incomplete ones, are in the
@@ -104,7 +104,7 @@ const openRows = computed(() => rows.value.filter((r) => !r.inStock));
 
 // The table's columns (widths and the hidden ones kept per table; no sorting: the newest come first);
 // the last shown one takes the room left. Stacks: kind, quality and amount; gear: kind, catalog data, stats
-// and pieces. Every one but the name and the actions may be hidden (ColumnsButton in the actions' head).
+// and pieces. Every one but the name and the actions may be hidden (ColumnsButton in the panel head).
 // The display "thumbs" puts the thumbnail column first (`view` mirrors the table's, which owns it)
 const view = ref<TableView>("compact");
 const columns = computed<ColumnSpec[]>(() => [
@@ -215,6 +215,8 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   <section class="panel inventory">
     <div class="head">
       <span class="head-title no-grow">{{ t(`${part}.title`) }} <span class="head-count">{{ openRows.length }}</span></span>
+      <ViewToggle :table="cols" :texts="viewTexts()" :size="22" />
+      <ColumnsButton :table="cols" :texts="columnsTexts()" :size="22" />
       <!-- What the scan detects -->
       <div class="chips filter">
         <Tooltip v-for="k in partKinds" :key="k" :text="t(kinds.has(k) ? 'filter.on' : 'filter.off')">
@@ -244,10 +246,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
       :ref="cols.observe"
       :style="{ '--cols': cols.template.value, '--cols-min': `${cols.minWidth.value}px` }"
     >
-      <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth">
-        <template #col-register><ViewToggle :table="cols" :texts="viewTexts()" /></template>
-        <template #col-drop><ColumnsButton :table="cols" :texts="columnsTexts()" /></template>
-      </ColumnHead>
+      <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth" />
       <div v-for="r in rows" :key="r.id" class="row data-row" :class="{ done: r.inStock }">
         <Thumb v-if="view === 'thumbs'" :item="r.thumb" size="m" :px="48" />
         <span v-if="shown.has('kind')" class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>

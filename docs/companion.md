@@ -167,8 +167,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   station and the actions (registering blue, storing a crate on green, removing outlined); the state tag
   (new blue, finished green, not at the terminal yellow), an icon-only link badge (accent: registered as a
   job, dimmed: not yet), the time left and the end, the total yield in SCU at the right; the materials
-  as compact rows in the columns of one head above the cards (material, quality, amount and the column
-  chooser's column; see "Tables"), each with the S thumbnail (18 px) in front of the name (no display toggle). German "Eintragen" for registering everywhere.
+  as compact rows in the columns of one head above the cards (material, quality, amount; see
+  "Tables"), each with the S thumbnail (18 px) in front of the name (no display toggle). German "Eintragen" for registering everywhere.
 - **Tables** (Components, Resources, the refinery's materials, Blueprints; 2026-10-20): the web app's
   (`useTableColumns` + `ColumnHead` from `adminapp/src`, ui.css `.table`/`.row`/`.cols-head`, the table
   measured with `observe`: the columns always fit, growing takes the free room and then narrows the
@@ -177,7 +177,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   takes the room left (the location, the material, the blueprint: no grip); widths and hidden columns in
   localStorage `qm.companion.{comps,stock,refinery,unlocks}.columns`. A first try with an "Excel" mode
   (only the dragged column changes, sideways scroll) was dropped the same day: the actions scrolled out. The icon button in the
-  head of the action column (`ColumnsButton.vue`, its tooltip "Spalten wählen"; both in `webapp/src/components/`
+  panel head left of the filter chips (since 2026-10-25, before in the head of the action column; `ColumnsButton.vue`, its tooltip "Spalten wählen"; both in `webapp/src/components/`
   since 2026-10-21, shared with the web app, texts via `columnsTexts()`) opens `ColumnsDialog.vue`:
   a switch per hideable column (all but the name and the actions), applied and kept right away. The
   location in the mono face (like the overlay's). Lists in dialogs scroll inside them (max. 40–50 vh) and
@@ -371,7 +371,7 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   UI language; items show none of these: every bookable item is of the type "Misc.", checked 2026-10-20),
   the stats ("Coolant Rating +12.5 % · Integrity ±0.0 %"; without any gain, or when the tooltip showed none,
   a dimmed "Standard"/"Default" since 0.2.1, before a "–"), the pieces (the overlay shows them only above 1). Both: location last, Register /
-  Discard (fixed 26 px each, the column chooser in the head of the second). Columns: see "Tables" (no
+  Discard (fixed 26 px each). Columns: see "Tables" (no
   sorting: the newest first).
 - **Every location collects its own** sightings (`inventorySync.ts`: an `InventoryScan` and a
   `ComponentScan` per location, keys and ids prefixed with the location): a read belongs to the location

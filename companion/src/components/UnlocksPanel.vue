@@ -5,7 +5,7 @@
 // (ambiguous ones after picking the variant) or all at once after a confirmation. In the head after the
 // count the filter "Unlocks" (off: Game.log's unlocks are not read, state.ts), then the old logs' scan
 // progress while it runs; each row with the same icon-only badge and the crafted item's thumbnail (in front of
-// the name, or in the display "thumbs", ViewToggle next to the column chooser, larger in a column of its own).
+// the name, or in the display "thumbs", larger in a column of its own).
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -207,16 +207,14 @@ async function measureStatus() {
   ctx.font = `600 12px ${family}`;
   const button = ctx.measureText(t("unlocks.add")).width + BUTTON_EXTRA;
   ctx.font = `600 11px ${family}`;
-  // Its title and the display toggle's and column chooser's buttons after it
-  const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1 + 2 * COLUMNS_BUTTON;
+  // Its title
+  const head = ctx.measureText(t("col.state").toUpperCase()).width * 1.1;
   statusWidth.value = Math.ceil(Math.max(...texts, pick, button, head));
 }
-const COLUMNS_BUTTON = 16 + 4;
 
 // The table's columns (widths and the hidden ones kept; no sorting: the newest first), like the web app's
-// tables: the blueprint takes the room left, the unlock time resizes, the status (the actions, with the
-// column chooser in its head) is as wide as its widest content. The display "thumbs" puts the thumbnail
-// column first (`view` mirrors the table's, which owns it)
+// tables: the blueprint takes the room left, the unlock time resizes, the status (the actions) is as wide
+// as its widest content. The display "thumbs" puts the thumbnail column first (`view` mirrors the table's, which owns it)
 const view = ref<TableView>("compact");
 const columns = computed<ColumnSpec[]>(() => [
   ...(view.value === "thumbs" ? [{ key: "thumb", label: "", width: 48, fixed: true, sortable: false }] : []),
@@ -249,6 +247,8 @@ watch(connected, (c) => {
   <section class="panel unlocks">
     <div class="head">
       <span class="head-title no-grow">{{ t("unlocks.title") }} <span class="head-count">{{ openRows.length }}</span></span>
+      <ViewToggle :table="table" :texts="viewTexts()" :size="22" />
+      <ColumnsButton :table="table" :texts="columnsTexts()" :size="22" />
       <!-- What the scan detects: off, Game.log's unlocks are not read -->
       <div class="chips filter">
         <Tooltip :text="t(unlocksOn ? 'filter.on' : 'filter.off')">
@@ -276,11 +276,7 @@ watch(connected, (c) => {
     <div v-if="!rows.length" class="empty-line">{{ t("unlocks.empty") }}</div>
     <!-- The web app's table, compact (App.vue): the columns always fit its width (measured on it) -->
     <div v-else class="table compact" :class="{ thumbs: view === 'thumbs' }" :ref="table.observe" :style="cols">
-      <ColumnHead :columns="table.columns.value" :sort="table.sort.value" @resize="table.startResize" @reset="table.resetWidth">
-        <template #col-state>
-          <span class="spacer" /><ViewToggle :table="table" :texts="viewTexts()" /><ColumnsButton :table="table" :texts="columnsTexts()" />
-        </template>
-      </ColumnHead>
+      <ColumnHead :columns="table.columns.value" :sort="table.sort.value" @resize="table.startResize" @reset="table.resetWidth" />
       <div v-for="row in rows" :key="row.name" class="row item" :class="{ done: row.state !== 'new' && row.state !== 'pick' }">
         <Thumb v-if="view === 'thumbs'" :item="thumbOf(row)" size="m" :px="48" />
         <span v-if="shown.has('kind')" class="tag kind"><Icon name="blueprint" :size="11" /></span>
