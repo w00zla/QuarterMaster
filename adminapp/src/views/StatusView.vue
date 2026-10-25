@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Is everything running and do the data hold: services (catalog, UEX pull, the bot's logs channels),
 // the user data checks, the catalog's counts and gaps, the item thumbnails' coverage. Ordering: by state, then by name.
+import { ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import HelpTip from "../components/HelpTip.vue";
 import Icon from "../components/Icon.vue";
@@ -14,8 +15,8 @@ const status = useFetch<StatusResponse>(() => "/status", false);
 const checks = useFetch<DataCheck[]>(() => "/checks");
 const overview = useFetch<Overview>(() => "/overview");
 const thumbs = useFetch<ThumbsResponse>(() => "/thumbs");
-// Items and materials without a thumbnail: the first ones by name, the rest as a count
-const MISSING_SHOWN = 40;
+// Items and materials without a thumbnail: a closed list, opened it scrolls after five rows
+const missingOpen = ref(false);
 
 function reload() {
   status.reload();
@@ -228,11 +229,18 @@ const TEXT_ENTITIES: Record<string, string> = {
             <dt>Without one</dt>
             <dd :class="{ faint: !thumbs.data.value.missing.length }">
               <template v-if="!thumbs.data.value.missing.length">0</template>
-              <template v-for="(m, i) in thumbs.data.value.missing.slice(0, MISSING_SHOWN)" :key="m.uuid">
-                <template v-if="i">, </template>
-                <RouterLink :to="m.kind === 'item' ? `/items/${m.uuid}` : `/materials/${m.uuid}`">{{ m.name }}</RouterLink>
+              <template v-else>
+                <button type="button" class="missing-toggle" :aria-expanded="missingOpen" @click="missingOpen = !missingOpen">
+                  <Icon :name="missingOpen ? 'chevron-down' : 'chevron-right'" :size="14" />
+                  {{ thumbs.data.value.missing.length.toLocaleString() }}
+                </button>
+                <ul v-if="missingOpen" class="missing-list">
+                  <li v-for="m in thumbs.data.value.missing" :key="m.uuid">
+                    <RouterLink :to="m.kind === 'item' ? `/items/${m.uuid}` : `/materials/${m.uuid}`">{{ m.name }}</RouterLink>
+                    <span class="faint mono">{{ m.type ?? "material" }}</span>
+                  </li>
+                </ul>
               </template>
-              <span v-if="thumbs.data.value.missing.length > MISSING_SHOWN" class="faint"> +{{ thumbs.data.value.missing.length - MISSING_SHOWN }} more</span>
             </dd>
           </dl>
         </div>
@@ -243,6 +251,36 @@ const TEXT_ENTITIES: Record<string, string> = {
 </template>
 
 <style scoped>
+/* The thumbnails' missing list: closed, the whole line toggles; open, five rows high, then it scrolls */
+.missing-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.missing-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: calc(5 * 22px);
+  overflow: auto;
+}
+
+.missing-list li {
+  display: flex;
+  gap: 8px;
+  height: 22px;
+  align-items: center;
+  white-space: nowrap;
+}
+
 .scroll {
   overflow: auto;
 }
