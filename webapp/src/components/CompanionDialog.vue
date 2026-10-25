@@ -88,19 +88,19 @@ async function copyKey() {
             <span v-if="release?.version" class="tag mono">v{{ release.version }}</span>
           </div>
           <div v-if="release && !release.version" class="faint">{{ t("companion.noRelease") }}</div>
+          <div v-if="release?.version" class="downloads">
+            <a
+              v-for="(d, i) in downloads"
+              :key="d.file"
+              class="btn small get"
+              :class="i === 0 && d.platform === own ? 'primary' : 'outline'"
+              :href="d.url"
+              download
+            >
+              <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }}
+            </a>
+          </div>
         </div>
-      </div>
-      <div v-if="release?.version" class="downloads">
-        <a
-          v-for="(d, i) in downloads"
-          :key="d.file"
-          class="btn small get"
-          :class="i === 0 && d.platform === own ? 'primary' : 'outline'"
-          :href="d.url"
-          download
-        >
-          <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }}
-        </a>
       </div>
     </div>
 
@@ -123,11 +123,8 @@ async function copyKey() {
 </template>
 
 <style scoped>
-/* The app: logo left of name and version, the downloads in one row below (beside the logo three do not fit) */
+/* The app: logo left of name and version, the downloads below them (wrapping when they do not fit) */
 .app-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-dim);
 }
@@ -141,7 +138,7 @@ async function copyKey() {
 .downloads {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .logo {

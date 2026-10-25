@@ -366,6 +366,7 @@ onUnmounted(() => {
 
 .owners,
 .stats {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -382,6 +383,7 @@ onUnmounted(() => {
 }
 
 .type-text {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
