@@ -105,7 +105,7 @@ describe('board (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }
     assert.equal(discord.posts.length, 1);
     assert.match(discord.posts[0]!, /## Org G/);
     assert.match(discord.posts[0]!, /👥 \*\*2\*\* Members · 📘 \*\*1 \/ \d+\*\* Blueprints/);
-    assert.match(discord.posts[0]!, /- \*\*Test Metal\*\* · 12\.5 SCU · ★★★★★ 910 · 2 holders/);
+    assert.match(discord.posts[0]!, /- \*\*Test Metal\*\* · 12\.5 SCU · ★★★★★ \*\*910\*\* · 2 holders/);
     assert.ok(await messageId(), 'the message ID is stored');
 
     // Nothing marked: no work at all
@@ -134,7 +134,7 @@ describe('board (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }
     poster.markGuild(G);
     await poster.round();
     assert.equal(discord.edits.length, 2);
-    assert.match(discord.edits[1]![1], /13\.5 SCU · ★★★★★ 950/);
+    assert.match(discord.edits[1]![1], /13\.5 SCU · ★★★★★ \*\*950\*\*/);
 
     // Deleted in Discord: a new post, its ID stored
     const old = (await messageId())!;
@@ -191,7 +191,7 @@ describe('board (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }
         await poster.round();
       }
       assert.equal(discord.posts.length + discord.edits.length, posted + 1);
-      assert.match(discord.edits.at(-1)![1], /★★★★★ 990/);
+      assert.match(discord.edits.at(-1)![1], /★★★★★ \*\*990\*\*/);
     } finally {
       await listening.unlisten();
     }

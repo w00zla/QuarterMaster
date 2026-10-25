@@ -88,10 +88,10 @@ async function describe(db: Db, actor: stock.Actor, batchId: number, lang: Lang)
 // is now (place · shares, its amount only where it differs from what was booked), line 3 small: the
 // material in your stock (only where that is more than this batch). Nothing said twice.
 
-/** "**Metal** Q900", a component "**Name · Cooler · S2 · B Military** · Integrity +5.0 %": what a booking was about. */
+/** "**Metal** · **Q900**", a component "**Name · Cooler · S2 · B Military** · Integrity +5.0 %": what a booking was about. */
 const subject = (p: Pick<ShownBatch, 'material' | 'component' | 'statsText'> & { batch: Pick<stock.Batch, 'quality'> }) =>
   (p.component ? [`**${escapeMarkdown(p.material)}**`, p.statsText && escapeMarkdown(p.statsText)].filter(Boolean).join(' · ')
-    : `**${escapeMarkdown(p.material)}** Q${p.batch.quality}`);
+    : `**${escapeMarkdown(p.material)}** · **Q${p.batch.quality}**`);
 
 const same = (a: string, b: string) => formatAmount(a) === formatAmount(b);
 
@@ -336,7 +336,7 @@ export function listLines(entries: ShownBatch[], scope: ListScope, userId: strin
       : scope === 'a' ? (p.batch.ownerUserId === userId ? tr('stock.personal') : escapeMarkdown(p.holderName ?? '?'))
       : p.sharedIn.length ? tr('stock.shared') : null;
     const parts = [
-      p.component ? escapeMarkdown(p.statsText ?? '') : `${p.batch.state === 'refining' ? '⚗️ ' : ''}Q${p.batch.quality}`,
+      p.component ? escapeMarkdown(p.statsText ?? '') : `${p.batch.state === 'refining' ? '⚗️ ' : ''}**Q${p.batch.quality}**`,
       amountText(lang, p.batch.quantity, p.batch.kind),
       escapeMarkdown(p.location),
       owner,
@@ -675,7 +675,7 @@ function stockCommandOf(area: Area): BotCommand {
         const name = escapeMarkdown(material.entry.label);
         const minText = min > 0 ? ctx.t('stock.find.min', { min }) : '';
         const lines = found.slice(0, MAX_FIND).map((p) => `- ${[
-          p.component ? escapeMarkdown(p.statsText ?? '') : `Q${p.batch.quality}`,
+          p.component ? escapeMarkdown(p.statsText ?? '') : `**Q${p.batch.quality}**`,
           amountText(ctx.lang, p.batch.quantity, p.batch.kind),
           escapeMarkdown(p.location),
           p.sharedIn.length ? `${ctx.t('stock.org')} (${escapeMarkdown(p.holderName ?? '?')})` : ctx.t('stock.personal'),

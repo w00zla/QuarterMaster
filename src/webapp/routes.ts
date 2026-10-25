@@ -233,6 +233,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
         unlockable: unlockable.has(e.uuid), outputUuid: e.outputUuid, thumb: (e.outputUuid && thumb.get(e.outputUuid)) ?? null,
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
+      magazineBlueprints: blueprints.magazineNames,
     } satisfies CatalogResponse);
   });
 

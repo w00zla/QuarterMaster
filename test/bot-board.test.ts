@@ -46,8 +46,8 @@ describe('board message', () => {
       '## Red\\_Hollow',
       '👥 **12** Members · 📘 **87 / 312** Blueprints\n📦 **1284.5 SCU / 38 pcs** Resources · 25 kinds · 7 locations'
         + '\n💠 **0 pcs** Gear · 0 kinds · 0 locations',
-      '### 📦 Resources\n- **Quantanium** · 42.5 SCU · ♛ 1000 · 1 holders\n- **Ore\\_1** · 99 SCU · ★★★★ 800 · 2 holders'
-        + '\n- **Weapon Barrel** · 8 pcs · ◌ 480 · 3 holders',
+      '### 📦 Resources\n- **Quantanium** · 42.5 SCU · ♛ **1000** · 1 holders\n- **Ore\\_1** · 99 SCU · ★★★★ **800** · 2 holders'
+        + '\n- **Weapon Barrel** · 8 pcs · ◌ **480** · 3 holders',
       `-# Updated <t:${at.getTime() / 1000}:R>`,
     ].join('\n'));
   });
@@ -55,7 +55,7 @@ describe('board message', () => {
   it('shows ship components in a section of their own, without a quality', () => {
     const cooler = { kind: 'item' as const, uuid: 'c1', component: true, name: 'Glacier', total: '3', bestQuality: 0, holders: 2 };
     const list = text(boardMessage(data([{ kind: 'item', uuid: 'i1', component: false, name: 'Weapon Barrel', total: '8', bestQuality: 480, holders: 3 }, cooler]), G, 'de', at));
-    assert.ok(list.includes('### 📦 Ressourcen\n- **Weapon Barrel** · 8 Stk. · ◌ 480 · 3 Halter\n### 💠 Ausrüstung\n- **Glacier** · 3 Stk. · 2 Halter'));
+    assert.ok(list.includes('### 📦 Ressourcen\n- **Weapon Barrel** · 8 Stk. · ◌ **480** · 3 Halter\n### 💠 Ausrüstung\n- **Glacier** · 3 Stk. · 2 Halter'));
     const table = text(boardMessage(data([cooler]), G, 'en', at, null, 'table'));
     assert.ok(table.includes('### 💠 Gear\n```\nGear item   Amount   Holders\nGlacier      3 pcs   2\n```'));
   });

@@ -42,7 +42,7 @@ describe('/qm-crafting', () => {
     assert.match(json, /⚒️ Blaster · S1 × 4/);
     assert.match(json, /Quality \*\*500\*\* \(default\) · Crafting time \*\*6m\*\*/);
     // The default 500 is raised to the slot's minimum 700; 4 × 0.25 = 1 SCU, 0.4 at Q ≥ 700 in stock
-    assert.match(json, /\*\*Metal\*\* · 1 SCU · Q ≥ 700 ★★★ · ❌ missing \*\*0.6 SCU\*\*/);
+    assert.match(json, /\*\*Metal\*\* · 1 SCU · \*\*Q ≥ 700\*\* ★★★ · ❌ missing \*\*0.6 SCU\*\*/);
     assert.match(json, /Uses the first 1 of 2 slots/);
     assert.match(json, /🟢 Damage: \*\*\+8\.0%\*\*/);
     assert.match(json, /qm-crafting:edit:bp-1:4:-/);

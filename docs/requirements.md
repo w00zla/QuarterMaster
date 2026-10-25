@@ -47,7 +47,7 @@ Only the structure is fixed for now; individual settings are added when a featur
 ## Blueprint registry
 
 - Global per user; **visible to the org** (unlike personal stock): `/qm-bp list member:` (a string option with autocomplete over active org members, by display name or RSI handle; Discord's user picker would offer everyone on the server) and `/qm-bp who` show what active org members registered. Default blueprints are not registered ("everyone has it").
-- Each game blueprint is registered on its own, also variants with the same name and recipe; labels tell them apart (size, grade + class, manufacturer, else differing tokens of the blueprint key).
+- Each game blueprint is registered on its own (except magazine blueprints: consumables, left out of every app since 2026-10-25), also variants with the same name and recipe; labels tell them apart (size, grade + class, else differing tokens of the blueprint key; no manufacturer, no size on FPS gear and magazines but attachments, no class on personal weapons).
 - `/qm-bp list` is grouped by blueprint category group (alphabetical, "other" last), alphabetical within; 20 per page with buttons.
 - Autocomplete searches the name in the user's language and in English (all words must match); names starting with the first word come first.
 

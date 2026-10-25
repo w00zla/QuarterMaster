@@ -53,9 +53,9 @@ describe('/qm-res bookings and lists (database)', { skip: url ? false : 'TEST_DA
   it('books removals from the modal and tells what is left', async () => {
     const b = (await add(db, mia, { ...metal, quality: 820, amount: '12,5' })).batch!;
     assert.equal(await bookChange(db, mia, { op: 'remove', batchId: b.id, amount: '2', expected: b.quantity }, 'en'),
-      '📤 Removed **2 SCU** · **Test Metal** Q820\nBatch: 10.5 SCU · Test Station · personal');
+      '📤 Removed **2 SCU** · **Test Metal** · **Q820**\nBatch: 10.5 SCU · Test Station · personal');
     assert.equal(await bookChange(db, mia, { op: 'remove', batchId: b.id, amount: '10.5', expected: '10.5' }, 'de'),
-      '📤 Entnommen **10.5 SCU** · **Testmetall** Q820\nBatch: leer · Test Station');
+      '📤 Entnommen **10.5 SCU** · **Testmetall** · **Q820**\nBatch: leer · Test Station');
   });
 
   it('refuses a booking against a batch that changed since the modal showed it', async () => {
@@ -68,12 +68,12 @@ describe('/qm-res bookings and lists (database)', { skip: url ? false : 'TEST_DA
   it('describes corrections by their result', async () => {
     const b = (await add(db, mia, { ...metal, quality: 600, amount: '5' })).batch!;
     assert.equal(await bookChange(db, mia, { op: 'adjust', batchId: b.id, amount: '6', expected: '5' }, 'en'),
-      '✏️ Corrected by **+1 SCU** · **Test Metal** Q600\nBatch: 6 SCU · Test Station · personal\n-# Test Metal in your resources: 10 SCU');
+      '✏️ Corrected by **+1 SCU** · **Test Metal** · **Q600**\nBatch: 6 SCU · Test Station · personal\n-# Test Metal in your resources: 10 SCU');
   });
 
   it('shares what it books in the ticked orgs, on top of the shares the batch already has', async () => {
     const text = await bookAdd(db, mia, { ...metal, quality: 900, amount: '2', shareIn: [G] }, 'en');
-    assert.equal(text, '📥 Booked **2 SCU** · **Test Metal** Q900\nTest Station · shared in Stock Cmd Org\n-# Test Metal in your resources: 12 SCU');
+    assert.equal(text, '📥 Booked **2 SCU** · **Test Metal** · **Q900**\nTest Station · shared in Stock Cmd Org\n-# Test Metal in your resources: 12 SCU');
     // Into an existing batch: its amount differs from the booked one and is shown
     assert.match(await bookAdd(db, mia, { ...metal, quality: 900, amount: '1', shareIn: [G2] }, 'en'), /\nBatch: 3 SCU · Test Station · shared in /);
     const [batch] = (await stockList(db, { scope: { personalOf: MIA } }, 'en')).filter((p) => p.batch.quality === 900);
@@ -86,15 +86,15 @@ describe('/qm-res bookings and lists (database)', { skip: url ? false : 'TEST_DA
 
   it('sets and takes back shares', async () => {
     const b = (await add(db, mia, { ...metal, quality: 500, amount: '1' })).batch!;
-    assert.equal(await bookShare(db, mia, b.id, [G, G2], 'en'), '📢 Shared in Second Org, Stock Cmd Org\n**Test Metal** Q500 · 1 SCU · Test Station');
-    assert.equal(await bookShare(db, mia, b.id, [], 'de'), '↩️ Nicht mehr geteilt\n**Testmetall** Q500 · 1 SCU · Test Station');
+    assert.equal(await bookShare(db, mia, b.id, [G, G2], 'en'), '📢 Shared in Second Org, Stock Cmd Org\n**Test Metal** · **Q500** · 1 SCU · Test Station');
+    assert.equal(await bookShare(db, mia, b.id, [], 'de'), '↩️ Nicht mehr geteilt\n**Testmetall** · **Q500** · 1 SCU · Test Station');
     await assert.rejects(bookShare(db, mia, b.id, [], 'en'), (err: unknown) => err instanceof UserError && err.key === 'stock.err.shareNoChange');
   });
 
   it('gives to a member: the batch becomes theirs, unshared', async () => {
     const b = (await add(db, mia, { ...metal, quality: 550, amount: '4' })).batch!;
     assert.equal(await bookChange(db, mia, { op: 'give', batchId: b.id, amount: '1', expected: '4', toOwnerUserId: OLGA, toOwnerName: 'Olga' }, 'en'),
-      '📦 Gave **1 SCU** · **Test Metal** Q550\nTo **Olga** · Test Station');
+      '📦 Gave **1 SCU** · **Test Metal** · **Q550**\nTo **Olga** · Test Station');
     const olgas = await stockList(db, { scope: { personalOf: OLGA } }, 'en');
     assert.ok(olgas.some((p) => p.batch.quality === 550 && p.batch.quantity === '1.000000' && !p.sharedIn.length));
   });
@@ -115,13 +115,13 @@ describe('/qm-res bookings and lists (database)', { skip: url ? false : 'TEST_DA
   it('lists shared stock with owners, all stock with your own marked, your own with what you share marked', async () => {
     await add(db, olga, { kind: 'item', uuid: U.gem, locationUuid: U.station, quality: 300, amount: '7', org: true });
     const org = listLines(await stockList(db, { scope: { guildId: G } }, 'en'), 'o', MIA, 0, 'en').lines;
-    assert.ok(org.includes('- Q300 · 7 pcs · Test Station · Olga'));
-    assert.ok(org.includes('- Q900 · 4 SCU · Test Station · Mia'));
+    assert.ok(org.includes('- **Q300** · 7 pcs · Test Station · Olga'));
+    assert.ok(org.includes('- **Q900** · 4 SCU · Test Station · Mia'));
     const all = listLines(await stockList(db, { scope: { allOf: MIA } }, 'en'), 'a', MIA, 0, 'en').lines;
-    assert.ok(all.includes('- Q300 · 7 pcs · Test Station · Olga'));
-    assert.ok(all.includes('- Q900 · 4 SCU · Test Station · Pers.'));
+    assert.ok(all.includes('- **Q300** · 7 pcs · Test Station · Olga'));
+    assert.ok(all.includes('- **Q900** · 4 SCU · Test Station · Pers.'));
     const own = listLines(await stockList(db, { scope: { personalOf: MIA } }, 'de'), 'p', MIA, 0, 'de').lines;
-    assert.ok(own.includes('- Q900 · 4 SCU · Test Station · geteilt'));
-    assert.ok(own.includes('- Q700 · 4 SCU · Test Station'));
+    assert.ok(own.includes('- **Q900** · 4 SCU · Test Station · geteilt'));
+    assert.ok(own.includes('- **Q700** · 4 SCU · Test Station'));
   });
 });

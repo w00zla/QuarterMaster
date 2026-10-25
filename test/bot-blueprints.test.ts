@@ -7,14 +7,24 @@ import { listPage, whoPage } from '../src/bot/commands/blueprints.ts';
 let n = 0;
 const entry = (over: Partial<BlueprintEntry>): Omit<BlueprintEntry, 'label'> => ({
   uuid: `u${++n}`, key: `BP_CRAFT_k${n}`, name: 'Thing', nameEn: 'Thing', size: null, gradeLetter: null, itemClass: null,
-  manufacturerCode: null, outputUuid: null, isDefault: false, retired: false, categoryLabel: 'Armor', ...over,
+  manufacturerCode: null, type: null, subType: null, outputUuid: null, isDefault: false, retired: false, categoryLabel: 'Armor', ...over,
 });
 
 describe('blueprint labels', () => {
-  it('joins name, size, grade + class and manufacturer', () => {
+  it('joins name, size and grade + class, without the manufacturer', () => {
     const [e] = buildLabels([entry({ name: 'BroadSpec', size: 3, gradeLetter: 'B', itemClass: 'Industrial', manufacturerCode: 'CHCO' })]);
-    assert.equal(e!.label, 'BroadSpec · S3 · B Industrial · CHCO');
+    assert.equal(e!.label, 'BroadSpec · S3 · B Industrial');
     assert.equal(buildLabels([entry({ name: 'Plain' })])[0]!.label, 'Plain');
+  });
+
+  it('leaves out the size of FPS gear and magazines but attachments, and the class of personal weapons', () => {
+    const labels = buildLabels([
+      entry({ name: 'Argus Helm', size: 1, type: 'Char_Armor_Helmet', subType: 'Light' }),
+      entry({ name: 'P4-AR', size: 3, itemClass: 'Ballistic', type: 'WeaponPersonal', subType: 'Medium' }),
+      entry({ name: 'Mag', size: 1, type: 'WeaponAttachment', subType: 'Magazine' }),
+      entry({ name: 'Barrel', size: 2, type: 'WeaponAttachment', subType: 'Barrel' }),
+    ]).map((e) => e.label);
+    assert.deepEqual(labels, ['Argus Helm', 'P4-AR', 'Mag', 'Barrel · S2']);
   });
 
   it('tells colliding labels apart by the differing tokens of the blueprint key', () => {
@@ -34,12 +44,12 @@ describe('blueprint labels', () => {
 describe('blueprint search', () => {
   const entries = buildLabels([
     entry({ name: 'Glacis', nameEn: 'Glacis', size: 4 }),
-    entry({ name: 'Argus Helm', nameEn: 'Argus Helmet', manufacturerCode: 'VGL' }),
-    entry({ name: 'Helm Zwei', nameEn: 'Helmet Two', manufacturerCode: 'VGL' }),
+    entry({ name: 'Argus Helm', nameEn: 'Argus Helmet' }),
+    entry({ name: 'Helm Zwei', nameEn: 'Helmet Two' }),
   ]);
 
   it('needs every word, in the label or the English name', () => {
-    assert.deepEqual(searchBlueprints(entries, 'helmet vgl').map((e) => e.name), ['Helm Zwei', 'Argus Helm']);
+    assert.deepEqual(searchBlueprints(entries, 'helmet zwei').map((e) => e.name), ['Helm Zwei']);
     assert.deepEqual(searchBlueprints(entries, 'glacis s4').map((e) => e.name), ['Glacis']);
     assert.deepEqual(searchBlueprints(entries, 'nothing'), []);
   });

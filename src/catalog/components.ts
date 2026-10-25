@@ -32,6 +32,11 @@ export const FPS_TYPES: Readonly<Record<string, readonly string[] | null>> = {
   Char_Armor_Undersuit: null,
 };
 
+/** SQL condition: the catalog.item row `alias` is a magazine (false without a row). Magazines are consumables:
+ * their blueprints stay out of the apps, the companion ignores their unlocks (decided 2026-10-25). */
+export const magazineSql = (alias: string): string =>
+  `coalesce(${alias}.type = 'WeaponAttachment' AND ${alias}.sub_type = 'Magazine', false)`;
+
 export function isFpsType(type: string | null | undefined, subType: string | null | undefined): boolean {
   if (!type || !Object.hasOwn(FPS_TYPES, type)) return false;
   const subTypes = FPS_TYPES[type];

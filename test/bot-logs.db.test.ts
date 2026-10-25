@@ -88,15 +88,15 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     await poster.round();
     const who = `<@${MIA}>`;
     assert.deepEqual(sent.get(CHANNEL_G)!.join('\n').split('\n'), [
-      `📢 ${who} shared **10 SCU** · **Test Metal** Q900 · Test Station`,
-      `📥 ${who} added **2 SCU** · **Test Metal** Q900 · Test Station · now 12 SCU`,
-      `📤 ${who} took out **3 SCU** · **Test Metal** Q900 · Test Station · 9 SCU left`,
-      `📦 ${who} gave **4 SCU** · **Test Metal** Q900 to <@${OLGA}> · Test Station`,
+      `📢 ${who} shared **10 SCU** · **Test Metal** · **Q900** · Test Station`,
+      `📥 ${who} added **2 SCU** · **Test Metal** · **Q900** · Test Station · now 12 SCU`,
+      `📤 ${who} took out **3 SCU** · **Test Metal** · **Q900** · Test Station · 9 SCU left`,
+      `📦 ${who} gave **4 SCU** · **Test Metal** · **Q900** to <@${OLGA}> · Test Station`,
     ]);
     assert.deepEqual(sent.get(CHANNEL_H)!.join('\n').split('\n'), [
-      `📢 ${who} teilt **12 SCU** · **Testmetall** Q900 · Test Station`,
-      `📤 ${who} entnimmt **3 SCU** · **Testmetall** Q900 · Test Station · noch 9 SCU`,
-      `📦 ${who} gibt ab: **4 SCU** · **Testmetall** Q900 · Test Station`,
+      `📢 ${who} teilt **12 SCU** · **Testmetall** · **Q900** · Test Station`,
+      `📤 ${who} entnimmt **3 SCU** · **Testmetall** · **Q900** · Test Station · noch 9 SCU`,
+      `📦 ${who} gibt ab: **4 SCU** · **Testmetall** · **Q900** · Test Station`,
     ]);
 
     // Nothing twice
@@ -182,7 +182,7 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     ]);
     assert.deepEqual(sent.get(CHANNEL_H)!.join('\n').split('\n'), [
       `📘 ${olga} trägt Bauplan ein: **${de}**`,
-      `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** Q950 · Test Station`,
+      `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** · **Q950** · Test Station`,
       `📕 ${olga} trägt Bauplan aus: **${de}**`,
     ]);
   });
@@ -215,7 +215,7 @@ describe('logs channel (database)', { skip: url ? false : 'TEST_DATABASE_URL not
       const json = h!.components!.map((c) => c.toJSON()) as { type: number; content?: string; components?: { content: string }[]; accessory?: { media: { url: string } } }[];
       assert.deepEqual(json.map((c) => c.type), [10, 9]);
       assert.match(json[0]!.content!, /^📘 /);
-      assert.equal(json[1]!.components![0]!.content, `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** Q960 · Test Station`);
+      assert.equal(json[1]!.components![0]!.content, `📢 <@${MIA}> teilt **1 SCU** · **Testmetall** · **Q960** · Test Station`);
       assert.equal(json[1]!.accessory!.media.url, `https://cdn.example/t/l/${U.metal}.deadbeef.avif`);
       // Pictures switched off in /qm-setup: the same line as plain text
       await updateGuildSettings(db, H, { logsThumbs: false });

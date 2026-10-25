@@ -83,7 +83,7 @@ export function logLine(r: LogRow, guildId: string, names: LogNames, lang: Lang)
   // A component shows its stats instead of a quality
   const statsOf = (s: Record<string, string> | undefined) => names.stats?.(r.targetUuid, s) ?? null;
   const stats = statsOf(r.details.stats);
-  const what = stats === null ? `${name} Q${r.details.quality ?? '?'}` : [name, stats && escapeMarkdown(stats)].filter(Boolean).join(' · ');
+  const what = stats === null ? `${name} · **Q${r.details.quality ?? '?'}**` : [name, stats && escapeMarkdown(stats)].filter(Boolean).join(' · ');
   const where = escapeMarkdown(names.location(r.details.locationUuid));
   const vars = { who: `<@${r.actorUserId}>`, amount: amount(r.details.amount), what, where };
   // A give seen from another org the batch was shared in: the recipient is none of its business

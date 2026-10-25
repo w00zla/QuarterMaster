@@ -106,7 +106,7 @@ export function checkPanel(lang: Lang, v: CheckView) {
 
   const unit = (kind: string) => tr(kind === 'item' ? 'unit.pcs' : 'unit.scu');
   const materials = v.coverages.map((c) => `- **${escapeMarkdown(c.need.name)}** · ${formatAmount(c.need.total)} ${unit(c.need.kind)}`
-    + ` · Q ≥ ${c.need.quality} ${qMark(c.need.quality)} · `
+    + ` · **Q ≥ ${c.need.quality}** ${qMark(c.need.quality)} · `
     + (c.covered ? `✅ ${tr('crafting.covered')}` : `❌ ${tr('crafting.lacking', { amount: `**${formatAmount(c.missing)} ${unit(c.need.kind)}**` })}`));
   const body = [tr('crafting.materials'), ...(materials.length ? materials : ['—'])];
   if (recipe.requiredSlots < recipe.slots.length) body.push(`-# ${tr('crafting.slotsOf', { n: recipe.requiredSlots, m: recipe.slots.length })}`);

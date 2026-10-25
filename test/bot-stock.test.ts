@@ -26,13 +26,13 @@ describe('/qm-res input and lists', () => {
       batch(3, 'Gold', 900, '3', { batch: { ...batch(3, 'Gold', 900, '3').batch, ownerUserId: 'olga' }, holderName: 'Olga', sharedIn: ['g'] }),
     ];
     assert.deepEqual(listLines(entries, 'p', 'me', 0, 'en'), {
-      lines: ['__Copper__ · Total: 3.5 SCU', '- Q700 · 2.5 SCU · Area18 · shared', '- Q600 · 1 SCU · Area18', '__Gold__ · Total: 3 SCU', '- Q900 · 3 SCU · Area18 · shared'],
+      lines: ['__Copper__ · Total: 3.5 SCU', '- **Q700** · 2.5 SCU · Area18 · shared', '- **Q600** · 1 SCU · Area18', '__Gold__ · Total: 3 SCU', '- **Q900** · 3 SCU · Area18 · shared'],
       page: 0, pages: 1,
     });
     const all = listLines(entries, 'a', 'me', 0, 'de').lines;
-    assert.equal(all[1], '- Q700 · 2.5 SCU · Area18 · Pers.');
-    assert.equal(all[4], '- Q900 · 3 SCU · Area18 · Olga');
-    assert.equal(listLines(entries, 'o', 'me', 0, 'en').lines[1], '- Q700 · 2.5 SCU · Area18 · Me');
+    assert.equal(all[1], '- **Q700** · 2.5 SCU · Area18 · Pers.');
+    assert.equal(all[4], '- **Q900** · 3 SCU · Area18 · Olga');
+    assert.equal(listLines(entries, 'o', 'me', 0, 'en').lines[1], '- **Q700** · 2.5 SCU · Area18 · Me');
   });
 
   it('shows components with their stats where materials show their quality', () => {

@@ -72,3 +72,26 @@ describe('blueprint registry (database)', { skip: url ? false : 'TEST_DATABASE_U
     assert.deepEqual(await whoHas(db, '899999999999999999', U.blueprint2), []);
   });
 });
+
+describe('blueprint catalog without magazines (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
+  let db: Db;
+  let close: () => Promise<void>;
+
+  before(async () => {
+    await prepareDb(url);
+    ({ db, close } = connectAs(url, 'qm_app'));
+    // The first blueprint crafts a magazine here
+    const snap = fixtureSnapshot();
+    const output = snap.blueprints.find((b) => b.uuid === U.blueprint)!.outputItemUuid;
+    snap.items = snap.items.map((i) => (i.uuid === output ? { ...i, type: 'WeaponAttachment', subType: 'Magazine' } : i));
+    await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
+  });
+  after(async () => close?.());
+
+  it('leaves magazine blueprints out and names them', async () => {
+    // German: the block above cached the English catalog (checked again after a minute only)
+    const catalog = await blueprintCatalog(db, 'de');
+    assert.deepEqual(catalog.entries.map((e) => e.uuid), [U.blueprint2]);
+    assert.equal(catalog.magazineNames.length, 1);
+  });
+});

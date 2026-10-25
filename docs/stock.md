@@ -90,8 +90,8 @@ whole `app`/`bot`/`web` split).
   display transformation: impact force, recoil; no base needed); the companion converts the tooltip's
   values with them) and marks them `component` with a
   unique `label` ("Name · Cooler · S3 · B Industrial": the type instead of a manufacturer, the class name
-  where that still collides; FPS gear with its sub type and without a size but on attachments: "Name ·
-  Helmets · Light", "Name · Attachment · Barrel · S1"). The bases are read only for the stats an item's
+  where that still collides; FPS gear with its sub type and without a size but on attachments, personal weapons without their
+  class: "Name · Helmets · Light", "Name · Attachment · Barrel · S1"). The bases are read only for the stats an item's
   blueprints change (the jsonpaths over every gear record took 1.3 s). `loadBatches` marks their batches (`PickableBatch.component`), the summary
   metrics (`stockMetricsSql` in `org-summary.ts`) count them as `components` apart from `items`. The bot does
   not tell them apart yet.

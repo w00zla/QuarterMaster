@@ -1,6 +1,7 @@
 // Blueprint catalog for the bot (labels, search) and the per-user blueprint registry.
 // The catalog is held in memory per language (1.6k rows, see importCache) so autocomplete stays fast.
 import { and, eq, sql } from 'drizzle-orm';
+import { isFpsType, magazineSql } from '../catalog/components.ts';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { categoryText, itemClassText, locText, rows, withCategoryLabel } from '../db/query.ts';
@@ -18,6 +19,9 @@ export interface BlueprintEntry {
   gradeLetter: string | null;
   itemClass: string | null;
   manufacturerCode: string | null;
+  // Item type and sub type of the output (labels leave out what says nothing for FPS gear)
+  type: string | null;
+  subType: string | null;
   // The item it crafts (its thumbnail); null when the game data names none
   outputUuid: string | null;
   isDefault: boolean;
@@ -30,13 +34,15 @@ export interface BlueprintEntry {
 // Discord limit for choice names
 const MAX_LABEL = 100;
 
-/** "Name · S3 · B Industrial · CHCO"; labels that still collide get the tokens of the blueprint key that tell them apart. */
+/**
+ * "Name · S3 · B Industrial"; FPS gear and magazines without their size (attachments keep theirs, as materialCatalog),
+ * personal weapons without their class. Labels that still collide get the tokens of the blueprint key that tell them apart.
+ */
 export function buildLabels(entries: Omit<BlueprintEntry, 'label'>[]): BlueprintEntry[] {
   const base = entries.map((e) => [
     e.name,
-    e.size !== null ? `S${e.size}` : null,
-    [e.gradeLetter, e.itemClass].filter(Boolean).join(' ') || null,
-    e.manufacturerCode,
+    e.size !== null && !(e.type === 'WeaponAttachment' ? e.subType === 'Magazine' : isFpsType(e.type, e.subType)) ? `S${e.size}` : null,
+    [e.gradeLetter, e.type === 'WeaponPersonal' ? null : e.itemClass].filter(Boolean).join(' ') || null,
   ].filter(Boolean).join(' · '));
   const groups = new Map<string, number[]>();
   base.forEach((label, i) => groups.set(label, [...(groups.get(label) ?? []), i]));
@@ -58,6 +64,8 @@ const truncate = (s: string) => (s.length > MAX_LABEL ? `${s.slice(0, MAX_LABEL 
 export interface BlueprintCatalog {
   entries: BlueprintEntry[];
   byUuid: Map<string, BlueprintEntry>;
+  // Names of the magazine blueprints left out of the catalog (the companion ignores their unlocks)
+  magazineNames: string[];
 }
 
 export const blueprintCatalog = importCache(async (db: Db, lang: Lang): Promise<BlueprintCatalog> => {
@@ -65,17 +73,23 @@ export const blueprintCatalog = importCache(async (db: Db, lang: Lang): Promise<
     SELECT b.uuid, b.key,
       coalesce(${locText(lang, sql`i.name_key`)}, i.class_name, b.key) AS name,
       coalesce(${locText('en', sql`i.name_key`)}, i.class_name, b.key) AS "nameEn",
-      i.size, i.grade_letter AS "gradeLetter", ${itemClassText(lang, 'i')} AS "itemClass", m.code AS "manufacturerCode", b.output_item_uuid AS "outputUuid",
+      i.size, i.grade_letter AS "gradeLetter", ${itemClassText(lang, 'i')} AS "itemClass", m.code AS "manufacturerCode", i.type, i.sub_type AS "subType",
+      b.output_item_uuid AS "outputUuid",
       b.is_default AS "isDefault", b.retired_at IS NOT NULL AS retired, c.key AS category, ${categoryText(lang)} AS "categoryLabel"
     FROM catalog.blueprint b
     LEFT JOIN catalog.item i ON i.uuid = b.output_item_uuid
     LEFT JOIN catalog.manufacturer m ON m.uuid = i.manufacturer_uuid
-    LEFT JOIN catalog.blueprint_category c ON c.uuid = b.category_uuid`);
+    LEFT JOIN catalog.blueprint_category c ON c.uuid = b.category_uuid
+    WHERE NOT ${sql.raw(magazineSql('i'))}`);
+  const magazines = await rows<{ name: string }>(db, sql`
+    SELECT DISTINCT coalesce(${locText(lang, sql`i.name_key`)}, i.class_name) AS name
+    FROM catalog.blueprint b JOIN catalog.item i ON i.uuid = b.output_item_uuid
+    WHERE ${sql.raw(magazineSql('i'))}`);
   const entries = buildLabels(loaded.map((r) => {
     const { category: _c, categoryGroup: _g, ...rest } = withCategoryLabel(r);
     return rest;
   }));
-  return { entries, byUuid: new Map(entries.map((e) => [e.uuid, e])) };
+  return { entries, byUuid: new Map(entries.map((e) => [e.uuid, e])), magazineNames: magazines.map((m) => m.name) };
 });
 
 /**

@@ -172,11 +172,11 @@ export const materialCatalog = importCache(async (db, lang): Promise<Map<string,
   // FPS gear has no size of note (armor is always 1, weapons 1–5 by kind) but attachments (S1–S4 fit the
   // weapon): only theirs is kept
   for (const m of found) if (m.component && m.type !== 'WeaponAttachment' && isFpsType(m.type, m.subType)) m.size = null;
-  // Ship components: "Name · Cooler · S3 · B Industrial"; FPS gear with its sub type:
-  // "Name · Helmets · Light", "Name · Attachment · Barrel · S1"
+  // Ship components: "Name · Cooler · S3 · B Industrial"; FPS gear with its sub type, personal weapons without
+  // their class: "Name · Helmets · Light", "Name · Attachment · Barrel · S1"
   const labels = found.map((m) => (m.component
     ? [m.name, typeLabel(m.type, m.typeText), isFpsType(m.type, m.subType) ? typeLabel(m.subType, m.subTypeText) : null,
-      m.size !== null ? `S${m.size}` : null, [m.gradeLetter, m.itemClass].filter(Boolean).join(' ') || null]
+      m.size !== null ? `S${m.size}` : null, [m.gradeLetter, m.type === 'WeaponPersonal' ? null : m.itemClass].filter(Boolean).join(' ') || null]
       .filter(Boolean).join(' · ')
     : m.name));
   const counts = new Map<string, number>();

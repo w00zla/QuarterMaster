@@ -47,11 +47,11 @@ describe('/qm-crafting check (database)', { skip: url ? false : 'TEST_DATABASE_U
     const at600 = text(await checkReply(db, 'en', MIA, U.blueprint, 2, 600));
     assert.match(at600, /× 2/);
     assert.match(at600, /Quality \*\*600\*\* · Crafting time \*\*5m\*\*/);
-    assert.match(at600, /\*\*Test Metal\*\* · 0.092 SCU · Q ≥ 600 ★★ · ✅ covered/);
+    assert.match(at600, /\*\*Test Metal\*\* · 0.092 SCU · \*\*Q ≥ 600\*\* ★★ · ✅ covered/);
     // At 700 only Olga's shared batch is good enough
-    assert.match(text(await checkReply(db, 'en', MIA, U.blueprint, 2, 700)), /Q ≥ 700 ★★★ · ❌ missing \*\*0.042 SCU\*\*/);
+    assert.match(text(await checkReply(db, 'en', MIA, U.blueprint, 2, 700)), /\*\*Q ≥ 700\*\* ★★★ · ❌ missing \*\*0.042 SCU\*\*/);
     // Someone without any org sees only their own stock (none here)
-    assert.match(text(await checkReply(db, 'de', NOORG, U.blueprint, 1, null)), /Q ≥ 500 ★ · ❌ fehlt \*\*0.046 SCU\*\*/);
+    assert.match(text(await checkReply(db, 'de', NOORG, U.blueprint, 1, null)), /\*\*Q ≥ 500\*\* ★ · ❌ fehlt \*\*0.046 SCU\*\*/);
   });
 
   it('refuses a blueprint that is not in the catalog', async () => {

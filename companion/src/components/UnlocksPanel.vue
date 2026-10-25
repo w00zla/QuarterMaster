@@ -20,7 +20,7 @@ import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/component
 import { scanBackups } from "../backend";
 import { unlockRows, type UnlockState } from "../debugReport";
 import { columnsTexts, langRef, t, viewTexts, type Key } from "../i18n";
-import { buildIndex, matchUnlock, type CatalogEntry } from "../match";
+import { buildIndex, matchUnlock, normalizeName, type CatalogEntry } from "../match";
 import { overlayRows, tabCounts, type OverlayRow } from "../overlay";
 import { catalogResponses } from "../refinerySync";
 import { api, connected, loadLog, log, toggleUnlocks, unlocksOn } from "../state";
@@ -45,6 +45,12 @@ const catalogs = computed(() => {
   return r ? (langRef.value === "de" ? [r.de, r.en] : [r.en, r.de]).map((c) => c.blueprints) : [];
 });
 const index = computed(() => buildIndex(catalogs.value));
+// Magazine blueprints are left out of the catalog (consumables): their unlocks are not listed at all
+// (an older server sends none)
+const magazines = computed(() => {
+  const r = catalogResponses.value;
+  return new Set(r ? [r.de, r.en].flatMap((c) => c.magazineBlueprints ?? []).map(normalizeName) : []);
+});
 // Labels in the UI language ("Name · S3 · B Industrial · CHCO")
 const labels = computed(() => new Map((catalogs.value[0] ?? []).map((b) => [b.uuid, b.label])));
 // The crafted item's thumbnail per blueprint
@@ -65,6 +71,7 @@ async function loadOwned() {
 }
 
 const allRows = computed<Row[]>(() => (log.value?.unlocks ?? [])
+  .filter((u) => !magazines.value.has(normalizeName(u.name)) || index.value.has(normalizeName(u.name)))
   .map((u) => {
     const all = matchUnlock(u.name, index.value);
     // Default blueprints are never registered (everyone has them)

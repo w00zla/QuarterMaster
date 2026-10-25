@@ -1,6 +1,7 @@
 // What an org offers: the figures of the web app's org tiles and the bot's board, and the board's
 // material lines. Org stock = stored batches shared in the org by its active members.
 import { sql } from 'drizzle-orm';
+import { magazineSql } from '../catalog/components.ts';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { REWARD_POOL_PATHS, rows } from '../db/query.ts';
@@ -17,12 +18,13 @@ export interface OrgMetrics extends StockMetrics {
   resourceItemLocations: number;
 }
 
-// Blueprints a player can unlock: not retired, not default, in a reward pool (the admin overview's
+// Blueprints a player can unlock: not retired, not default, no magazine (not in the apps), in a reward pool (the admin overview's
 // "no source" count is the rest); language-independent, cached under one key
 const obtainable = importCache(async (db: Db) =>
   (await db.execute<{ n: number }>(sql`
     SELECT count(*)::int AS n FROM catalog.blueprint b JOIN catalog.raw_record r ON r.uuid = b.uuid
-    WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path IN ${REWARD_POOL_PATHS}`))[0]?.n ?? 0);
+    LEFT JOIN catalog.item i ON i.uuid = b.output_item_uuid
+    WHERE b.retired_at IS NULL AND NOT b.is_default AND NOT ${sql.raw(magazineSql('i'))} AND r.path IN ${REWARD_POOL_PATHS}`))[0]?.n ?? 0);
 export const obtainableBlueprints = (db: Db) => obtainable(db, '');
 
 /** Stock figures in the shape of the web app's tiles (exact decimal text). */

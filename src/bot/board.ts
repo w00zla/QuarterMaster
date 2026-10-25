@@ -71,7 +71,7 @@ export function boardMessage(d: BoardData, guildId: string, lang: Lang, updatedA
       const vars = {
         name: escapeMarkdown(x.name),
         amount: `${x.total} ${unit(x)}`,
-        quality: `${qMark(x.bestQuality)} ${x.bestQuality}`,
+        quality: `${qMark(x.bestQuality)} **${x.bestQuality}**`,
         // Always plural: one holder rarely stays alone
         holders: tr('board.holders', { count: x.holders }),
       };

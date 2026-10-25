@@ -103,7 +103,7 @@ export async function previewPanel(db: Db, lang: Lang, token: string, d: StartDr
   for (const r of parsed.rows) {
     rows.push({ resourceUuid: r.resourceUuid, quality: r.quality, amount: r.amount });
     const name = escapeMarkdown(materials.get(r.resourceUuid)?.name ?? '?');
-    lines.push(`- **${name}** · Q${r.quality} · ${r.amount} ${tr('unit.scu')}`);
+    lines.push(`- **${name}** · **Q${r.quality}** · ${r.amount} ${tr('unit.scu')}`);
   }
   const problems = parsed.errors.map((e) => `- ⚠️ ${tr('refinery.line', { line: e.line, text: codeText(e.text), error: tr(lineErrorKey(e.error)) })}`);
   if (seconds === null) problems.unshift(`- ⚠️ ${tr('refinery.preview.badDuration', { text: codeText(d.duration) })}`);
@@ -190,7 +190,7 @@ async function onDoneSubmit(interaction: ModalSubmitInteraction, db: Db, lang: L
     rows: d.rows.map((r, i) => ({ batchId: r.batchId, amount: parsed.amounts[i]!, expected: r.quantity })),
   }));
   getState(token, interaction.user.id, true);
-  const lines = d.rows.map((r, i) => `- **${escapeMarkdown(r.name)}** · Q${r.quality} → ${parsed.amounts[i]} ${t(lang, 'unit.scu')}`);
+  const lines = d.rows.map((r, i) => `- **${escapeMarkdown(r.name)}** · **Q${r.quality}** → ${parsed.amounts[i]} ${t(lang, 'unit.scu')}`);
   await answerModal(interaction, textPanel(lang, [t(lang, 'refinery.doneOk', { station: escapeMarkdown(d.station) }), ...lines].join('\n'), true));
 }
 
@@ -239,9 +239,9 @@ async function ownJobs(db: Db, userId: string, lang: Lang): Promise<Job[]> {
 
 const isReady = (j: Job, now = Date.now()) => j.endsAt !== null && new Date(j.endsAt).getTime() <= now;
 
-/** "- Quantainium · Q820 · 5.69 SCU" per batch of a job (the quantity is the expected yield). */
+/** "- Quantainium · **Q820** · 5.69 SCU" per batch of a job (the quantity is the expected yield). */
 const materialLines = (lang: Lang, j: Job) =>
-  j.batches.map((p) => `- ${escapeMarkdown(p.material)} · Q${p.batch.quality} · ${formatAmount(p.batch.quantity)} ${t(lang, 'unit.scu')}`);
+  j.batches.map((p) => `- ${escapeMarkdown(p.material)} · **Q${p.batch.quality}** · ${formatAmount(p.batch.quantity)} ${t(lang, 'unit.scu')}`);
 
 /** "CRU-L1 · Quantainium, Laranite · ready in 2h 10m" for the job option. */
 function jobLabel(j: Job, lang: Lang): string {

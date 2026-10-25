@@ -31,6 +31,7 @@ const catalog = (names: [string, string, string]): CatalogResponse => ({
     location(ARC, 'ARC-L1 Wide Forest Station · ArcCorp · Stanton', 'rr_arc_l1'),
   ],
   blueprints: [],
+  magazineBlueprints: [],
 });
 
 const CAT = buildCatalog([catalog(['Hephaestanite', 'Silicon', 'Titanium']), catalog(['Hephaestanit', 'Silizium', 'Titan'])], {});
