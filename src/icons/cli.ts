@@ -1,5 +1,5 @@
 // Rendert Icons für alle Gear-Items der App (Schiffskomponenten + FPS-Ausrüstung, dieselbe Regel wie der
-// Stock-Service) und für Rohstoffe mit Thumbnail-Entity (roh und raffiniert teilen sich den Brocken).
+// Stock-Service), für die Sammelobjekte und für Rohstoffe mit Thumbnail-Entity (roh und raffiniert teilen sich den Brocken).
 // Pipeline je Entity: StarBreaker (fleetyards-Fork) `entity export --kind decomposed` -> scene.blend ->
 // Blender headless (src/icons/render.py, StarBreaker-Addon) mit Pose und Licht-Rig des Spiels aus dem
 // DataCore (`PlayerChoice_PITConfig.inventoryParams`, `inventorylightgroup_*`) -> PNG je Katalog-UUID.
@@ -167,8 +167,10 @@ async function loadTargets(): Promise<Target[]> {
   ]);
   const { db, close } = connect(process.env.DATABASE_URL);
   try {
+    // Gear plus Sammelobjekte (Rezept-Inputs wie Hadanit): dieselbe Bookable-Regel wie der Stock-Service
     const items = (await db.execute(sql`SELECT i.uuid, i.class_name, i.type, i.sub_type FROM catalog.item i
-      WHERE i.retired_at IS NULL AND ${componentItemSql('i.uuid')} ORDER BY i.type, i.sub_type, i.class_name`)) as unknown as
+      WHERE i.retired_at IS NULL AND (EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid)
+        OR ${componentItemSql('i.uuid')}) ORDER BY i.type, i.sub_type, i.class_name`)) as unknown as
       { uuid: string; class_name: string; type: string; sub_type: string | null }[];
     // rttThumbnailEntityClass ist ein Dateiverweis (file://…/thumbnailentity_resource_rock_gold.json)
     const resources = (await db.execute(sql`SELECT uuid, key, data->>'rttThumbnailEntityClass' AS entity

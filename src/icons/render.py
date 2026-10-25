@@ -43,10 +43,36 @@ def load(path):
         bpy.ops.wm.open_mainfile(filepath=path)
         for root in [o for o in bpy.data.objects if any('package_root' in k for k in o.keys())]:
             bpy.ops.starbreaker.refresh_materials(package_root_name=root.name)
+        tint_organic()
     else:
         bpy.ops.wm.read_factory_settings(use_empty=True)  # deaktiviert Addons, daher nur hier
         bpy.ops.import_scene.gltf(filepath=path)
     return bpy.context.scene
+
+
+def tint_organic():
+    # Organic-Shader (Mineralien wie Hadanit): die Farbe steckt im Tint der ersten Layer (der Kristall), das
+    # Addon nimmt nur die graue Diffuse. Base Color mit dem Tint multiplizieren (linear, wie im Material).
+    for m in bpy.data.materials:
+        if m.get('starbreaker_shader_family') != 'Organic' or not m.node_tree:
+            continue
+        layers = json.loads(m.get('starbreaker_submaterial_json', '{}')).get('layer_manifest') or []
+        tint = layers[0].get('tint_color') if layers else None
+        bsdf = next((n for n in m.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
+        if not tint or bsdf is None:
+            continue
+        nodes, links = m.node_tree.nodes, m.node_tree.links
+        base = bsdf.inputs['Base Color']
+        mix = nodes.new('ShaderNodeMix')
+        mix.data_type = 'RGBA'
+        mix.blend_type = 'MULTIPLY'
+        mix.inputs[0].default_value = 1.0
+        if base.is_linked:
+            links.new(base.links[0].from_socket, mix.inputs[6])
+        else:
+            mix.inputs[6].default_value = base.default_value
+        mix.inputs[7].default_value = (*tint[:3], 1.0)
+        links.new(mix.outputs[2], base)
 
 
 def mesh_corners(objects):
@@ -164,7 +190,8 @@ def render(job, a):
             beam = rig_rot @ light_rot @ Vector((1.0, 0.0, 0.0))
             o.rotation_euler = beam.to_track_quat('-Z', 'Y').to_euler()
         # Das Fill-Licht des Rigs ist praktisch aus (0.1): ohne mehr Umgebungslicht saufen Schatten ab
-        ambient = 0.5
+        # (0.9: Helme ohne abgesoffene Flächen, Weiß brennt bei 30 W kaum aus)
+        ambient = 0.9
     else:
         sun('key', (-0.6, 0.8, 0.7), 3.0)
         sun('fill', (0.8, 0.2, 0.6), 1.2, (0.9, 0.95, 1.0))

@@ -385,7 +385,8 @@ Throwaway script, not in the repo. Result:
 ## Icons (`pnpm icons:render`)
 
 Inventory-style icons for everything the app books: the gear items (`componentItemSql`, ship components and FPS
-gear, no consumables) and the ore chunks (`catalog.resource.data.rttThumbnailEntityClass`: 25 thumbnail
+gear, no consumables), the harvestables (items used as recipe inputs, the stock service's bookable rule: 11
+`Misc/Harvestable`, e.g. Hadanite) and the ore chunks (`catalog.resource.data.rttThumbnailEntityClass`: 25 thumbnail
 entities, an ore and its refined material share one). `Data.p4k` holds no 2D item images (`displayIcon` is
 empty or a generic loadout icon; the commodity logos under `ui/sharedassets/commoditylogos/` are category
 pictures with gaps), so the icons are rendered from the models:
@@ -401,7 +402,10 @@ pictures with gaps), so the icons are rendered from the models:
    materials (`starbreaker.refresh_materials`, called explicitly: its load handler needs timers that background
    mode lacks). Eevee, 16 samples, Standard view transform, transparent film, 256 px. Ray tracing on, with
    raytraced refraction (dithered) for the `SB_GlassPBR` materials: they are pure transmission, without it Eevee
-   only refracts the grey world and visors render as flat grey.
+   only refracts the grey world and visors render as flat grey. The minerals use the `Organic` shader, whose colour
+   is the first layer's `TintColor` (the crystal; layer 2 is grey sand): the addon builds it as a plain principled
+   material from the grey diffuse, so `render.py` multiplies the base colour by that tint (linear). Beradom
+   (tint 1,1,1) and Sadaryx (light grey tint) stay grey; not compared in game.
 3. **Pose and light from the game:** `PlayerChoice_PITConfig.inventoryParams` (`dcb query`) gives
    `defaultOrientation` (90, 0, 0) plus an offset per item type/sub type (45 entries) and a light group per
    category (39 entries, default `inventorylightgroup_other`); the groups are entities under
@@ -409,8 +413,9 @@ pictures with gaps), so the icons are rendered from the models:
    key/rim/fill projector lights. The model is turned by Euler XYZ of default + offset, the cell is then Y-up
    with the camera on −Z and screen-up −Y (not mirrored: rifle muzzle to the right, as in game); the rig sits at
    the cell centre turned by (90, 180, 0), each projector shining along its local +X, Blender spots at 30 W per
-   game intensity unit (100 W burnt white materials out under the Standard view transform), ambient 0.5 (the rigs' fill light is
-   0.1: with 0.15 dark materials drowned in their shadows). The item is scaled so its largest extent is 0.7 m (the game fits it into
+   game intensity unit (100 W burnt white materials out under the Standard view transform), ambient 0.9 (the rigs' fill light is
+   0.1: with 0.15 dark materials drowned in their shadows, 0.5 still left helmets partly dark; 0.9 lightens the
+   helmet's inside behind the visor a little). The item is scaled so its largest extent is 0.7 m (the game fits it into
    the cell; the rig's lights stand ~1 m out, a 3 m cooler would have them inside). Matching: type + sub type
    exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
