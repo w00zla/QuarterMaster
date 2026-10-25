@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import DataTable from "../components/DataTable.vue";
 import DetailPanel from "../components/DetailPanel.vue";
+import { loadThumbs, thumbOf } from "../thumbs";
 import Dropdown from "../components/Dropdown.vue";
 import HelpTip from "../components/HelpTip.vue";
 import Icon from "../components/Icon.vue";
@@ -92,6 +93,9 @@ function modifierRange(range: BlueprintModifier["ranges"][number]): string {
 }
 const signed = (n: number | undefined) => (n === undefined ? "?" : n >= 0 ? `+${n}` : String(n));
 const inputLink = (kind: string, uuid: string) => `/${kind === "resource" ? "materials" : "items"}/${uuid}`;
+
+// The large thumbnail in the detail panel
+loadThumbs();
 </script>
 
 <template>
@@ -173,6 +177,7 @@ const inputLink = (kind: string, uuid: string) => `/${kind === "resource" ? "mat
       :technical="detail.data.value?.key"
       :loading="detail.loading.value && !detail.data.value"
       :error="detail.error.value"
+      :thumb="thumbOf(detail.data.value?.output?.uuid)"
       @close="router.push('/blueprints')"
     >
       <template v-if="detail.data.value">

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Right-hand detail panel of a list view: head with title (its technical id in a
-// tooltip) and a close button, scrolling body. Loading and error states are handled here.
+// tooltip) and a close button, scrolling body. Loading and error states are handled here. `thumb`: the item's
+// large thumbnail at the top of the body.
 import Icon, { type IconName } from "./Icon.vue";
 import Tooltip from "./Tooltip.vue";
 
-defineProps<{ icon: IconName; title: string; technical?: string; loading?: boolean; error?: string }>();
+defineProps<{ icon: IconName; title: string; technical?: string; loading?: boolean; error?: string; thumb?: string | null }>();
 const emit = defineEmits<{ close: [] }>();
 </script>
 
@@ -22,7 +23,10 @@ const emit = defineEmits<{ close: [] }>();
     <div class="body">
       <div v-if="error" class="empty-line">{{ error }}</div>
       <div v-else-if="loading" class="empty-line">Loading…</div>
-      <slot v-else />
+      <template v-else>
+        <img v-if="thumb" :src="thumb" class="thumb" width="128" height="128" alt="" />
+        <slot />
+      </template>
     </div>
   </section>
 </template>
@@ -49,6 +53,12 @@ const emit = defineEmits<{ close: [] }>();
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.thumb {
+  align-self: flex-start;
+  width: 128px;
+  height: 128px;
 }
 
 .body :deep(section) {

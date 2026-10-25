@@ -2,6 +2,8 @@
 // behind HTTP basic auth. Binds to 127.0.0.1 unless ADMINAPP_HOST says otherwise; in production it sits
 // behind Caddy (TLS) and is published on the host's loopback only (compose.yaml).
 import { existsSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -21,6 +23,9 @@ import { getStatus } from './status.ts';
 import * as s from './status-quotes.ts';
 import * as st from './stock.ts';
 import * as u from './users.ts';
+import { getThumbs } from './thumbs.ts';
+import { THUMB_FILE, THUMB_SIZES } from '../thumbs.ts';
+import { thumbIndex } from '../webapp/thumbs.ts';
 
 const { ADMINAPP_USER, ADMINAPP_PASSWORD, ADMINAPP_HOST = '127.0.0.1', ADMINAPP_PORT = '3000' } = process.env;
 if (!ADMINAPP_USER || !ADMINAPP_PASSWORD) {
@@ -32,6 +37,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // Discord IDs (the schema's format check)
 const SNOWFLAKE = /^[0-9]{17,20}$/;
 const DIST = fileURLToPath(new URL('../../adminapp/dist', import.meta.url));
+// The item thumbnails (s/, m/, l/ + thumbs.json from pnpm icons:pack), the web app's directory
+const THUMBS_DIR = process.env.THUMBS_DIR || fileURLToPath(new URL('../../local/thumbs', import.meta.url));
+const thumbs = thumbIndex(THUMBS_DIR);
 
 const { db, close } = connect(process.env.DATABASE_URL);
 const app = new Hono();
@@ -111,6 +119,7 @@ api.get('/users/:userId', async (c) => {
 });
 api.get('/checks', async (c) => c.json(await u.getDataChecks(db, lang(c))));
 api.get('/status', async (c) => c.json(await getStatus(db)));
+api.get('/thumbs', async (c) => c.json(await getThumbs(db, lang(c), THUMBS_DIR, thumbs())));
 // --- dashboard and activity (read-only) ---
 api.get('/dashboard', async (c) => {
   const days = a.DASHBOARD_DAYS.find((d) => String(d) === c.req.query('days')) ?? 30;
@@ -257,6 +266,22 @@ app.onError((err, c) => {
   if (err instanceof HTTPException) return err.getResponse();
   console.error(err);
   return c.json({ error: 'internal error' }, 500);
+});
+
+// The item thumbnails (only the manifest's files), behind the basic auth like everything here
+app.get('/thumbs/:size/:file', async (c) => {
+  const size = c.req.param('size');
+  const file = c.req.param('file');
+  const m = THUMB_FILE.exec(file);
+  if (!Object.hasOwn(THUMB_SIZES, size) || !m || thumbs().get(m[1]!) !== m[2]) return c.text('Not found', 404);
+  try {
+    const body = await readFile(join(THUMBS_DIR, size, file));
+    c.header('Content-Type', 'image/avif');
+    c.header('Cache-Control', 'private, max-age=31536000, immutable');
+    return c.body(new Uint8Array(body));
+  } catch {
+    return c.text('Not found', 404);
+  }
 });
 
 // The SPA: static files, every other path gets index.html (client-side routing)

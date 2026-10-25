@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import DataTable from "../components/DataTable.vue";
 import DetailPanel from "../components/DetailPanel.vue";
+import { loadThumbs, thumbOf } from "../thumbs";
 import Dropdown from "../components/Dropdown.vue";
 import HelpTip from "../components/HelpTip.vue";
 import Icon from "../components/Icon.vue";
@@ -81,6 +82,9 @@ function valueOf(r: ItemRow, key: string): string | number {
     default: return r.className;
   }
 }
+
+// The large thumbnail in the detail panel
+loadThumbs();
 </script>
 
 <template>
@@ -162,6 +166,7 @@ function valueOf(r: ItemRow, key: string): string | number {
       :technical="detail.data.value?.className"
       :loading="detail.loading.value && !detail.data.value"
       :error="detail.error.value"
+      :thumb="thumbOf(selected)"
       @close="router.push('/items')"
     >
       <template v-if="detail.data.value">

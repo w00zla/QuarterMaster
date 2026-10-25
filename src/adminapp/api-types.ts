@@ -67,6 +67,18 @@ export interface SourceSummary {
   keyCount: number;
 }
 
+// GET /api/thumbs: the item thumbnails (src/adminapp/thumbs.ts); the images at /thumbs/<s|m|l>/<uuid>.<hash>.avif
+export interface ThumbsResponse {
+  // When thumbs.json was written; null = no manifest
+  updatedAt: string | null;
+  count: number;
+  // Items and materials that should have one (the renderer's targets)
+  targets: number;
+  hashes: Record<string, string>;
+  // Targets without one, by name
+  missing: { uuid: string; kind: 'item' | 'resource'; name: string; type: string | null }[];
+}
+
 export interface Overview {
   // Sorted by active count, largest first
   counts: EntityCount[];

@@ -12,6 +12,7 @@ import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { storeSnapshot } from '../src/ext/store.ts';
 import { add } from '../src/stock/service.ts';
 import { getStatus } from '../src/adminapp/status.ts';
+import { getThumbs } from '../src/adminapp/thumbs.ts';
 import { getDataChecks } from '../src/adminapp/users.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
@@ -40,6 +41,19 @@ describe('admin: status (database)', { skip: url ? false : 'TEST_DATABASE_URL no
   after(async () => {
     await owner?.close();
     await close?.();
+  });
+
+  it('lists the thumbnail coverage: the render targets without one', async () => {
+    const none = await getThumbs(db, 'en', null, new Map());
+    assert.equal(none.updatedAt, null);
+    assert.equal(none.count, 0);
+    assert.ok(none.targets > 0);
+    assert.equal(none.missing.length, none.targets);
+    const first = none.missing[0]!;
+    const some = await getThumbs(db, 'en', null, new Map([[first.uuid, 'deadbeef']]));
+    assert.deepEqual([some.count, some.targets, some.missing.length], [1, none.targets, none.targets - 1]);
+    assert.ok(!some.missing.some((m) => m.uuid === first.uuid));
+    assert.deepEqual(some.hashes, { [first.uuid]: 'deadbeef' });
   });
 
   it('reports the catalog and no UEX data before the first pull', async () => {

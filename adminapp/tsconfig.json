@@ -19,6 +19,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "../src/adminapp/api-types.ts", "../src/catalog/components.ts"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "../src/adminapp/api-types.ts", "../src/thumbs.ts", "../src/catalog/components.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

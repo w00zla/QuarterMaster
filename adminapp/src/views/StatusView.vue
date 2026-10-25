@@ -1,23 +1,27 @@
 <script setup lang="ts">
 // Is everything running and do the data hold: services (catalog, UEX pull, the bot's logs channels),
-// the user data checks, the catalog's counts and gaps. Ordering: by state, then by name.
+// the user data checks, the catalog's counts and gaps, the item thumbnails' coverage. Ordering: by state, then by name.
 import { RouterLink, useRouter } from "vue-router";
 import HelpTip from "../components/HelpTip.vue";
 import Icon from "../components/Icon.vue";
 import { useFetch } from "../api";
 import { ago, dateTime } from "../format";
 import { HELP } from "../help";
-import type { DataCheck, DataCheckKey, Health, Overview, StatusResponse } from "../../../src/adminapp/api-types";
+import type { DataCheck, DataCheckKey, Health, Overview, StatusResponse, ThumbsResponse } from "../../../src/adminapp/api-types";
 
 const router = useRouter();
 const status = useFetch<StatusResponse>(() => "/status", false);
 const checks = useFetch<DataCheck[]>(() => "/checks");
 const overview = useFetch<Overview>(() => "/overview");
+const thumbs = useFetch<ThumbsResponse>(() => "/thumbs");
+// Items and materials without a thumbnail: the first ones by name, the rest as a count
+const MISSING_SHOWN = 40;
 
 function reload() {
   status.reload();
   checks.reload();
   overview.reload();
+  thumbs.reload();
 }
 
 const STATE: Record<Health, string> = { ok: "OK", warn: "Late", err: "Stale" };
@@ -203,6 +207,35 @@ const TEXT_ENTITIES: Record<string, string> = {
             </dl>
           </div>
         </template>
+        <div v-else class="empty-line">Loading…</div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <Icon name="list-large" :size="16" />
+          <span class="head-title no-grow">Thumbnails</span>
+        </div>
+        <div v-if="thumbs.error.value" class="empty-line">{{ thumbs.error.value }}</div>
+        <div v-else-if="thumbs.data.value" class="pad">
+          <dl class="kv">
+            <dt>Rendered</dt>
+            <dd>{{ thumbs.data.value.count.toLocaleString() }} <span class="faint">of {{ thumbs.data.value.targets.toLocaleString() }} items and materials</span></dd>
+            <dt>Manifest</dt>
+            <dd :class="{ faint: !thumbs.data.value.updatedAt }">
+              <template v-if="thumbs.data.value.updatedAt">{{ dateTime(thumbs.data.value.updatedAt) }} <span class="faint">({{ ago(thumbs.data.value.updatedAt) }})</span></template>
+              <template v-else>none</template>
+            </dd>
+            <dt>Without one</dt>
+            <dd :class="{ faint: !thumbs.data.value.missing.length }">
+              <template v-if="!thumbs.data.value.missing.length">0</template>
+              <template v-for="(m, i) in thumbs.data.value.missing.slice(0, MISSING_SHOWN)" :key="m.uuid">
+                <template v-if="i">, </template>
+                <RouterLink :to="m.kind === 'item' ? `/items/${m.uuid}` : `/materials/${m.uuid}`">{{ m.name }}</RouterLink>
+              </template>
+              <span v-if="thumbs.data.value.missing.length > MISSING_SHOWN" class="faint"> +{{ thumbs.data.value.missing.length - MISSING_SHOWN }} more</span>
+            </dd>
+          </dl>
+        </div>
         <div v-else class="empty-line">Loading…</div>
       </section>
     </div>

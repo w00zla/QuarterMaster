@@ -55,7 +55,12 @@ removing imported text sources) and the bot's status texts.
   hits: stock of retired materials, stock at retired locations, registered retired blueprints, refinery jobs
   ready for over 7 days (`OVERDUE_DAYS`), jobs outside the UEX refineries) and the catalog (counts, texts
   missing per language, blueprints without a known source and those registered anyway, without output,
-  materials in no recipe; `GET /api/overview`).
+  materials in no recipe; `GET /api/overview`) and the item thumbnails (`GET /api/thumbs`, `src/adminapp/thumbs.ts`:
+  how many of the renderer's targets — gear items by the stock service's rule, materials with a thumbnail entity
+  — have one, when `thumbs.json` was written, the targets without one by name, linked; after a game patch's
+  import the new items show up there until the next render). The catalog's detail panels (items, materials,
+  blueprints: the crafted item) show the large thumbnail; the admin serves `/thumbs/…` itself from `THUMBS_DIR`
+  (the web app's directory, mounted read-only), behind its basic auth.
 - **Activity** (`/activity`, `GET /api/activity`, `src/adminapp/activity.ts`): every `app.history` row, newest
   first, "Load more" by id cursor (`before`, `limit` ≤ 200); filters source, category, action, org, user (actor,
   owner or recipient), days. All filters live in the route query (`/activity?user=<id>`, `?guild=<id>`,

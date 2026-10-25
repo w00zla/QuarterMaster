@@ -99,6 +99,10 @@ services:
       # Never publish without 127.0.0.1: Docker's port rules bypass ufw/firewalld.
       ADMINAPP_HOST: 0.0.0.0
       ADMINAPP_PORT: "3000"
+      # The item thumbnails: coverage on Status, the image in the catalog's detail panels
+      THUMBS_DIR: /thumbs
+    volumes:
+      - ./local/thumbs:/thumbs:ro
     ports: ["127.0.0.1:3001:3000"]
 
   # The user web app (Discord login, the companion app's API); Caddy serves it on 443

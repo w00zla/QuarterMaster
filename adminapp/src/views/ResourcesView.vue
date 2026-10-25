@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import DataTable from "../components/DataTable.vue";
 import DetailPanel from "../components/DetailPanel.vue";
+import { loadThumbs, thumbOf } from "../thumbs";
 import HelpTip from "../components/HelpTip.vue";
 import Icon from "../components/Icon.vue";
 import RawJson from "../components/RawJson.vue";
@@ -49,6 +50,9 @@ function valueOf(r: ResourceRow, key: string): string | number {
     default: return r.key;
   }
 }
+
+// The large thumbnail in the detail panel
+loadThumbs();
 </script>
 
 <template>
@@ -110,6 +114,7 @@ function valueOf(r: ResourceRow, key: string): string | number {
       :technical="detail.data.value?.key"
       :loading="detail.loading.value && !detail.data.value"
       :error="detail.error.value"
+      :thumb="thumbOf(selected)"
       @close="router.push('/materials')"
     >
       <template v-if="detail.data.value">
