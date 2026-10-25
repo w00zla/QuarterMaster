@@ -23,6 +23,7 @@ const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
 const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [
   { to: "/crafting", label: "nav.crafting", icon: "crafter" },
   { to: "/mining", label: "nav.mining", icon: "pickaxe" },
+  { to: "/trade", label: "nav.trade", icon: "trade" },
 ];
 
 const profileOpen = ref(false);

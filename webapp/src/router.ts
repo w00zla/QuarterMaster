@@ -7,6 +7,7 @@ import HomeView from "./views/HomeView.vue";
 import MiningView from "./views/MiningView.vue";
 import RefineryView from "./views/RefineryView.vue";
 import StockView from "./views/StockView.vue";
+import TradeView from "./views/TradeView.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -18,6 +19,7 @@ export const router = createRouter({
     { path: "/blueprints", component: BlueprintsView },
     { path: "/crafting", component: CraftingView },
     { path: "/mining", component: MiningView },
+    { path: "/trade", component: TradeView },
     { path: "/history", component: HistoryView },
     { path: "/:rest(.*)*", redirect: "/" },
   ],

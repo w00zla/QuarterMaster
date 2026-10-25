@@ -197,7 +197,7 @@ blocks".
   "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal (Terminal as "place – shop", e.g. "ARC-L1 Wide Forest Station – Admin",
   System, Preis, Nachfrage / Bestand as a bar against the tab's largest amount with a tick at the terminal's
   average, the figures on hover, Stand dimmed; items without that column), best price
-  first, scrolling inside; UEX's averages in the head.
+  first, scrolling inside (the tabs and tables: `TradeTables.vue`, shared with Handel); UEX's averages in the head.
 - **Ausrüstung** (route `/gear`, until 2026-10-20 "Komponenten" at `/components`; `?scope=` like Ressourcen;
   `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): the ship components and
   FPS gear (since 2026-10-22; their type reads "Helmets · Light", "Attachment · Barrel": `itemTypes` in
@@ -235,7 +235,7 @@ blocks".
   head: count, systems, rank span, best chance), every row listed (title with the game's placeholders as "…",
   rank, systems · bound place, markers Kette/Illegal/Annahme/event, chance), the list scrolls inside with a
   sticky head row; event tiers with event, points and chance. Wording in `webapp/src/unlocks.ts`.
-- **Crafting** (the third tab bar, the tools, with Bergbau; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
+- **Crafting** (the third tab bar, the tools, with Bergbau and Handel; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
   field that stop at the slot's minimum (`withQualityFloor`; the track keeps the full 0–1000 scale). Below the
@@ -270,6 +270,10 @@ blocks".
   there ("Häufigkeit", with a bar in the color of the rock's rarity class, the class in its tooltip, and a help tooltip in the head; not "Anteil": next to "Gehalt" both would read as a share; rarity has no column of its own: two columns read alike), the parts' content ("Gehalt (gut · Rest)", the lean ones dimmed, a help tooltip); no
   quality column (the system says which bar applies). Wording, the card's grouping and filters in
   `webapp/src/mining.ts`.
+- **Handel** ("Trading", route `/trade`, the tab right of Bergbau, icon `trade`): `TradeView`, a section "Preise"
+  with a picker over every bookable material and gear item with a UEX price (`GET /api/trade/prices`, per visit;
+  names from the catalog, components by their `label`; the pick kept for the session), UEX's averages dimmed at
+  the bar's end, below it the trading dialog's `TradeTables` for the pick (`GET /api/trade/:uuid`).
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
 - Info cards: hovering a blueprint name or a material shows game data from `GET /api/info/...`
   (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records).
