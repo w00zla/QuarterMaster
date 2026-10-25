@@ -299,11 +299,14 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   0.75–1.4 allows, the screen once known only where the last k puts it (cheap); k is kept until the scan
   stops. The left (personal) pane is not read.
 - The tooltip opens at a **fixed place** right of the character (not at the cursor); only that area (right of
-  the centre, 0.22–0.76 of the height, scaled up to 1800 px height for the small texts) and the page
+  the centre, 0.22–0.76 of the height, scaled to 1800 px height: up for the small texts, down on larger
+  frames, 3840×2160 ~8 % faster) and the page
   number's go through the OCR, ~0.25–0.4 s per read on 3840×1600 (~0.2–0.3 s at 1080p), and only while the
   cursor is on a lit tile.
   A tooltip needs ≥ 4 body lines and 3 letters in the title (real ones have 13–17 lines, stray reads of the
-  scene 1–3); the Rust side emits the title and the body lines as texts (also into the log). It ends at the
+  scene 1–3); lines above the first with 3 letters are strays of the scene and skipped (a lamp above the
+  panel read as "I", 3840×2160, a user's recording of 2026-10-25); the Rust side emits the title and the
+  body lines as texts (also into the log). It ends at the
   first gap of 0.038 of the height between two lines (`TIP_GAP`): FPS gear often shows a second tooltip
   right below (the equipped piece to compare, or the list "1: MaxLift Tractor Beam / 2: CQ7 Rifle"), ≥ 0.041
   down; within one tooltip the widest gap is 0.035 (above "Registered To You"; 29 FPS and 22 component shots).

@@ -37,8 +37,8 @@ const TIP_LEFT: f32 = 0.02;
 const TIP_RIGHT: f32 = 0.39;
 const TIP_TOP: f32 = 0.22;
 const TIP_BOTTOM: f32 = 0.76;
-/// The tooltip's texts are small (~0.012 of the height): its crop is scaled up to what this frame
-/// height would show
+/// The tooltip's texts are small (~0.012 of the height): its crop is scaled to what this frame height
+/// would show (up on smaller frames, down on larger ones like 2160p: more pixels only cost time)
 const TIP_SCALE_HEIGHT: f32 = 1800.0;
 /// The page number ("2/3") below the storage grid: where it is looked for once the scale is known, and
 /// its centre (from the frame's centre) the scale is taken from
@@ -327,15 +327,13 @@ pub fn lines_of(boxes: &[TextBox], s: f32) -> Vec<Line> {
         .collect()
 }
 
-/// The tooltip in the area's lines: the first line is the title (it must hold letters), the rest its
-/// body up to the first gap of TIP_GAP (a second tooltip below); None with fewer than MIN_BODY_LINES
-/// body lines (stray texts of the scene are no tooltip). `s` = the UI's height (`Ui::len(1.0)`).
+/// The tooltip in the area's lines: the first line with letters is the title (lines above it are
+/// strays of the scene, like a lamp read as "I"), the rest its body up to the first gap of TIP_GAP (a
+/// second tooltip below); None with fewer than MIN_BODY_LINES body lines (stray texts of the scene
+/// are no tooltip). `s` = the UI's height (`Ui::len(1.0)`).
 pub fn tooltip_of(lines: Vec<Line>, s: f32) -> Option<Tooltip> {
     let mut it = lines.into_iter();
-    let title = it.next()?;
-    if title.text.chars().filter(|c| c.is_alphabetic()).count() < MIN_TITLE_LETTERS {
-        return None;
-    }
+    let title = it.find(|l| l.text.chars().filter(|c| c.is_alphabetic()).count() >= MIN_TITLE_LETTERS)?;
     let mut top = title.rect.y0;
     let lines: Vec<Line> = it
         .take_while(|l| {
@@ -359,10 +357,10 @@ fn scaled_crop(frame: &RgbImage, rect: Rect, scale: f32) -> RgbImage {
     let cw = ((rect.x1 as u32).min(w)).saturating_sub(x0).max(1);
     let ch = ((rect.y1 as u32).min(h)).saturating_sub(y0).max(1);
     let crop = imageops::crop_imm(frame, x0, y0, cw, ch).to_image();
-    if scale <= 1.0 {
+    if scale == 1.0 {
         return crop;
     }
-    imageops::resize(&crop, (cw as f32 * scale) as u32, (ch as f32 * scale) as u32, FilterType::CatmullRom)
+    imageops::resize(&crop, ((cw as f32 * scale) as u32).max(1), ((ch as f32 * scale) as u32).max(1), FilterType::CatmullRom)
 }
 
 /// Reads the texts in `rect` of `frame` (scaled up by `scale` first); boxes in frame pixels.
@@ -416,7 +414,7 @@ pub fn read_page(ocr: &mut Ocr, frame: &RgbImage, hint: Option<f32>) -> Result<(
 /// Reads the hovered item's tooltip in its fixed area. The boxes read, in frame pixels.
 pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage, ui: Ui) -> Result<(Option<Tooltip>, Vec<TextBox>), String> {
     let tip_area = Rect { x0: ui.x(TIP_LEFT), y0: ui.y(TIP_TOP), x1: ui.x(TIP_RIGHT), y1: ui.y(TIP_BOTTOM) };
-    let boxes = read_area(ocr, frame, tip_area, (TIP_SCALE_HEIGHT / ui.len(1.0)).max(1.0))?;
+    let boxes = read_area(ocr, frame, tip_area, TIP_SCALE_HEIGHT / ui.len(1.0))?;
     let tooltip = tooltip_of(lines_of(&boxes, ui.len(1.0)), ui.len(1.0));
     Ok((tooltip, boxes))
 }
@@ -492,6 +490,24 @@ mod tests {
         let tip = tooltip_of(lines_of(&boxes, 1600.0), 1600.0).expect("tooltip");
         assert_eq!(tip.lines.last().map(|l| l.text.as_str()), Some("Registered To You"));
         assert_eq!(tip.lines.len(), 5);
+    }
+
+    #[test]
+    fn a_stray_above_the_title_is_skipped() {
+        // IonSurge (3840×2160, a user's recording of 2026-10-25): a lamp of the scene above the panel read as "I"
+        let boxes = vec![
+            tb(2554.0, 461.0, 16.0, 24.0, "I"),
+            tb(2051.0, 549.0, 237.0, 36.0, "lonSurge (Civ/2/B)"),
+            tb(2050.0, 578.0, 288.0, 39.0, "Volumen: 252000 μSCU"),
+            tb(2048.0, 641.0, 393.0, 39.0, "Hersteller: Lightning Power Ltd."),
+            tb(2050.0, 703.0, 270.0, 39.0, "Typ (En): Power Plant"),
+            tb(2050.0, 734.0, 273.0, 41.0, "Typ (De): Power Plant"),
+            tb(2051.0, 795.0, 131.0, 37.0, "Größe: S2"),
+            tb(2052.0, 829.0, 153.0, 35.0, "Gütegrad: B"),
+        ];
+        let tip = tooltip_of(lines_of(&boxes, 2160.0), 2268.0).expect("tooltip");
+        assert_eq!(tip.title, "lonSurge (Civ/2/B)");
+        assert_eq!(tip.lines.len(), 6);
     }
 
     #[test]
