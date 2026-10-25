@@ -17,7 +17,6 @@ import { blueprints, catalog } from "../catalog";
 import ChipButton from "../components/ChipButton.vue";
 import ColumnsButton from "../components/ColumnsButton.vue";
 import Thumb from "../components/Thumb.vue";
-import TypeLabel from "../components/TypeLabel.vue";
 import ViewToggle from "../components/ViewToggle.vue";
 import { blueprintThumb } from "../thumbs";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
@@ -285,7 +284,8 @@ onUnmounted(() => {
         <span class="spacer" />
         <span class="head-count">{{ rows.length }} / {{ allRows.length }}</span>
       </div>
-      <div v-if="org ? !orgEntries : !mine" class="empty-line">{{ t("common.loading") }}</div>
+      <!-- The names come from the catalog: until it is there, every row would say "unknown" -->
+      <div v-if="(org ? !orgEntries : !mine) || !catalog" class="empty-line">{{ t("common.loading") }}</div>
       <div v-else-if="!allRows.length" class="empty-line">{{ t(org ? "bp.orgNone" : "bp.none") }}</div>
       <!-- Keyed by its storage key: org and personal list keep their own columns (a scope switch rebuilds it) -->
       <DataTable
@@ -311,7 +311,7 @@ onUnmounted(() => {
           <InfoTip kind="blueprint" :uuid="row.uuid"><Thumb v-if="!thumbView" v-bind="blueprintThumb(row.uuid)" size="s" :px="20" :icon="bpIcon(row)" :icon-size="15" class="name-icon" /><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span></InfoTip>
           <span v-if="row.bp?.retired" class="tag err">{{ t("bp.retired") }}</span>
         </template>
-        <template #cell-type="{ row }"><TypeLabel :type="row.bp?.type" :label="row.bp?.typeLabel" /></template>
+        <template #cell-type="{ row }"><span class="type-text" :title="row.bp?.type ?? undefined">{{ row.bp?.typeLabel ?? "" }}</span></template>
         <template #cell-size="{ row }">{{ row.bp?.size ?? "—" }}</template>
         <template #cell-grade="{ row }">{{ row.bp?.gradeLetter ?? "—" }}</template>
         <template #cell-stats="{ row }"><span class="stats" :title="row.bp?.stats.join(', ')">{{ row.bp?.stats.join(", ") }}</span></template>
@@ -379,5 +379,11 @@ onUnmounted(() => {
 
 .name-icon {
   margin-right: 6px;
+}
+
+.type-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

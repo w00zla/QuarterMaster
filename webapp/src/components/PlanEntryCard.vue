@@ -67,11 +67,12 @@ const setQuality = (s: EntryResult["slots"][number], e: Event) => emit("quality"
 const setCount = (e: Event) => emit("count", clamped(e, MIN_COUNT, MAX_COUNT));
 const step = (by: number) => emit("count", clampCount(props.result.count + by));
 
-// The stock part: each card on its own (nothing reserved across cards), open by default
-const stockOpen = computed(() => !craftingUi.stockClosed.includes(props.result.blueprintUuid));
-// The owners part, built like the stock part: you first, then each org; open by default
-const ownersOpen = computed(() => !craftingUi.ownersClosed.includes(props.result.blueprintUuid));
+// The stock part: each card on its own (nothing reserved across cards), closed by default
+const stockOpen = computed(() => craftingUi.stockOpen.includes(props.result.blueprintUuid));
+// The owners part, built like the stock part: you first, then each org; closed by default
+const ownersOpen = computed(() => craftingUi.ownersOpen.includes(props.result.blueprintUuid));
 const coverages = computed(() => needsOf(props.result).map((n) => coverageOf(n, props.stock ?? [], me.value?.userId ?? null)));
+const allCovered = computed(() => coverages.value.every((c) => c.covered));
 
 const slotWarning = computed(() => {
   const w = props.result.warnings.find((w) => w.code === "slots");
@@ -217,10 +218,17 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
     </div>
 
     <div class="stock-part">
-      <button type="button" class="stock-toggle" :aria-expanded="stockOpen" @click="toggleIn(craftingUi.stockClosed, result.blueprintUuid)">
+      <!-- The whole head toggles; closed, right: only whether the stock covers everything -->
+      <button type="button" class="stock-toggle" :aria-expanded="stockOpen" @click="toggleIn(craftingUi.stockOpen, result.blueprintUuid)">
         <Icon :name="stockOpen ? 'chevron-down' : 'chevron-right'" :size="14" />
         <Icon name="type-crate" :size="14" />
         <span class="panel-title">{{ t("crafting.stock") }}</span>
+        <span class="spacer" />
+        <template v-if="!stockOpen && coverages.length">
+          <span v-if="!stock" class="tag">—</span>
+          <span v-else-if="allCovered" class="tag ok">{{ t("crafting.covered") }}</span>
+          <span v-else class="tag err">{{ t("crafting.notCovered") }}</span>
+        </template>
       </button>
       <div v-if="stockOpen" class="needs">
         <div v-for="c in coverages" :key="`${c.need.kind}:${c.need.uuid}`" class="need">
@@ -247,10 +255,17 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
 
     <!-- Who has the blueprint: you, then each of your orgs with its members who registered it -->
     <div class="stock-part">
-      <button type="button" class="stock-toggle" :aria-expanded="ownersOpen" @click="toggleIn(craftingUi.ownersClosed, result.blueprintUuid)">
+      <!-- The whole head toggles; closed, right: only whether you have it -->
+      <button type="button" class="stock-toggle" :aria-expanded="ownersOpen" @click="toggleIn(craftingUi.ownersOpen, result.blueprintUuid)">
         <Icon :name="ownersOpen ? 'chevron-down' : 'chevron-right'" :size="14" />
         <Icon name="users" :size="14" />
         <span class="panel-title">{{ t("crafting.owners") }}</span>
+        <span class="spacer" />
+        <template v-if="!ownersOpen">
+          <span v-if="recipe?.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
+          <span v-else-if="!owners" class="tag">—</span>
+          <span v-else class="tag" :class="owners.mine ? 'ok' : 'warn'">{{ t(owners.mine ? "crafting.ownHave" : "crafting.ownMissing") }}</span>
+        </template>
       </button>
       <div v-if="ownersOpen" class="needs">
         <div v-if="!owners" class="faint">{{ t("common.loading") }}</div>
@@ -397,11 +412,12 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
   background: color-mix(in srgb, #000 35%, var(--bg-base));
 }
 
+/* The part's head as one toggle over its full width (closed: its summary tag on the right) */
 .stock-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  align-self: flex-start;
+  align-self: stretch;
   padding: 0;
   border: none;
   background: none;

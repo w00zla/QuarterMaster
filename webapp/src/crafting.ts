@@ -40,21 +40,22 @@ watch(
   { deep: true },
 );
 
-// The view's own state: Stock and Owners panels closed per blueprint
+// The view's own state: Stock and Owners panels opened per blueprint (closed by default; the lists of the
+// former open-by-default state, stockClosed/ownersClosed, are dropped)
 const UI_KEY = "qm.webapp.crafting.ui";
 
 interface CraftingUi {
-  stockClosed: string[];
-  ownersClosed: string[];
+  stockOpen: string[];
+  ownersOpen: string[];
 }
 
 function loadUi(): CraftingUi {
   try {
     const value = JSON.parse(localStorage.getItem(UI_KEY) ?? "{}") as Partial<CraftingUi>;
     const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-    return { stockClosed: strings(value?.stockClosed), ownersClosed: strings(value?.ownersClosed) };
+    return { stockOpen: strings(value?.stockOpen), ownersOpen: strings(value?.ownersOpen) };
   } catch {
-    return { stockClosed: [], ownersClosed: [] };
+    return { stockOpen: [], ownersOpen: [] };
   }
 }
 

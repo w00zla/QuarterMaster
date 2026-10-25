@@ -40,6 +40,8 @@ async function copy() {
 }
 
 .toggle {
+  /* The whole head toggles, up to the copy button */
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 6px;

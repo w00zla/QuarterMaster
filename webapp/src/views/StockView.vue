@@ -26,7 +26,6 @@ import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import ColumnsButton from "../components/ColumnsButton.vue";
 import Thumb from "../components/Thumb.vue";
-import TypeLabel from "../components/TypeLabel.vue";
 import ViewToggle from "../components/ViewToggle.vue";
 import { materialThumb, thumbColumnFlag } from "../thumbs";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
@@ -132,7 +131,6 @@ const batches = computed(() => (data.value?.batches ?? []).filter((b) => b.compo
 // A component's group shows its plain name; type, size and grade have their own columns
 const nameOf = (b: StockBatch) => (b.component ? materials.value.get(b.subjectUuid)?.name ?? b.material : b.material);
 const typeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.typeLabel ?? t("filter.noType");
-const typeCodeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.type;
 const sizeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.size;
 const gradeOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.gradeLetter;
 const classOf = (b: StockBatch) => materials.value.get(b.subjectUuid)?.itemClass;
@@ -379,7 +377,7 @@ function open(batch: StockBatch, action: BatchAction) {
               <InfoTip kind="material" :uuid="g.uuid"><span class="name-tip"><Thumb v-if="!thumbView" v-bind="materialThumb(g.uuid)" size="s" :px="20" :icon="materialIcon(g.uuid)" :icon-size="15" />{{ g.material }}</span></InfoTip>
             </span>
             <template v-if="components">
-              <span v-if="on('type')" class="cell"><TypeLabel :type="typeCodeOf(g.rows[0]!)" :label="typeOf(g.rows[0]!)" /></span>
+              <span v-if="on('type')" class="cell">{{ typeOf(g.rows[0]!) }}</span>
               <span v-if="on('size')" class="num">{{ sizeOf(g.rows[0]!) ?? "—" }}</span>
               <span v-if="on('grade')">{{ gradeOf(g.rows[0]!) ?? "—" }}</span>
               <span v-if="on('class')" class="cell">{{ classOf(g.rows[0]!) ?? "—" }}</span>

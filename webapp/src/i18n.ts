@@ -308,6 +308,7 @@ const en = {
   "crafting.ownersNone": "nobody",
   "crafting.need": "Needed",
   "crafting.covered": "covered",
+  "crafting.notCovered": "missing",
   "crafting.lacking": "missing {n}",
   "crafting.me": "Me",
 
@@ -717,6 +718,7 @@ const de: Record<Key, string> = {
   "crafting.ownersNone": "niemand",
   "crafting.need": "Benötigt",
   "crafting.covered": "gedeckt",
+  "crafting.notCovered": "fehlt",
   "crafting.lacking": "fehlt {n}",
   "crafting.me": "Ich",
 

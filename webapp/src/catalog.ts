@@ -12,6 +12,7 @@ export const catalog = ref<CatalogResponse | null>(null);
 export const catalogFailed = ref(false);
 
 let seq = 0;
+const RETRY_MS = 5000;
 async function load(l: Lang, force = false) {
   const cached = cache.get(l);
   if (cached && !force) {
@@ -26,7 +27,12 @@ async function load(l: Lang, force = false) {
     if (mine === seq) catalog.value = data;
     catalogFailed.value = false;
   } catch {
-    if (mine === seq) catalogFailed.value = true;
+    if (mine !== seq) return;
+    catalogFailed.value = true;
+    // E.g. the server restarting after an update: try again instead of staying without names until a reload
+    setTimeout(() => {
+      if (mine === seq && status.value === "in") void load(lang.value, true);
+    }, RETRY_MS);
   }
 }
 

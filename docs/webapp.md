@@ -239,13 +239,13 @@ blocks".
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
   field that stop at the slot's minimum (`withQualityFloor`; the track keeps the full 0–1000 scale). Below the
-  stats a collapsible "Resources" panel (open by default; closed ones in localStorage `qm.webapp.crafting.ui`):
+  stats a collapsible "Resources" panel (closed by default; opened ones in localStorage `qm.webapp.crafting.ui`):
   per material the need (for the card's count) and a chip "covered" / "missing <amount>", then the stored
   batches of that material at or above the card's target quality, own first, then by quality. The stock is
   `GET /api/stock?scope=all`, loaded once per view and on stock/resync messages; each card is checked on its
   own. Pure logic in `src/planner/stock.ts` (shared with `/qm-crafting`), tested in
-  `test/crafting-stock.test.ts`. Below it a collapsible "Besitzer" ("Owners") panel built the same way (open
-  by default, closed ones as `ownersClosed` in the same localStorage entry): "Du" with "vorhanden" / "fehlt"
+  `test/crafting-stock.test.ts`. Below it a collapsible "Besitzer" ("Owners") panel built the same way (closed
+  by default, opened ones as `ownersOpen` in the same localStorage entry): "Du" with "vorhanden" / "fehlt"
   ("Standard" for a default blueprint, then nothing more), then each of your orgs with its active members who
   registered it ("niemand" without) and their count; from `GET /api/blueprints` and
   `GET /api/orgs/:g/blueprints` per org, loaded once per view and on blueprints/members/profile/resync
