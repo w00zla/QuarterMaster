@@ -163,7 +163,8 @@ def render(job, a):
             light_rot = Matrix.Rotation(rz, 3, 'Z') @ Matrix.Rotation(ry, 3, 'Y') @ Matrix.Rotation(rx, 3, 'X')
             beam = rig_rot @ light_rot @ Vector((1.0, 0.0, 0.0))
             o.rotation_euler = beam.to_track_quat('-Z', 'Y').to_euler()
-        ambient = 0.15
+        # Das Fill-Licht des Rigs ist praktisch aus (0.1): ohne mehr Umgebungslicht saufen Schatten ab
+        ambient = 0.5
     else:
         sun('key', (-0.6, 0.8, 0.7), 3.0)
         sun('fill', (0.8, 0.2, 0.6), 1.2, (0.9, 0.95, 1.0))
