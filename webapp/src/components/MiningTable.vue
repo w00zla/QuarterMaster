@@ -103,9 +103,9 @@ const thumbView = computed(() => table.value?.table.view.value === "thumbs");
           </span>
         </template>
         <template #cell-ore="{ row }">
-          <span class="clip" :title="row.ore"><Thumb v-if="!thumbView" :uuid="row.oreUuid" :hash="row.thumb" size="s" :px="20" icon="resource" :icon-size="14" class="ore-thumb" />{{ row.ore }}</span>
+          <span :title="row.ore"><Thumb v-if="!thumbView" :uuid="row.oreUuid" :hash="row.thumb" size="s" :px="20" icon="resource" :icon-size="14" class="ore-thumb" />{{ row.ore }}</span>
         </template>
-        <template #cell-system="{ row }"><span class="mono-cell clip" :title="row.system ?? undefined">{{ row.system ?? "—" }}</span></template>
+        <template #cell-system="{ row }"><span class="mono-cell" :title="row.system ?? undefined">{{ row.system ?? "—" }}</span></template>
         <template #cell-method="{ row }"><span class="tag">{{ methodText(row.method) }}</span></template>
         <template #cell-share="{ row }">
           <span class="share" :title="shareTitle(row)">
@@ -181,7 +181,6 @@ const thumbView = computed(() => table.value?.table.view.value === "thumbs");
 }
 
 .place {
-  display: block;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -200,7 +199,7 @@ const thumbView = computed(() => table.value?.table.view.value === "thumbs");
 }
 
 .share {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;

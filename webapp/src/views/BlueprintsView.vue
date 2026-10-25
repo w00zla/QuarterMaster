@@ -308,8 +308,8 @@ onUnmounted(() => {
         </template>
         <template #cell-name="{ row }">
           <!-- The crafted item's thumbnail before the name (the type's icon without one), as in the stock lists -->
-          <InfoTip kind="blueprint" :uuid="row.uuid"><Thumb v-if="!thumbView" v-bind="blueprintThumb(row.uuid)" size="s" :px="20" :icon="bpIcon(row)" :icon-size="15" class="name-icon" /><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span></InfoTip>
-          <span v-if="row.bp?.retired" class="tag err">{{ t("bp.retired") }}</span>
+          <InfoTip kind="blueprint" :uuid="row.uuid"><Thumb v-if="!thumbView" v-bind="blueprintThumb(row.uuid)" size="s" :px="20" :icon="bpIcon(row)" :icon-size="15" class="name-icon" /><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span>
+            <span v-if="row.bp?.retired" class="tag err">{{ t("bp.retired") }}</span></InfoTip>
         </template>
         <template #cell-type="{ row }"><span class="type-text" :title="row.bp?.type ?? undefined">{{ row.bp?.typeLabel ?? "" }}</span></template>
         <template #cell-size="{ row }">{{ row.bp?.size ?? "—" }}</template>
@@ -366,7 +366,6 @@ onUnmounted(() => {
 
 .owners,
 .stats {
-  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -383,7 +382,6 @@ onUnmounted(() => {
 }
 
 .type-text {
-  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

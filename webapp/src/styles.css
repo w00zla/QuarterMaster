@@ -364,6 +364,15 @@
   min-width: 0;
 }
 
+/* An info card (InfoTip) answers over the whole cell width, not only on the image and the name */
+.info-anchor {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* An info card (InfoTip) around a thumbnail alone: no line box around the image */
 .info-anchor:has(> .thumb:only-child) {
   display: inline-flex;
