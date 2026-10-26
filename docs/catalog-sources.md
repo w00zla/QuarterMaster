@@ -392,11 +392,16 @@ empty or a generic loadout icon; the commodity logos under `ui/sharedassets/comm
 pictures with gaps), so the icons are rendered from the models:
 
 1. **Export:** StarBreaker `entity export <class_name> --kind decomposed` (`--worn` for armour: the worn model
-   instead of the loot crate) writes `Packages/<name>_LOD1_TEX2/scene.blend` plus a `Data/` tree, one export root
-   per entity (`local/work/icons/export/<class>/`): variants share mesh files under `Data/`, but each export
-   rewrites the mesh to match its own `scene.blend`, so in a shared tree every variant exported before the last
-   one rendered empty ("keine Meshes in der Szene", 27 armour pieces in the first full run). The
-   export is deleted after a successful render (~2 MB each), failed ones stay for inspection. The
+   instead of the loot crate; `--variant-tags` for paint variants: `…_tan01` gets its own tagged SubGeometry
+   instead of the base colours, checked on 58 entities: only 3 changed, the rest bit-identical) writes
+   `Packages/<name>_LOD1_TEX2/scene.blend` plus a `Data/` tree, one export root per entity
+   (`local/work/icons/export/<8 hex of the class name's SHA-256>/`): variants share mesh files under `Data/`, but
+   each export rewrites the mesh to match its own `scene.blend`, so in a shared tree every variant exported before
+   the last one rendered empty ("keine Meshes in der Szene", 27 armour pieces in the first full run). Paths inside
+   an export reach ~160 characters; Blender on Windows reads none over 259 (an empty scene, or missing textures
+   that render silently white), so the root is a short hash and the CLI fails an export whose longest path is
+   longer ("Pfad zu lang": move `--work` to a shorter folder). The export is deleted after a successful render
+   (~2 MB each), failed ones stay for inspection. The
    **fleetyards fork** (`local/starbreaker-fy/`, MIT, built from github.com/fleetyards/StarBreaker main; commit in
    `COMMIT`) is required: the 0.3.2 release misplaces weapon magazines and its addon does not stack LayerBlend
    layers. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable

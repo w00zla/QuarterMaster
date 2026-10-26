@@ -8,6 +8,7 @@
 // Auf einem anderen Rechner ohne DB und Repo (scripts/icons-bundle.ps1 packt alles): --targets <targets.json>
 // mit der Zielliste, die --write-targets hier aus der DB schreibt; die DB-Module werden dann nicht geladen.
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -232,6 +233,12 @@ function sample(targets: Target[], n: number): Target[] {
   return out;
 }
 
+/** Export-Verzeichnis einer Entity: 8 Hex-Zeichen statt des Klassennamens. Die Pfade darin werden bis ~160
+ * Zeichen lang, mit dem Klassennamen davor lag der volle Pfad über den 260, die Blender liest ("keine Meshes"). */
+function entityRoot(exportRoot: string, entity: string): string {
+  return join(exportRoot, createHash('sha256').update(entity).digest('hex').slice(0, 8));
+}
+
 /** Das Paketverzeichnis eines Exports: StarBreaker ersetzt Unterstriche durch Leerzeichen, die
  * Groß-/Kleinschreibung folgt dem DataCore-Namen, nicht dem gesuchten. */
 function packageDir(exportRoot: string, entity: string): string | undefined {
@@ -350,10 +357,11 @@ async function main() {
       // Eigenes Export-Verzeichnis je Entity: Varianten teilen sich Meshes unter Data/, und jeder Export schreibt
       // das Mesh passend zu seiner eigenen scene.blend neu; im gemeinsamen Data/ fand eine früher exportierte
       // Variante ihr Mesh danach nicht mehr ("keine Meshes in der Szene")
-      const root = join(exportRoot, t.entity);
+      const root = entityRoot(exportRoot, t.entity);
       let pkg = packageDir(root, t.entity);
       if (args.force || !pkg) {
-        const base = ['entity', 'export', '--p4k', p4k, t.entity, root, '--kind', 'decomposed'];
+        // --variant-tags: Lackvarianten (…_tan01) mit ihrer eigenen SubGeometry statt in der Grundfarbe
+        const base = ['entity', 'export', '--p4k', p4k, t.entity, root, '--kind', 'decomposed', '--variant-tags'];
         const t0 = Date.now();
         try {
           try {
@@ -374,6 +382,13 @@ async function main() {
         if (!pkg) {
           failures.push(`${t.entity}: package directory not found after export`);
           progress(i + 1, 'export', t.entity, 'FEHLER kein Paketverzeichnis');
+          return;
+        }
+        // Blender liest unter Windows keine Pfade über 259 Zeichen: fehlende Texturen rendern still weiß
+        const longest = readdirSync(root, { recursive: true }).reduce((n, f) => Math.max(n, join(root, String(f)).length), 0);
+        if (longest > 259) {
+          failures.push(`${t.entity}: Pfad zu lang (${longest} Zeichen), --work in einen kürzeren Ordner legen`);
+          progress(i + 1, 'export', t.entity, 'FEHLER Pfad zu lang');
           return;
         }
       } else {
@@ -442,7 +457,7 @@ async function main() {
         rendered++;
         placeIcons(j.job.out, j.target, false);
         // Export nach erfolgreichem Render weg (je Entity ~2 MB, der volle Satz wären ~7 GB); Fehlschläge bleiben zur Diagnose
-        rmSync(join(exportRoot, j.target.entity), { recursive: true, force: true });
+        rmSync(entityRoot(exportRoot, j.target.entity), { recursive: true, force: true });
       } else if (!failed) {
         failures.push(`${j.target.entity}: no render output (Blender abgebrochen?)`);
         progress(j.index + 1, 'render', j.target.entity, 'FEHLER kein Bild');
