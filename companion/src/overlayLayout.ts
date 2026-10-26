@@ -1,5 +1,5 @@
 // The scan overlay's display (settings "Darstellung"/"Display", config overlayDisplay) and how many rows
-// its fixed tile shows below the location line (overlay.rs HEIGHT / HEIGHT_THUMBS). Pure (also run by
+// its fixed tile shows below the location line (overlay.rs size: 340×190 / 360×210). Pure (also run by
 // the root's node tests).
 
 export type OverlayDisplay = "thumbs" | "compact";

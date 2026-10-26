@@ -26,18 +26,20 @@ use crate::capture;
 pub const LABEL: &str = "overlay";
 // The tile's fixed size and its distance to the game window's edges (logical pixels): a 22 px location
 // line and 8 rows of 20 px (OverlayApp.vue, overlayLayout.ts) with the border and padding, the
-// ~28 px mode rail on the right; the display "thumbs" a little higher (a 60 px top row and 6 rows)
+// ~28 px mode rail on the right; the display "thumbs" a little higher (a 60 px top row and 6 rows) and
+// wider by the rows' small thumbnails (16 px, rounded up to 20)
 const WIDTH: f64 = 340.0;
 const HEIGHT: f64 = 190.0;
+const WIDTH_THUMBS: f64 = WIDTH + 20.0;
 const HEIGHT_THUMBS: f64 = 210.0;
 const MARGIN: f64 = 24.0;
 
-/// The tile's height in the configured display ("thumbs" or "compact").
-fn height(display: &str) -> f64 {
+/// The tile's size (width, height) in the configured display ("thumbs" or "compact").
+fn size(display: &str) -> (f64, f64) {
     if display == "compact" {
-        HEIGHT
+        (WIDTH, HEIGHT)
     } else {
-        HEIGHT_THUMBS
+        (WIDTH_THUMBS, HEIGHT_THUMBS)
     }
 }
 // How often the place and the foreground window are checked
@@ -48,7 +50,7 @@ const TICK: Duration = Duration::from_millis(250);
 pub struct Overlay(pub Arc<AtomicBool>);
 
 /// Opens the overlay window (hidden until the game is in front) or closes it; `display` gives its first
-/// height (the placing thread follows a change).
+/// size (the placing thread follows a change).
 pub fn set(app: &AppHandle, overlay: &Overlay, on: bool, display: &str) -> Result<(), String> {
     overlay.0.store(on, Ordering::Relaxed);
     let existing = app.get_webview_window(LABEL);
@@ -64,7 +66,7 @@ pub fn set(app: &AppHandle, overlay: &Overlay, on: bool, display: &str) -> Resul
     }
     let window = tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App("overlay.html".into()))
         .title("Quartermaster Companion – Overlay")
-        .inner_size(WIDTH, height(display))
+        .inner_size(size(display).0, size(display).1)
         .decorations(false)
         .transparent(true)
         .shadow(false)
@@ -106,7 +108,7 @@ pub fn spawn(app: AppHandle, overlay: Overlay, config: impl Fn() -> (String, Str
             let place = capture::foreground_game().and_then(|game| {
                 let client = capture::client_rect(game).ok()?;
                 let (position, display) = config();
-                Some(place(client, scale(game), &position, height(&display)))
+                Some(place(client, scale(game), &position, size(&display)))
             });
             match place {
                 // Every tick: the game may have pushed itself above the overlay
@@ -137,9 +139,9 @@ fn scale(game: HWND) -> f64 {
 }
 
 /// The overlay's place at `position` in the game's client area ("top-left", "top-center", …;
-/// anything else is top left), `height` logical pixels high, screen pixels.
-fn place(client: RECT, scale: f64, position: &str, height: f64) -> RECT {
-    let (w, h, m) = ((WIDTH * scale).round() as i32, (height * scale).round() as i32, (MARGIN * scale).round() as i32);
+/// anything else is top left), `size` (width, height) in logical pixels, screen pixels.
+fn place(client: RECT, scale: f64, position: &str, (width, height): (f64, f64)) -> RECT {
+    let (w, h, m) = ((width * scale).round() as i32, (height * scale).round() as i32, (MARGIN * scale).round() as i32);
     let x = if position.ends_with("-right") {
         client.right - m - w
     } else if position.ends_with("-center") {
@@ -314,18 +316,19 @@ mod tests {
     #[test]
     fn placed_in_a_corner_or_centred() {
         let game = rect(1000, 0, 4840, 1600);
-        assert_eq!(place(game, 1.0, "top-left", HEIGHT), rect(1024, 24, 1364, 214));
-        assert_eq!(place(game, 1.0, "top-right", HEIGHT), rect(4476, 24, 4816, 214));
-        assert_eq!(place(game, 1.0, "bottom-left", HEIGHT), rect(1024, 1386, 1364, 1576));
-        assert_eq!(place(game, 1.0, "bottom-right", HEIGHT), rect(4476, 1386, 4816, 1576));
-        assert_eq!(place(game, 1.0, "top-center", HEIGHT), rect(2750, 24, 3090, 214));
-        assert_eq!(place(game, 1.0, "bottom-center", HEIGHT), rect(2750, 1386, 3090, 1576));
+        assert_eq!(place(game, 1.0, "top-left", (WIDTH, HEIGHT)), rect(1024, 24, 1364, 214));
+        assert_eq!(place(game, 1.0, "top-right", (WIDTH, HEIGHT)), rect(4476, 24, 4816, 214));
+        assert_eq!(place(game, 1.0, "bottom-left", (WIDTH, HEIGHT)), rect(1024, 1386, 1364, 1576));
+        assert_eq!(place(game, 1.0, "bottom-right", (WIDTH, HEIGHT)), rect(4476, 1386, 4816, 1576));
+        assert_eq!(place(game, 1.0, "top-center", (WIDTH, HEIGHT)), rect(2750, 24, 3090, 214));
+        assert_eq!(place(game, 1.0, "bottom-center", (WIDTH, HEIGHT)), rect(2750, 1386, 3090, 1576));
         // Unknown: top left; scaled with the monitor
-        assert_eq!(place(game, 1.5, "?", HEIGHT), rect(1036, 36, 1546, 321));
-        // The display "thumbs" is higher; at the bottom it grows upwards
-        assert_eq!(place(game, 1.0, "top-left", height("thumbs")), rect(1024, 24, 1364, 234));
-        assert_eq!(place(game, 1.0, "bottom-left", height("thumbs")), rect(1024, 1366, 1364, 1576));
-        assert_eq!(height("compact"), HEIGHT);
+        assert_eq!(place(game, 1.5, "?", (WIDTH, HEIGHT)), rect(1036, 36, 1546, 321));
+        // The display "thumbs" is higher and wider; at the bottom it grows upwards, at the right to the left
+        assert_eq!(place(game, 1.0, "top-left", size("thumbs")), rect(1024, 24, 1384, 234));
+        assert_eq!(place(game, 1.0, "bottom-left", size("thumbs")), rect(1024, 1366, 1384, 1576));
+        assert_eq!(place(game, 1.0, "top-right", size("thumbs")), rect(4456, 24, 4816, 234));
+        assert_eq!(size("compact"), (WIDTH, HEIGHT));
     }
 
     #[test]

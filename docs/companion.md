@@ -519,7 +519,7 @@ FP16 and a tone map would be the fix); rotated monitors untested.
 game since.
 
 - A frameless, transparent, click-through, non-focusable window holding the mode's panel as a
-  compact fixed-size read-only tile (340×190 logical px, 340×210 in the display "Thumbnails", slightly see-through; layout "C" of the concept
+  compact fixed-size read-only tile (340×190 logical px, 360×210 in the display "Thumbnails": wider by the rows' S thumbnails (16 px, rounded up), slightly see-through; layout "C" of the concept
   https://claude.ai/artifact/1CK7QBiMpLcj7n4efMeybn with the rail on the right, 2026-10-20): a narrow rail
   on the right with the four modes top down, each its icon above its count, exactly as wide as "999"
   (`3ch`, tabular digits; the shown one highlighted; a warning instead of the count when its filters are
