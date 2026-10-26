@@ -187,11 +187,11 @@ blocks".
   and org stock with an owner column ("Pers." / "Org (holder)"). Adding has a share switch per org (an org
   scope starts with that org on; the batch is always personal, the switches share it). Row actions Sharing (a
   switch per org, whole batch) · Split (unshared) or Merge back (a split-off part) · Move (place, recipient) ·
-  Remove · Adjust. UEC columns (mono, 12 px, dimmed; amount × UEX price, BigInt micro units; batch rows their value, the group row
+  Remove · Adjust; on batches you cannot change (org scope, "All") the same buttons, disabled. UEC columns (mono, 12 px, dimmed; amount × UEX price, BigInt micro units; batch rows their value, the group row
   the material's total; "—" without a price): "UEC Verkauf" (best sell) shown, "UEC Kauf" (best buy) and both
   averages hidden by default; Ausrüstung has "UEC Verkauf" and "UEC Kauf" only (items have no averages).
-  The panel title adds the list's worth at the best sell prices, dimmed: "Ressourcen · Persönlich (123.000
-  aUEC)" (its stored batches with a price, like the overview's total; left out without any price).
+  The panel title adds the list's worth at the best sell prices, set apart (mono, 12 px, dimmer): "Ressourcen · Persönlich (123.000
+  aUEC)" (its stored batches with a price, like the overview's total; every scope, "(0 aUEC)" without any price).
   Ressourcen and Ausrüstung: a last fixed column with the "Handel" button
   (`ChipButton`) on each material's row, disabled without a UEX price; it opens `TradeDialog.vue`: tabs
   "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal (Terminal as "place – shop", e.g. "ARC-L1 Wide Forest Station – Admin",
@@ -214,8 +214,11 @@ blocks".
   the small eye button right of the filter chips (`ColumnsButton.vue` → `ColumnsDialog.vue`, shared with
   the companion, which keeps it in a column head; texts via
   `columnsTexts()`) switches them, kept with the widths in localStorage
-  (`qm.webapp.columns.{stock,components,bp-mine,bp-org}`; `hiddenByDefault` columns start hidden, the ones the
-  user switched on are kept as `shown`). The owners of an org's blueprint list may be hidden too. `DataTable`
+  (`qm.webapp.columns.{stock,components,stock-org,components-org,bp-mine,bp-org}`; `hiddenByDefault` columns start hidden, the ones the
+  user switched on are kept as `shown`). The org scopes of Ressourcen/Ausrüstung keep their own columns: a
+  Halter column, no Status column (refinery jobs are never shared, the share tag is not needed there), every
+  UEC column hidden by default. The owners of an org's blueprint list may be hidden too. Columns naming people
+  (Halter, Besitzer, History's Von) use the UEC columns' face (`.user-cell`: mono, 12 px). `DataTable`
   renders only the shown columns, passes `#col-<key>` head slots on (with the table as `table`) and exposes
   the column state as `table` (the blueprint list's chooser outside the table). The action and Handel
   columns are exactly as wide as their buttons (the Handel button fills its column). The blueprint list's
@@ -228,7 +231,7 @@ blocks".
   open") and rows of resource, quality and expected yield (no method, no estimates). `RefineryDoneDialog`
   stores the whole job, each row's amount starting from its expected yield.
 - **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold with the crafted item's thumbnail before them (the type column the type's icon and name, `TypeLabel`); an org
-  shows every blueprint its active members registered with who has it. A click on a row puts it into the
+  shows every blueprint its active members registered with who has it (the remove button there disabled). A click on a row puts it into the
   crafting check (`addToCrafting`) and opens the tab. The last column (fixed, both scopes) holds the
   "Freischaltung" button (`ChipButton`, disabled without an unlock; its click never reaches the row): it opens
   `UnlocksDialog.vue`, one section per kind; missions in collapsible groups (collapsed, a single group open;
@@ -312,7 +315,9 @@ blocks".
 - Grid tables (`useTableColumns`/`ColumnHead`): the last non-fixed column is the filler (`fillerKey`: takes
   the space left over, no grip), every grip before it resizes its own column (widening takes the free room
   first, then narrows the resizable columns to its right like Excel, down to 40 px), fixed columns (actions)
-  stay at the right edge. Table actions are icon buttons with a tooltip; table filters say "Filter…".
+  stay at the right edge. Table actions are icon buttons with a tooltip; table filters say "Filter…". Every
+  cell of a `.table .data-row` shows its text as tooltip (`webapp/src/cellTips.ts`, one global `mouseover`,
+  set on hover), except cells with an info card (the names), buttons or a `title` of their own.
 - Dialog buttons always sit in the footer (`ConfirmDialog`); a `ConfirmButton` with `form` submits a form in
   the body (Enter works). Pickers: `webapp/src/components/Picker.vue` (lists every match, the list scrolls);
   `Dropdown.vue` is BindSight's with prefixed variant classes (`dd-chip`, …: ui.css has global

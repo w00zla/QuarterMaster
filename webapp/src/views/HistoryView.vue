@@ -187,7 +187,7 @@ const rows = computed(() => sortRows(entries.value ?? [], cols.sort.value, value
           <span class="cell">{{ sourceText(e) }}</span>
           <span class="cell">{{ categoryText(e) }}</span>
           <span class="cell">{{ actionText(e) }}</span>
-          <span class="cell" :class="{ faint: e.actor.userId === me?.userId }">{{ personText(e.actor) }}</span>
+          <span class="cell user-cell" :class="{ faint: e.actor.userId === me?.userId }">{{ personText(e.actor) }}</span>
           <span class="cell target"><Thumb v-if="!thumbView" v-bind="targetThumb(e)" size="s" :px="20" :icon="targetIcon(e)" :icon-size="15" class="target-thumb" />{{ e.target }}</span>
           <span class="cell" :title="detailsText(e)">{{ detailsText(e) }}</span>
         </div>

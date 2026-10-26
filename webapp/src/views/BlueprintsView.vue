@@ -144,7 +144,9 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "size", label: t("bp.col.size"), width: 64, hideable: true },
   { key: "grade", label: t("bp.col.grade"), width: 72, hideable: true },
   { key: "stats", label: t("bp.col.stats"), width: 280, hideable: true },
-  org.value ? { key: "owners", label: t("bp.col.owners"), width: 240, hideable: true } : { key: "actions", label: "", width: 44, sortable: false, fixed: true, sep: true },
+  ...(org.value ? [{ key: "owners", label: t("bp.col.owners"), width: 240, hideable: true }] : []),
+  // Auch in der Org-Ansicht, dort ausgegraut (entfernt wird in der eigenen Liste)
+  { key: "actions", label: "", width: 44, sortable: false, fixed: true, sep: true },
   // Last: the unlocks button (the column chooser sits right of the filters)
   { key: "unlock", label: "", width: lang.value === "de" ? 124 : 96, sortable: false, fixed: true, sep: true },
 ]);
@@ -316,10 +318,10 @@ onUnmounted(() => {
         <template #cell-grade="{ row }">{{ row.bp?.gradeLetter ?? "—" }}</template>
         <template #cell-stats="{ row }"><span class="stats" :title="row.bp?.stats.join(', ')">{{ row.bp?.stats.join(", ") }}</span></template>
         <template #cell-owners="{ row }">
-          <span class="owners" :title="row.owners.map(memberLabel).join(', ')">{{ row.owners.map(memberLabel).join(", ") }}</span>
+          <span class="owners user-cell" :title="row.owners.map(memberLabel).join(', ')">{{ row.owners.map(memberLabel).join(", ") }}</span>
         </template>
         <template #cell-actions="{ row }">
-          <button type="button" class="icon-btn remove" :title="t('bp.remove')" :disabled="busy" @click.stop="pending = row.uuid">
+          <button type="button" class="icon-btn remove" :title="t('bp.remove')" :disabled="busy || !!org" @click.stop="pending = row.uuid">
             <Icon name="trash" :size="14" />
           </button>
         </template>

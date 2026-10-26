@@ -379,3 +379,9 @@
   flex-shrink: 0;
   vertical-align: middle;
 }
+
+/* Spalten mit Personen (Halter, Besitzer, Von): dieselbe Schrift wie die UEC-Spalten */
+.user-cell {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

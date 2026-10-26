@@ -21,7 +21,7 @@ import { materials } from "../catalog";
 import RangeSlider from "../components/RangeSlider.vue";
 import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { sortRows, THUMB_COLUMN, useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
+import { sortRows, THUMB_COLUMN, useTableColumns, type ColumnSpec, type SortState } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import ColumnsButton from "../components/ColumnsButton.vue";
@@ -156,7 +156,8 @@ const filtered = computed(() => {
 // Every column but the name and the actions may be hidden (ColumnsButton right of the filters); the view
 // 'thumbs' (ViewToggle) puts the thumbnail column first
 const thumbCol = thumbColumnFlag();
-const columns = computed<ColumnSpec[]>(() => [
+// The org scopes keep columns of their own (`orgView`): holder instead of state, UEC hidden until switched on
+const columnsFor = (orgView: boolean) => computed<ColumnSpec[]>(() => [
   ...(thumbCol.on.value ? [THUMB_COLUMN] : []),
   { key: "material", label: props.components ? t("stock.col.component") : t("stock.col.material"), width: 200 },
   ...(props.components
@@ -170,17 +171,19 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "amount", label: props.components ? t("stock.col.count") : t("stock.col.amount"), width: 120, hideable: true },
   ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260, hideable: true }] : []),
   // What the amount is worth at UEX's prices (best sell shown, the others on demand); items have no averages
-  { key: "uecSell", label: t("trade.col.sell"), width: 120, hideable: true },
+  { key: "uecSell", label: t("trade.col.sell"), width: 120, hideable: true, hiddenByDefault: orgView },
   { key: "uecBuy", label: t("trade.col.buy"), width: 120, hideable: true, hiddenByDefault: true },
   ...(props.components ? [] : [
     { key: "uecSellAvg", label: t("trade.col.sellAvg"), width: 120, hideable: true, hiddenByDefault: true },
     { key: "uecBuyAvg", label: t("trade.col.buyAvg"), width: 120, hideable: true, hiddenByDefault: true },
   ]),
   { key: "location", label: t("stock.col.location"), width: 280, hideable: true },
-  ...(org.value ? [{ key: "holder", label: t("stock.col.holder"), width: 180, hideable: true }] : []),
-  ...(scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200, hideable: true }] : []),
-  // Die Füllspalte (Rest der Breite, ohne Griff): ihre Breite ist ihr Minimum, daher das der anderen (MIN_WIDTH)
-  { key: "state", label: t("stock.col.state"), width: 40, hideable: true },
+  ...(orgView ? [{ key: "holder", label: t("stock.col.holder"), width: 180, hideable: true }] : []),
+  ...(!orgView && scope.value === "all" ? [{ key: "owner", label: t("stock.col.owner"), width: 200, hideable: true }] : []),
+  // Die Füllspalte (Rest der Breite, ohne Griff): ihre Breite ist ihr Minimum, daher das der anderen (MIN_WIDTH).
+  // Nicht in der Org-Ansicht: Raffinerie-Aufträge werden nie geteilt, den Teilen-Tag braucht sie nicht, die Spalte
+  // bliebe leer (dort ist "Halter" die Füllspalte)
+  ...(orgView ? [] : [{ key: "state", label: t("stock.col.state"), width: 40, hideable: true }]),
   // Genau so breit wie die Buttons (je 26px, 6px Abstand) plus der Abstand hinter der Trennlinie (6px) und ein
   // Mini-Abstand (3px) vor der Handel-Spalte: Ressourcen fünf Buttons, Ausrüstung vier
   { key: "actions", label: "", width: (props.components ? 4 * 26 + 3 * 6 : 5 * 26 + 4 * 6) + 6 + 3, sortable: false, fixed: true, sep: true },
@@ -188,17 +191,20 @@ const columns = computed<ColumnSpec[]>(() => [
   // Der Button füllt die Spalte (kein Polster); breit genug für "Handel" und "Trading"
   { key: "trade", label: "", width: 6 + 62, sortable: false, fixed: true, sep: true },
 ]);
-const cols = props.components
-  ? useTableColumns("qm.webapp.columns.components", columns, { key: "amount", dir: "desc" })
-  : useTableColumns("qm.webapp.columns.stock", columns, { key: "quality", dir: "desc" });
-thumbCol.follow(cols.view);
-const thumbView = computed(() => cols.view.value === "thumbs");
-const shown = computed(() => new Set(cols.columns.value.map((c) => c.key)));
+const storageKey = props.components ? "qm.webapp.columns.components" : "qm.webapp.columns.stock";
+const defaultSort: SortState = props.components ? { key: "amount", dir: "desc" } : { key: "quality", dir: "desc" };
+const mineCols = useTableColumns(storageKey, columnsFor(false), defaultSort);
+const orgCols = useTableColumns(`${storageKey}-org`, columnsFor(true), defaultSort);
+// The table remounts on a scope switch (the list reloads), so it binds to the active one's `observe`
+const cols = computed(() => (org.value ? orgCols : mineCols));
+thumbCol.follow(computed(() => cols.value.view.value));
+const thumbView = computed(() => cols.value.view.value === "thumbs");
+const shown = computed(() => new Set(cols.value.columns.value.map((c) => c.key)));
 const on = (key: string) => shown.value.has(key);
 // Cells of a group row before the empty ones: (thumbnail,) name, (type, size, grade, class | quality,) total,
 // (stats, empty,) UEC values; the trade button comes after them
 const LEAD = new Set(["thumb", "material", "type", "size", "grade", "class", "quality", "amount", "stats", "uecSell", "uecBuy", "uecSellAvg", "uecBuyAvg"]);
-const groupRest = computed(() => cols.columns.value.filter((c) => !LEAD.has(c.key) && c.key !== "trade").length);
+const groupRest = computed(() => cols.value.columns.value.filter((c) => !LEAD.has(c.key) && c.key !== "trade").length);
 
 // The UEC columns' prices: best sell (highest), best buy (lowest), UEX's averages
 const UEC = {
@@ -209,7 +215,7 @@ const UEC = {
 };
 type UecKey = keyof typeof UEC;
 const isUec = (key: string): key is UecKey => Object.hasOwn(UEC, key);
-const uecShown = computed(() => cols.columns.value.map((c) => c.key).filter(isUec));
+const uecShown = computed(() => cols.value.columns.value.map((c) => c.key).filter(isUec));
 /** An amount's worth at the column's price in micro aUEC (exact, BigInt); null without a price. */
 function uecMicros(uuid: string, quantity: string, key: UecKey): bigint | null {
   const p = prices.value[uuid];
@@ -217,14 +223,14 @@ function uecMicros(uuid: string, quantity: string, key: UecKey): bigint | null {
   return price === undefined ? null : valueMicros(quantity, price);
 }
 const uecText = (micros: bigint | null) => (micros === null ? "—" : uec(Number(micros) / 1e6));
-// The list's worth at the best sell prices (its stored batches, like the overview's total value); null
-// while no batch has a price
+// The list's worth at the best sell prices (its stored batches, like the overview's total value); 0 without
+// any price
 const listWorth = computed(() => {
-  let sum: bigint | null = null;
+  let sum = 0n;
   for (const b of batches.value) {
     if (b.state !== "stored") continue;
     const m = uecMicros(b.subjectUuid, b.quantity, "uecSell");
-    if (m !== null) sum = (sum ?? 0n) + m;
+    if (m !== null) sum += m;
   }
   return sum;
 });
@@ -254,17 +260,17 @@ function valueOf(b: StockBatch, key: string): string | number {
 const groups = computed(() => {
   const by = new Map<string, StockBatch[]>();
   for (const b of filtered.value) by.set(b.subjectUuid, [...(by.get(b.subjectUuid) ?? []), b]);
-  const { key, dir } = cols.sort.value;
+  const { key, dir } = cols.value.sort.value;
   const sign = dir === "asc" ? 1 : -1;
   const byName = (a: { material: string }, b: { material: string }) => a.material.localeCompare(b.material, lang.value);
   const list = [...by.values()]
     .map((rows) => ({
       uuid: rows[0]!.subjectUuid, material: nameOf(rows[0]!), unit: rows[0]!.unit,
       total: data.value?.totals[rows[0]!.subjectUuid] ?? "0",
-      rows: sortRows(rows, cols.sort.value, valueOf, compareBatches),
+      rows: sortRows(rows, cols.value.sort.value, valueOf, compareBatches),
     }));
   // A component's type, size and grade belong to its group: the groups sort by them, then by name
-  if (key === "type" || key === "size" || key === "grade") return sortRows(list, cols.sort.value, (g, k) => valueOf(g.rows[0]!, k), byName);
+  if (key === "type" || key === "size" || key === "grade") return sortRows(list, cols.value.sort.value, (g, k) => valueOf(g.rows[0]!, k), byName);
   // Groups follow the material, amount and UEC columns (by name, by total); otherwise alphabetical
   const worth = (g: { uuid: string; total: string }, k: UecKey) => Number(uecMicros(g.uuid, g.total, k) ?? -1n);
   return list.sort((a, b) => key === "material" ? sign * byName(a, b)
@@ -328,7 +334,7 @@ function open(batch: StockBatch, action: BatchAction) {
     <section class="panel unclipped">
       <div class="head">
         <Icon :name="components ? 'gear' : 'type-crate'" :size="16" />
-        <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}<template v-if="listWorth !== null"> ({{ uecText(listWorth) }} aUEC)</template></span></span>
+        <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span><span class="head-worth">({{ uecText(listWorth) }} aUEC)</span></span>
         <!-- Offen: als Umriss-Button "Schließen", damit nur der Hinzufügen-Button im Formular gefüllt ist -->
         <button type="button" class="btn small" :class="showAdd ? 'outline' : 'primary'" @click="showAdd = !showAdd">
           <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ showAdd ? t("common.close") : t("stock.add") }}
@@ -400,32 +406,31 @@ function open(batch: StockBatch, action: BatchAction) {
             <span v-if="components && on('stats')" class="cell" :class="{ dim: !statsText(b.subjectUuid, b.stats) }" :title="statsText(b.subjectUuid, b.stats)">{{ statsText(b.subjectUuid, b.stats) || t("stock.standard") }}</span>
             <span v-for="k in uecShown" :key="k" class="num uec">{{ uecText(uecMicros(b.subjectUuid, b.quantity, k)) }}</span>
             <span v-if="on('location')" class="cell">{{ b.location }}</span>
-            <span v-if="org && on('holder')" class="cell">{{ b.holderName }}</span>
-            <span v-if="scope === 'all' && on('owner')" class="cell">{{ ownerText(b) }}</span>
+            <span v-if="org && on('holder')" class="cell user-cell">{{ b.holderName }}</span>
+            <span v-if="scope === 'all' && on('owner')" class="cell user-cell">{{ ownerText(b) }}</span>
             <span v-if="on('state')">
               <span v-if="b.state === 'refining'" class="tag warn">{{ t("stock.refining") }}</span>
-              <!-- Where it is shared (an org's own list needs no tag for it) -->
-              <span v-else-if="!org && b.sharedIn.length" class="tag accent">{{ sharedText(b) }}</span>
+              <!-- Where it is shared -->
+              <span v-else-if="b.sharedIn.length" class="tag accent">{{ sharedText(b) }}</span>
             </span>
             <span class="sep actions">
-              <template v-if="canChange(b)">
-                <!-- Sharing needs an org to share in; taking back always works -->
-                <button type="button" class="icon-btn" :title="t('field.sharing')"
-                  :disabled="b.state !== 'stored' || (!b.sharedIn.length && !shareable)" @click="open(b, 'share')"><Icon name="users" :size="15" /></button>
-                <!-- In der Raffinerie: nichts entnehmen; korrigiert wird im Raffinerie-Tab -->
-                <button type="button" class="icon-btn" :title="t('stock.remove')" :disabled="b.state !== 'stored'" @click="open(b, 'remove')"><Icon name="arrow-up" :size="15" /></button>
-                <button type="button" class="icon-btn" :title="t('stock.move')" :disabled="b.state !== 'stored'" @click="open(b, 'move')"><Icon name="move" :size="15" /></button>
-                <!-- A part goes back into its main batch; only unshared batches split. Ausrüstung (ein Stück
-                     je Eintrag): weder Aufteilen noch Zusammenführen -->
-                <template v-if="!components">
-                  <button v-if="b.part" type="button" class="icon-btn" :title="t('stock.merge')" @click="open(b, 'merge')"><Icon name="merge" :size="15" /></button>
-                  <button v-else type="button" class="icon-btn" :title="t('stock.split')"
-                    :disabled="b.state !== 'stored' || b.sharedIn.length > 0" @click="open(b, 'split')"><Icon name="split" :size="15" /></button>
-                </template>
-                <!-- Ausrüstung: nur die Werte korrigieren; bei Teilen ohne Werte deaktiviert (kein Layout-Sprung) -->
-                <button v-if="!components" type="button" class="icon-btn" :title="t('stock.adjust')" :disabled="b.state !== 'stored'" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
-                <button v-else type="button" class="icon-btn" :title="t('stock.adjustStats')" :disabled="!materials.get(b.subjectUuid)?.stats.length" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
+              <!-- Fremde Einträge (Org-Ansicht, Alle): dieselben Buttons, ausgegraut -->
+              <!-- Sharing needs an org to share in; taking back always works -->
+              <button type="button" class="icon-btn" :title="t('field.sharing')"
+                :disabled="!canChange(b) || b.state !== 'stored' || (!b.sharedIn.length && !shareable)" @click="open(b, 'share')"><Icon name="users" :size="15" /></button>
+              <!-- In der Raffinerie: nichts entnehmen; korrigiert wird im Raffinerie-Tab -->
+              <button type="button" class="icon-btn" :title="t('stock.remove')" :disabled="!canChange(b) || b.state !== 'stored'" @click="open(b, 'remove')"><Icon name="arrow-up" :size="15" /></button>
+              <button type="button" class="icon-btn" :title="t('stock.move')" :disabled="!canChange(b) || b.state !== 'stored'" @click="open(b, 'move')"><Icon name="move" :size="15" /></button>
+              <!-- A part goes back into its main batch; only unshared batches split. Ausrüstung (ein Stück
+                   je Eintrag): weder Aufteilen noch Zusammenführen -->
+              <template v-if="!components">
+                <button v-if="b.part" type="button" class="icon-btn" :title="t('stock.merge')" :disabled="!canChange(b)" @click="open(b, 'merge')"><Icon name="merge" :size="15" /></button>
+                <button v-else type="button" class="icon-btn" :title="t('stock.split')"
+                  :disabled="!canChange(b) || b.state !== 'stored' || b.sharedIn.length > 0" @click="open(b, 'split')"><Icon name="split" :size="15" /></button>
               </template>
+              <!-- Ausrüstung: nur die Werte korrigieren; bei Teilen ohne Werte deaktiviert (kein Layout-Sprung) -->
+              <button v-if="!components" type="button" class="icon-btn" :title="t('stock.adjust')" :disabled="!canChange(b) || b.state !== 'stored'" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
+              <button v-else type="button" class="icon-btn" :title="t('stock.adjustStats')" :disabled="!canChange(b) || !materials.get(b.subjectUuid)?.stats.length" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
             </span>
             <span class="sep" />
           </div>
@@ -473,6 +478,15 @@ function open(batch: StockBatch, action: BatchAction) {
 
 .uec.total {
   color: var(--text-2);
+}
+
+/* Der Wert hinter dem Titel: abgesetzt und leiser als der Titel */
+.head-worth {
+  margin-left: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
 }
 
 /* Rows look like the blueprint table's (same .data-row type), without the click cursor */
