@@ -4,6 +4,8 @@
 // that side. UEX fields (commodities_prices_all): price_sell / scu_sell (+ _avg) = what the terminal
 // pays and takes when the player sells, price_buy / scu_buy = what it asks and has in stock when the
 // player buys; items_prices_all has no stock. `commodities` holds UEX's average prices (items have none).
+// Harvestables (items counted in pieces) are matched to commodities by name as well, their prices per SCU
+// scaled to one piece by the item's inventory volume.
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
@@ -35,10 +37,12 @@ export interface MaterialTrade {
   buy: Offer[];
 }
 
-/** A catalog resource: its English name. */
+/** A catalog resource or harvestable: its English name. */
 export interface ResourceName {
   uuid: string;
   nameEn: string;
+  // Harvestables: SCU per piece (prices are per piece); resources: absent (per SCU)
+  scu?: number;
 }
 
 /** "Quantainium", "Agricium (Ore)" -> "quantainium", "agriciumore" (exact names, case and punctuation dropped). */
@@ -47,6 +51,8 @@ export const nameKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const positive = (v: unknown) => { const n = num(v); return n !== null && n > 0 ? n : null; };
+// A price per SCU for one piece (factor = SCU per piece), to 6 decimals like the stock values
+const scaled = (price: number | null, factor: number) => (price === null ? null : Math.round(price * factor * 1e6) / 1e6);
 
 function range(offers: Offer[], avg: number | null): PriceRange | null {
   if (!offers.length) return null;
@@ -76,10 +82,10 @@ export function buildTrade(
   for (const t of data.terminals ?? []) {
     if (typeof t.id === 'number') terminals.set(t.id, { ...terminalPlace(t), system: str(t.star_system_name) });
   }
-  const byName = new Map<string, string[]>();
-  for (const r of resources) byName.set(nameKey(r.nameEn), [...(byName.get(nameKey(r.nameEn)) ?? []), r.uuid]);
-  // UEX commodity ID -> catalog resource UUIDs and its average prices
-  const commodities = new Map<number, { uuids: string[]; sell: number | null; buy: number | null }>();
+  const byName = new Map<string, Array<{ uuid: string; factor: number }>>();
+  for (const r of resources) byName.set(nameKey(r.nameEn), [...(byName.get(nameKey(r.nameEn)) ?? []), { uuid: r.uuid, factor: r.scu ?? 1 }]);
+  // UEX commodity ID -> catalog resource and harvestable UUIDs (with their price factor) and its average prices
+  const commodities = new Map<number, { uuids: Array<{ uuid: string; factor: number }>; sell: number | null; buy: number | null }>();
   for (const c of data.commodities ?? []) {
     const uuids = typeof c.name === 'string' ? byName.get(nameKey(c.name)) : undefined;
     if (typeof c.id === 'number' && uuids) commodities.set(c.id, { uuids, sell: positive(c.price_sell), buy: positive(c.price_buy) });
@@ -106,10 +112,11 @@ export function buildTrade(
     if (!c) continue;
     const sell = positive(r.price_sell);
     const buy = positive(r.price_buy);
-    for (const uuid of c.uuids) {
-      const e = entry(uuid, c.sell, c.buy);
-      if (sell !== null) e.sell.push(offer(r, sell, r.scu_sell, r.scu_sell_avg));
-      if (buy !== null) e.buy.push(offer(r, buy, r.scu_buy, r.scu_buy_avg));
+    // Stock and demand stay in SCU
+    for (const { uuid, factor } of c.uuids) {
+      const e = entry(uuid, scaled(c.sell, factor), scaled(c.buy, factor));
+      if (sell !== null) e.sell.push(offer(r, scaled(sell, factor)!, r.scu_sell, r.scu_sell_avg));
+      if (buy !== null) e.buy.push(offer(r, scaled(buy, factor)!, r.scu_buy, r.scu_buy_avg));
     }
   }
   for (const r of data.items_prices_all ?? []) {
@@ -137,9 +144,19 @@ export function buildTrade(
   return result;
 }
 
-/** Every resource not retired, by English name (ores too), reloaded with the catalog. */
-const resourceNames = importCache(async (db): Promise<ResourceName[]> => rows<ResourceName>(db, sql`
-  SELECT r.uuid, coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn" FROM catalog.resource r WHERE r.retired_at IS NULL`));
+/**
+ * Every resource not retired, by English name (ores too), and the harvestables with their inventory volume
+ * (SCU per piece; none without it), reloaded with the catalog.
+ */
+const resourceNames = importCache(async (db): Promise<ResourceName[]> => rows<{ uuid: string; nameEn: string; scu: number | null }>(db, sql`
+  SELECT r.uuid, coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", NULL::float8 AS scu FROM catalog.resource r WHERE r.retired_at IS NULL
+  UNION ALL
+  SELECT i.uuid, coalesce(${locText('en', sql`i.name_key`)}, i.class_name), v.micro / 1e6
+  FROM catalog.item i JOIN catalog.raw_record rr ON rr.uuid = i.uuid
+  CROSS JOIN LATERAL (SELECT (jsonb_path_query_first(rr.data,
+    '$.Components[*] ? (@._Type_ == "SAttachableComponentParams").AttachDef.inventoryOccupancyVolume.microSCU'))::float8 AS micro) v
+  WHERE i.retired_at IS NULL AND i.sub_type = 'Harvestable' AND v.micro > 0`)
+  .then((found) => found.map(({ scu, ...r }) => (scu === null ? r : { ...r, scu }))));
 
 let cached: { key: string; resources: ResourceName[]; value: Promise<Map<string, MaterialTrade>> } | null = null;
 

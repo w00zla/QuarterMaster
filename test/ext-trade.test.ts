@@ -64,6 +64,19 @@ describe('UEX trade prices', () => {
     assert.equal(trade.size, 3);
   });
 
+  it('harvestables: the commodity of their name, priced per piece by their volume', () => {
+    const PIECE = '10000000-0000-0000-0000-0000000000a4';
+    const trade = buildTrade({
+      terminals, commodities,
+      commodities_prices_all: [price(10, 1, 1_800_000, 0, T1, { scu_sell: 32, scu_sell_avg: 16 }), price(10, 2, 6599, 0, T1)],
+    }, [{ uuid: METAL, nameEn: 'Test Metal' }, { uuid: PIECE, nameEn: 'Test Metal', scu: 0.001 }]);
+    assert.equal(trade.get(METAL)!.summary.sell!.max, 1_800_000);
+    const piece = trade.get(PIECE)!;
+    assert.deepEqual(piece.summary.sell, { min: 6.599, max: 1800, avg: 0.09, terminals: 2 });
+    // Stock and demand stay in SCU
+    assert.deepEqual(piece.sell.map((o) => [o.price, o.scu, o.scuAvg]), [[1800, 32, 16], [6.599, null, null]]);
+  });
+
   it('without terminals: the name of the price row', () => {
     const trade = buildTrade({ commodities, commodities_prices_all: [price(10, 7, 3, 0, T1, { terminal_name: 'Somewhere' })] }, [{ uuid: METAL, nameEn: 'Test Metal' }]);
     assert.deepEqual(trade.get(METAL)!.sell.map((o) => [o.location, o.terminal, o.system]), [['Somewhere', 'Somewhere', null]]);

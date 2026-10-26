@@ -17,8 +17,12 @@ location bonuses (server-side).
 - **Trading** (`trade.ts`, read by the web app: `docs/webapp.md`): `terminals`, `commodities`,
   `commodities_prices_all` and `items_prices_all` per catalog material. Commodities are matched to catalog
   resources (not retired, ores too) by `nameKey` of the English name (lower case, only letters and digits:
-  exact names, unlike `oreKey`), items by `item_uuid` (the game's UUID). Price 0 = not traded on that side,
-  left out. Fields: `price_sell`/`scu_sell`/`scu_sell_avg` = what the terminal pays and takes when the
+  exact names, unlike `oreKey`), items by `item_uuid` (the game's UUID). Harvestables (items of sub type
+  `Harvestable`, booked in pieces; none of them in `items_prices_all`) are matched to commodities by name as
+  well, their prices (offers and averages; stock and demand stay SCU) scaled to one piece by the item's
+  inventory volume (`SAttachableComponentParams.AttachDef.inventoryOccupancyVolume.microSCU` in its
+  `raw_record`: 1000 µSCU each in 4.x, Janalite 1.8 M/SCU = 1,800 aUEC per piece; decided 2026-10-26).
+  Price 0 = not traded on that side, left out. Fields: `price_sell`/`scu_sell`/`scu_sell_avg` = what the terminal pays and takes when the
   player sells (its demand), `price_buy`/`scu_buy`/`scu_buy_avg` = what it asks and has in stock when the
   player buys (UEX's docs only say "last"/"average"; read from the field names and UEX's site); `commodities`'
   `price_sell`/`price_buy` = UEX's averages (items have none, `items_prices_all` no stock);
