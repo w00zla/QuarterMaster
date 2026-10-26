@@ -392,7 +392,11 @@ empty or a generic loadout icon; the commodity logos under `ui/sharedassets/comm
 pictures with gaps), so the icons are rendered from the models:
 
 1. **Export:** StarBreaker `entity export <class_name> --kind decomposed` (`--worn` for armour: the worn model
-   instead of the loot crate) writes `Packages/<name>_LOD1_TEX2/scene.blend` plus a shared `Data/` tree. The
+   instead of the loot crate) writes `Packages/<name>_LOD1_TEX2/scene.blend` plus a `Data/` tree, one export root
+   per entity (`local/work/icons/export/<class>/`): variants share mesh files under `Data/`, but each export
+   rewrites the mesh to match its own `scene.blend`, so in a shared tree every variant exported before the last
+   one rendered empty ("keine Meshes in der Szene", 27 armour pieces in the first full run). The
+   export is deleted after a successful render (~2 MB each), failed ones stay for inspection. The
    **fleetyards fork** (`local/starbreaker-fy/`, MIT, built from github.com/fleetyards/StarBreaker main; commit in
    `COMMIT`) is required: the 0.3.2 release misplaces weapon magazines and its addon does not stack LayerBlend
    layers. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable
@@ -420,9 +424,14 @@ pictures with gaps), so the icons are rendered from the models:
    exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
 4. **Output:** one render per entity (`local/work/icons/render/<class>.png`), copied to
-   `local/icons/<uuid>.png` per catalog UUID. Exports and renders are reused unless `--force`; `--filter` re-renders
+   `local/icons/<Name> (<class>) <uuid>.png` per catalog UUID (English name, so the renders can be checked by eye
+   in Explorer and re-rendered with `--filter <class>`; `icons:pack` reads only the UUID at the end and stops when
+   a UUID has two files). A run without `--force` renames existing icons to this pattern. Renders are reused unless `--force`; `--filter` re-renders
    single entities. ~2 s export + ~2 s render per entity (Blender runs 50 per process), the full set (~3800
-   entities) takes 4–5 h. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
+   entities) took 4 h on the render PC. Log: `render.log` (the console plus full error messages) and
+   `blender.log` (Blender's output, tracebacks of `render.py`) in the work directory, appended per run. Known
+   failures of the first full run (2026-10-26) besides the armour: ~20 entities whose files are missing from
+   `Data.p4k` or that have no geometry (docking tubes, ship-built missile racks, `RADR_S02_Fake`, …), not fixable here. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
    packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
    Windows PC (`run.cmd`, needs only `Data.p4k`).
 5. **Pack:** `pnpm icons:pack [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns

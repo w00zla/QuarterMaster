@@ -66,8 +66,10 @@ Icon-Render-Bundle (sc-quartermaster)
 2. run.cmd ausführen. Erst ein Test: run.cmd --sample 20
    Voller Lauf: run.cmd            (ca. 4-5 Stunden; abbrechen und neu starten ist ok, Fertiges wird übersprungen)
    Weitere Optionen: run.cmd --help
-3. Ergebnis: icons\<uuid>.png (ein Bild je Katalog-UUID). Den Ordner icons\ zurück auf den Entwicklungsrechner.
-   work\ ist nur Cache (Exporte, Renders je Entity, DataCore-Dumps) und kann danach weg.
+3. Ergebnis: icons\<Name> (<Klasse>) <uuid>.png (ein Bild je Katalog-UUID; im Explorer mit großen Symbolen
+   auf Sicht prüfen, Nachrendern mit run.cmd --force --filter <Klasse>). Den Ordner icons\ zurück auf den
+   Entwicklungsrechner. Log: work\render.log (Fortschritt, Fehler), work\blender.log (Blender-Ausgabe).
+   work\ ist sonst nur Cache (Renders je Entity, DataCore-Dumps) und kann danach weg.
 
 Der Rechner braucht nichts installiert: Node, Blender und StarBreaker liegen im Bundle. Kein Internet nötig.
 '@ | Set-Content -Path (Join-Path $Out 'LIESMICH.txt') -Encoding UTF8

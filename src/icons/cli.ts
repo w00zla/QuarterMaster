@@ -8,7 +8,7 @@
 // Auf einem anderen Rechner ohne DB und Repo (scripts/icons-bundle.ps1 packt alles): --targets <targets.json>
 // mit der Zielliste, die --write-targets hier aus der DB schreibt; die DB-Module werden dann nicht geladen.
 import { execFile, spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
@@ -31,7 +31,8 @@ const HELP = `Usage: pnpm icons:render [options]
   --parallel <n>        Gleichzeitige StarBreaker-Exporte (default 4; jeder lädt die DataCore für sich)`;
 
 interface Category { type: string; subType: string; requiredTag: unknown }
-interface Target { uuids: string[]; entity: string; type: string; subType: string; worn: boolean }
+// names: Klarname je UUID (gleiche Reihenfolge) für die Dateinamen; fehlt in targets.json von vor 2026-10-26
+interface Target { uuids: string[]; names?: string[]; entity: string; type: string; subType: string; worn: boolean }
 interface Job { src: string; out: string; pose: number[]; rig: string; size: number }
 interface Vec3 { x: number; y: number; z: number }
 interface LightRecord {
@@ -60,6 +61,14 @@ interface PitConfig {
 const PACKAGE_SUFFIX = '_LOD1_TEX2';
 const DEFAULT_RIG = 'inventorylightgroup_other';
 const LIGHT_GROUPS_PATH = 'libs/foundry/records/entities/lights/scene/inventory';
+
+// Logfile im Arbeitsverzeichnis (render.log, wird fortgeschrieben): alles, was die Konsole zeigt, dazu die
+// vollständigen Fehlermeldungen (fileOnly). Blenders eigene Ausgabe geht nach blender.log.
+let logFile: string | undefined;
+function log(line: string, fileOnly = false) {
+  if (!fileOnly) console.log(line);
+  if (logFile) appendFileSync(logFile, `${line}\n`);
+}
 
 async function run(bin: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   try {
@@ -106,12 +115,12 @@ async function loadGameTables(bin: string, p4k: string, work: string, force: boo
   const groupsDir = join(dir, 'lightgroups');
   mkdirSync(join(dir, 'rigs'), { recursive: true });
   if (force || !existsSync(configFile)) {
-    console.log('DataCore: Inventar-Tabellen lesen (PlayerChoice_PITConfig) …');
+    log('DataCore: Inventar-Tabellen lesen (PlayerChoice_PITConfig) …');
     const { stdout } = await run(bin, ['dcb', 'query', '--p4k', p4k, 'PlayerChoice_PITConfig']);
     writeFileSync(configFile, stdout);
   }
   if (force || !existsSync(groupsDir)) {
-    console.log('DataCore: Licht-Rigs lesen (inventorylightgroup_*) …');
+    log('DataCore: Licht-Rigs lesen (inventorylightgroup_*) …');
     await run(bin, ['dcb', 'extract', '--p4k', p4k, '--format', 'json', '-o', groupsDir, '--filter', `${LIGHT_GROUPS_PATH}/**`]);
   }
   const params = (JSON.parse(readFileSync(configFile, 'utf8')) as PitConfig)._RecordValue_.inventoryParams;
@@ -162,36 +171,47 @@ async function loadGameTables(bin: string, p4k: string, work: string, force: boo
 
 /** Die Items und Rohstoffe, die die App zeigt, gruppiert nach Entity (Rohstoffe teilen sich Brocken). */
 async function loadTargets(): Promise<Target[]> {
-  const [{ sql }, { connect }, { componentItemSql }] = await Promise.all([
-    import('drizzle-orm'), import('../db/client.ts'), import('../stock/service.ts'),
+  const [{ sql }, { connect }, { componentItemSql }, { locText }] = await Promise.all([
+    import('drizzle-orm'), import('../db/client.ts'), import('../stock/service.ts'), import('../db/query.ts'),
   ]);
   const { db, close } = connect(process.env.DATABASE_URL);
   try {
     // Gear plus Sammelobjekte (Rezept-Inputs wie Hadanit): dieselbe Bookable-Regel wie der Stock-Service
-    const items = (await db.execute(sql`SELECT i.uuid, i.class_name, i.type, i.sub_type FROM catalog.item i
+    const items = (await db.execute(sql`SELECT i.uuid, i.class_name, i.type, i.sub_type,
+        coalesce(${locText('en', sql`i.name_key`)}, i.class_name) AS name FROM catalog.item i
       WHERE i.retired_at IS NULL AND (EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid)
         OR ${componentItemSql('i.uuid')}) ORDER BY i.type, i.sub_type, i.class_name`)) as unknown as
-      { uuid: string; class_name: string; type: string; sub_type: string | null }[];
+      { uuid: string; class_name: string; type: string; sub_type: string | null; name: string }[];
     // rttThumbnailEntityClass ist ein Dateiverweis (file://…/thumbnailentity_resource_rock_gold.json)
-    const resources = (await db.execute(sql`SELECT uuid, key, data->>'rttThumbnailEntityClass' AS entity
-      FROM catalog.resource WHERE retired_at IS NULL AND coalesce(data->>'rttThumbnailEntityClass', '') <> '' ORDER BY key`)) as unknown as
-      { uuid: string; key: string; entity: string }[];
+    const resources = (await db.execute(sql`SELECT r.uuid, r.data->>'rttThumbnailEntityClass' AS entity,
+        coalesce(${locText('en', sql`r.name_key`)}, r.key) AS name
+      FROM catalog.resource r WHERE r.retired_at IS NULL AND coalesce(r.data->>'rttThumbnailEntityClass', '') <> '' ORDER BY r.key`)) as unknown as
+      { uuid: string; entity: string; name: string }[];
     const byEntity = new Map<string, Target>();
     for (const i of items) {
-      const t = byEntity.get(i.class_name) ?? { uuids: [], entity: i.class_name, type: i.type, subType: i.sub_type ?? 'UNDEFINED', worn: i.type.startsWith('Char_Armor_') };
+      const t = byEntity.get(i.class_name) ?? { uuids: [], names: [], entity: i.class_name, type: i.type, subType: i.sub_type ?? 'UNDEFINED', worn: i.type.startsWith('Char_Armor_') };
       t.uuids.push(i.uuid);
+      t.names!.push(i.name);
       byEntity.set(i.class_name, t);
     }
     for (const r of resources) {
       const entity = r.entity.replace(/^.*\//, '').replace(/\.json$/, '').replace(/^EntityClassDefinition\./, '');
-      const t = byEntity.get(entity) ?? { uuids: [], entity, type: 'Thumbnail', subType: 'UNDEFINED', worn: false };
+      const t = byEntity.get(entity) ?? { uuids: [], names: [], entity, type: 'Thumbnail', subType: 'UNDEFINED', worn: false };
       t.uuids.push(r.uuid);
+      t.names!.push(r.name);
       byEntity.set(entity, t);
     }
     return [...byEntity.values()];
   } finally {
     await close();
   }
+}
+
+/** Dateiname eines Icons: Klarname, Klassenname, UUID ("P4-AR Rifle (behr_rifle_ballistic_01) <uuid>.png"),
+ * damit man die Renders im Explorer auf Sicht prüfen und gezielt nachrendern kann; icons:pack liest nur die UUID. */
+function iconFile(t: Target, k: number): string {
+  const name = (t.names?.[k] ?? '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 80);
+  return `${name ? `${name} ` : ''}(${t.entity}) ${t.uuids[k]}.png`;
 }
 
 /** n Targets, reihum je einer pro Typ (Testlauf quer durch die Kategorien). */
@@ -243,7 +263,7 @@ async function main() {
     },
   });
   if (args.help) {
-    console.log(HELP);
+    log(HELP);
     return;
   }
   if (!args.p4k && !process.env.SC_DATA_P4K) throw new Error('No Data.p4k given (--p4k or $SC_DATA_P4K)');
@@ -261,23 +281,25 @@ async function main() {
   const chunk = Number(args.chunk);
   const parallel = Math.max(1, Number(args.parallel));
   for (const d of [out, exportRoot, renderDir]) mkdirSync(d, { recursive: true });
+  logFile = join(work, 'render.log');
+  log(`=== ${new Date().toISOString()} icons:render ${process.argv.slice(2).join(' ')}`, true);
 
-  console.log(args.targets ? `Zielliste: ${resolve(args.targets)}` : 'Zielliste aus der DB …');
+  log(args.targets ? `Zielliste: ${resolve(args.targets)}` : 'Zielliste aus der DB …');
   let targets = args.targets ? (JSON.parse(readFileSync(resolve(args.targets), 'utf8')) as Target[]) : await loadTargets();
   if (args['write-targets']) {
     writeFileSync(resolve(args['write-targets']), JSON.stringify(targets, null, 1));
-    console.log(`${targets.length} Entities -> ${resolve(args['write-targets'])}`);
+    log(`${targets.length} Entities -> ${resolve(args['write-targets'])}`);
     return;
   }
   const total = targets.reduce((n, t) => n + t.uuids.length, 0);
   if (args.filter) targets = targets.filter((t) => t.entity.toLowerCase().includes(args.filter!.toLowerCase()));
   if (args.sample) targets = sample(targets, Number(args.sample));
-  console.log(`${total} Katalog-Einträge, ${targets.length} Entities zu rendern${args.sample ? ' (Sample)' : ''}`);
+  log(`${total} Katalog-Einträge, ${targets.length} Entities zu rendern${args.sample ? ' (Sample)' : ''}`);
   const tables = await loadGameTables(starbreaker, p4k, work, args.force);
   if (args['dry-run']) {
     for (const t of targets) {
       const rig = tables.rig(t.type, t.subType).replace(/^.*[\\/]/, '').replace(/\.json$/, '');
-      console.log(`${t.entity}  ${t.type}/${t.subType}  pose ${tables.pose(t.type, t.subType).join(',')}  ${rig}${t.worn ? '  worn' : ''}  -> ${t.uuids.length} uuid(s)`);
+      log(`${t.entity}  ${t.type}/${t.subType}  pose ${tables.pose(t.type, t.subType).join(',')}  ${rig}${t.worn ? '  worn' : ''}  -> ${t.uuids.length} uuid(s)`);
     }
     return;
   }
@@ -291,9 +313,26 @@ async function main() {
   let skipped = 0;
   const width = String(targets.length).length;
   const progress = (i: number, what: string, entity: string, note: string) =>
-    console.log(`[${String(i).padStart(width)}/${targets.length}] ${what.padEnd(6)} ${entity}  ${note}`);
+    log(`[${String(i).padStart(width)}/${targets.length}] ${what.padEnd(6)} ${entity}  ${note}`);
   const elapsed = () => `${Math.round((Date.now() - started) / 60000)} min`;
-  console.log(`Blender: ${blender}`);
+  log(`Blender: ${blender}`);
+  const blenderLog = createWriteStream(join(work, 'blender.log'), { flags: 'a' });
+  blenderLog.write(`=== ${new Date().toISOString()}\n`);
+
+  // Icons im Ziel je UUID: ein neuer Name (Klarname geändert, alte <uuid>.png) ersetzt den alten, nie zwei je UUID
+  const existing = new Map<string, string[]>();
+  for (const f of readdirSync(out)) {
+    const m = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.png$/i.exec(f);
+    if (m) existing.set(m[1]!.toLowerCase(), [...(existing.get(m[1]!.toLowerCase()) ?? []), f]);
+  }
+  const placeIcons = (png: string, t: Target, onlyMissing: boolean) => {
+    t.uuids.forEach((uuid, k) => {
+      const file = iconFile(t, k);
+      for (const old of existing.get(uuid) ?? []) if (old !== file) rmSync(join(out, old), { force: true });
+      existing.set(uuid, [file]);
+      if (!onlyMissing || !existsSync(join(out, file))) copyFileSync(png, join(out, file));
+    });
+  };
 
   for (let b0 = 0; b0 < targets.length; b0 += chunk) {
     const jobs: { index: number; target: Target; job: Job }[] = [];
@@ -304,13 +343,17 @@ async function main() {
     const exportOne = async (i: number, t: Target) => {
       const png = join(renderDir, `${t.entity}.png`);
       if (!args.force && existsSync(png)) {
-        for (const uuid of t.uuids) if (!existsSync(join(out, `${uuid}.png`))) copyFileSync(png, join(out, `${uuid}.png`));
+        placeIcons(png, t, true);
         skipped++;
         return;
       }
-      let pkg = packageDir(exportRoot, t.entity);
+      // Eigenes Export-Verzeichnis je Entity: Varianten teilen sich Meshes unter Data/, und jeder Export schreibt
+      // das Mesh passend zu seiner eigenen scene.blend neu; im gemeinsamen Data/ fand eine früher exportierte
+      // Variante ihr Mesh danach nicht mehr ("keine Meshes in der Szene")
+      const root = join(exportRoot, t.entity);
+      let pkg = packageDir(root, t.entity);
       if (args.force || !pkg) {
-        const base = ['entity', 'export', '--p4k', p4k, t.entity, exportRoot, '--kind', 'decomposed'];
+        const base = ['entity', 'export', '--p4k', p4k, t.entity, root, '--kind', 'decomposed'];
         const t0 = Date.now();
         try {
           try {
@@ -323,10 +366,11 @@ async function main() {
           progress(i + 1, 'export', t.entity, `${((Date.now() - t0) / 1000).toFixed(1)} s`);
         } catch (err) {
           failures.push(`${t.entity}: ${(err as Error).message.split('\n').pop()}`);
+          log(`    ${(err as Error).message}`, true);
           progress(i + 1, 'export', t.entity, 'FEHLER');
           return;
         }
-        pkg = packageDir(exportRoot, t.entity);
+        pkg = packageDir(root, t.entity);
         if (!pkg) {
           failures.push(`${t.entity}: package directory not found after export`);
           progress(i + 1, 'export', t.entity, 'FEHLER kein Paketverzeichnis');
@@ -356,7 +400,7 @@ async function main() {
     const byOut = new Map(jobs.map((j) => [j.job.out.toLowerCase(), j]));
     const done = new Set<string>();
     let t0 = Date.now();
-    console.log(`Blender startet für ${jobs.length} Renders …`);
+    log(`Blender startet für ${jobs.length} Renders …`);
     const onLine = (line: string) => {
       const m = /^(icon|failed): (.+?\.png)(?: (.*))?$/.exec(line.trim());
       if (!m) return;
@@ -376,18 +420,19 @@ async function main() {
       const child = spawn(blender, ['-b', '--python', renderScript, '--', '--jobs', jobsFile], { stdio: ['ignore', 'pipe', 'pipe'] });
       let buffer = '';
       child.stdout.on('data', (data: Buffer) => {
+        blenderLog.write(data);
         buffer += data.toString();
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const l of lines) onLine(l);
       });
-      child.stderr.on('data', () => {}); // Blenders eigenes Rauschen
+      child.stderr.on('data', (data: Buffer) => blenderLog.write(data)); // Blenders Rauschen, Tracebacks von render.py
       child.on('close', () => {
         if (buffer) onLine(buffer);
         resolveRun();
       });
       child.on('error', (err) => {
-        console.log(`Blender konnte nicht starten: ${err.message}`);
+        log(`Blender konnte nicht starten: ${err.message}`);
         resolveRun();
       });
     });
@@ -395,20 +440,24 @@ async function main() {
       const failed = failures.some((f) => f.startsWith(`${j.target.entity}: `));
       if (!failed && existsSync(j.job.out)) {
         rendered++;
-        for (const uuid of j.target.uuids) copyFileSync(j.job.out, join(out, `${uuid}.png`));
+        placeIcons(j.job.out, j.target, false);
+        // Export nach erfolgreichem Render weg (je Entity ~2 MB, der volle Satz wären ~7 GB); Fehlschläge bleiben zur Diagnose
+        rmSync(join(exportRoot, j.target.entity), { recursive: true, force: true });
       } else if (!failed) {
         failures.push(`${j.target.entity}: no render output (Blender abgebrochen?)`);
         progress(j.index + 1, 'render', j.target.entity, 'FEHLER kein Bild');
       }
     }
-    console.log(`Block fertig: ${rendered} gerendert, ${skipped} übersprungen, ${failures.length} Fehler, ${elapsed()}`);
+    log(`Block fertig: ${rendered} gerendert, ${skipped} übersprungen, ${failures.length} Fehler, ${elapsed()}`);
   }
-  console.log(`Fertig: ${rendered} gerendert, ${skipped} übersprungen, ${exported} exportiert, ${failures.length} Fehler, ${elapsed()} -> ${out}`);
-  for (const f of failures) console.log(`  ! ${f}`);
+  log(`Fertig: ${rendered} gerendert, ${skipped} übersprungen, ${exported} exportiert, ${failures.length} Fehler, ${elapsed()} -> ${out}`);
+  for (const f of failures) log(`  ! ${f}`);
+  blenderLog.end();
   if (failures.length) process.exitCode = 1;
 }
 
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : err);
+  if (logFile) appendFileSync(logFile, `${err instanceof Error ? err.stack : String(err)}\n`);
   process.exit(1);
 });

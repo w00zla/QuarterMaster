@@ -1,4 +1,5 @@
-// Packt die gerenderten Icons (local/icons/<uuid>.png, 256 px) zu Thumbnails für die Apps: je UUID drei
+// Packt die gerenderten Icons (local/icons/[<Name> (<class>) ]<uuid>.png, 256 px; nur die UUID am Ende zählt)
+// zu Thumbnails für die Apps: je UUID drei
 // AVIFs (s/m/l, src/thumbs.ts), auf den Inhalt beschnitten und mit etwas Rand quadratisch aufgefüllt, plus
 // thumbs.json {uuid: hash}. Hash = die ersten 8 Hex-Zeichen von SHA-256 des PNGs: ein neu gerendertes Icon
 // bekommt eine neue URL, unveränderte bleiben im Cache der Clients. Veraltete Dateien im Ziel werden gelöscht.
@@ -12,11 +13,11 @@ import sharp from 'sharp';
 import { THUMB_FILE, THUMB_SIZES, thumbFile, type ThumbSize } from '../thumbs.ts';
 
 const HELP = `Usage: pnpm icons:pack [options]
-  --in <dir>     Die PNGs, <uuid>.png (default: local/icons; Unterordner werden nicht gelesen)
+  --in <dir>     Die PNGs, …<uuid>.png (default: local/icons; Unterordner werden nicht gelesen)
   --out <dir>    Ziel: s/, m/, l/ und thumbs.json (default: local/thumbs)
   --force        Vorhandene Thumbnails neu erzeugen`;
 
-const PNG = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.png$/i;
+const PNG = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.png$/i;
 // AVIF-Qualität: gemessen das kleinste Format ab 96 px, bei 40 px gleichauf mit WebP
 const QUALITY = 45;
 const EFFORT = 6;
@@ -45,6 +46,18 @@ for (const size of SIZES) mkdirSync(join(outDir, size), { recursive: true });
 const sources = readdirSync(inDir, { withFileTypes: true })
   .filter((d) => d.isFile() && PNG.test(d.name))
   .map((d) => ({ uuid: PNG.exec(d.name)![1]!.toLowerCase(), file: join(inDir, d.name) }));
+// Zwei Dateien zu einer UUID (alte <uuid>.png neben einer mit Namen): welche gilt, ist nicht zu entscheiden
+const seen = new Map<string, string>();
+const doubles: string[] = [];
+for (const s of sources) {
+  const prev = seen.get(s.uuid);
+  if (prev) doubles.push(`${prev} | ${s.file}`);
+  else seen.set(s.uuid, s.file);
+}
+if (doubles.length) {
+  console.error(`${doubles.length} UUIDs doppelt in ${inDir}, eine Datei je UUID löschen:\n  ${doubles.slice(0, 20).join('\n  ')}`);
+  process.exit(1);
+}
 console.log(`${sources.length} Icons in ${inDir} -> ${outDir}`);
 
 async function pack(file: string, hash: string, uuid: string) {
