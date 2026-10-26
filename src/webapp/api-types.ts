@@ -128,8 +128,6 @@ export interface CatalogResponse {
   materials: CatalogMaterial[];
   locations: CatalogLocation[];
   blueprints: CatalogBlueprint[];
-  // Names of the magazine blueprints, left out of `blueprints` (consumables): the companion ignores their unlocks
-  magazineBlueprints: string[];
 }
 
 // --- stock -------------------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 // Blueprint catalog for the bot (labels, search) and the per-user blueprint registry.
 // The catalog is held in memory per language (1.6k rows, see importCache) so autocomplete stays fast.
 import { and, eq, sql } from 'drizzle-orm';
-import { isFpsType, magazineSql } from '../catalog/components.ts';
+import { isFpsType } from '../catalog/components.ts';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { categoryText, itemClassText, locText, rows, withCategoryLabel } from '../db/query.ts';
@@ -64,8 +64,6 @@ const truncate = (s: string) => (s.length > MAX_LABEL ? `${s.slice(0, MAX_LABEL 
 export interface BlueprintCatalog {
   entries: BlueprintEntry[];
   byUuid: Map<string, BlueprintEntry>;
-  // Names of the magazine blueprints left out of the catalog (the companion ignores their unlocks)
-  magazineNames: string[];
 }
 
 export const blueprintCatalog = importCache(async (db: Db, lang: Lang): Promise<BlueprintCatalog> => {
@@ -79,17 +77,12 @@ export const blueprintCatalog = importCache(async (db: Db, lang: Lang): Promise<
     FROM catalog.blueprint b
     LEFT JOIN catalog.item i ON i.uuid = b.output_item_uuid
     LEFT JOIN catalog.manufacturer m ON m.uuid = i.manufacturer_uuid
-    LEFT JOIN catalog.blueprint_category c ON c.uuid = b.category_uuid
-    WHERE NOT ${sql.raw(magazineSql('i'))}`);
-  const magazines = await rows<{ name: string }>(db, sql`
-    SELECT DISTINCT coalesce(${locText(lang, sql`i.name_key`)}, i.class_name) AS name
-    FROM catalog.blueprint b JOIN catalog.item i ON i.uuid = b.output_item_uuid
-    WHERE ${sql.raw(magazineSql('i'))}`);
+    LEFT JOIN catalog.blueprint_category c ON c.uuid = b.category_uuid`);
   const entries = buildLabels(loaded.map((r) => {
     const { category: _c, categoryGroup: _g, ...rest } = withCategoryLabel(r);
     return rest;
   }));
-  return { entries, byUuid: new Map(entries.map((e) => [e.uuid, e])), magazineNames: magazines.map((m) => m.name) };
+  return { entries, byUuid: new Map(entries.map((e) => [e.uuid, e])) };
 });
 
 /**

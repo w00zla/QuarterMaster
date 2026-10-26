@@ -73,7 +73,7 @@ describe('blueprint registry (database)', { skip: url ? false : 'TEST_DATABASE_U
   });
 });
 
-describe('blueprint catalog without magazines (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
+describe('blueprint catalog with magazines (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
   let close: () => Promise<void>;
 
@@ -88,10 +88,9 @@ describe('blueprint catalog without magazines (database)', { skip: url ? false :
   });
   after(async () => close?.());
 
-  it('leaves magazine blueprints out and names them', async () => {
+  it('lists magazine blueprints like any other', async () => {
     // German: the block above cached the English catalog (checked again after a minute only)
     const catalog = await blueprintCatalog(db, 'de');
-    assert.deepEqual(catalog.entries.map((e) => e.uuid), [U.blueprint2]);
-    assert.equal(catalog.magazineNames.length, 1);
+    assert.deepEqual(catalog.entries.map((e) => e.uuid).sort(), [U.blueprint, U.blueprint2].sort());
   });
 });

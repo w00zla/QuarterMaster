@@ -33,8 +33,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   between the filter chip and the buttons). The list keeps the first unlock per name, each marked whether it came from an old log
   (`backup`); the panel lists every one, newest first, each with an icon-only badge: registered and default
   blueprints dimmed with their state (hidden 2026-10-19, back on 2026-10-20), the count and the tab only
-  the unregistered ones (new, ambiguous, not in the catalog: obtainable all the same; magazine unlocks are left
-  out entirely, consumables like the catalog's `magazineBlueprints`, since 2026-10-25); the overlay lists
+  the unregistered ones (new, ambiguous, not in the catalog: obtainable all the same; magazine unlocks were left
+  out 2026-10-25, listed again since 2026-10-26); the overlay lists
   every one like the panel (the user sees what is detected), the others dimmed with the blueprint icon
   instead of their state text (too wide for the tile). In the panel's head after the count the filter
   "Unlocks" ("Freischaltungen", like the other panels' filter chips; localStorage `qm.companion.unlocks`,

@@ -58,7 +58,7 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag,
   yield bonuses and the star map `key` (as Game.log names it, for the companion); materials `minable` (the
   mining data answers for it: a mined resource, a refined one from its ores, or a gem item); blueprints (`unlockable`: a
-  row in `catalog.blueprint_source`; no magazines, their names apart as `magazineBlueprints` for the companion); each material and location with its loc `nameKey` (the companion looks it up in
+  row in `catalog.blueprint_source`; magazines included); each material and location with its loc `nameKey` (the companion looks it up in
   the player's language pack). From the shared in-memory catalogs; no ores, no refining methods.
 - Stock: `/api/stock` personal = everything you own incl. shared, org = what its active members shared (with
   an owner filter), or `all` = both; writes `add`/`remove`/`adjust`/`move` (+ split, merge, share).
@@ -176,7 +176,7 @@ blocks".
 - **Übersicht**: KPI tiles from `GET /api/summary`, each with a detail line below (`StatTile`: unit after
   the value, the line as tall as a `.tag`): a personal panel with Materials (SCU materials only; SCU; kinds ·
   locations), Harvestables/Sammelobjekte (until 2026-10-20 "Items"; pieces; kinds · locations), Gear/Ausrüstung (the same), Blueprints "X / Y" (Y = obtainable:
-  not retired, not default, no magazine, in a reward pool of the game data, cached per import; X = every registered one
+  not retired, not default, in a reward pool of the game data, cached per import; X = every registered one
   and may exceed Y: then the game data misses a source, listed in the admin overview), Refinery jobs (sum of
   the expected yields · stations) and Next job ready (countdown, a "n ready" tag); "Your orgs" with one
   sub-tile per org (name, state, "Members: n", Resources/Items/Blueprints). Reloads on every realtime message.
