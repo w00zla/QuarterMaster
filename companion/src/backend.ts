@@ -21,7 +21,13 @@ export interface Config {
   hotkeyMode: string;
   // The tab (= the overlay's mode) switches by itself: with the screen the scan sees, with a new blueprint unlock
   autoTab: boolean;
+  // The screen scan's OCR on the GPU where it can (GpuStatus), else on the CPU
+  gpu: boolean;
 }
+
+// Whether the OCR can run on the GPU: ready, DirectML.dll not next to the exe, or failed in this run
+// (then it goes on on the CPU); the event "ocr-gpu" brings a failure
+export type GpuStatus = { state: "ready" } | { state: "missing" } | { state: "failed"; error: string };
 
 export type OverlayPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
 
@@ -76,6 +82,7 @@ export const exportLogDebug = (dir: string, report: unknown) => call<string>("ex
 export const scanBackups = () => call<{ found: number; failed: number }>("scan_backups");
 // updater = the installed app (setup), which updates itself (installUpdate); the standalone exe downloads the zip
 export const appInfo = () => call<{ version: string; platform: CompanionPlatform; updater: boolean }>("app_info");
+export const gpuStatus = () => call<GpuStatus>("gpu_status");
 export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });
 // Ends the app when it worked (the setup starts the new version)
 export const installUpdate = () => call<void>("install_update");

@@ -15,6 +15,7 @@
 // far: that read disagrees with the next).
 import { findMaterial, type MaterialNames } from "../../src/stock/material-names.ts";
 import type { StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
+import type { GpuStatus } from "./backend.ts";
 import type { ComponentRead } from "./components.ts";
 import type { Overview } from "./refinery.ts";
 
@@ -96,6 +97,11 @@ export interface InventoryReadEvent {
   frame: string | null;
   // A refinery read (only while debugging; the sync gets "refinery-overview"): overview, terminal without work orders, nothing
   refinery: { kind: "overview" | "terminal" | "nothing"; overview: Overview | null } | null;
+  // How the frame was captured (Rust: CaptureInfo; the rest for the debug window): restMs = how long the
+  // mouse cursor had rested when it was grabbed (0 when not waited for)
+  capture: { restMs: number };
+  // The models that read it ("tiny", "small"), on the GPU or the CPU (why: the setting, the GPU's state), and their share of ms
+  ocr: { models: string[]; gpu: boolean; setting: boolean; status: GpuStatus; ms: number };
 }
 
 // --- sightings -------------------------------------------------------------------------------------

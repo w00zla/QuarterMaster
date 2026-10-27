@@ -1,17 +1,19 @@
 <script setup lang="ts">
 // API token (created in the web app's Companion dialog and pasted here), game folder, the UI
-// language and the automatic tab switch (overlay.ts); saving checks the connection and reloads the log state (the path may have changed). The
+// language; the screen scan group: the automatic tab switch (overlay.ts) and the OCR on the GPU (greyed
+// out, off, when it cannot run there: gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed). The
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor), display (compact or thumbnails) and hotkeys, saved (on/off is the scan row's
 // toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes the
 // dialog), small left of it the app's version.
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { appInfo, openDebugWindow, setConfig, type OverlayPosition } from "../backend";
+import { appInfo, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "../backend";
 import type { OverlayDisplay } from "../overlayLayout";
 import { t } from "../i18n";
 import { applyConfig, config, loadLog, refreshConnection } from "../state";
@@ -24,19 +26,27 @@ const token = ref(config.value?.token ?? "");
 const gameDir = ref(config.value?.gameDir ?? "");
 const language = ref(config.value?.language ?? "");
 const autoTab = ref(config.value?.autoTab ?? true);
+const gpu = ref(config.value?.gpu ?? true);
+// Until the Rust side answered: as if it can
+const gpuState = ref<GpuStatus["state"]>("ready");
+const gpuOk = computed(() => gpuState.value === "ready");
 const overlayPosition = ref<OverlayPosition>(config.value?.overlayPosition ?? "top-left");
 const overlayDisplay = ref<OverlayDisplay>(config.value?.overlayDisplay ?? "thumbs");
 const hotkeyOverlay = ref(config.value?.hotkeyOverlay ?? "");
 const hotkeyMode = ref(config.value?.hotkeyMode ?? "");
 const busy = ref(false);
 const version = ref("");
+let unlisten: (() => void) | null = null;
 onMounted(async () => {
   try {
+    unlisten = await listen<GpuStatus>("ocr-gpu", (e) => (gpuState.value = e.payload.state));
     version.value = (await appInfo()).version;
+    gpuState.value = (await gpuStatus()).state;
   } catch (e) {
     toastError(e);
   }
 });
+onUnmounted(() => unlisten?.());
 // The overlay needs the screen capture's window tracking (Windows only so far)
 const isWindows = navigator.userAgent.includes("Windows");
 
@@ -56,6 +66,7 @@ const changed = computed(() => token.value.trim() !== (config.value?.token ?? ""
   || gameDir.value.trim() !== (config.value?.gameDir ?? "")
   || language.value !== (config.value?.language ?? "")
   || autoTab.value !== (config.value?.autoTab ?? true)
+  || gpu.value !== (config.value?.gpu ?? true)
   || overlayPosition.value !== config.value?.overlayPosition
   || overlayDisplay.value !== (config.value?.overlayDisplay ?? "thumbs")
   || hotkeyOverlay.value !== config.value?.hotkeyOverlay
@@ -79,6 +90,7 @@ async function save() {
       hotkeyOverlay: hotkeyOverlay.value,
       hotkeyMode: hotkeyMode.value,
       autoTab: autoTab.value,
+      gpu: gpu.value,
     }));
     await Promise.all([refreshConnection(), loadLog()]);
     toast(t("settings.saved"));
@@ -126,9 +138,16 @@ async function pickFolder() {
           <span class="label">{{ t("settings.language") }}</span>
           <Dropdown v-model="language" :options="languageOptions" variant="outline" />
         </div>
+      </section>
+      <section class="group">
+        <div class="group-title">{{ t("settings.scan") }}</div>
         <label class="line between">
           <span class="label">{{ t("settings.autoTab") }}</span>
           <input v-model="autoTab" class="switch" type="checkbox" />
+        </label>
+        <label class="line between" :class="{ off: !gpuOk }">
+          <span class="label">{{ t("settings.gpu") }}</span>
+          <input class="switch" type="checkbox" :checked="gpuOk && gpu" :disabled="!gpuOk" @change="gpu = ($event.target as HTMLInputElement).checked" />
         </label>
       </section>
       <section class="group">
@@ -225,6 +244,15 @@ async function pickFolder() {
 /* A setting on the left, its control pushed to the right edge (as in BindSight) */
 .line.between {
   justify-content: space-between;
+}
+
+/* A setting that cannot be used here: greyed out */
+.line.off {
+  opacity: 0.5;
+}
+
+.line.off .switch {
+  cursor: default;
 }
 
 /* The overlay's places on a small monitor (16:9 with a stand): top row, bottom row, each place an

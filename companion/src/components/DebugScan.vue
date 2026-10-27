@@ -81,18 +81,27 @@ const legend = computed(() => {
 });
 
 const time = (ms: number) => new Date(ms).toLocaleTimeString();
+// On the GPU or why not: off in the settings, DirectML.dll missing, failed (with the error)
+const gpuWhy = (o: InventoryReadEvent["ocr"]) => {
+  if (o.gpu) return t("debug.gpu.on");
+  if (!o.setting) return t("debug.gpu.off");
+  return o.status.state === "failed" ? t("debug.gpu.failed", { error: o.status.error }) : t(`debug.gpu.${o.status.state}`);
+};
 const pos = (r: ReadRect) => `${Math.round(r.x0)}, ${Math.round(r.y0)}`;
 const size = (r: ReadRect) => `${Math.round(r.x1 - r.x0)}×${Math.round(r.y1 - r.y0)}`;
 // A tile, 1-based: "r2 c3", a wide one "r2 c3–4"
 const rc = (row: number, col: number, span = 1) => t("debug.rc", { r: row + 1, c: span > 1 ? `${col + 1}–${col + span}` : col + 1 });
 
-// The read's key figures: time, duration, frame, screen, then per screen, then the OCR boxes
+// The read's key figures: time, duration, the OCR (models, their time; on the GPU or why not), how long the cursor had rested at the grab, frame, screen, then per screen, then the OCR boxes
 const facts = computed(() => {
   const r = read.value;
   if (!r) return [];
   const list = [
     { k: t("debug.k.time"), v: time(r.atMs) },
     { k: t("debug.k.duration"), v: `${r.ms} ms` },
+    { k: "OCR", v: `${r.ocr.models.join(" + ") || "–"} · ${r.ocr.ms} ms` },
+    { k: "GPU", v: gpuWhy(r.ocr) },
+    { k: t("debug.k.rest"), v: `${r.capture.restMs} ms` },
     { k: t("debug.k.frame"), v: `${r.width}×${r.height}` },
     { k: t("debug.k.screen"), v: t(`debug.screen.${readScreen.value}`) },
   ];

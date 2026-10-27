@@ -1,22 +1,28 @@
 //! Offline check of the freight manager read over folders of screenshots:
-//! `cargo run --release --example inventory_dump -- <out dir> <screenshots dir>...`
+//! `cargo run --release --example inventory_dump -- <out dir> <screenshots dir>... [--threads n] [--model small|tiny] [--gpu]`
 //!
 //! A debug recording's frames are read with the cursor stored next to them (`read-N.json`).
-//! Prints every frame's layout, tooltip and tiles (cell, quality, count, hovered, texts) and the
-//! cells read, then writes an overlay per frame into the out dir (the frame at half size: tiles green,
+//! Prints every frame's layout, tooltip and tiles (cell, quality, count, hovered, texts), the cells
+//! read and where the read's time went (`ocr::Timings`, the rest is the read's own work; the average
+//! at the end), then writes an overlay per frame into the out dir (the frame at half size: tiles green,
 //! the hovered one white, OCR boxes yellow, the tooltip magenta) and the OCR boxes as text.
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use companion_lib::inventory::read_grid;
-use companion_lib::ocr::{Ocr, Rect};
+use companion_lib::ocr::{Model, Ocr, Rect};
 use image::{Rgb, RgbImage};
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let out = PathBuf::from(args.remove(0));
     fs::create_dir_all(&out).expect("out dir");
-    let mut ocr = Ocr::new(4).expect("ocr models");
+    let threads = take_threads(&mut args);
+    let model = take_model(&mut args);
+    // --gpu: on DirectML (DirectML.dll 1.15 next to this exe, e.g. copied from resources/ocr)
+    let gpu = args.iter().position(|a| a == "--gpu").map(|i| args.remove(i)).is_some();
+    let mut ocr = Ocr::new(threads, model, gpu).expect("ocr models");
+    let (mut frames, mut total_ms, mut model_ms) = (0u128, 0u128, 0u128);
     for dir in args {
         for path in sorted(Path::new(&dir), "jpg").into_iter().chain(sorted(Path::new(&dir), "png")) {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -24,10 +30,16 @@ fn main() {
             let t = std::time::Instant::now();
             let (grid, boxes) = read_grid(&mut ocr, &frame, cursor_of(&path), None, true).expect("read");
             let ms = t.elapsed().as_millis();
+            let phases = ocr.take_timings();
+            frames += 1;
+            total_ms += ms;
+            model_ms += phases.total().as_millis();
+            let phases = format!("  phases: {phases}, rest {} ms", ms.saturating_sub(phases.total().as_millis()));
             let dump: Vec<String> = boxes.iter().map(|b| format!("{:5.0} {:5.0} {:4.0} {:3.0}  {:.2}  {}", b.rect.x0, b.rect.y0, b.rect.w(), b.rect.h(), b.score, b.text)).collect();
             fs::write(out.join(format!("boxes-{name}.txt")), dump.join("\n")).unwrap();
             let Some(grid) = grid else {
                 println!("\n== {name}: no grid ({} boxes, {ms} ms)", boxes.len());
+                println!("{phases}");
                 continue;
             };
             println!(
@@ -39,6 +51,7 @@ fn main() {
                 boxes.len(),
                 grid.tiles.len()
             );
+            println!("{phases}");
             match &grid.tooltip {
                 Some(t) => println!("  tooltip: {} Q{:?} {:?} SCU at ({:.0}, {:.0})", t.name, t.quality, t.scu, t.x, t.y),
                 None => println!("  tooltip: none"),
@@ -73,6 +86,18 @@ fn main() {
             small.save(out.join(format!("overlay-{name}.png"))).unwrap();
         }
     }
+    if frames > 0 {
+        let mode = if gpu { "GPU".to_string() } else { format!("{threads} threads") };
+        println!("\n{frames} frames, {model:?}, {mode}: {} ms per read, models {} ms, rest {} ms", total_ms / frames, model_ms / frames, (total_ms - model_ms) / frames);
+    }
+}
+
+/// `--threads n` out of the arguments (ONNX Runtime's intra-op threads; the app uses 3), else 4.
+fn take_threads(args: &mut Vec<String>) -> usize {
+    let Some(i) = args.iter().position(|a| a == "--threads") else { return 4 };
+    let n = args.get(i + 1).and_then(|n| n.parse().ok()).expect("--threads n");
+    args.drain(i..i + 2);
+    n
 }
 
 /// The cursor a debug recording stored with the frame (`read-N.json` next to `read-N.jpg`), if any.
@@ -106,4 +131,12 @@ fn draw(img: &mut RgbImage, r: Rect, colour: Rgb<u8>) {
             img.put_pixel(x.min(w - 1), y, colour);
         }
     }
+}
+
+/// `--model small|tiny` out of the arguments, else small (the app's model here).
+fn take_model(args: &mut Vec<String>) -> Model {
+    let Some(i) = args.iter().position(|a| a == "--model") else { return Model::Small };
+    let m = args.get(i + 1).and_then(|n| Model::parse(n)).expect("--model small|tiny");
+    args.drain(i..i + 2);
+    m
 }

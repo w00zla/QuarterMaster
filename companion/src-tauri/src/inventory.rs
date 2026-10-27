@@ -18,12 +18,12 @@
 //!
 //! Anything unexpected yields fewer tiles or `None` fields, never a panic.
 
-use image::imageops::{self, FilterType};
+use image::imageops;
 use image::RgbImage;
 use serde::Serialize;
 
 use crate::locale::norm;
-use crate::ocr::{Ocr, Rect, TextBox};
+use crate::ocr::{resize, FilterType, Ocr, Rect, TextBox};
 
 /// The warehouse pane lies right of this share of the frame's width
 const PANE_LEFT: f32 = 0.45;
@@ -35,8 +35,9 @@ const GRID_BOTTOM: f32 = 0.84;
 /// bottom row tile
 const READ_TOP: f32 = 0.25;
 const READ_BOTTOM: f32 = 0.95;
-/// Height of a badge or quality text (shares of the frame height)
-const TEXT_MIN_H: f32 = 0.012;
+/// Height of a badge or quality text (shares of the frame height; PP-OCRv6 tiny's boxes are a little
+/// smaller than small's: a badge 18 px high at 1600 px)
+const TEXT_MIN_H: f32 = 0.011;
 const TEXT_MAX_H: f32 = 0.032;
 /// A tooltip title's box may be taller: the terminal hangs tilted in the world, a long line's
 /// axis-aligned box grows with its slant (1080p: 53 px for a 12 px text)
@@ -79,6 +80,10 @@ const BADGE_SCALE: u32 = 3;
 /// Padding around a detected badge box when it is read on its own, on its right a share of its height
 const BADGE_PAD: f32 = 6.0;
 const BADGE_RIGHT_PAD: f32 = 0.6;
+/// A badge's light box stands out from the tile by at least this much luma (0–255), and is at least
+/// this share of the searched area's height
+const BADGE_CONTRAST: u32 = 60;
+const BADGE_MIN_SHARE: f32 = 0.25;
 /// What a count badge can hold ("X 14", "×1"): the recognizer picks among these only
 const BADGE_CHARS: &str = "Xx× 0123456789";
 /// Minimum recognizer confidence of a cell's text
@@ -499,6 +504,70 @@ pub fn crop(frame: &RgbImage, rect: Rect) -> RgbImage {
     imageops::crop_imm(frame, x0, y0, cw, ch).to_image()
 }
 
+/// A badge's crop upscaled for the recognizer (small text in a box).
+fn upscaled_badge(frame: &RgbImage, rect: Rect) -> RgbImage {
+    let c = crop(frame, rect);
+    resize(&c, c.width() * BADGE_SCALE, c.height() * BADGE_SCALE, FilterType::CatmullRom)
+}
+
+/// The count badge's light box in `rect` of `frame`: the largest 4-connected region of pixels
+/// brighter than halfway between the area's darkest and brightest (the badge is dark text on a light
+/// box; the tile's dark ground and frame lines around it made PP-OCRv6 tiny read an icon, "图", for
+/// "X 1", and small lose the thin 1). None without one of a badge's shape inside (an empty area, a
+/// box cut by the area's edge).
+fn badge_box(frame: &RgbImage, rect: Rect) -> Option<Rect> {
+    let x0 = (rect.x0.max(0.0) as u32).min(frame.width().saturating_sub(1));
+    let y0 = (rect.y0.max(0.0) as u32).min(frame.height().saturating_sub(1));
+    let (w, h) = (((rect.x1.max(0.0) as u32).min(frame.width()).saturating_sub(x0)) as usize, ((rect.y1.max(0.0) as u32).min(frame.height()).saturating_sub(y0)) as usize);
+    if w < 4 || h < 4 {
+        return None;
+    }
+    let luma: Vec<u32> = (0..w * h)
+        .map(|i| {
+            let p = frame.get_pixel(x0 + (i % w) as u32, y0 + (i / w) as u32);
+            (299 * p[0] as u32 + 587 * p[1] as u32 + 114 * p[2] as u32) / 1000
+        })
+        .collect();
+    let (lo, hi) = (*luma.iter().min().expect("pixels"), *luma.iter().max().expect("pixels"));
+    if hi - lo < BADGE_CONTRAST {
+        return None;
+    }
+    let light: Vec<bool> = luma.iter().map(|&l| l > (lo + hi) / 2).collect();
+    let mut seen = vec![false; w * h];
+    let mut best: Option<(usize, (usize, usize, usize, usize))> = None;
+    let mut stack = Vec::new();
+    for start in 0..w * h {
+        if !light[start] || seen[start] {
+            continue;
+        }
+        let (mut count, mut bx) = (0, (usize::MAX, usize::MAX, 0, 0));
+        seen[start] = true;
+        stack.push(start);
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % w, i / w);
+            count += 1;
+            bx = (bx.0.min(x), bx.1.min(y), bx.2.max(x), bx.3.max(y));
+            let neighbours = [(x > 0).then(|| i - 1), (x + 1 < w).then(|| i + 1), (y > 0).then(|| i - w), (y + 1 < h).then(|| i + w)];
+            for j in neighbours.into_iter().flatten() {
+                if light[j] && !seen[j] {
+                    seen[j] = true;
+                    stack.push(j);
+                }
+            }
+        }
+        if best.is_none_or(|(c, _)| count > c) {
+            best = Some((count, bx));
+        }
+    }
+    let (_, (bx0, by0, bx1, by1)) = best?;
+    let (bw, bh) = ((bx1 - bx0 + 1) as f32, (by1 - by0 + 1) as f32);
+    // A badge is wider than high, no sliver, and wholly inside
+    if bw < bh || bh < BADGE_MIN_SHARE * h as f32 || bx0 == 0 || by0 == 0 || bx1 + 1 == w || by1 + 1 == h {
+        return None;
+    }
+    Some(Rect { x0: (x0 + bx0 as u32) as f32, y0: (y0 + by0 as u32) as f32, x1: (x0 + bx1 as u32 + 1) as f32, y1: (y0 + by1 as u32 + 1) as f32 })
+}
+
 /// Reads the warehouse grid in `frame`: the detector over the pane right of the screen centre at the
 /// frame's height, the layout from its badges and quality texts (`hint`: the last read's pitch),
 /// then every tile's quality band and the hovered tile's badge (every tile's with `all_badges`, for
@@ -514,13 +583,29 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
     // above cost recognition time (~1 s per read on 3840×1600 before)
     let (y0, y1) = ((READ_TOP * s) as u32, ((READ_BOTTOM * s) as u32).min(h));
     let pane = imageops::crop_imm(frame, x0, y0, w - x0, y1 - y0).to_image();
-    let mut boxes = ocr.read(&pane, pane.height())?;
-    for b in &mut boxes {
-        b.rect.x0 += x0 as f32;
-        b.rect.x1 += x0 as f32;
-        b.rect.y0 += y0 as f32;
-        b.rect.y1 += y0 as f32;
+    let found = ocr.detect(&pane, pane.height())?;
+    let mut texts = ocr.recognize_all(&pane, &found)?;
+    let rects: Vec<Rect> = found.iter().map(|r| Rect { x0: r.x0 + x0 as f32, y0: r.y0 + y0 as f32, x1: r.x1 + x0 as f32, y1: r.y1 + y0 as f32 }).collect();
+    // Boxes of a badge's size the general read took for no badge: read again on the light box around
+    // them as a badge's characters only, taken with digits ("X1"). PP-OCRv6 tiny read most badges as
+    // nothing or an icon there, and the fit lacked its anchors
+    let again: Vec<(usize, Rect)> = (0..rects.len())
+        .filter(|&i| {
+            let r = rects[i];
+            r.h() >= TEXT_MIN_H * s && r.h() <= TEXT_MAX_H * s && r.w() <= BADGE_MAX_W * s && parse_badge(&texts[i].0).is_none()
+        })
+        .filter_map(|i| {
+            let (r, m) = (rects[i], rects[i].h() * 0.5);
+            badge_box(frame, Rect { x0: r.x0 - m, y0: r.y0 - m, x1: r.x1 + m, y1: r.y1 + m }).map(|b| (i, b))
+        })
+        .collect();
+    let reads = ocr.recognize_images_only(&again.iter().map(|&(_, b)| upscaled_badge(frame, b)).collect::<Vec<_>>(), BADGE_CHARS)?;
+    for (&(i, _), (text, score)) in again.iter().zip(reads) {
+        if score >= MIN_SCORE && parse_badge(&text).is_some_and(|(_, uncertain)| !uncertain) {
+            texts[i] = (text, score);
+        }
     }
+    let boxes: Vec<TextBox> = rects.into_iter().zip(texts).filter(|(_, (t, _))| !t.trim().is_empty()).map(|(rect, (text, score))| TextBox { rect, text, score }).collect();
     let Some(layout) = layout_from_boxes(&boxes, w as f32, s, hint) else { return Ok((None, boxes)) };
     let positions: Vec<(usize, usize)> = (0..layout.rows.len()).flat_map(|r| (0..layout.cols.len()).map(move |c| (r, c))).collect();
     let tile_rects: Vec<Rect> = positions.iter().map(|&(r, c)| layout.tile_rect(r, c)).collect();
@@ -551,10 +636,7 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
     // tooltip opens there) is not read: its text would pass for a count
     let badge_hidden = |i: usize| tooltip.as_ref().is_some_and(|(t, _)| covered(t.rect, part(tile_rects[i], BADGE_AREA)) > BADGE_COVER);
     let wanted: Vec<usize> = (0..positions.len()).filter(|&i| (all_badges || hovered == Some(i)) && !badge_hidden(i)).collect();
-    let upscaled = |r: Rect| {
-        let c = crop(frame, r);
-        imageops::resize(&c, c.width() * BADGE_SCALE, c.height() * BADGE_SCALE, FilterType::CatmullRom)
-    };
+    let upscaled = |r: Rect| upscaled_badge(frame, badge_box(frame, r).unwrap_or(r));
     let mut badge_rects: Vec<(usize, Rect)> = Vec::new();
     for &i in &wanted {
         let area = part(tile_rects[i], BADGE_AREA);
@@ -621,6 +703,24 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, hi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_badges_light_box() {
+        // A dark tile with a frame line on top and a light 30×20 box at (20, 10) holding dark text
+        let mut frame = RgbImage::from_pixel(80, 50, image::Rgb([30, 40, 40]));
+        for x in 0..80 {
+            frame.put_pixel(x, 2, image::Rgb([120, 170, 160]));
+        }
+        for (x, y) in (20..50).flat_map(|x| (10..30).map(move |y| (x, y))) {
+            let text = (26..44).contains(&x) && (14..26).contains(&y) && x % 3 == 0;
+            frame.put_pixel(x, y, if text { image::Rgb([30, 40, 40]) } else { image::Rgb([140, 200, 190]) });
+        }
+        let r = |x0: f32, y0: f32, x1: f32, y1: f32| Rect { x0, y0, x1, y1 };
+        assert_eq!(badge_box(&frame, r(0.0, 0.0, 80.0, 50.0)), Some(r(20.0, 10.0, 50.0, 30.0)));
+        // Cut by the area's edge, or no contrast: none
+        assert_eq!(badge_box(&frame, r(30.0, 0.0, 80.0, 50.0)), None);
+        assert_eq!(badge_box(&frame, r(55.0, 10.0, 80.0, 50.0)), None);
+    }
 
     #[test]
     fn scu_amounts_are_no_title() {
@@ -782,5 +882,49 @@ mod tests {
         let tiles = [Rect { x0: 1960.0, y0: 640.0, x1: 2210.0, y1: 960.0 }];
         let (t, _) = tooltip_from_boxes(&boxes, &tiles, 1600.0).expect("tooltip");
         assert_eq!((t.name.as_str(), t.quality, t.scu.as_deref()), ("Janalite", Some(269), Some("0.001")));
+    }
+
+    // The user's screenshots (local/, not in git) read with the warehouse's model (small, as in the app);
+    // skipped without them. Slow in debug builds: cargo test --release.
+    mod screenshots {
+        use super::super::*;
+        use crate::ocr::Model;
+        use std::path::{Path, PathBuf};
+
+        fn shots(dir: &str) -> Vec<PathBuf> {
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/screenshots").join(dir);
+            let mut files: Vec<PathBuf> = std::fs::read_dir(dir).map(|d| d.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jpg")).collect()).unwrap_or_default();
+            files.sort();
+            files
+        }
+
+        #[test]
+        fn grids_tooltips_and_hovered_stacks() {
+            let (terminal, inventory) = (shots("fe terminal 1"), shots("inventory 2"));
+            if terminal.is_empty() || inventory.is_empty() {
+                eprintln!("screenshots missing, skipped");
+                return;
+            }
+            let mut ocr = Ocr::new(4, Model::Small, false).unwrap();
+            // Checked against the shots: tooltip name, its quality chip and SCU, the hovered tile's count
+            let cases: &[(&str, &str, Option<u32>, Option<&str>, Option<u32>)] = &[
+                ("17-17-27-58F", "Beradom", Some(578), Some("0.001"), Some(3)),
+                ("17-17-35-520", "Feynmaline", Some(561), Some("0.001"), Some(14)),
+                ("13-04-05-C45", "Mil/3/A Blizzard", None, None, Some(1)),
+                // A ship component's tooltip has no chip (a stray "1" read as one before 2026-10-27)
+                ("13-04-10-D57", "Mil/1/A VK-00", None, None, Some(1)),
+            ];
+            for path in terminal.iter().chain(&inventory) {
+                let name = path.file_stem().unwrap().to_string_lossy().to_string();
+                let frame = image::open(path).unwrap().to_rgb8();
+                let (grid, _) = read_grid(&mut ocr, &frame, None, None, false).unwrap();
+                let grid = grid.unwrap_or_else(|| panic!("{name}: no grid"));
+                let Some((_, title, quality, scu, count)) = cases.iter().find(|c| name.ends_with(c.0)) else { continue };
+                let tip = grid.tooltip.as_ref().unwrap_or_else(|| panic!("{name}: no tooltip"));
+                assert_eq!((norm(&tip.name), tip.quality, tip.scu.as_deref()), (norm(title), *quality, *scu), "{name}");
+                let hovered = grid.tiles.iter().find(|t| t.hovered).unwrap_or_else(|| panic!("{name}: no hovered tile"));
+                assert_eq!(hovered.count, *count, "{name}");
+            }
+        }
     }
 }

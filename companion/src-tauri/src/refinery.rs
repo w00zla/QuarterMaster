@@ -14,12 +14,11 @@
 //! Layout as of SC 4.x (screenshots 2026-10-07/08); anything unexpected yields no panel or empty
 //! fields, never a panic.
 
-use image::imageops::{self, FilterType};
 use image::RgbImage;
 use serde::Serialize;
 
 use crate::locale::{norm, Labels};
-use crate::ocr::{Ocr, Rect, TextBox};
+use crate::ocr::{resize, FilterType, Ocr, Rect, TextBox};
 
 /// Height the frame is scaled to for the full pass (3840×1600: half)
 const READ_HEIGHT: u32 = 800;
@@ -107,7 +106,8 @@ struct Column {
 }
 
 /// The words of the table head with their (estimated) centers: OCR may merge neighbouring heads
-/// into one box ("QUALITY YIELD"), each word then gets its share of the box by its characters.
+/// into one box ("QUALITY YIELD"), each word then gets its share of the box by its characters. A
+/// zero is an O (no label holds a digit; PP-OCRv6 tiny read "TO D0").
 fn head_words(boxes: &[&TextBox]) -> Vec<Column> {
     let mut out = Vec::new();
     for b in boxes {
@@ -120,7 +120,7 @@ fn head_words(boxes: &[&TextBox]) -> Vec<Column> {
                 (true, Some(s)) => {
                     let word: String = chars[s..i].iter().collect();
                     let mid = (s + i) as f32 / 2.0;
-                    out.push(Column { key: norm(&word), cx: b.rect.x0 + b.rect.w() * mid / total });
+                    out.push(Column { key: norm(&word).replace('0', "O"), cx: b.rect.x0 + b.rect.w() * mid / total });
                     start = None;
                 }
                 _ => {}
@@ -323,7 +323,7 @@ fn read_order(ocr: &mut Ocr, frame: &RgbImage, boxes: &[TextBox], l: Layout) -> 
                 Some(v) => Some(v),
                 None => {
                     let crop = crate::inventory::crop(frame, c);
-                    let big = imageops::resize(&crop, crop.width() * CELL_SCALE, crop.height() * CELL_SCALE, FilterType::CatmullRom);
+                    let big = resize(&crop, crop.width() * CELL_SCALE, crop.height() * CELL_SCALE, FilterType::CatmullRom);
                     ocr.recognize_images_only(&[big], "0123456789")?.pop().and_then(|(t, _)| parse_number(&t))
                 }
             };
@@ -400,7 +400,7 @@ mod tests {
                 eprintln!("screenshots missing, skipped");
                 return None;
             }
-            Some((Ocr::new(4).unwrap(), shots))
+            Some((Ocr::new(4, crate::ocr::Model::Tiny, false).unwrap(), shots))
         }
 
         fn frame(dir: &Path, suffix: &str) -> RgbImage {

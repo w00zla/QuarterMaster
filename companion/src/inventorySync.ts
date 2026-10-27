@@ -180,7 +180,7 @@ function onRead(e: InventoryReadEvent) {
     if (e.components) {
       // An unknown title (no kind yet) only while either gear kind is on (it is listed in the debug window)
       const accept = (s: ComponentSighting) => (s.fps === null ? kinds.value.has("comps") || kinds.value.has("fps") : kinds.value.has(s.fps ? "fps" : "comps"));
-      changed = !!at.components.feed(e.atMs, e.components, cat.components, accept) || changed;
+      changed = !!at.components.feed(e.atMs, e.components, cat.components, accept, e.capture.restMs) || changed;
     }
     if (changed) publish();
   });

@@ -333,6 +333,12 @@ struct AppInfo {
     updater: bool,
 }
 
+/// Whether the screen scan's OCR can run on the GPU (the settings grey their switch out otherwise).
+#[tauri::command]
+fn gpu_status(gpu: tauri::State<ocrwatch::Gpu>) -> ocrwatch::GpuState {
+    gpu.state()
+}
+
 /// This build's version and platform (for the update hint: which download fits).
 #[tauri::command]
 fn app_info() -> AppInfo {
@@ -608,7 +614,8 @@ pub fn run() {
             let store = ocrwatch::DebugStore::default();
             let fast = ocrwatch::FastCapture::default();
             let front = ocrwatch::GameFront::default();
-            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone(), fast.clone(), front.clone());
+            let gpu = ocrwatch::Gpu::new();
+            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone(), fast.clone(), front.clone(), gpu.clone());
             let seen = ocrwatch::GameSeen::default();
             #[cfg(windows)]
             capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast, front.clone());
@@ -619,6 +626,7 @@ pub fn run() {
             app.manage(store);
             app.manage(seen);
             app.manage(front);
+            app.manage(gpu);
             // The scan overlay: off at every start; its hotkeys from the config (invalid ones only logged)
             #[cfg(windows)]
             {
@@ -661,6 +669,7 @@ pub fn run() {
             api,
             thumb,
             app_info,
+            gpu_status,
             download_update,
             install_update,
             open_webapp,

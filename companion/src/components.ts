@@ -12,9 +12,9 @@
 // with that many pieces. A sighting's identity is its tile's place in the page's content (page, row with the pane's
 // scroll counted in, units; the Rust side finds them) and its content: a tile hovered again after a
 // scroll is the same sighting, equal components on other tiles stay apart. A tooltip counts only once
-// the cursor stayed on its tile for a read (right after a move the game may still show the previous
-// tile's tooltip), and a sighting only once two such reads in a row agree (an OCR glitch in one read
-// books nothing).
+// the cursor stayed on its tile for a read or had rested when the frame was grabbed (right after a
+// move the game may still show the previous tile's tooltip), and a sighting only once two such reads
+// in a row agree (an OCR glitch in one read books nothing).
 import { FPS_TYPES } from "../../src/catalog/components.ts";
 import { norm } from "../../src/stock/material-names.ts";
 import type { CatalogResponse, CatalogStat, StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
@@ -103,10 +103,14 @@ export function buildComponentCatalog(responses: CatalogResponse[], gameNames: R
 }
 
 // "Ind/1/B Guardian", "Mil/3/A JS-500", "Sth/2/B Bolt"; the OCR drops the space now and then ("Sth/1/ASnowBlind")
-const PREFIX = /^[A-Za-z]{3}\/(\d+)\/([A-Z])\s*(.+)$/;
+// and reads the grade in lower case (PP-OCRv6 tiny: "Sth/1/c HeatSafe")
+const PREFIX = /^[A-Za-z]{3}\/(\d+)\/([A-Za-z])\s*(.+)$/;
+
+// A normalized text without accents: the OCR adds some ("RADIATION CAPAÇITY", "VOLÙME")
+const plain = (normed: string) => normed.normalize("NFD").replace(/\p{M}/gu, "");
 
 // A normalized name with the OCR's look-alikes folded: "Sion Compensatorl" for "Sion Compensator1"
-const loose = (normed: string) => normed.replace(/[LI]/g, "1").replace(/O/g, "0");
+const loose = (normed: string) => plain(normed).replace(/[LI]/g, "1").replace(/O/g, "0");
 
 /** The items a tooltip title can mean: none, one, or several; without an exact match the names with
  * look-alike letters and digits folded (l/I and 1, O and 0). The prefix's size and grade narrow
@@ -121,7 +125,7 @@ export function findComponents(cat: ComponentCatalog, title: string): ComponentD
     hits = cat.components.filter((c) => [...c.names].some((n) => loose(n) === folded));
   }
   if (hits.length > 1 && prefix) {
-    const narrowed = hits.filter((c) => c.size === Number(prefix[1]) && c.gradeLetter === prefix[2]);
+    const narrowed = hits.filter((c) => c.size === Number(prefix[1]) && c.gradeLetter === prefix[2]!.toUpperCase());
     if (narrowed.length) hits = narrowed;
   }
   if (hits.length > 1) {
@@ -199,7 +203,7 @@ export function statsOf(def: ComponentDef, lines: string[], cat: ComponentCatalo
   const fields = lines.map(parseField).filter((f): f is Field => f !== null);
   for (const s of def.stats) {
     const names = cat.statNames.get(s.uuid);
-    const field = names && fields.find((f) => names.has(norm(f.label)));
+    const field = names && (fields.find((f) => names.has(norm(f.label))) ?? fields.find((f) => [...names].some((n) => plain(n) === plain(norm(f.label)))));
     if (!field) continue;
     const value = statFromTooltip(s, field.value);
     if (value === null) unreadable.push(s.name);
@@ -275,6 +279,10 @@ export function sightingOf(atMs: number, e: ComponentRead, cat: ComponentCatalog
   };
 }
 
+// A frame grabbed once the cursor rested this long shows the tooltip of the tile under it (the
+// capture waits for it, `REST` in capture.rs): its read counts even right after a move
+export const SETTLED_MS = 200;
+
 /** The sightings of one scan session, by key. */
 export class ComponentScan {
   readonly sightings = new Map<string, ComponentSighting>();
@@ -286,14 +294,15 @@ export class ComponentScan {
 
   /** Takes a read in; the sighting it added (or a known one with another count), null when nothing
    * changed (the cursor just came to the tile, a known sighting read again, a first read still waiting
-   * for its confirmation, or one `accept` turns down). */
-  feed(atMs: number, e: ComponentRead, cat: ComponentCatalog, accept: (s: ComponentSighting) => boolean = () => true): ComponentSighting | null {
+   * for its confirmation, or one `accept` turns down). `restMs`: how long the cursor had rested when
+   * the frame was grabbed; from SETTLED_MS on a read of a tile just come to counts. */
+  feed(atMs: number, e: ComponentRead, cat: ComponentCatalog, accept: (s: ComponentSighting) => boolean = () => true, restMs = 0): ComponentSighting | null {
     const tile = tileOf(e);
     const arrived = tile !== this.lastTile;
     this.lastTile = tile;
     if (arrived) {
       this.pending = null;
-      return null;
+      if (restMs < SETTLED_MS) return null;
     }
     const s = sightingOf(atMs, e, cat);
     if (!s || !accept(s)) return null;

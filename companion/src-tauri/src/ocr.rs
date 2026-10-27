@@ -7,19 +7,27 @@
 //! `area * 1.6 / perimeter` ("unclip"); the recognizer sees one text line at height 48 and is
 //! decoded greedily (CTC: blank first, the dictionary, then a space).
 //!
+//! Also compiled in: PP-OCRv6 "tiny" (`Model::Tiny`, PaddlePaddle's own ONNX, dictionary of 6904
+//! characters; ~4× faster, reads worse), its detector's input and thresholds from its inference.yml
+//! (BGR `/255` with ImageNet mean/std, 0.2 / 0.4 / 1.4). Since 2026-10-27 tiny reads the character
+//! inventory and the refinery terminal, small the warehouse (`ocrwatch::ensure_ocr`); each area's
+//! screenshot tests run with its model.
+//!
 //! Simplification: boxes are axis-aligned (the refinery terminal is read frontally), no rotated text.
 //! The models are compiled into the app (the Windows release is a bare exe without resources); they
 //! come from `scripts/fetch-ocr-models.mjs` (`resources/ocr/`, not in git), which every build needs once.
 
-use image::imageops::{self, FilterType};
+use fast_image_resize::images::{Image, ImageRef};
+pub use fast_image_resize::FilterType;
+use fast_image_resize::{PixelType, ResizeAlg, ResizeOptions, Resizer};
+use image::imageops;
 use image::RgbImage;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
-use ort::value::Tensor;
+use ort::value::{Tensor, ValueType};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-const DET_THRESH: f32 = 0.3;
-const DET_BOX_THRESH: f32 = 0.5;
-const DET_UNCLIP: f32 = 1.6;
 const DET_MIN_SIZE: f32 = 3.0;
 const REC_HEIGHT: u32 = 48;
 // The recognizer's nominal input width (RapidOCR's rec_img_shape); wider lines widen the input
@@ -60,49 +68,226 @@ pub struct TextBox {
 }
 
 pub struct Ocr {
-    det: Session,
-    rec: Session,
+    det: Engine,
+    rec: Engine,
     // Index 0 is the CTC blank
     chars: Vec<String>,
+    spec: &'static Spec,
+    timings: Timings,
 }
 
-const DET_MODEL: &[u8] = include_bytes!("../resources/ocr/det.onnx");
-const REC_MODEL: &[u8] = include_bytes!("../resources/ocr/rec.onnx");
-const REC_DICT: &str = include_str!("../resources/ocr/rec_dict.txt");
+// The recognizer's input widths on the GPU (lines padded to the next; wider ones get their own)
+const REC_WIDTHS_GPU: [usize; 7] = [320, 480, 640, 960, 1280, 1920, 2560];
+
+/// A model's ONNX Runtime sessions. On the CPU one for every input shape. On the GPU (DirectML, its
+/// redistributable DirectML.dll next to the exe) one per input shape with its dimensions fixed:
+/// DirectML compiles a session's graph for the first shape it runs, every other shape cost ~20 ms of
+/// CPU per run (2026-10-27, RTX 5080); the detector's shapes are fixed per screen area and
+/// resolution, the recognizer's batches are padded to REC_BATCH lines of a width in REC_WIDTHS_GPU.
+/// A read then takes a few ms of CPU instead of hundreds.
+enum Engine {
+    Cpu(Session),
+    Gpu { model: &'static [u8], symbols: Vec<String>, sessions: HashMap<Vec<usize>, Session> },
+}
+
+impl Engine {
+    fn new(name: &str, model: &'static [u8], threads: usize, gpu: bool) -> Result<Self, String> {
+        if !gpu {
+            return Ok(Self::Cpu(session(name, model, threads, None)?));
+        }
+        // A first session tells whether DirectML works at all and the input's dimension names
+        let probe = session(name, model, 1, Some(&[]))?;
+        let symbols = match probe.inputs()[0].dtype() {
+            ValueType::Tensor { dimension_symbols, .. } => dimension_symbols.to_vec(),
+            other => return Err(format!("{name}: input {other:?}")),
+        };
+        Ok(Self::Gpu { model, symbols, sessions: HashMap::new() })
+    }
+
+    /// The session for an input of `shape`.
+    fn session(&mut self, name: &str, shape: &[usize]) -> Result<&mut Session, String> {
+        match self {
+            Self::Cpu(s) => Ok(s),
+            Self::Gpu { model, symbols, sessions } => {
+                if !sessions.contains_key(shape) {
+                    let started = Instant::now();
+                    let dims: Vec<(String, i64)> = symbols.iter().zip(shape).filter(|(s, _)| !s.is_empty()).map(|(s, &v)| (s.clone(), v as i64)).collect();
+                    sessions.insert(shape.to_vec(), session(name, model, 1, Some(&dims))?);
+                    log::debug!("OCR {name} on the GPU for {shape:?} in {:?} ({} sessions)", started.elapsed(), sessions.len());
+                }
+                Ok(sessions.get_mut(shape).expect("inserted above"))
+            }
+        }
+    }
+
+    fn gpu(&self) -> bool {
+        matches!(self, Self::Gpu { .. })
+    }
+}
+
+/// One session on the CPU (`gpu` None) or on DirectML with these dimensions fixed.
+fn session(name: &str, model: &[u8], threads: usize, gpu: Option<&[(String, i64)]>) -> Result<Session, String> {
+    let e = |x: &dyn std::fmt::Display| format!("{name}: {x}");
+    let mut b = Session::builder().map_err(|x| e(&x))?;
+    b = b.with_optimization_level(GraphOptimizationLevel::Level3).map_err(|x| e(&x))?.with_intra_threads(threads).map_err(|x| e(&x))?;
+    if let Some(dims) = gpu {
+        #[cfg(not(windows))]
+        return Err(format!("{name}: no GPU on this platform ({dims:?})"));
+        // DirectML needs sequential runs without memory patterns (ONNX Runtime's documentation)
+        #[cfg(windows)]
+        {
+            b = b.with_memory_pattern(false).map_err(|x| e(&x))?.with_parallel_execution(false).map_err(|x| e(&x))?;
+            b = b.with_execution_providers([ort::ep::directml::DirectML::default().build().error_on_failure()]).map_err(|x| e(&x))?;
+            for (symbol, size) in dims {
+                b = b.with_dimension_override(symbol, *size).map_err(|x| e(&x))?;
+            }
+        }
+    }
+    b.commit_from_memory(model).map_err(|x| e(&x))
+}
+
+/// Where the OCR's time went since the last `take_timings`: per model the preparation (resize, crops,
+/// input tensor), the model run and the post-processing (DB boxes, CTC decoding).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Timings {
+    pub det_prep: Duration,
+    pub det_run: Duration,
+    pub det_post: Duration,
+    pub det_runs: u32,
+    pub rec_prep: Duration,
+    pub rec_run: Duration,
+    pub rec_post: Duration,
+    pub rec_runs: u32,
+    pub rec_lines: u32,
+}
+
+impl Timings {
+    pub fn total(&self) -> Duration {
+        self.det_prep + self.det_run + self.det_post + self.rec_prep + self.rec_run + self.rec_post
+    }
+}
+
+impl std::fmt::Display for Timings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ms = |d: Duration| d.as_millis();
+        write!(
+            f,
+            "det {}+{}+{} ms ({} runs), rec {}+{}+{} ms ({} lines in {} runs)",
+            ms(self.det_prep),
+            ms(self.det_run),
+            ms(self.det_post),
+            self.det_runs,
+            ms(self.rec_prep),
+            ms(self.rec_run),
+            ms(self.rec_post),
+            self.rec_lines,
+            self.rec_runs
+        )
+    }
+}
+
+/// The compiled-in PP-OCRv6 models.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Model {
+    Small,
+    Tiny,
+}
+
+impl Model {
+    /// "small" or "tiny".
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "small" => Some(Self::Small),
+            "tiny" => Some(Self::Tiny),
+            _ => None,
+        }
+    }
+
+    fn spec(self) -> &'static Spec {
+        match self {
+            Self::Small => &SMALL,
+            Self::Tiny => &TINY,
+        }
+    }
+}
+
+/// A model pair with its dictionary, the detector's input normalization (`(x/255 - mean) / std` per
+/// channel, in B, G, R order as the models see it) and its DB thresholds.
+struct Spec {
+    det: &'static [u8],
+    rec: &'static [u8],
+    dict: &'static str,
+    mean: [f32; 3],
+    std: [f32; 3],
+    thresh: f32,
+    box_thresh: f32,
+    unclip: f32,
+}
+
+const SMALL: Spec = Spec {
+    det: include_bytes!("../resources/ocr/det.onnx"),
+    rec: include_bytes!("../resources/ocr/rec.onnx"),
+    dict: include_str!("../resources/ocr/rec_dict.txt"),
+    mean: [0.5; 3],
+    std: [0.5; 3],
+    thresh: 0.3,
+    box_thresh: 0.5,
+    unclip: 1.6,
+};
+
+// PaddleX applies the ImageNet mean/std (given in RGB) to the BGR image as it is
+const TINY: Spec = Spec {
+    det: include_bytes!("../resources/ocr/det-tiny.onnx"),
+    rec: include_bytes!("../resources/ocr/rec-tiny.onnx"),
+    dict: include_str!("../resources/ocr/rec_dict-tiny.txt"),
+    mean: [0.485, 0.456, 0.406],
+    std: [0.229, 0.224, 0.225],
+    thresh: 0.2,
+    box_thresh: 0.4,
+    unclip: 1.4,
+};
 
 impl Ocr {
-    /// The compiled-in models. `threads`: ONNX Runtime's intra-op threads (the game runs at the same
-    /// time, so few). ONNX Runtime's memory arena keeps the largest run's memory (without it the reads
-    /// took 30 % longer): `ocrwatch` drops the whole `Ocr` when no panel was seen for a while.
-    pub fn new(threads: usize) -> Result<Self, String> {
-        let session = |name: &str, model: &[u8]| -> Result<Session, String> {
-            Session::builder()
-                .map_err(|e| e.to_string())?
-                .with_optimization_level(GraphOptimizationLevel::Level3)
-                .map_err(|e| e.to_string())?
-                .with_intra_threads(threads)
-                .map_err(|e| e.to_string())?
-                .commit_from_memory(model)
-                .map_err(|e| format!("{name}: {e}"))
-        };
+    /// The compiled-in models, on the CPU or the GPU (`Engine`; an error when DirectML does not work).
+    /// `threads`: ONNX Runtime's intra-op threads on the CPU (the game runs at the same time, so few).
+    /// ONNX Runtime's memory arena keeps the largest run's memory (without it the reads took 30 %
+    /// longer): `ocrwatch` drops the whole `Ocr` when the scan stops.
+    pub fn new(threads: usize, model: Model, gpu: bool) -> Result<Self, String> {
+        let spec = model.spec();
         let mut chars = vec![String::new()];
-        chars.extend(REC_DICT.lines().map(|l| l.trim_end_matches('\r').to_string()));
+        chars.extend(spec.dict.lines().map(|l| l.trim_end_matches('\r').to_string()));
         chars.push(" ".into());
-        Ok(Self { det: session("det", DET_MODEL)?, rec: session("rec", REC_MODEL)?, chars })
+        Ok(Self { det: Engine::new("det", spec.det, threads, gpu)?, rec: Engine::new("rec", spec.rec, threads, gpu)?, chars, spec, timings: Timings::default() })
+    }
+
+    /// Whether it runs on the GPU.
+    pub fn gpu(&self) -> bool {
+        self.det.gpu()
+    }
+
+    /// The timings since the last call (and starts over).
+    pub fn take_timings(&mut self) -> Timings {
+        std::mem::take(&mut self.timings)
     }
 
     /// Text boxes in `img`, detected on a copy scaled down to at most `max_height` pixels high (never
     /// up), in `img`'s pixels, top to bottom.
     pub fn detect(&mut self, img: &RgbImage, max_height: u32) -> Result<Vec<Rect>, String> {
+        let started = Instant::now();
         let (w, h) = img.dimensions();
         let ratio = (max_height as f32 / h as f32).min(1.0);
         let round32 = |v: f32| (((v / 32.0).round() as u32) * 32).max(32);
         let (rw, rh) = (round32(w as f32 * ratio), round32(h as f32 * ratio));
-        let resized = imageops::resize(img, rw, rh, FilterType::Triangle);
-        let input = Tensor::from_array(([1usize, 3, rh as usize, rw as usize], to_chw_bgr(&resized, rw))).map_err(|e| e.to_string())?;
-        let outputs = self.det.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+        let resized = resize(img, rw, rh, FilterType::Bilinear);
+        let input = Tensor::from_array(([1usize, 3, rh as usize, rw as usize], to_chw_bgr(&resized, rw, self.spec))).map_err(|e| e.to_string())?;
+        let prepared = Instant::now();
+        let outputs = self.det.session("det", &[1, 3, rh as usize, rw as usize])?.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+        let ran = Instant::now();
+        self.timings.det_prep += prepared - started;
+        self.timings.det_run += ran - prepared;
+        self.timings.det_runs += 1;
         let (_, prob) = outputs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
-        let mut boxes = db_boxes(prob, rw as usize, rh as usize);
+        let mut boxes = db_boxes(prob, rw as usize, rh as usize, self.spec);
         let (sx, sy) = (w as f32 / rw as f32, h as f32 / rh as f32);
         for b in &mut boxes {
             *b = Rect {
@@ -113,6 +298,7 @@ impl Ocr {
             };
         }
         boxes.sort_by(|a, b| a.y0.total_cmp(&b.y0).then(a.x0.total_cmp(&b.x0)));
+        self.timings.det_post += ran.elapsed();
         Ok(boxes)
     }
 
@@ -123,7 +309,9 @@ impl Ocr {
 
     /// The text of every rect (in their order), read in batches of lines of similar shape.
     pub fn recognize_all(&mut self, img: &RgbImage, rects: &[Rect]) -> Result<Vec<(String, f32)>, String> {
+        let started = Instant::now();
         let crops: Vec<RgbImage> = rects.iter().map(|r| crop(img, *r)).collect();
+        self.timings.rec_prep += started.elapsed();
         self.recognize_images(&crops)
     }
 
@@ -147,15 +335,23 @@ impl Ocr {
         order.sort_by(|&a, &b| ratio(&crops[a]).total_cmp(&ratio(&crops[b])));
         let mut out = vec![(String::new(), 0f32); crops.len()];
         for batch in order.chunks(REC_BATCH) {
+            let started = Instant::now();
             let max_ratio = batch.iter().map(|&i| ratio(&crops[i])).fold(REC_WIDTH as f32 / REC_HEIGHT as f32, f32::max);
-            let padded = (REC_HEIGHT as f32 * max_ratio) as u32;
+            let mut padded = (REC_HEIGHT as f32 * max_ratio) as u32;
+            // On the GPU one of a few shapes (`Engine`): a full batch, the next of its widths
+            let rows = if self.rec.gpu() {
+                padded = REC_WIDTHS_GPU.into_iter().find(|&w| w >= padded as usize).map_or(padded, |w| w as u32);
+                REC_BATCH
+            } else {
+                batch.len()
+            };
             let plane = (REC_HEIGHT * padded) as usize;
             // Zero padding on the right, as RapidOCR does
-            let mut data = vec![0f32; batch.len() * 3 * plane];
+            let mut data = vec![0f32; rows * 3 * plane];
             for (n, &i) in batch.iter().enumerate() {
                 let c = &crops[i];
                 let resized_w = ((REC_HEIGHT as f32 * ratio(c)).ceil() as u32).clamp(1, padded);
-                let resized = imageops::resize(c, resized_w, REC_HEIGHT, FilterType::Triangle);
+                let resized = resize(c, resized_w, REC_HEIGHT, FilterType::Bilinear);
                 let base = n * 3 * plane;
                 for (x, y, p) in resized.enumerate_pixels() {
                     let j = (y * padded + x) as usize;
@@ -164,8 +360,15 @@ impl Ocr {
                     }
                 }
             }
-            let input = Tensor::from_array(([batch.len(), 3, REC_HEIGHT as usize, padded as usize], data)).map_err(|e| e.to_string())?;
-            let outputs = self.rec.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+            let shape = [rows, 3, REC_HEIGHT as usize, padded as usize];
+            let input = Tensor::from_array((shape, data)).map_err(|e| e.to_string())?;
+            let prepared = Instant::now();
+            let outputs = self.rec.session("rec", &shape)?.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+            let ran = Instant::now();
+            self.timings.rec_prep += prepared - started;
+            self.timings.rec_run += ran - prepared;
+            self.timings.rec_runs += 1;
+            self.timings.rec_lines += batch.len() as u32;
             let (shape, probs) = outputs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
             let (steps, classes) = (shape[1] as usize, shape[2] as usize);
             if classes != self.chars.len() {
@@ -174,6 +377,7 @@ impl Ocr {
             for (n, &i) in batch.iter().enumerate() {
                 out[i] = ctc_decode(&probs[n * steps * classes..(n + 1) * steps * classes], steps, classes, &self.chars, allowed);
             }
+            self.timings.rec_post += ran.elapsed();
         }
         Ok(out)
     }
@@ -186,6 +390,16 @@ impl Ocr {
     }
 }
 
+/// `img` scaled to `width`×`height` (at least one pixel each) with `filter`: SIMD (`fast_image_resize`),
+/// the reads' largest cost besides the models with `image`'s resize (its Triangle is `Bilinear` here,
+/// the same kernel; the detector needs that smoothing).
+pub fn resize(img: &RgbImage, width: u32, height: u32, filter: FilterType) -> RgbImage {
+    let src = ImageRef::new(img.width(), img.height(), img.as_raw(), PixelType::U8x3).expect("an RgbImage's buffer");
+    let mut dst = Image::new(width, height, PixelType::U8x3);
+    Resizer::new().resize(&src, &mut dst, &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter))).expect("one pixel type, no crop");
+    RgbImage::from_raw(width, height, dst.into_vec()).expect("width × height × 3 bytes")
+}
+
 /// The part of `img` in `rect` (at least one pixel).
 fn crop(img: &RgbImage, rect: Rect) -> RgbImage {
     let (w, h) = img.dimensions();
@@ -196,24 +410,26 @@ fn crop(img: &RgbImage, rect: Rect) -> RgbImage {
     imageops::crop_imm(img, x0, y0, cw, ch).to_image()
 }
 
-/// CHW planes in BGR order, scaled to [-1, 1].
-fn to_chw_bgr(img: &RgbImage, width: u32) -> Vec<f32> {
+/// CHW planes in BGR order, normalized as the model's spec says.
+fn to_chw_bgr(img: &RgbImage, width: u32, spec: &Spec) -> Vec<f32> {
     let plane = (img.height() * width) as usize;
     let mut data = vec![0f32; 3 * plane];
+    let scale: [f32; 3] = std::array::from_fn(|c| 1.0 / (255.0 * spec.std[c]));
+    let offset: [f32; 3] = std::array::from_fn(|c| spec.mean[c] / spec.std[c]);
     for (x, y, p) in img.enumerate_pixels() {
         let i = (y * width + x) as usize;
-        data[i] = p[2] as f32 / 127.5 - 1.0;
-        data[plane + i] = p[1] as f32 / 127.5 - 1.0;
-        data[2 * plane + i] = p[0] as f32 / 127.5 - 1.0;
+        for (c, v) in [p[2], p[1], p[0]].into_iter().enumerate() {
+            data[c * plane + i] = v as f32 * scale[c] - offset[c];
+        }
     }
     data
 }
 
 /// Boxes of the regions above the threshold in a `w`×`h` probability map (DB post-processing,
-/// axis-aligned), in map pixels.
-fn db_boxes(prob: &[f32], w: usize, h: usize) -> Vec<Rect> {
+/// axis-aligned, the spec's thresholds), in map pixels.
+fn db_boxes(prob: &[f32], w: usize, h: usize, spec: &Spec) -> Vec<Rect> {
     // Threshold, then dilate with a 2×2 kernel (as RapidOCR's use_dilation)
-    let raw: Vec<bool> = prob.iter().map(|&p| p > DET_THRESH).collect();
+    let raw: Vec<bool> = prob.iter().map(|&p| p > spec.thresh).collect();
     let mut mask = raw.clone();
     for y in 0..h {
         for x in 0..w {
@@ -266,10 +482,10 @@ fn db_boxes(prob: &[f32], w: usize, h: usize) -> Vec<Rect> {
         if bw.min(bh) < DET_MIN_SIZE {
             continue;
         }
-        if sum / (count as f32) < DET_BOX_THRESH {
+        if sum / (count as f32) < spec.box_thresh {
             continue;
         }
-        let d = bw * bh * DET_UNCLIP / (2.0 * (bw + bh));
+        let d = bw * bh * spec.unclip / (2.0 * (bw + bh));
         let r = Rect { x0: x0 as f32 - d, y0: y0 as f32 - d, x1: x1 as f32 + d + 1.0, y1: y1 as f32 + d + 1.0 };
         if r.w().min(r.h()) < DET_MIN_SIZE + 2.0 {
             continue;
@@ -351,7 +567,7 @@ mod tests {
                 prob[y * w + x] = 0.9;
             }
         }
-        let boxes = db_boxes(&prob, w, h);
+        let boxes = db_boxes(&prob, w, h, &SMALL);
         assert_eq!(boxes.len(), 2);
         assert!(boxes.iter().all(|b| b.y0 < 5.0 && b.y1 > 12.0));
     }

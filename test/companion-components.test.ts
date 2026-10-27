@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { CatalogResponse, CatalogStat, StockBatch } from '../src/webapp/api-types.ts';
 import {
-  addRequest, buildComponentCatalog, ComponentScan, findComponents, inStockOf, parseField, parseNumber, proposalsOf, sightingOf, statFromTooltip, statNameKeys, statsOf,
+  addRequest, buildComponentCatalog, ComponentScan, findComponents, inStockOf, parseField, parseNumber, proposalsOf, SETTLED_MS, sightingOf, statFromTooltip, statNameKeys, statsOf,
   type ComponentCatalog, type ComponentProposal, type ComponentRead,
 } from '../companion/src/components.ts';
 
@@ -69,6 +69,7 @@ describe('catalog', () => {
     const cat = catalog();
     assert.deepEqual(findComponents(cat, 'Mil/3/A Blizzard').map((c) => c.uuid), [BLIZZARD], 'the craftable one among the S3 A variants');
     assert.deepEqual(findComponents(cat, 'Mil/3/ABlizzard').map((c) => c.uuid), [BLIZZARD], 'the OCR dropped the space');
+    assert.deepEqual(findComponents(cat, 'Mil/3/a Blizzard').map((c) => c.uuid), [BLIZZARD], 'the grade read in lower case');
     assert.deepEqual(findComponents(cat, 'Mil/2/A Blizzard').map((c) => c.uuid), [BLIZZARD_S2]);
     assert.equal(findComponents(cat, 'Blizzard').length, 2, 'without a prefix both craftable sizes stay');
     assert.deepEqual(findComponents(cat, 'Mil/1/B Sovereign IP-10').map((c) => c.uuid), [SOVEREIGN]);
@@ -123,6 +124,8 @@ describe('tooltip lines', () => {
     assert.deepEqual(statsOf(blizzard, BLIZZARD_LINES, cat), { stats: {}, read: [COOLANT, HEALTH], unreadable: [] });
     assert.deepEqual(statsOf(blizzard, ['Item Type: Cooler', 'Kühlleistung: 67.50', 'Integrität: 1836.00'], cat), { stats: { [COOLANT]: '12.5', [HEALTH]: '2' }, read: [COOLANT, HEALTH], unreadable: [] });
     assert.deepEqual(statsOf(blizzard, ['Coolant Rating: 67.50', 'Integrity: 1B00.00'], cat), { stats: { [COOLANT]: '12.5' }, read: [COOLANT], unreadable: ['Integrity'] });
+    // Accents the OCR added (PP-OCRv6 tiny), and the umlauts it dropped
+    assert.deepEqual(statsOf(blizzard, ['Coolant Ratìng: 67.50', 'Integritat: 1836.00'], cat).read, [COOLANT, HEALTH]);
     assert.deepEqual(statsOf(blizzard, ['Registered To You'], cat), { stats: {}, read: [], unreadable: [] }, 'no stat lines: an item without stats');
   });
 });
@@ -186,6 +189,16 @@ describe('sightings', () => {
     scan.clear();
     assert.equal(scan.sightings.size, 0);
   });
+
+  it('counts the read of a tile just come to when the cursor had rested at the grab', () => {
+    const cat = catalog();
+    const scan = new ComponentScan();
+    const blizzard = ['Coolant Rating: 67.50'];
+    const all = () => true;
+    assert.equal(scan.feed(1, read('Mil/3/A Blizzard', blizzard), cat, all, SETTLED_MS - 1), null, 'not rested long enough');
+    assert.equal(scan.feed(2, read('Mil/3/A Blizzard', blizzard, { row: 2, col: 0 }), cat, all, SETTLED_MS), null, 'first read waits');
+    assert.ok(scan.feed(3, read('Mil/3/A Blizzard', blizzard, { row: 2, col: 0 }), cat, all, SETTLED_MS), 'two reads');
+  });
 });
 
 describe('proposals', () => {
@@ -248,6 +261,7 @@ describe('FPS gear', () => {
     assert.deepEqual(findComponents(cat, 'Sion Compensatorl').map((c) => c.uuid), [SION], 'l for 1');
     assert.deepEqual(findComponents(cat, 'Si0n Compensator1').map((c) => c.uuid), [SION], '0 for O');
     assert.deepEqual(findComponents(cat, 'Mil/3/A BIizzard').map((c) => c.uuid), [BLIZZARD]);
+    assert.deepEqual(findComponents(cat, 'Sion Cómpensatorl').map((c) => c.uuid), [SION], 'an accent added');
   });
 
   it('reads percent changes as they are (negated where the game negates them), absolute values over the base', () => {

@@ -23,7 +23,7 @@
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -36,7 +36,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::components::{hovered_tile, read_count, read_page, read_tooltip, ComponentRead, Page, Ui};
 use crate::inventory::{read_grid, Grid};
 use crate::locale::{LabelSource, Labels};
-use crate::ocr::{Ocr, TextBox};
+use crate::ocr::{Model, Ocr, TextBox};
 use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
 
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
@@ -155,6 +155,8 @@ pub struct CaptureInfo {
     pub gated: u32,
     /// From the grab to the read's start
     pub wait_ms: u64,
+    /// How long the mouse cursor had rested when the frame was grabbed (pulled frames; 0: not waited for)
+    pub rest_ms: u32,
 }
 
 impl CaptureInfo {
@@ -206,6 +208,21 @@ struct InventoryEvent {
     refinery: Option<RefineryRead>,
     /// How the frame was captured
     capture: CaptureInfo,
+    /// Which models read it, where, and their share of `ms`
+    ocr: OcrInfo,
+}
+
+/// The OCR of a read (debug view, recordings): the models that ran ("tiny", "small"), on the GPU or
+/// the CPU and why (the setting, the GPU's state), and their time (preparation, runs, post-processing;
+/// the rest of the read is its own work).
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct OcrInfo {
+    models: Vec<&'static str>,
+    gpu: bool,
+    setting: bool,
+    status: GpuState,
+    ms: u64,
 }
 
 /// What a read of the refinery terminal found, for the debug view and a recording.
@@ -558,19 +575,57 @@ impl Default for GameFront {
 
 pub const GAME_FRONT: &str = "game-front";
 
-/// How often the capture delivers a frame (ms; 0: the normal once a second). The worker sets it while
-/// the character inventory is in view (its tooltips need three reads of a tile): 1.5 × its last read
-/// there, within FAST_MIN_MS–FAST_MAX_MS, so it reads at most ~2/3 of the time on any machine.
+/// The worker's pull on the screens read every frame (warehouse, character inventory): when the capture
+/// may grab the next frame (Unix ms; 0: off, the normal once a second). The worker sets it once a read
+/// is done (now: a fresh frame for the next read, none grabbed while it reads), the capture grabs as
+/// soon as the mouse cursor rests (`capture::REST`) and sets it PULL_TIMEOUT_MS ahead, in case no read
+/// answers (the screen changed, the scan stopped).
 #[derive(Default, Clone)]
-pub struct FastCapture(pub Arc<AtomicU32>);
-const FAST_MIN_MS: u64 = 500;
-const FAST_MAX_MS: u64 = 1000;
+pub struct FastCapture(pub Arc<AtomicU64>);
+pub const PULL_TIMEOUT_MS: u64 = 3000;
 pub const GAME_SEEN: &str = "game-seen";
 
+/// Whether the OCR can run on the GPU (`ocr::Engine`, DirectML): the redistributable DirectML.dll next
+/// to the exe (the setup brings it; Windows' own is too old) and no failure in this run (then the OCR
+/// goes on on the CPU). The settings grey their switch out otherwise (`gpu_status`, event `ocr-gpu`).
+#[derive(Clone)]
+pub struct Gpu(pub Arc<Mutex<GpuState>>);
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum GpuState {
+    Ready,
+    Missing,
+    Failed { error: String },
+}
+
+pub const OCR_GPU: &str = "ocr-gpu";
+
+impl Gpu {
+    pub fn new() -> Self {
+        let dll = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join("DirectML.dll")));
+        let state = if cfg!(windows) && dll.is_some_and(|d| d.is_file()) { GpuState::Ready } else { GpuState::Missing };
+        log::info!("OCR GPU: {state:?}");
+        Self(Arc::new(Mutex::new(state)))
+    }
+
+    pub fn state(&self) -> GpuState {
+        self.0.lock().unwrap().clone()
+    }
+
+    /// No GPU any more in this run.
+    fn fail(&self, app: &AppHandle, error: String) {
+        log::warn!("OCR GPU failed, on the CPU from now on: {error}");
+        let state = GpuState::Failed { error };
+        *self.0.lock().unwrap() = state.clone();
+        let _ = app.emit(OCR_GPU, state);
+    }
+}
+
 /// Starts the OCR worker; frames sent to the returned channel are read in order while a session runs.
-pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront) -> Sender<Frame> {
+pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront, gpu: Gpu) -> Sender<Frame> {
     let (tx, rx) = channel::<Frame>();
-    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store, fast, front).run(rx));
+    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store, fast, front, gpu).run(rx));
     if let Some(dir) = std::env::var_os("QM_OCR_FRAMES") {
         spawn_folder_source(PathBuf::from(dir), tx.clone());
     }
@@ -611,11 +666,15 @@ struct Worker {
     debug: Debug,
     /// While debugging, the reads go with their frame to the debug writer (`spawn_debug_writer`)
     debug_tx: Sender<(RgbImage, InventoryEvent)>,
-    /// Set while the character inventory is in view: the capture delivers frames faster
+    /// Set while the warehouse or the character inventory is in view: the worker pulls the frames
     fast: FastCapture,
     /// The game in front (else no frames come, and the screen is left)
     front: GameFront,
-    ocr: Option<Ocr>,
+    /// The two models (`ensure_ocr`), each loaded once needed, on the GPU (`on_gpu`) or the CPU
+    tiny: Option<Ocr>,
+    small: Option<Ocr>,
+    gpu: Gpu,
+    on_gpu: bool,
     gate: Gate,
     labels: LabelSource,
     visit: Option<Visit>,
@@ -631,24 +690,28 @@ struct Worker {
     /// The capture of the frame being read, and the counts of the frames not read since the last read
     capture: CaptureInfo,
     unread: CaptureInfo,
+    /// The frame's conversion to RGB before the read (logged with the read's phases)
+    rgb_time: Duration,
 }
 
 pub(crate) fn unix_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
-/// The OCR, loaded on first use.
-fn ensure_ocr(slot: &mut Option<Ocr>) -> Result<&mut Ocr, String> {
+/// The OCR with `model`, loaded on first use. Tiny reads the character inventory (page, tooltip,
+/// count) and the refinery terminal as well as small (their tests) at a third of the time; the
+/// warehouse grid needs small (tiny misses badges and misreads item names).
+fn ensure_ocr(slot: &mut Option<Ocr>, model: Model, gpu: bool) -> Result<&mut Ocr, String> {
     if slot.is_none() {
         let started = Instant::now();
-        *slot = Some(Ocr::new(OCR_THREADS).map_err(|e| format!("models: {e}"))?);
-        log::info!("OCR loaded in {:?}", started.elapsed());
+        *slot = Some(Ocr::new(OCR_THREADS, model, gpu).map_err(|e| format!("models: {e}"))?);
+        log::info!("OCR {model:?} loaded in {:?} on the {}", started.elapsed(), if gpu { "GPU" } else { "CPU" });
     }
     Ok(slot.as_mut().expect("loaded above"))
 }
 
 impl Worker {
-    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront) -> Self {
+    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront, gpu: Gpu) -> Self {
         let debug_tx = spawn_debug_writer(app.clone(), store);
         Self {
             app,
@@ -658,7 +721,10 @@ impl Worker {
             fast,
             front,
             debug_tx,
-            ocr: None,
+            tiny: None,
+            small: None,
+            gpu,
+            on_gpu: false,
             gate: Gate::default(),
             labels: LabelSource::default(),
             visit: None,
@@ -669,6 +735,7 @@ impl Worker {
             ui_scale: None,
             capture: CaptureInfo::default(),
             unread: CaptureInfo::default(),
+            rgb_time: Duration::ZERO,
         }
     }
 
@@ -687,7 +754,7 @@ impl Worker {
                 self.ui_scale = None;
                 // Off: the OCR's memory goes right away (the next start loads it again in well under a
                 // second); while the scan runs it stays, read or not
-                if self.ocr.take().is_some() {
+                if self.tiny.take().is_some() | self.small.take().is_some() {
                     log::info!("OCR unloaded (scan stopped)");
                 }
                 continue;
@@ -722,22 +789,57 @@ impl Worker {
             self.capture = frame.capture;
             self.capture.add_unread(std::mem::take(&mut self.unread));
             self.capture.wait_ms = unix_ms(SystemTime::now()).saturating_sub(frame.at_ms);
+            let converting = Instant::now();
+            let image = frame.pixels.into_rgb();
+            self.rgb_time = converting.elapsed();
+            self.use_gpu();
             let result = match self.screen {
                 // The terminal: once the view came to rest after it moved, and every REREAD_MS
-                Screen::Refinery => self.look_refinery(frame.at_ms, frame.cursor, frame.pixels.into_rgb()),
+                Screen::Refinery => self.look_refinery(frame.at_ms, frame.cursor, image),
                 // Warehouse and character inventory: every frame (the character and the world behind
                 // the translucent inventory screen never come to rest, and the user waits for each stack)
-                Screen::Warehouse | Screen::Inventory => self.look_inventory(scope, frame.at_ms, frame.cursor, frame.pixels.into_rgb()),
+                Screen::Warehouse | Screen::Inventory => self.look_inventory(scope, frame.at_ms, frame.cursor, image),
                 // Nothing in view (a menu, the verse): a probe costs the reads, so every PROBE_MS only
                 Screen::Unknown => {
                     self.last_probe_ms = frame.at_ms;
-                    self.probe(scope, frame)
+                    self.probe(scope, frame.at_ms, frame.cursor, image)
                 }
             };
             if let Err(e) = result {
                 log::warn!("OCR: {e}");
+                // On the GPU: the CPU from the next frame on (`use_gpu`)
+                if self.on_gpu {
+                    self.gpu.fail(&self.app, e);
+                }
             }
         }
+    }
+
+    /// The models on the GPU or the CPU as the settings and the GPU's state say; on a switch they are
+    /// loaded anew.
+    fn use_gpu(&mut self) {
+        let want = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu && self.gpu.state() == GpuState::Ready;
+        if want != self.on_gpu {
+            self.on_gpu = want;
+            if self.tiny.take().is_some() | self.small.take().is_some() {
+                log::info!("OCR unloaded (now on the {})", if want { "GPU" } else { "CPU" });
+            }
+        }
+    }
+
+    /// The models' phases since the last call (for the log, per model that ran) and what ran.
+    fn take_phases(&mut self) -> (String, OcrInfo) {
+        let setting = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu;
+        let (mut parts, mut info) = (Vec::new(), OcrInfo { models: Vec::new(), gpu: self.on_gpu, setting, status: self.gpu.state(), ms: 0 });
+        for (name, slot) in [("tiny", &mut self.tiny), ("small", &mut self.small)] {
+            let Some(t) = slot.as_mut().map(Ocr::take_timings) else { continue };
+            if t.det_runs + t.rec_runs > 0 {
+                parts.push(format!("{name}: {t}"));
+                info.models.push(name);
+                info.ms += t.total().as_millis() as u64;
+            }
+        }
+        (parts.join(", "), info)
     }
 
     /// The labels in the player's language (re-read when the game's language or pack changes).
@@ -766,28 +868,29 @@ impl Worker {
         self.screen = screen;
         self.screen_misses = 0;
         self.gate = Gate::default();
-        self.fast.0.store(if screen == Screen::Inventory { FAST_MIN_MS as u32 } else { 0 }, Ordering::Relaxed);
+        // The screens read every frame pull them (`FastCapture`), the others take the normal interval
+        let pull = matches!(screen, Screen::Warehouse | Screen::Inventory);
+        self.fast.0.store(if pull { unix_ms(SystemTime::now()) } else { 0 }, Ordering::Relaxed);
         let _ = self.app.emit(SCAN_SCREEN, screen.name());
     }
 
     /// Looks for a screen in a frame: the refinery's big titles first (cheap), then the inventory's
     /// reads (the page number, else the warehouse grid; a frame with neither is tried as the
     /// character inventory too), each only when in scope.
-    fn probe(&mut self, scope: Scope, frame: Frame) -> Result<(), String> {
-        let image = frame.pixels.into_rgb();
+    fn probe(&mut self, scope: Scope, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
         if scope.refinery {
             let labels = self.labels_now();
-            let ocr = ensure_ocr(&mut self.ocr)?;
+            let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
             let started = Instant::now();
             let found = terminal_in_view(ocr, &image, &labels)?;
             log::debug!("terminal check in {:?}: {found}", started.elapsed());
             if found {
                 self.set_screen(Screen::Refinery, "titles seen");
-                return self.look_refinery(frame.at_ms, frame.cursor, image);
+                return self.look_refinery(at_ms, cursor, image);
             }
         }
         if scope.warehouse || scope.inventory {
-            return self.look_inventory(scope, frame.at_ms, frame.cursor, image);
+            return self.look_inventory(scope, at_ms, cursor, image);
         }
         Ok(())
     }
@@ -799,8 +902,9 @@ impl Worker {
     /// tried as the inventory too; a screen out of `scope` is not read.
     fn look_inventory(&mut self, scope: Scope, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
         let debug = self.debug.0.load(Ordering::Relaxed);
-        let ocr = ensure_ocr(&mut self.ocr)?;
         let (width, height) = image.dimensions();
+        // Only this read's phases (a probe's terminal check came before)
+        self.take_phases();
         let started = Instant::now();
         let mut grid = None;
         let mut components = None;
@@ -812,14 +916,14 @@ impl Worker {
             // Probing: the page number over every place it can have (the scale is not known yet)
             let probe_page = screen == Screen::Unknown && scope.inventory;
             let page = if probe_page {
-                let (page, page_boxes) = read_page(ocr, &image, None)?;
+                let (page, page_boxes) = read_page(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, None)?;
                 boxes.extend(page_boxes);
                 page
             } else {
                 None
             };
             if page.is_none() && scope.warehouse {
-                let (g, grid_boxes) = read_grid(ocr, &image, cursor, self.last_pitch, debug)?;
+                let (g, grid_boxes) = read_grid(ensure_ocr(&mut self.small, Model::Small, self.on_gpu)?, &image, cursor, self.last_pitch, debug)?;
                 boxes.extend(grid_boxes);
                 if let Some(g) = &g {
                     // Only a strong fit sets the pitch the weaker reads keep
@@ -833,7 +937,7 @@ impl Worker {
             }
             if scope.inventory && (screen == Screen::Unknown || page.is_some()) {
                 // The page or nothing at all: try the character inventory
-                let (read, k) = inventory_screen(ocr, &image, cursor, page, self.ui_scale, &mut boxes)?;
+                let (read, k) = inventory_screen(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, cursor, page, self.ui_scale, &mut boxes)?;
                 found = found || read.page.is_some() || read.tooltip.is_some();
                 if page.is_some() {
                     screen = Screen::Inventory;
@@ -843,9 +947,9 @@ impl Worker {
             }
         } else {
             // The page number where the known scale puts it (cheap)
-            let (page, page_boxes) = read_page(ocr, &image, self.ui_scale)?;
+            let (page, page_boxes) = read_page(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, self.ui_scale)?;
             boxes.extend(page_boxes);
-            let (read, k) = inventory_screen(ocr, &image, cursor, page, self.ui_scale, &mut boxes)?;
+            let (read, k) = inventory_screen(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, cursor, page, self.ui_scale, &mut boxes)?;
             if page.is_some() {
                 self.ui_scale = Some(k);
             }
@@ -862,11 +966,10 @@ impl Worker {
             }
         }
         let ms = started.elapsed().as_millis() as u64;
-        // On the character inventory the next frame comes after 1.5 × this read (set_screen below resets it
-        // when the screen changes)
-        if screen == Screen::Inventory && self.screen == Screen::Inventory {
-            self.fast.0.store((ms * 3 / 2).clamp(FAST_MIN_MS, FAST_MAX_MS) as u32, Ordering::Relaxed);
-        }
+        // Where the read's time went: the models' phases, the rest is the reads' own work (crops and
+        // their scaling, page, grid, hover)
+        let (phases, ocr) = self.take_phases();
+        log::debug!("read phases: rgb {} ms, {phases}, rest {} ms", self.rgb_time.as_millis(), ms.saturating_sub(ocr.ms));
         match (&grid, &components) {
             (Some(g), _) => {
                 let tip = g.tooltip.as_ref().map_or("no tooltip".to_string(), |t| format!("tooltip {} Q{:?} {:?}", t.name, t.quality, t.scu));
@@ -880,12 +983,16 @@ impl Worker {
             }
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", screen),
         }
-        let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None, capture: self.capture };
+        let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None, capture: self.capture, ocr };
         // While debugging the debug writer adds the frame and emits; the worker goes on reading
         if !debug || self.debug_tx.send((image, event.clone())).is_err() {
             let _ = self.app.emit(INVENTORY_READ, event);
         }
         self.set_screen(screen, if found { "seen" } else { "nothing seen" });
+        // Still on a screen read every frame: the next one is grabbed as soon as the cursor rests
+        if matches!(self.screen, Screen::Warehouse | Screen::Inventory) {
+            self.fast.0.store(unix_ms(SystemTime::now()), Ordering::Relaxed);
+        }
         Ok(())
     }
 
@@ -893,7 +1000,9 @@ impl Worker {
     /// reads in a row without the terminal leave it).
     fn look_refinery(&mut self, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
         let labels = self.labels_now();
-        let ocr = ensure_ocr(&mut self.ocr)?;
+        // Only this read's phases (a probe's terminal check came before)
+        self.take_phases();
+        let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
         let started = Instant::now();
         let read = read_overview(ocr, &image, &labels)?;
         let ms = started.elapsed().as_millis() as u64;
@@ -922,7 +1031,7 @@ impl Worker {
         // While debugging the read goes with its frame to the debug window and a recording
         if self.debug.0.load(Ordering::Relaxed) {
             let (width, height) = image.dimensions();
-            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug), capture: self.capture };
+            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug), capture: self.capture, ocr: self.take_phases().1 };
             let _ = self.debug_tx.send((image, event));
         }
         if self.screen_misses >= LEAVE_AFTER {

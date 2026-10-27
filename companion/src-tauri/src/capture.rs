@@ -32,7 +32,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindow};
 
-use crate::ocrwatch::{CaptureInfo, Detect, FastCapture, Frame, GameFront, GameSeen, Pixels, GAME_FRONT, GAME_SEEN};
+use crate::ocrwatch::{CaptureInfo, Detect, FastCapture, Frame, GameFront, GameSeen, Pixels, GAME_FRONT, GAME_SEEN, PULL_TIMEOUT_MS};
 
 const GAME_EXE: &str = "StarCitizen.exe";
 const INTERVAL: Duration = Duration::from_secs(1);
@@ -40,10 +40,44 @@ const INTERVAL: Duration = Duration::from_secs(1);
 const ACQUIRE_TIMEOUT_MS: u32 = 200;
 // A grab slower than this is logged (debug)
 const SLOW_GRAB: Duration = Duration::from_millis(150);
+// While the worker pulls: how often the cursor is looked at, how far it may move and still rest
+// (physical pixels), and how long it must rest before a grab (the game then shows the tooltip of the
+// tile under it; `SETTLED_MS` in components.ts)
+const PULL_POLL: Duration = Duration::from_millis(15);
+const REST_PX: i32 = 3;
+const REST: Duration = Duration::from_millis(200);
+
+/// Since when the mouse cursor stays where it is.
+struct Rest {
+    at: POINT,
+    since: Instant,
+}
+
+impl Default for Rest {
+    fn default() -> Self {
+        Self { at: POINT::default(), since: Instant::now() }
+    }
+}
+
+impl Rest {
+    fn update(&mut self) {
+        let mut p = POINT::default();
+        if unsafe { GetCursorPos(&mut p) }.is_err() {
+            return;
+        }
+        if (p.x - self.at.x).abs() > REST_PX || (p.y - self.at.y).abs() > REST_PX {
+            *self = Self { at: p, since: Instant::now() };
+        }
+    }
+
+    fn rested(&self) -> Duration {
+        self.since.elapsed()
+    }
+}
 
 /// Starts the capture thread; it sends frames only while `detect` is on and the game is in front
-/// (one per second, on the character inventory as often as `fast` says), and tells whether the game runs (`seen`, only while `detect` is
-/// on).
+/// (one per second, on the warehouse and the character inventory when the worker pulls, `FastCapture`),
+/// and tells whether the game runs (`seen`, only while `detect` is on).
 pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, fast: FastCapture, front: GameFront) {
     std::thread::spawn(move || {
         let mut dup: Option<Duplication> = None;
@@ -52,10 +86,26 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
         let mut last_game: Option<HWND> = None;
         // What went into the next frame's way (sent with it: debug view, recordings)
         let mut skipped = CaptureInfo::default();
+        let mut rest = Rest::default();
         loop {
-            // Faster on the character inventory, paced by the worker's read time (`FastCapture`)
-            let fast_ms = fast.0.load(Ordering::Relaxed);
-            std::thread::sleep(if fast_ms > 0 { Duration::from_millis(fast_ms.into()) } else { INTERVAL });
+            // Pulled by the worker (warehouse, character inventory): as soon as it is ready and the cursor
+            // rests, at the latest after an interval (the checks below run that often; no frame then)
+            let pulled = fast.0.load(Ordering::Relaxed) > 0;
+            let mut grab_now = !pulled;
+            if pulled {
+                let waiting = Instant::now();
+                while waiting.elapsed() < INTERVAL {
+                    std::thread::sleep(PULL_POLL);
+                    rest.update();
+                    let ready = now_ms() >= fast.0.load(Ordering::Relaxed);
+                    if ready && rest.rested() >= REST {
+                        grab_now = true;
+                        break;
+                    }
+                }
+            } else {
+                std::thread::sleep(INTERVAL);
+            }
             let on = detect.load(Ordering::Relaxed);
             let game = if on { game_window(&mut last_game) } else { None };
             let running = on && (game.is_some() || game_running());
@@ -72,7 +122,7 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
             };
             // The companion in front: no frames (the capture is of the monitor, the companion's own window
             // over the game was read as a warehouse grid and switched the mode while the user worked in it)
-            if !in_front {
+            if !in_front || !grab_now {
                 continue;
             }
             let started = Instant::now();
@@ -83,7 +133,11 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
                     if started.elapsed() > SLOW_GRAB {
                         log::debug!("screen capture: grab took {:?}", started.elapsed());
                     }
-                    let capture = CaptureInfo { grab_ms: started.elapsed().as_millis() as u32, ..std::mem::take(&mut skipped) };
+                    let rest_ms = if pulled { rest.rested().as_millis() as u32 } else { 0 };
+                    let capture = CaptureInfo { grab_ms: started.elapsed().as_millis() as u32, rest_ms, ..std::mem::take(&mut skipped) };
+                    // The next pulled frame once the worker read this one (or after the timeout); left off
+                    // when the worker switched it off meanwhile
+                    let _ = fast.0.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| (v > 0).then(|| now_ms() + PULL_TIMEOUT_MS));
                     if tx.send(Frame { at_ms: now_ms(), pixels, live: true, cursor, capture }).is_err() {
                         return;
                     }

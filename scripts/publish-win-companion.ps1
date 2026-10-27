@@ -1,6 +1,6 @@
 #Requires -Version 7
 # Publishes the built Windows companion release (pnpm companion:build first): the NSIS setup with its
-# updater signature and the standalone zip go to local/companion/ (as quartermaster-companion_<v>_x64-setup.exe(.sig) and
+# updater signature and the standalone zip (the exe with DirectML.dll for the OCR on the GPU) go to local/companion/ (as quartermaster-companion_<v>_x64-setup.exe(.sig) and
 # _x64-standalone.zip), companion.json gets the version and both files (a linux entry stays), then the
 # files the manifest names go to the VM's checkout, the manifest last (copied first, it would send
 # outdated apps to downloads that are not there yet; like push-companion.sh).
@@ -23,7 +23,9 @@ $version = $Matches[1]
 
 $release = 'companion/src-tauri/target/release'
 $setup = "$release/bundle/nsis/Quartermaster Companion_${version}_x64-setup.exe"
-foreach ($f in $setup, "$setup.sig", "$release/quartermaster-companion.exe") {
+# The one the setup bundles too (pnpm --filter sc-quartermaster-companion ocr:models)
+$dml = 'companion/src-tauri/resources/ocr/DirectML.dll'
+foreach ($f in $setup, "$setup.sig", "$release/quartermaster-companion.exe", $dml) {
   if (-not (Test-Path -LiteralPath $f)) { throw "Missing build output: $f (pnpm companion:build first)" }
 }
 
@@ -33,7 +35,7 @@ $setupName = "quartermaster-companion_${version}_x64-setup.exe"
 $zipName = "quartermaster-companion_${version}_x64-standalone.zip"
 Copy-Item -LiteralPath $setup "$dir/$setupName"
 Copy-Item -LiteralPath "$setup.sig" "$dir/$setupName.sig"
-Compress-Archive -LiteralPath "$release/quartermaster-companion.exe" -DestinationPath "$dir/$zipName" -Force
+Compress-Archive -LiteralPath "$release/quartermaster-companion.exe", $dml -DestinationPath "$dir/$zipName" -Force
 
 $manifest = "$dir/companion.json"
 $m = if (Test-Path $manifest) { Get-Content $manifest -Raw | ConvertFrom-Json -AsHashtable } else { @{} }

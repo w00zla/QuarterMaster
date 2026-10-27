@@ -25,11 +25,11 @@
 //!
 //! Anything unexpected yields `None` fields, never a panic.
 
-use image::imageops::{self, FilterType};
+use image::imageops;
 use image::RgbImage;
 use serde::Serialize;
 
-use crate::ocr::{Ocr, Rect, TextBox};
+use crate::ocr::{resize, FilterType, Ocr, Rect, TextBox};
 
 /// The tooltip's area: right of the centre, below the screen's title row
 const TIP_LEFT: f32 = 0.02;
@@ -360,18 +360,56 @@ fn scaled_crop(frame: &RgbImage, rect: Rect, scale: f32) -> RgbImage {
     if scale == 1.0 {
         return crop;
     }
-    imageops::resize(&crop, ((cw as f32 * scale) as u32).max(1), ((ch as f32 * scale) as u32).max(1), FilterType::CatmullRom)
+    resize(&crop, ((cw as f32 * scale) as u32).max(1), ((ch as f32 * scale) as u32).max(1), FilterType::CatmullRom)
 }
 
-/// Reads the texts in `rect` of `frame` (scaled up by `scale` first); boxes in frame pixels.
-fn read_area(ocr: &mut Ocr, frame: &RgbImage, rect: Rect, scale: f32) -> Result<Vec<TextBox>, String> {
+/// Reads the texts in `rect` of `frame` (scaled up by `scale` first); boxes in frame pixels. Only the
+/// detected lines `keep` (their boxes in frame pixels) picks are recognized.
+fn read_area(ocr: &mut Ocr, frame: &RgbImage, rect: Rect, scale: f32, keep: impl FnOnce(&[Rect]) -> Vec<bool>) -> Result<Vec<TextBox>, String> {
     let crop = scaled_crop(frame, rect, scale);
-    let mut boxes = ocr.read(&crop, crop.height())?;
     let (ox, oy) = (rect.x0.max(0.0), rect.y0.max(0.0));
-    for b in &mut boxes {
-        b.rect = Rect { x0: ox + b.rect.x0 / scale, y0: oy + b.rect.y0 / scale, x1: ox + b.rect.x1 / scale, y1: oy + b.rect.y1 / scale };
+    let found = ocr.detect(&crop, crop.height())?;
+    let in_frame: Vec<Rect> = found.iter().map(|r| Rect { x0: ox + r.x0 / scale, y0: oy + r.y0 / scale, x1: ox + r.x1 / scale, y1: oy + r.y1 / scale }).collect();
+    let keep = keep(&in_frame);
+    let picked: Vec<usize> = (0..found.len()).filter(|&i| keep[i]).collect();
+    let texts = ocr.recognize_all(&crop, &picked.iter().map(|&i| found[i]).collect::<Vec<_>>())?;
+    Ok(picked.into_iter().zip(texts).filter(|(_, (t, _))| !t.trim().is_empty()).map(|(i, (text, score))| TextBox { rect: in_frame[i], text, score }).collect())
+}
+
+/// Every detected line.
+fn all(rects: &[Rect]) -> Vec<bool> {
+    vec![true; rects.len()]
+}
+
+/// The detected lines of the tooltip, before they are recognized (the recognizer is the read's
+/// largest cost): the boxes of a line's height grouped into rows as `lines_of` does, the rows into
+/// blocks at gaps wider than TIP_GAP as `tooltip_of` does, and of these the first with a title and
+/// MIN_BODY_LINES rows below it. Not recognized: a second tooltip below and strays of the scene
+/// (unrecognized boxes only make rows closer, never a gap wider). `s` = the UI's height.
+fn tooltip_block(rects: &[Rect], s: f32) -> Vec<bool> {
+    let mut order: Vec<usize> = (0..rects.len()).filter(|&i| rects[i].h() >= LINE_MIN_H * s && rects[i].h() <= LINE_MAX_H * s).collect();
+    order.sort_by(|&a, &b| rects[a].cy().total_cmp(&rects[b].cy()));
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    for i in order {
+        match rows.last_mut() {
+            Some(row) if row.iter().any(|&o| (rects[o].cy() - rects[i].cy()).abs() < 0.5 * rects[o].h().min(rects[i].h())) => row.push(i),
+            _ => rows.push(vec![i]),
+        }
     }
-    Ok(boxes)
+    let top = |row: &Vec<usize>| row.iter().map(|&i| rects[i].y0).fold(f32::MAX, f32::min);
+    let mut keep = vec![false; rects.len()];
+    let mut start = 0;
+    for end in 1..=rows.len() {
+        if end < rows.len() && top(&rows[end]) - top(&rows[end - 1]) <= TIP_GAP * s {
+            continue;
+        }
+        if end - start > MIN_BODY_LINES {
+            rows[start..end].iter().flatten().for_each(|&i| keep[i] = true);
+            break;
+        }
+        start = end;
+    }
+    keep
 }
 
 /// The page number among `boxes` and the scale its place tells: its centre's x and y (from the
@@ -407,14 +445,15 @@ pub fn read_page(ocr: &mut Ocr, frame: &RgbImage, hint: Option<f32>) -> Result<(
             Rect { x0: lo.x(PAGE_CX) - pad(lo), y0: lo.y(0.5 + PAGE_CY) - pad(lo), x1: hi.x(PAGE_CX) + pad(hi), y1: hi.y(0.5 + PAGE_CY) + pad(hi) }
         }
     };
-    let boxes = read_area(ocr, frame, area, PAGE_SCALE as f32)?;
+    let boxes = read_area(ocr, frame, area, PAGE_SCALE as f32, all)?;
     Ok((page_and_scale(&boxes, frame), boxes))
 }
 
 /// Reads the hovered item's tooltip in its fixed area. The boxes read, in frame pixels.
 pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage, ui: Ui) -> Result<(Option<Tooltip>, Vec<TextBox>), String> {
     let tip_area = Rect { x0: ui.x(TIP_LEFT), y0: ui.y(TIP_TOP), x1: ui.x(TIP_RIGHT), y1: ui.y(TIP_BOTTOM) };
-    let boxes = read_area(ocr, frame, tip_area, TIP_SCALE_HEIGHT / ui.len(1.0))?;
+    let s = ui.len(1.0);
+    let boxes = read_area(ocr, frame, tip_area, TIP_SCALE_HEIGHT / s, |rects| tooltip_block(rects, s))?;
     let tooltip = tooltip_of(lines_of(&boxes, ui.len(1.0)), ui.len(1.0));
     Ok((tooltip, boxes))
 }
@@ -423,7 +462,7 @@ pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage, ui: Ui) -> Result<(Option<T
 pub fn read_count(ocr: &mut Ocr, frame: &RgbImage, tile: Rect) -> Result<(Option<u32>, Vec<TextBox>), String> {
     let (w, h) = (tile.x1 - tile.x0, tile.y1 - tile.y0);
     let area = Rect { x0: tile.x1 - COUNT_W * w, y0: tile.y0, x1: tile.x1, y1: tile.y0 + COUNT_H * h };
-    let boxes = read_area(ocr, frame, area, COUNT_SCALE)?;
+    let boxes = read_area(ocr, frame, area, COUNT_SCALE, all)?;
     let count = boxes.iter().filter(|b| b.score >= MIN_SCORE).find_map(|b| parse_count(&b.text));
     Ok((count, boxes))
 }
@@ -490,6 +529,29 @@ mod tests {
         let tip = tooltip_of(lines_of(&boxes, 1600.0), 1600.0).expect("tooltip");
         assert_eq!(tip.lines.last().map(|l| l.text.as_str()), Some("Registered To You"));
         assert_eq!(tip.lines.len(), 5);
+    }
+
+    #[test]
+    fn only_the_tooltips_lines_go_to_the_recognizer() {
+        let r = |x0: f32, y0: f32, w: f32, h: f32| Rect { x0, y0, x1: x0 + w, y1: y0 + h };
+        // Canuto (as above): a stray far above, the tooltip (label and value of a row in two boxes),
+        // the equipped piece's tooltip 68 px below its last line
+        let rects = [
+            r(2554.0, 300.0, 16.0, 24.0),
+            r(2015.0, 422.0, 188.0, 24.0),
+            r(2014.0, 444.0, 182.0, 24.0),
+            r(2014.0, 489.0, 224.0, 24.0),
+            r(2013.0, 535.0, 169.0, 26.0),
+            r(2206.0, 534.0, 48.0, 27.0),
+            r(2013.0, 580.0, 338.0, 26.0),
+            r(2013.0, 629.0, 131.0, 25.0),
+            r(2013.0, 697.0, 209.0, 26.0),
+            r(2014.0, 720.0, 182.0, 24.0),
+        ];
+        let keep = tooltip_block(&rects, 1600.0);
+        assert_eq!(keep, [false, true, true, true, true, true, true, true, false, false]);
+        // Too few rows for a tooltip: nothing is recognized
+        assert!(!tooltip_block(&rects[..4], 1600.0).contains(&true));
     }
 
     #[test]
@@ -615,7 +677,7 @@ mod tests {
                 eprintln!("screenshots missing, skipped");
                 return None;
             }
-            Some((Ocr::new(4).unwrap(), shots))
+            Some((Ocr::new(4, crate::ocr::Model::Tiny, false).unwrap(), shots))
         }
 
         fn frame(dir: &Path, suffix: &str) -> RgbImage {

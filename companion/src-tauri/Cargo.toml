@@ -1,6 +1,6 @@
 [package]
 name = "quartermaster-companion"
-version = "1.1.3"
+version = "1.2.0"
 description = "Quartermaster Companion: reads Star Citizen's Game.log for the Quartermaster web app"
 authors = ["w00zla"]
 edition = "2021"
@@ -40,9 +40,13 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 base64 = "0.21"
 # The main and the debug window come back where they were (place, size, monitor)
 tauri-plugin-window-state = "2"
+fast_image_resize = "6.1.0"
 
 # Screen capture for the refinery OCR (DXGI Desktop Duplication); the version Tauri already uses
 [target.'cfg(windows)'.dependencies]
+# The OCR on the GPU: ONNX Runtime's DirectML API (its Windows binaries have it anyway; the redistributable
+# DirectML.dll comes next to the exe, see scripts/fetch-ocr-models.mjs)
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["directml"] }
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",

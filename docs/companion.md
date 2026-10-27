@@ -105,8 +105,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - Release: bump the version in `companion/src-tauri/Cargo.toml` (bundle names and the header use it),
   build per platform: Windows `build:windows` with the updater's private key **as content** in
   `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if it has one; the `_PATH`
-  variant is not read by the CLI, see BindSight) gives the setup
-  `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and its `.sig`, and
+  variant is not read by the CLI, see BindSight) gives the setup (with `DirectML.dll` next to the exe,
+  from `ocr:models`) `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and its `.sig`, and
   `target/release/quartermaster-companion.exe` zipped as `…_x64-standalone.zip`; Linux the AppImage.
   Copy them and `companion.json` to `COMPANION_DIR` (`docs/deploy.md` § 8; the server side is in
   `docs/webapp.md` "Companion release"). The key pair comes from `pnpm --filter
@@ -156,7 +156,9 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   (room for "999": the chips after it stay put), the panel's filter chips (no label: "Scanned" / "Not
   scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
   and scroll only their rows (head and column titles stay).
-- Settings dialog (`SettingsDialog.vue`): Access Key, language, the automatic tab switch (a switch), game folder, the "Scan overlay" group
+- Settings dialog (`SettingsDialog.vue`): Access Key, language, game folder, the "Bildschirm-Scan" group
+  ("Screen Scan", 2026-10-27: the automatic tab switch and "GPU-Beschleunigung aktivieren", switches; the
+  latter greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
   place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
   `overlayDisplay`, applied once saved); the hotkeys "Hotkey Overlay an/aus" and "… Modus wechseln"; the UI says "Modus" for tab and overlay view alike), in the head's right end
@@ -340,7 +342,9 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   the debug window with the reason, like unknown or ambiguous titles).
 - A sighting's identity is **page + content row + units + content** (a tile hovered again after a scroll is
   the same sighting, equal components on other tiles stay apart). A tooltip counts only once the cursor
-  stayed on its tile for a read, then two agreeing reads in a row (≥ 3 reads per tile). The stack count is
+  stayed on its tile for a read or had rested ≥ 200 ms when the frame was grabbed (`SETTLED_MS`, the
+  capture waits for that: `capture::REST`), then two agreeing reads in a row (2 reads per tile since
+  2026-10-27, ≥ 3 before). The stack count is
   not part of the identity: a count that changes on the same tile (two agreeing reads) updates the
   sighting. One proposal per sighting (its pieces, quality 0, the stats if any).
 - Screenshot tests over `local/screenshots/inventory 3` and `inventory 4`; `cargo run --release --example components_dump --
@@ -396,7 +400,7 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
     JPEG data URL, 1280 px wide, CSP `img-src data:`, in a box of the frame's aspect that stays while what
     follows changes; its height can be dragged, the image then fits in centred) with SVG overlays (OCR boxes, read cells, tiles, hovered tile, tooltip, or the
     character inventory's tooltip lines and the cursor's tile) and a legend of the overlays this screen
-    draws; then a row of key figures (time, duration, frame, screen, then tiles / page / station and work
+    draws; then a row of key figures (time, duration, "OCR" (the models that ran and their time), "GPU" (yes, or no and why: off in the settings, DirectML.dll missing, failed with the error), how long the cursor had rested at the grab, frame, screen, then tiles / page / station and work
     orders, OCR boxes); per screen the grid and tooltip with a table of every tile (hovered one marked,
     uncertain values "?"), the cursor and tooltip with every tooltip line marked as title, stat (its label
     one of the catalog's stat names: the sightings report carries them), field ("Label: value") or text
@@ -438,7 +442,32 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   dictionary of 18708 characters; ONNX, Apache-2.0, as converted by RapidOCR, fetched by
   `scripts/fetch-ocr-models.mjs` with pinned SHA-256 and compiled in with `include_bytes!`: the Windows
   release is a bare exe, ~31 MB of models) on ONNX Runtime via `ort` (prebuilt, static); pre/post-processing
-  after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar shape (~8 % faster). A
+  after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar shape (~8 % faster).
+  Since 2026-10-27 also PP-OCRv6 tiny (PaddlePaddle's ONNX, 6904 characters, ~6 MB; its detector's
+  normalization and DB thresholds from its inference.yml): it reads the character inventory and the
+  refinery terminal, small the warehouse grid (tiny missed badges and misread item names there); each
+  model is loaded once needed, each area's screenshot tests run with its model. Images are scaled with
+  `fast_image_resize` (SIMD, the same kernels as `image`'s; a gear read 447 → 239 ms with small, 299 →
+  92 ms with tiny, 3840×1600, 3 threads); the detector needs its input smoothed by that resize (fed the
+  crop directly at a size of multiples of 32, it lost page numbers).
+  **On the GPU** (since 2026-10-27, Windows, setting "GPU-Beschleunigung aktivieren", config `gpu`, on by
+  default): ONNX Runtime's DirectML execution provider (pyke's Windows binaries are its DirectML build
+  anyway; `ort` feature `directml` on Windows only). It needs the redistributable `DirectML.dll` 1.15.4
+  (18.5 MB, Microsoft, MIT) next to the exe: Windows' own (`System32`, 1.0 on Windows 10) refuses the
+  session; `ocr:models` fetches it into `resources/ocr/` (only that file of the 200 MB NuGet package, by
+  HTTP ranges, SHA-256 pinned), `build:windows` bundles it into the setup (`tauri.setup.conf.json`:
+  `$INSTDIR\DirectML.dll`; `publish-win-companion.ps1` puts it next to the exe in the standalone zip too; not in `tauri dev`).
+  DirectML compiles a session's graph for the first input shape it runs, every other shape cost ~20 ms
+  of CPU per run: `ocr::Engine` keeps one session per input shape with its dimensions fixed (the
+  detector's shapes are fixed per screen area and resolution; the recognizer's batches are padded to 6
+  lines of a width out of 320–2560). A probe session at load tells whether DirectML works. Measured
+  (3840×1600, RTX 5080, whole dump processes incl. JPEG decoding): gear read with tiny 97 → 67 ms, CPU
+  238 → 81 ms per read; warehouse with small 382 → 135 ms, CPU 1093 → 203 ms. The warehouse reads the
+  same on CPU and GPU, tiny's gear tooltips differ in spaces and punctuation of the description (the
+  padded width), every screenshot test passes on both. `ocrwatch::Gpu`: ready (the DLL next to the exe),
+  missing, or failed (any OCR error on the GPU: the models load anew on the CPU from the next frame, for
+  the rest of the run); the settings grey the switch out (off) unless ready (`gpu_status`, event
+  `ocr-gpu`). Not measured: what the GPU load costs the running game's frame time, VRAM next to it. A
   detected region is kept by the mean probability of its own pixels (like PaddleOCR's polygon score), not
   of its axis-aligned box: the terminals hang tilted in the world, and the box mean dropped whole tooltips
   below the threshold (2026-10-19: FE tooltips at 1080p and component stat lines at 3840×1600).
@@ -498,9 +527,11 @@ no frames, the scan idle (`GameFront`, event `game-front`: the worker leaves its
 the scan row shows "Spiel nicht im Fokus"; with the companion in front and the game window still up the
 game still counts as seen). The capture is of the monitor: frames taken while the companion was in front
 read its own tables as a warehouse grid (2026-10-20), which switched the mode while the user worked in
-the app (while the character inventory is in view faster, paced by the read time: `FastCapture`, set by
-the worker to 1.5 × its last read there within 0.5–1 s, so the OCR works at most ~2/3 of the time also
-on slower machines; a component needs three reads of its tile: ~1.8 s at 0.4 s per read instead of ~3 s)
+the app (while the warehouse or the character inventory is in view the worker pulls the frames,
+`FastCapture`, since 2026-10-27: the next one is grabbed once a read is done and the mouse cursor
+rested 200 ms (polled every 15 ms), so every read sees a fresh frame and none is grabbed while the
+cursor moves or the OCR works; before, a fixed 1.5 × the last read within 0.5–1 s, which on slow
+machines, reads over 1 s, did not hold the worker back but handed it frames up to a second old)
 through DXGI Desktop Duplication (`windows` crate, the version Tauri uses): the game's monitor
 duplicated on the adapter driving it, cut to the window's client area (physical pixels: the process is
 per-monitor DPI aware), with the cursor's position in frame pixels (`GetCursorPos`), into a staging texture
@@ -579,7 +610,8 @@ GPU process should not compete with the game; not measured yet.
 - **Tooltip-driven**: the user shows every entry's tooltip briefly. Icon matching (DINOv2 ViT-S/14
   embeddings) was tried and dropped: the freight manager's icons look alike, the amount is only in the
   tooltip.
-- **PP-OCRv6 small** replaced v5 (2026-10-18); the refinery read is secondary.
+- **PP-OCRv6 small** replaced v5 (2026-10-18); the refinery read is secondary. **tiny for the character
+  inventory and the refinery, small for the warehouse** (2026-10-27: the scans took 4–8 s on slower CPUs).
 - **Manual scanning** (switched on by hand or with the overlay); **one proposal per stack or component**, nothing summed up; registering asks with
   a switch per org.
 - Identity history: per tile first, which double-counted after a scroll; then per column (equal components

@@ -2,7 +2,7 @@
 //! `%APPDATA%\com.w00zla.quartermaster.companion\config.json` on Windows,
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
 //! Quartermaster server, the user's API token, the SC channel folder whose
-//! `Game.log` is followed, the UI language, the automatic tab switch and the scan overlay's position, display and hotkeys. The server is fixed in the app; only a `server` entry
+//! `Game.log` is followed, the UI language, the automatic tab switch, the OCR on the GPU and the scan overlay's position, display and hotkeys. The server is fixed in the app; only a `server` entry
 //! in the file changes it (e.g. a dev server, read at start), the settings UI
 //! does not show it and saving never writes or overwrites that entry.
 
@@ -58,6 +58,9 @@ pub struct Config {
     /// and with a new blueprint unlock (the frontend's `overlay.ts`).
     #[serde(default = "default_true")]
     pub auto_tab: bool,
+    /// The screen scan's OCR on the GPU where it can (`ocrwatch::Gpu`), else on the CPU.
+    #[serde(default = "default_true")]
+    pub gpu: bool,
 }
 
 pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
@@ -92,6 +95,7 @@ impl Default for Config {
             hotkey_overlay: default_hotkey_overlay(),
             hotkey_mode: String::new(),
             auto_tab: true,
+            gpu: true,
         }
     }
 }
@@ -169,6 +173,7 @@ mod tests {
         assert_eq!(c.game_dir, DEFAULT_GAME_DIR);
         // Missing in files written before it existed: on
         assert!(c.auto_tab);
+        assert!(c.gpu);
         assert_eq!(c.overlay_display, "thumbs");
     }
 
