@@ -35,7 +35,7 @@ const tile = (row: number, col: number, quality: number | null, count: number | 
   ({ rect: tileRect(row, col), row, col, quality, qualityAmbiguous: false, count, countUncertain, hovered, qualityText: quality === null ? '' : `${quality}Q`, badgeText: count === null ? '' : `X${count}` });
 const tooltip = (name: string, quality: number | null, scu: string | null): ReadTooltip => ({ name, quality, scu, x: 0, y: 0, rect });
 const read = (atMs: number, tiles: ReadTile[], tip: ReadTooltip | null): InventoryReadEvent =>
-  ({ atMs, ms: 400, width: 3840, height: 1600, grid: { tiles, tooltip: tip, cells: [], cols: [], rows: [], pitchX: 260, pitchY: 255 }, components: null, cursor: null, boxes: [], frame: null, refinery: null, capture: { restMs: 0 }, ocr: { models: ["small"], gpu: false, setting: true, status: { state: "missing" }, ms: 300 } });
+  ({ atMs, ms: 400, width: 3840, height: 1600, grid: { tiles, tooltip: tip, cells: [], cols: [], rows: [], pitchX: 260, pitchY: 255 }, components: null, cursor: null, boxes: [], frame: null, refinery: null, capture: { restMs: 0 }, ocr: { models: ["tiny"], gpu: false, setting: true, status: { state: "missing" }, ms: 300 } });
 
 describe('sightings', () => {
   it('an SCU material: the amount from the tooltip', () => {

@@ -235,18 +235,35 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
 ### The read (Rust)
 
-- Only the pane right of the screen centre is read, at native height (the elevator pane is ignored; also
-  halves the detector's memory), and only 0.25–0.95 of the height (the grid with room, below it a bottom
-  row's tooltip; the search, filter and capacity rows above cost ~25 % of the read time on 3840×1600).
+- Only the pane right of the screen centre is read (the elevator pane is ignored), and only 0.25–0.95 of
+  the height (the grid with room, below it a bottom row's tooltip; the search, filter and capacity rows
+  above cost ~25 % of the read time on 3840×1600). **Since 2026-10-31 with PP-OCRv6 tiny** (small
+  before): the detector's crop is scaled as if the frame were 2400 px high (×1.5 at 3840×1600, ×2.2 at
+  1080p; tiny misses the badges' small texts at native size). The first read of a session sees the whole
+  pane; once a strong layout is known, only the **area around the cursor** is read: 1.6 pitches left and
+  up of it (the hovered tile's anchors and its neighbours'), the tooltip's window right and below (it
+  opens at the cursor: measured over 336 reads x −0.18…+0.47 h, y −0.06…+0.26 h, so +0.50 h and
+  +0.28 h), the size rounded up to 64 px (one detector shape, one GPU session, per layout) and shifted
+  to stay inside the pane. Measured on the recordings of 2026-10-30 (165 reads at 3840×1600, 276 at
+  1080p): 128 and 139 ms per read on the CPU (3 threads), 60 ms on the GPU; small over the whole pane
+  took 373 ms on the CPU (screenshots) and ~1 s in game. Of 159/260 reads with a grid, 141/223 read
+  the same as small (tooltip, quality, SCU, hovered count); the rest are mostly tiny's misspellings
+  ("Silican", "Apharite" in single reads: two agreeing reads book, so a glitch costs a frame) and a few
+  spurious qualities small had read on items (tiny: none, right). A pixel-based read of the hovered
+  tile like the gear scan's was tried first and dropped: the terminal's glare washes the lit frame out
+  on whole sides (3 of 336 reads found all four edges in one variant, 108 in the best).
 - The terminal is a screen in the world: the grid's pitch changes with the player's position, resolution
   and FOV (260–290 px at 1600 px height, ~140 px at 1080p 16:9: pitch candidates 0.10–0.20 of the height),
   so the grid is **fitted per frame** from the detected badge boxes and quality texts (only with their Q,
   "526Q"/"5260": a bare "526" is the tooltip chip's and pulled the columns off; anchors with weights, the pitch and phase most agree on per axis, the four consecutive columns with the
   most anchors, rows within 0.3–0.84 of the height; at least anchor weight 3). The first strong fit of a
-  session (anchor weight ≥ `STRONG_FIT_WEIGHT` on the weaker axis) locks the pitch, weaker fits keep it and
-  fit only the phase (reset when the session stops); the row pitch is bounded to 0.85–1.05 of the column
+  session (anchor weight ≥ `STRONG_FIT_WEIGHT` on the weaker axis) is the **last layout**: weaker fits
+  keep its pitch and fit only the phase, from whatever anchors the area around the cursor holds (one
+  suffices, and every anchor anchors both axes; ties between column windows go to the one nearest the
+  last layout's first column). Dropped when the warehouse screen is left or the scan stops. The row pitch is bounded to 0.85–1.05 of the column
   pitch. Every cell is a tile (unread fields None). The fit can sit up to ~30 px off the tiles.
-- Quality band per tile, recognized on its own; not read when the tooltip covers over 20 % of it.
+- Quality band of the hovered tile (every tile's without a cursor: the hovered rule below needs them),
+  recognized on its own; not read when the tooltip covers over 20 % of it.
 - Badges: only the hovered tile's (every tile's while the debug window is open: the costly part). First the
   nearest detected box of a badge's size around the tile's top right corner (`BADGE_SEARCH`, whatever the
   general model read there: "X 2" came as "xa"), with room on its right (`BADGE_RIGHT_PAD`: the detector
@@ -260,8 +277,9 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   icon texts are none), no SCU amount (the capacity line "Capacity: 1.00mSCU", also misread, when the
   title went unread), up to 0.06 of the height high (a slanted line's box grows: 53 px for a 12 px text at
   1080p). The tooltip is see-through: a tile's quality behind it shows in the title's row
-  ("Janalite 360" over a 360Q neighbour), so the quality is the number right of the name's repeat in the
-  chip row, else any number below the title row, never one in it.
+  ("Janalite 360" over a 360Q neighbour, at times in the title's own box: "Glacosite 258"), so the
+  quality is the number right of the name's repeat in the chip row, else any number below the title row,
+  never one in it; a trailing bare number leaves the name when the chip row repeats the name without it.
 - The **hovered tile** is the one under the mouse cursor, which the capture passes with every frame
   (`Frame.cursor`, frame pixels; the duplicated image has no pointer). Screenshots without a cursor fall
   back to the tile with the chip's quality or whose quality the tooltip hides (near the right edge the
@@ -440,15 +458,16 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 
 ## OCR
 
-- `ocr.rs`: PaddleOCR PP-OCRv6 small (since 2026-10-18; one multi-language detector and recognizer,
-  dictionary of 18708 characters; ONNX, Apache-2.0, as converted by RapidOCR, fetched by
-  `scripts/fetch-ocr-models.mjs` with pinned SHA-256 and compiled in with `include_bytes!`: the Windows
-  release is a bare exe, ~31 MB of models) on ONNX Runtime via `ort` (prebuilt, static); pre/post-processing
-  after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar shape (~8 % faster).
-  Since 2026-10-27 also PP-OCRv6 tiny (PaddlePaddle's ONNX, 6904 characters, ~6 MB; its detector's
-  normalization and DB thresholds from its inference.yml): it reads the character inventory and the
-  refinery terminal, small the warehouse grid (tiny missed badges and misread item names there); each
-  model is loaded once needed, each area's screenshot tests run with its model. Images are scaled with
+- `ocr.rs`: PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
+  and recognizer, dictionary of 6904 characters, ~6 MB; its detector's normalization and DB thresholds
+  from its inference.yml; fetched by `scripts/fetch-ocr-models.mjs` with pinned SHA-256 and compiled in
+  with `include_bytes!`: the Windows release is a bare exe) on ONNX Runtime via `ort` (prebuilt, static);
+  pre/post-processing after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar
+  shape (~8 % faster). History: PP-OCRv6 small (RapidOCR's ONNX, 18708 characters, ~31 MB) replaced v5
+  on 2026-10-18; from 2026-10-27 tiny read the character inventory and the refinery terminal, small the
+  warehouse grid (tiny missed the badges at native size); since 2026-10-31 tiny reads everything, with
+  the warehouse crop scaled up (one model: ~25 MB less exe, on the GPU ~1 GB less VRAM, one detector
+  session per area instead of two models'). Images are scaled with
   `fast_image_resize` (SIMD, the same kernels as `image`'s; a gear read 447 → 239 ms with small, 299 →
   92 ms with tiny, 3840×1600, 3 threads); the detector needs its input smoothed by that resize (fed the
   crop directly at a size of multiples of 32, it lost page numbers).
@@ -614,6 +633,10 @@ GPU process should not compete with the game; not measured yet.
   tooltip.
 - **PP-OCRv6 small** replaced v5 (2026-10-18); the refinery read is secondary. **tiny for the character
   inventory and the refinery, small for the warehouse** (2026-10-27: the scans took 4–8 s on slower CPUs).
+  **tiny alone** (2026-10-31): the warehouse read around the cursor with the last layout as prior, ~3×
+  faster on the CPU, half the time on the GPU, one model's VRAM; chosen over fine-tuning (the data: one
+  player, two resolutions; the cost is the detector's input, not the reading) and over a pixel-based
+  tile finder like the gear scan's (the terminal's glare washes the hovered frame out).
 - **Manual scanning** (switched on by hand or with the overlay); **one proposal per stack or component**, nothing summed up; registering asks with
   a switch per org.
 - Identity history: per tile first, which double-counted after a scroll; then per column (equal components

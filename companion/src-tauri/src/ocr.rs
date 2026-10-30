@@ -1,17 +1,13 @@
-//! Text detection and recognition with PaddleOCR's PP-OCRv6 "small" models (ONNX, Apache-2.0, as
-//! converted by RapidOCR; multi-language with one dictionary of 18708 characters, since 2026-10-18,
-//! PP-OCRv5 mobile/latin before) on ONNX Runtime. Pre- and post-processing follow RapidOCR
-//! (`rapidocr` 3.x, the same for v5 and v6): the detector
-//! sees the image in BGR scaled to `(x/255 - 0.5) / 0.5`, its probability map is thresholded at 0.3,
-//! dilated, split into connected regions (box score ≥ 0.5) and each region's box is grown by
-//! `area * 1.6 / perimeter` ("unclip"); the recognizer sees one text line at height 48 and is
-//! decoded greedily (CTC: blank first, the dictionary, then a space).
-//!
-//! Also compiled in: PP-OCRv6 "tiny" (`Model::Tiny`, PaddlePaddle's own ONNX, dictionary of 6904
-//! characters; ~4× faster, reads worse), its detector's input and thresholds from its inference.yml
-//! (BGR `/255` with ImageNet mean/std, 0.2 / 0.4 / 1.4). Since 2026-10-27 tiny reads the character
-//! inventory and the refinery terminal, small the warehouse (`ocrwatch::ensure_ocr`); each area's
-//! screenshot tests run with its model.
+//! Text detection and recognition with PaddleOCR's PP-OCRv6 "tiny" models (PaddlePaddle's own ONNX,
+//! Apache-2.0; multi-language with one dictionary of 6904 characters; since 2026-10-31 for every
+//! screen, PP-OCRv6 "small" read the warehouse before, PP-OCRv5 mobile/latin until 2026-10-18) on
+//! ONNX Runtime. Pre- and post-processing follow RapidOCR (`rapidocr` 3.x) with tiny's own detector
+//! input and thresholds (its inference.yml): the detector sees the image in BGR `/255` with the
+//! ImageNet mean/std, its probability map is thresholded at 0.2, dilated, split into connected
+//! regions (box score ≥ 0.4) and each region's box is grown by `area * 1.4 / perimeter` ("unclip");
+//! the recognizer sees one text line at height 48 and is decoded greedily (CTC: blank first, the
+//! dictionary, then a space). Tiny reads small texts (the warehouse's badges) only scaled up: the
+//! readers scale their crops before the detector.
 //!
 //! Simplification: boxes are axis-aligned (the refinery terminal is read frontally), no rotated text.
 //! The models are compiled into the app (the Windows release is a bare exe without resources); they
@@ -186,26 +182,16 @@ impl std::fmt::Display for Timings {
     }
 }
 
-/// The compiled-in PP-OCRv6 models.
+/// The compiled-in PP-OCRv6 models (one tier since 2026-10-31; the enum stays for the log and the
+/// debug data, "tiny").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Model {
-    Small,
     Tiny,
 }
 
 impl Model {
-    /// "small" or "tiny".
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "small" => Some(Self::Small),
-            "tiny" => Some(Self::Tiny),
-            _ => None,
-        }
-    }
-
     fn spec(self) -> &'static Spec {
         match self {
-            Self::Small => &SMALL,
             Self::Tiny => &TINY,
         }
     }
@@ -223,17 +209,6 @@ struct Spec {
     box_thresh: f32,
     unclip: f32,
 }
-
-const SMALL: Spec = Spec {
-    det: include_bytes!("../resources/ocr/det.onnx"),
-    rec: include_bytes!("../resources/ocr/rec.onnx"),
-    dict: include_str!("../resources/ocr/rec_dict.txt"),
-    mean: [0.5; 3],
-    std: [0.5; 3],
-    thresh: 0.3,
-    box_thresh: 0.5,
-    unclip: 1.6,
-};
 
 // PaddleX applies the ImageNet mean/std (given in RGB) to the BGR image as it is
 const TINY: Spec = Spec {
@@ -567,7 +542,7 @@ mod tests {
                 prob[y * w + x] = 0.9;
             }
         }
-        let boxes = db_boxes(&prob, w, h, &SMALL);
+        let boxes = db_boxes(&prob, w, h, &TINY);
         assert_eq!(boxes.len(), 2);
         assert!(boxes.iter().all(|b| b.y0 < 5.0 && b.y1 > 12.0));
     }

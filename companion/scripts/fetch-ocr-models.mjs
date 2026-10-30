@@ -1,10 +1,9 @@
-// Downloads the OCR models (PaddleOCR PP-OCRv6 "small" as ONNX, Apache-2.0, converted by RapidOCR,
-// its default since RapidOCR 3.9; multi-language, one dictionary of 18708 characters) into
-// src-tauri/resources/ocr/, checked against pinned SHA-256 hashes (the models' from RapidOCR's
-// default_models.yaml). Also PP-OCRv6 "tiny" (PaddlePaddle's own ONNX from Hugging Face, Apache-2.0,
-// dictionary of 6904 characters; `ocr::Model::Tiny`): its dictionary is the list
-// `PostProcess.character_dict` of the recognizer's inference.yml, written one character per line like
-// small's. On Windows also DirectML.dll 1.15.4 (Microsoft's redistributable, MIT; ONNX Runtime's GPU
+// Downloads the OCR models (PaddleOCR PP-OCRv6 "tiny", PaddlePaddle's own ONNX from Hugging Face,
+// Apache-2.0; multi-language, one dictionary of 6904 characters; `ocr::Model::Tiny`) into
+// src-tauri/resources/ocr/, checked against pinned SHA-256 hashes: its dictionary is the list
+// `PostProcess.character_dict` of the recognizer's inference.yml, written one character per line
+// (PP-OCRv6 "small" from RapidOCR read the warehouse until 2026-10-31).
+// On Windows also DirectML.dll 1.15.4 (Microsoft's redistributable, MIT; ONNX Runtime's GPU
 // acceleration needs it next to the exe, Windows' own is too old; the setup bundles it): out of the
 // NuGet package Microsoft.AI.DirectML (200 MB) only that one file, by HTTP ranges, checked against
 // its pinned SHA-256. The files stay out of git; run this once per checkout (and after a change):
@@ -15,7 +14,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
-const BASE = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0";
 const HF = "https://huggingface.co/PaddlePaddle";
 const TINY_DET = `${HF}/PP-OCRv6_tiny_det_onnx/resolve/2ba1506c0380b8f0b03dd142459aac66d4421f6c`;
 const TINY_REC = `${HF}/PP-OCRv6_tiny_rec_onnx/resolve/2612ab37152ae0a677521bae4e1e3d4fb4cf7c30`;
@@ -37,12 +35,6 @@ function dictOfYml(bytes) {
 
 // sha256: of the download; written: of the file written from it, when converted
 const MODELS = [
-  { file: "det.onnx", url: `${BASE}/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx`,
-    sha256: "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f" },
-  { file: "rec.onnx", url: `${BASE}/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx`,
-    sha256: "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884" },
-  { file: "rec_dict.txt", url: `${BASE}/paddle/PP-OCRv6/rec/PP-OCRv6_rec_small/ppocrv6_dict.txt`,
-    sha256: "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d" },
   { file: "det-tiny.onnx", url: `${TINY_DET}/inference.onnx`,
     sha256: "193bab7a04fca699a6c82e6abb5b81bdb28177f0abd4062552b04908dafb19f8" },
   { file: "rec-tiny.onnx", url: `${TINY_REC}/inference.onnx`,

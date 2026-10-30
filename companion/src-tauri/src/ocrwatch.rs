@@ -34,7 +34,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::components::{hovered_tile, read_count, read_page, read_tooltip, ComponentRead, Page, Ui};
-use crate::inventory::{read_grid, Grid};
+use crate::inventory::{read_grid, Grid, Layout};
 use crate::locale::{LabelSource, Labels};
 use crate::ocr::{Model, Ocr, TextBox};
 use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
@@ -212,7 +212,7 @@ struct InventoryEvent {
     ocr: OcrInfo,
 }
 
-/// The OCR of a read (debug view, recordings): the models that ran ("tiny", "small"), on the GPU or
+/// The OCR of a read (debug view, recordings): the models that ran ("tiny"), on the GPU or
 /// the CPU and why (the setting, the GPU's state), and their time (preparation, runs, post-processing;
 /// the rest of the read is its own work).
 #[derive(Serialize, Clone)]
@@ -675,16 +675,16 @@ struct Worker {
     fast: FastCapture,
     /// The game in front (else no frames come, and the screen is left)
     front: GameFront,
-    /// The two models (`ensure_ocr`), each loaded once needed, on the GPU (`on_gpu`) or the CPU
+    /// The OCR (`ensure_ocr`), loaded once needed, on the GPU (`on_gpu`) or the CPU
     tiny: Option<Ocr>,
-    small: Option<Ocr>,
     gpu: Gpu,
     on_gpu: bool,
     gate: Gate,
     labels: LabelSource,
     visit: Option<Visit>,
-    /// The last inventory read's grid pitch: the next fit's prior
-    last_pitch: Option<(f32, f32)>,
+    /// The last strong warehouse read's layout: the next read's prior (its area around the cursor,
+    /// its pitch, its columns for ties); dropped when the screen is left
+    last_layout: Option<Layout>,
     /// Which screen the scan looks at, and how many reads in a row found nothing there
     screen: Screen,
     screen_misses: u32,
@@ -703,9 +703,8 @@ pub(crate) fn unix_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
-/// The OCR with `model`, loaded on first use. Tiny reads the character inventory (page, tooltip,
-/// count) and the refinery terminal as well as small (their tests) at a third of the time; the
-/// warehouse grid needs small (tiny misses badges and misreads item names).
+/// The OCR with `model`, loaded on first use (tiny for every screen since 2026-10-31; the warehouse
+/// read small before, at ~3× the time: tiny needs its crops scaled up for the badges).
 fn ensure_ocr(slot: &mut Option<Ocr>, model: Model, gpu: bool) -> Result<&mut Ocr, String> {
     if slot.is_none() {
         let started = Instant::now();
@@ -727,13 +726,12 @@ impl Worker {
             front,
             debug_tx,
             tiny: None,
-            small: None,
             gpu,
             on_gpu: false,
             gate: Gate::default(),
             labels: LabelSource::default(),
             visit: None,
-            last_pitch: None,
+            last_layout: None,
             screen: Screen::Unknown,
             screen_misses: 0,
             last_probe_ms: 0,
@@ -755,11 +753,11 @@ impl Worker {
             if !self.detect.load(Ordering::Relaxed) {
                 self.set_screen(Screen::Unknown, "scan stopped");
                 // The next start may see the terminal from elsewhere
-                self.last_pitch = None;
+                self.last_layout = None;
                 self.ui_scale = None;
                 // Off: the OCR's memory goes right away (the next start loads it again in well under a
                 // second); while the scan runs it stays, read or not
-                if self.tiny.take().is_some() | self.small.take().is_some() {
+                if self.tiny.take().is_some() {
                     log::info!("OCR unloaded (scan stopped)");
                 }
                 continue;
@@ -826,7 +824,7 @@ impl Worker {
         let want = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu && self.gpu.state() == GpuState::Ready;
         if want != self.on_gpu {
             self.on_gpu = want;
-            if self.tiny.take().is_some() | self.small.take().is_some() {
+            if self.tiny.take().is_some() {
                 log::info!("OCR unloaded (now on the {})", if want { "GPU" } else { "CPU" });
             }
         }
@@ -836,7 +834,7 @@ impl Worker {
     fn take_phases(&mut self) -> (String, OcrInfo) {
         let setting = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu;
         let (mut parts, mut info) = (Vec::new(), OcrInfo { models: Vec::new(), gpu: self.on_gpu, setting, status: self.gpu.state(), ms: 0 });
-        for (name, slot) in [("tiny", &mut self.tiny), ("small", &mut self.small)] {
+        for (name, slot) in [("tiny", &mut self.tiny)] {
             let Some(t) = slot.as_mut().map(Ocr::take_timings) else { continue };
             if t.det_runs + t.rec_runs > 0 {
                 parts.push(format!("{name}: {t}"));
@@ -859,6 +857,10 @@ impl Worker {
             return;
         }
         let at_ms = unix_ms(SystemTime::now());
+        if self.screen == Screen::Warehouse {
+            // The next warehouse may be seen from elsewhere: its first read fits the whole pane again
+            self.last_layout = None;
+        }
         if self.screen == Screen::Refinery {
             self.visit = None;
             log::info!("refinery visit ended ({why})");
@@ -928,12 +930,12 @@ impl Worker {
                 None
             };
             if page.is_none() && scope.warehouse {
-                let (g, grid_boxes) = read_grid(ensure_ocr(&mut self.small, Model::Small, self.on_gpu)?, &image, cursor, self.last_pitch, debug)?;
+                let (g, grid_boxes) = read_grid(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, cursor, self.last_layout.as_ref(), debug)?;
                 boxes.extend(grid_boxes);
                 if let Some(g) = &g {
-                    // Only a strong fit sets the pitch the weaker reads keep
+                    // Only a strong fit sets the layout the weaker reads keep
                     if g.fit_weight >= crate::inventory::STRONG_FIT_WEIGHT {
-                        self.last_pitch = Some((g.pitch_x, g.pitch_y));
+                        self.last_layout = Some(g.layout());
                     }
                     found = true;
                     screen = Screen::Warehouse;

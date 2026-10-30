@@ -100,7 +100,7 @@ export interface InventoryReadEvent {
   // How the frame was captured (Rust: CaptureInfo; the rest for the debug window): restMs = how long the
   // mouse cursor had rested when it was grabbed (0 when not waited for)
   capture: { restMs: number };
-  // The models that read it ("tiny", "small"), on the GPU or the CPU (why: the setting, the GPU's state), and their share of ms
+  // The models that read it ("tiny"), on the GPU or the CPU (why: the setting, the GPU's state), and their share of ms
   ocr: { models: string[]; gpu: boolean; setting: boolean; status: GpuStatus; ms: number };
 }
 

@@ -1,7 +1,8 @@
 //! Offline check of the freight manager read over folders of screenshots:
-//! `cargo run --release --example inventory_dump -- <out dir> <screenshots dir>... [--threads n] [--model small|tiny] [--gpu]`
+//! `cargo run --release --example inventory_dump -- <out dir> <screenshots dir>... [--threads n] [--gpu]`
 //!
-//! A debug recording's frames are read with the cursor stored next to them (`read-N.json`).
+//! A debug recording's frames are read with the cursor stored next to them (`read-N.json`), and,
+//! as in the app, around the cursor once a frame of the folder gave a strong layout.
 //! Prints every frame's layout, tooltip and tiles (cell, quality, count, hovered, texts), the cells
 //! read and where the read's time went (`ocr::Timings`, the rest is the read's own work; the average
 //! at the end), then writes an overlay per frame into the out dir (the frame at half size: tiles green,
@@ -9,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use companion_lib::inventory::read_grid;
+use companion_lib::inventory::{read_grid, Layout, STRONG_FIT_WEIGHT};
 use companion_lib::ocr::{Model, Ocr, Rect};
 use image::{Rgb, RgbImage};
 
@@ -18,18 +19,21 @@ fn main() {
     let out = PathBuf::from(args.remove(0));
     fs::create_dir_all(&out).expect("out dir");
     let threads = take_threads(&mut args);
-    let model = take_model(&mut args);
     // --gpu: on DirectML (DirectML.dll 1.15 next to this exe, e.g. copied from resources/ocr)
     let gpu = args.iter().position(|a| a == "--gpu").map(|i| args.remove(i)).is_some();
-    let mut ocr = Ocr::new(threads, model, gpu).expect("ocr models");
+    let mut ocr = Ocr::new(threads, Model::Tiny, gpu).expect("ocr models");
     let (mut frames, mut total_ms, mut model_ms) = (0u128, 0u128, 0u128);
     for dir in args {
+        let mut last: Option<Layout> = None;
         for path in sorted(Path::new(&dir), "jpg").into_iter().chain(sorted(Path::new(&dir), "png")) {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
             let frame = image::open(&path).expect("frame").to_rgb8();
             let t = std::time::Instant::now();
-            let (grid, boxes) = read_grid(&mut ocr, &frame, cursor_of(&path), None, true).expect("read");
+            let (grid, boxes) = read_grid(&mut ocr, &frame, cursor_of(&path), last.as_ref(), true).expect("read");
             let ms = t.elapsed().as_millis();
+            if let Some(g) = grid.as_ref().filter(|g| g.fit_weight >= STRONG_FIT_WEIGHT) {
+                last = Some(g.layout());
+            }
             let phases = ocr.take_timings();
             frames += 1;
             total_ms += ms;
@@ -88,7 +92,7 @@ fn main() {
     }
     if frames > 0 {
         let mode = if gpu { "GPU".to_string() } else { format!("{threads} threads") };
-        println!("\n{frames} frames, {model:?}, {mode}: {} ms per read, models {} ms, rest {} ms", total_ms / frames, model_ms / frames, (total_ms - model_ms) / frames);
+        println!("\n{frames} frames, {mode}: {} ms per read, models {} ms, rest {} ms", total_ms / frames, model_ms / frames, (total_ms - model_ms) / frames);
     }
 }
 
@@ -131,12 +135,4 @@ fn draw(img: &mut RgbImage, r: Rect, colour: Rgb<u8>) {
             img.put_pixel(x.min(w - 1), y, colour);
         }
     }
-}
-
-/// `--model small|tiny` out of the arguments, else small (the app's model here).
-fn take_model(args: &mut Vec<String>) -> Model {
-    let Some(i) = args.iter().position(|a| a == "--model") else { return Model::Small };
-    let m = args.get(i + 1).and_then(|n| Model::parse(n)).expect("--model small|tiny");
-    args.drain(i..i + 2);
-    m
 }

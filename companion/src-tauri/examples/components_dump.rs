@@ -1,5 +1,5 @@
 //! Offline check of the character inventory read over folders of screenshots or debug exports:
-//! `cargo run --release --example components_dump -- <screenshots dir>... [--threads n] [--model small|tiny] [--gpu]`
+//! `cargo run --release --example components_dump -- <screenshots dir>... [--threads n] [--gpu]`
 //!
 //! A debug recording's frames are read with the cursor stored next to them (`read-N.json`).
 //! Prints every frame's page, the tile under the cursor, tooltip title and lines as the OCR read them (what `components.ts`
@@ -13,10 +13,9 @@ use companion_lib::ocr::{Model, Ocr};
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let threads = take_threads(&mut args);
-    let model = take_model(&mut args);
     // --gpu: on DirectML (DirectML.dll 1.15 next to this exe, e.g. copied from resources/ocr)
     let gpu = args.iter().position(|a| a == "--gpu").map(|i| args.remove(i)).is_some();
-    let mut ocr = Ocr::new(threads, model, gpu).expect("ocr models");
+    let mut ocr = Ocr::new(threads, Model::Tiny, gpu).expect("ocr models");
     let (mut frames, mut total_ms, mut model_ms) = (0u128, 0u128, 0u128);
     for dir in args {
         for path in sorted(Path::new(&dir), "jpg").into_iter().chain(sorted(Path::new(&dir), "png")) {
@@ -54,7 +53,7 @@ fn main() {
     }
     if frames > 0 {
         let mode = if gpu { "GPU".to_string() } else { format!("{threads} threads") };
-        println!("\n{frames} frames, {model:?}, {mode}: {} ms per read, models {} ms, rest {} ms", total_ms / frames, model_ms / frames, (total_ms - model_ms) / frames);
+        println!("\n{frames} frames, {mode}: {} ms per read, models {} ms, rest {} ms", total_ms / frames, model_ms / frames, (total_ms - model_ms) / frames);
     }
 }
 
@@ -79,12 +78,4 @@ fn sorted(dir: &Path, ext: &str) -> Vec<PathBuf> {
         .unwrap_or_default();
     files.sort();
     files
-}
-
-/// `--model small|tiny` out of the arguments, else tiny (the app's model here).
-fn take_model(args: &mut Vec<String>) -> Model {
-    let Some(i) = args.iter().position(|a| a == "--model") else { return Model::Tiny };
-    let m = args.get(i + 1).and_then(|n| Model::parse(n)).expect("--model small|tiny");
-    args.drain(i..i + 2);
-    m
 }
