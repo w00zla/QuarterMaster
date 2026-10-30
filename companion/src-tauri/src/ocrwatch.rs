@@ -217,7 +217,7 @@ struct InventoryEvent {
 /// the rest of the read is its own work).
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct OcrInfo {
+pub struct OcrInfo {
     models: Vec<&'static str>,
     gpu: bool,
     setting: bool,
@@ -272,6 +272,7 @@ pub struct DebugRead {
     pub cursor: Option<(f32, f32)>,
     pub boxes: Vec<TextBox>,
     pub capture: CaptureInfo,
+    pub ocr: OcrInfo,
     /// The frame as JPEG
     pub jpeg: Vec<u8>,
 }
@@ -318,8 +319,10 @@ struct ExportRead<'a> {
     /// The mouse cursor in frame pixels (replays pass it to the reads)
     cursor: Option<(f32, f32)>,
     boxes: &'a [TextBox],
-    /// How the frame was captured (grab time, skipped and unread frames, wait)
+    /// How the frame was captured (grab time, skipped and unread frames, wait, cursor rest)
     capture: CaptureInfo,
+    /// The models that read it, GPU or CPU and why, their time
+    ocr: &'a OcrInfo,
 }
 
 #[derive(Serialize)]
@@ -346,6 +349,7 @@ fn write_read(folder: &Path, n: usize, r: &DebugRead) -> Result<(), String> {
         cursor: r.cursor,
         boxes: &r.boxes,
         capture: r.capture,
+        ocr: &r.ocr,
     })
         .map_err(|e| e.to_string())?;
     std::fs::write(folder.join(format!("read-{n}.json")), json).map_err(|e| e.to_string())
@@ -410,6 +414,7 @@ fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> Sender<(RgbImage, In
                         cursor: event.cursor,
                         boxes: event.boxes.clone(),
                         capture: event.capture,
+                        ocr: event.ocr.clone(),
                         jpeg,
                     };
                     let mut state = store.0.lock().unwrap();

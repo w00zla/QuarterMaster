@@ -432,7 +432,9 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   part, refinery part, the cursor and boxes, and `capture` for remote diagnosis since 2026-10-20: `grabMs`,
   grabs without a new image `skippedTimeout`/`skippedPointer`/`skippedOutside`, frames not read `dropped`
   (the OCR busy) and `gated` (probe throttle, the refinery's rest gate), `waitMs` from grab to read, the
-  counts since the read before; `info.json` with the count), until stopped or the window
+  counts since the read before, `restMs` the cursor's rest at the grab; and `ocr` since 2026-10-30 (the
+  recordings of 1.2.0 lacked it): the models that ran, `gpu`, the setting and the GPU's `status`, their
+  `ms`; `info.json` with the count), until stopped or the window
   closes. The folders replay through `inventory_dump` and `components_dump` (both pass the stored cursor;
   recordings before 2026-10-19 have none).
 
