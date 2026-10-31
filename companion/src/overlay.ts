@@ -7,12 +7,14 @@
 // a click on a tab or the mode hotkey, stepping through them. Each panel
 // puts its rows into `overlayRows`; the overlay gets them as one read-only view (texts in the UI
 // language, thumbnail references) on every change and when it asks, laid out for the configured display
-// (overlayLayout.ts). Off at every start.
+// (overlayLayout.ts); with each thing detected (detections.ts) its location line flashes (setting overlayFlash).
+// Off at every start.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, reactive, ref, watch } from "vue";
 import type { IconName } from "../../adminapp/src/components/Icon.vue";
 import { setOverlayWindow } from "./backend";
 import { unlockRows } from "./debugReport";
+import { detected, detections } from "./detections";
 import { t } from "./i18n";
 import { kinds, locationUuid } from "./inventorySync";
 import { overlayLayout, type OverlayDisplay } from "./overlayLayout";
@@ -41,11 +43,10 @@ const autoTab = () => config.value?.autoTab !== false;
 // The overlay switched the scan on (and switches it off with itself)
 let startedScan = false;
 
-/** One read-only line: a tag (its text, or only an icon), the name with an optional detail,
+/** One read-only line: a tag (none when empty), the name with an optional detail,
  * right-aligned columns. */
 export interface OverlayRow {
   tag: string;
-  icon?: IconName;
   cls: string;
   name: string;
   detail: string | null;
@@ -77,6 +78,8 @@ export interface OverlayView {
   rows: OverlayRow[];
   // More rows than shown
   more: boolean;
+  // Counts up with each detected item (settings: overlayFlash); the page flashes the location when it changes
+  flash: number;
 }
 
 // The panels' rows, newest first (each panel keeps its own up to date)
@@ -86,6 +89,12 @@ export const tabCounts = reactive<Record<Tab, number>>({ stock: 0, comps: 0, unl
 
 // Like the web app's navigation
 export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "gear", unlocks: "blueprint", refinery: "drop" };
+
+// Each detection (detections.ts) while the setting is on (on by default)
+const flash = ref(0);
+watch(detections, () => {
+  if (config.value?.overlayFlash !== false) flash.value++;
+});
 
 const view = computed<OverlayView>(() => {
   const m = tab.value;
@@ -105,7 +114,7 @@ const view = computed<OverlayView>(() => {
   const all = overlayRows[m];
   const top = layout.top ? (all[0] ?? null) : null;
   const rest = layout.top ? all.slice(1) : all;
-  return { display, top, place, placeMissing, tabs, rows: rest.slice(0, layout.rows), more: rest.length > layout.rows };
+  return { display, top, place, placeMissing, tabs, rows: rest.slice(0, layout.rows), more: rest.length > layout.rows, flash: flash.value };
 });
 
 const publish = () => {
@@ -142,8 +151,9 @@ export async function watchOverlay() {
   watch(screenTab, (s) => {
     if (s && autoTab()) pickTab(s);
   });
-  // A new unlock still to register picks the blueprints tab: only what Game.log adds while the app runs
-  // (the log's unlocks at its first state count as known, the old logs' too), once matched to the catalog
+  // A new unlock still to register picks the blueprints tab and flashes: only what Game.log adds while
+  // the app runs (the log's unlocks at its first state count as known, the old logs' too), once matched
+  // to the catalog
   let known: Set<string> | null = null;
   watch(log, (l) => {
     if (l && !known) known = new Set(l.unlocks.map((u) => u.name));
@@ -153,7 +163,9 @@ export async function watchOverlay() {
     for (const r of rows) {
       if (known.has(r.name) || r.state === "loading") continue;
       known.add(r.name);
-      if (!r.backup && (r.state === "new" || r.state === "pick") && autoTab()) pickTab("unlocks");
+      if (r.backup || (r.state !== "new" && r.state !== "pick")) continue;
+      detected();
+      if (autoTab()) pickTab("unlocks");
     }
   });
   // The scan stopped another way (it cannot while the overlay is on, but the overlay must not switch it off later)

@@ -4,7 +4,7 @@
 // counts only the unregistered ones (also those not in the catalog), the overlay all of them like the list. New ones are registered one by one right away
 // (ambiguous ones after picking the variant) or all at once after a confirmation. In the head after the
 // count the filter "Unlocks" (off: Game.log's unlocks are not read, state.ts), then the old logs' scan
-// progress while it runs; each row with the same icon-only badge and the crafted item's thumbnail (in front of
+// progress while it runs; each row with the crafted item's thumbnail (in front of
 // the name, or in the display "thumbs", larger in a column of its own).
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
@@ -92,11 +92,11 @@ function thumbOf(row: Row): ThumbRef | null {
 }
 
 // The scan overlay shows every unlock, newest first: the ones to register (new, ambiguous) with their tag,
-// the others dimmed with the blueprint icon only (the state texts are too wide for the tile)
+// the others dimmed without one (the state texts are too wide for the tile)
 watchEffect(() => {
   overlayRows.unlocks = rows.value.map((r): OverlayRow => r.state === "new" || r.state === "pick"
     ? { tag: t(r.state === "new" ? "state.new" : "state.pick"), cls: r.state === "new" ? "ok" : "warn", name: r.name, detail: null, cols: [], thumb: thumbOf(r) }
-    : { tag: "", icon: "blueprint", cls: "", name: r.name, detail: null, cols: [], dim: true, thumb: thumbOf(r) });
+    : { tag: "", cls: "", name: r.name, detail: null, cols: [], dim: true, thumb: thumbOf(r) });
   tabCounts.unlocks = openRows.value.length;
 });
 
@@ -211,7 +211,6 @@ async function measureStatus() {
 const view = ref<TableView>("compact");
 const columns = computed<ColumnSpec[]>(() => [
   ...(view.value === "thumbs" ? [{ key: "thumb", label: "", width: 48, fixed: true, sortable: false }] : []),
-  { key: "kind", label: "", title: t("col.kind"), width: 16, fixed: true, sortable: false, hideable: true },
   { key: "name", label: t("col.blueprint"), width: 120, sortable: false, fill: true },
   { key: "at", label: t("col.at"), width: 170, sortable: false, hideable: true },
   { key: "state", label: t("col.state"), width: statusWidth.value, fixed: true, sortable: false },
@@ -272,7 +271,6 @@ watch(connected, (c) => {
       <ColumnHead :columns="table.columns.value" :sort="table.sort.value" @resize="table.startResize" @reset="table.resetWidth" />
       <div v-for="row in rows" :key="row.name" class="row item" :class="{ done: row.state !== 'new' && row.state !== 'pick' }">
         <Thumb v-if="view === 'thumbs'" :item="thumbOf(row)" size="m" :px="48" />
-        <span v-if="shown.has('kind')" class="tag kind"><Icon name="blueprint" :size="11" /></span>
         <span class="name" :title="row.candidates.length === 1 ? label(row.candidates[0]!) : row.name"><Thumb v-if="view === 'compact'" :item="thumbOf(row)" size="s" :px="18" class="lead" />{{ row.name }}</span>
         <span v-if="shown.has('at')" class="faint">{{ when(row.at) }}</span>
         <span class="state-cell">
@@ -340,12 +338,6 @@ watch(connected, (c) => {
   border-color: color-mix(in srgb, var(--text-2) 45%, transparent);
   background: color-mix(in srgb, var(--text-2) 14%, transparent);
   color: var(--text-2);
-}
-
-/* The row's icon-only badge, hardly wider than its icon */
-.tag.kind {
-  height: 16px;
-  padding: 0 1px;
 }
 
 

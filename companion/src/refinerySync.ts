@@ -9,6 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 import { computed, ref, shallowRef, watch } from "vue";
 import type { CatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
 import { gameNames } from "./backend";
+import { detected } from "./detections";
 import { t } from "./i18n";
 import {
   buildCatalog, doneRequest, finishedRequests, gameNameKeys, jobsOf, RefinerySync, removeRequest, startRequest,
@@ -125,7 +126,10 @@ function onOverview(e: OverviewEvent) {
       await loadCatalog();
       await loadJobs();
     }
+    // A proposal not there before or a job update: the overlay flashes
+    const known = new Set(sync.proposals.map((p) => p.id));
     const result = sync.feed(e, syncCatalog.value!, jobs, Date.now());
+    if (result.updates.length || sync.proposals.some((p) => !known.has(p.id))) detected();
     if (!result.locationUuid) console.warn("refinery station not recognized:", e.overview.station);
     else if (result.updates.length) {
       try {

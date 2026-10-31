@@ -4,7 +4,7 @@
 // warehouse) and comps (every gear item, ship component or FPS gear, in the character inventory's storage
 // pane). "Register all" in the head, after the count the part's kind filter (what the scan detects; off: its
 // screen is not read), then the proposals of every location as a compact table with resizable columns, one
-// row per stack (kind, name, quality, amount, location) or gear tile (kind, name, type, size, grade, stats,
+// row per stack (name, quality, amount, location) or gear tile (name, type, size, grade, stats,
 // pieces, location), each with
 // Register / Discard; the item's thumbnail in front of the name, or in the display "thumbs" larger
 // in a column of its own; what the stored stock holds already stays dimmed without them (also in the overlay;
@@ -18,6 +18,7 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import { useTableColumns, type ColumnSpec, type TableView } from "../../../adminapp/src/tableColumns";
 import { statValueText } from "../../../src/stock/component-stats";
+import { qMark } from "../../../src/stock/quality";
 import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import type { ComponentProposal } from "../components";
 import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
@@ -103,17 +104,17 @@ const rows = computed<Row[]>(() => stock
 const openRows = computed(() => rows.value.filter((r) => !r.inStock));
 
 // The table's columns (widths and the hidden ones kept per table; no sorting: the newest come first);
-// the last shown one takes the room left. Stacks: kind, quality and amount; gear: kind, catalog data, stats
+// the last shown one takes the room left. Stacks: quality and amount; gear: catalog data, stats
 // and pieces. Every one but the name and the actions may be hidden (ColumnsButton in the panel head).
 // The display "thumbs" puts the thumbnail column first (`view` mirrors the table's, which owns it)
 const view = ref<TableView>("compact");
 const columns = computed<ColumnSpec[]>(() => [
   ...(view.value === "thumbs" ? [{ key: "thumb", label: "", width: 48, fixed: true, sortable: false }] : []),
-  { key: "kind", label: "", title: t("col.kind"), width: 20, fixed: true, sortable: false, hideable: true },
   { key: "name", label: t("debug.col.name"), width: 120, sortable: false },
   ...(stock
     ? [
-      { key: "quality", label: t("col.quality"), width: 40, sortable: false, hideable: true },
+      // Its level before the number, like the web app's ("★★★ 734"; only here, not in the overlay)
+      { key: "quality", label: t("col.quality"), width: 96, sortable: false, hideable: true },
       { key: "amount", label: t("col.amount"), width: 60, sortable: false, hideable: true },
     ]
     : [
@@ -143,7 +144,7 @@ watchEffect(() => {
     .filter((r) => r.locationUuid === locationUuid.value)
     .sort((a, b) => (seen.get(b.id) ?? 0) - (seen.get(a.id) ?? 0))
     // Gear: its name and stats (and its pieces when more than one); a stack: its name, quality and amount
-    .map((r) => ({ tag: "", icon: kindIcon[r.kind], cls: tagClass[r.kind], name: r.name, detail: r.detail, cols: r.component ? (r.component.amount > 1 ? [r.amount] : []) : [r.quality, r.amount], dim: r.inStock, thumb: r.thumb }));
+    .map((r) => ({ tag: "", cls: "", name: r.name, detail: r.detail, cols: r.component ? (r.component.amount > 1 ? [r.amount] : []) : [r.quality, r.amount], dim: r.inStock, thumb: r.thumb }));
   tabCounts[props.part] = openRows.value.length;
 });
 
@@ -166,7 +167,7 @@ function togglePlace(uuid: string) {
 const toRegister = computed(() => (registering.value ?? []).filter((r) => !skipped.value.has(r.locationUuid)));
 // The dialog's rows show the table's columns in its order (without the actions)
 const DIALOG_WIDTHS: Record<string, string> = {
-  kind: "16px", name: "minmax(0, 1fr)", quality: "40px", amount: "72px", type: "minmax(0, 70px)", size: "30px", grade: "24px",
+  name: "minmax(0, 1fr)", quality: "40px", amount: "72px", type: "minmax(0, 70px)", size: "30px", grade: "24px",
   stats: "minmax(0, 1fr)", location: "minmax(0, 110px)",
 };
 const dialogKeys = computed(() => cols.columns.value.map((c) => c.key).filter((k) => k in DIALOG_WIDTHS));
@@ -249,14 +250,14 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
       <ColumnHead :columns="cols.columns.value" :sort="cols.sort.value" @resize="cols.startResize" @reset="cols.resetWidth" />
       <div v-for="r in rows" :key="r.id" class="row data-row" :class="{ done: r.inStock }">
         <Thumb v-if="view === 'thumbs'" :item="r.thumb" size="m" :px="48" />
-        <span v-if="shown.has('kind')" class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
         <span class="cell row-name"><Thumb v-if="view === 'compact'" :item="r.thumb" size="s" :px="18" class="lead" />{{ r.name }}</span>
-        <span v-if="shown.has('quality')" class="num">{{ r.quality }}</span>
-        <span v-if="shown.has('amount')" class="num">{{ r.amount }}</span>
+        <!-- In the columns' order: stacks quality, amount; gear type, size, grade, stats, pieces -->
+        <span v-if="shown.has('quality')" class="num"><span class="qcell"><span>{{ qMark(Number(r.quality)) }}</span><span>{{ r.quality }}</span></span></span>
         <span v-if="shown.has('type')" class="cell">{{ r.type }}</span>
         <span v-if="shown.has('size')" class="cell">{{ r.size }}</span>
         <span v-if="shown.has('grade')" class="cell">{{ r.grade }}</span>
         <span v-if="shown.has('stats')" class="cell" :class="{ dim: r.standard }">{{ r.detail }}</span>
+        <span v-if="shown.has('amount')" class="num">{{ r.amount }}</span>
         <span v-if="shown.has('location')" class="cell loc">{{ r.location }}</span>
         <!-- In stock already: nothing to register or discard, the columns stay -->
         <template v-if="r.inStock"><span /><span /></template>
@@ -290,8 +291,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
         <div class="confirm-list" :style="{ '--dialog-cols': dialogCols }">
           <div v-for="r in toRegister" :key="r.id" class="confirm-row">
             <template v-for="k in dialogKeys" :key="k">
-              <span v-if="k === 'kind'" class="tag kind" :class="tagClass[r.kind]"><Icon :name="kindIcon[r.kind]" :size="11" /></span>
-              <span v-else-if="k === 'quality' || k === 'amount'" class="num">{{ r[k] }}</span>
+              <span v-if="k === 'quality' || k === 'amount'" class="num">{{ r[k] }}</span>
               <span v-else class="cell" :class="{ 'row-name': k === 'name', loc: k === 'location', dim: k === 'stats' && r.standard }">{{ k === "stats" ? r.detail : r[k as "name" | "type" | "size" | "grade" | "location"] }}</span>
             </template>
           </div>
@@ -371,19 +371,16 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
   color: var(--kind);
 }
 
-/* One row per stack or gear tile (the table's look: App.vue .table.compact) */
+/* One row per stack or gear tile (the table's look: App.vue .table.compact); controls 24 px high, and
+   the rows without them (in stock already) just as high, like the blueprints' */
 .data-row {
+  min-height: 24px;
   color: var(--text-2);
 }
 
-.row .tag {
-  justify-self: start;
-}
-
-/* The kind as a small icon-only badge, hardly wider than its icon (no tooltip: the filter chips name the icons) */
-.tag.kind {
-  height: 16px;
-  padding: 0 1px;
+.data-row .icon-btn {
+  width: 24px;
+  height: 24px;
 }
 
 /* Every text cell clips at its end (the full text shows after a moment on hover) */

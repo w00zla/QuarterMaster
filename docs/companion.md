@@ -31,7 +31,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   read at start, then what the game appends. "Scan history" ("Historie scannen") reads every `logbackups/*.log` (GBs: `memmem`
   search, off the main thread; progress per file as the `scan-progress` event, shown as a bar in the head
   between the filter chip and the buttons). The list keeps the first unlock per name, each marked whether it came from an old log
-  (`backup`); the panel lists every one, newest first, each with an icon-only badge: registered and default
+  (`backup`); the panel lists every one, newest first (no kind badge since 2026-10-30: the thumbnail says it): registered and default
   blueprints dimmed with their state (hidden 2026-10-19, back on 2026-10-20), the count and the tab only
   the unregistered ones (new, ambiguous, not in the catalog: obtainable all the same; magazine unlocks were left
   out 2026-10-25, listed again since 2026-10-26); the overlay lists
@@ -157,11 +157,11 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
   and scroll only their rows (head and column titles stay).
 - Settings dialog (`SettingsDialog.vue`): Access Key, language, game folder, the "Bildschirm-Scan" group
-  ("Screen Scan", 2026-10-27: the automatic tab switch and "GPU-Beschleunigung aktivieren", switches; the
-  latter greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Scan overlay" group
+  ("Screen Scan", 2026-10-27: first "GPU-Beschleunigung aktivieren" as a highlighted card (2026-10-30: bolt icon, a state tag "Aktiv" / "CPU" / "Nicht verfügbar" / "Fehler", glowing while on), then "App-Ansicht automatisch wechseln" (the automatic tab switch), switches; the
+  GPU greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
   place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
-  `overlayDisplay`, applied once saved); the hotkeys "Hotkey Overlay an/aus" and "… Modus wechseln"; the UI says "Modus" for tab and overlay view alike), in the head's right end
+  `overlayDisplay`, applied once saved); "Bei Erkennung aufblinken" ("Flash on a detected item", a switch, config `overlayFlash`, on by default, 2026-10-31); the hotkeys "Hotkey Overlay an/aus" and "Hotkey Overlay-Ansicht wechseln"; the UI says "Ansicht" for tab and overlay view alike, since 2026-10-30), in the head's right end
   a small "Debug" button for the debug window (secondary for the user; what it does as tooltip; the dialog
   closes once the window is open; `ConfirmDialog`'s `head` slot). Labels left, controls right like
   BindSight's settings.
@@ -187,7 +187,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - **Display per table** (Gear, Resources, Blueprints; 2026-10-25): `ViewToggle.vue` (shared with the web
   app, tooltip "Thumbnails anzeigen" / "Kompakt anzeigen") left of the column chooser, kept with the
   table's columns (`useTableColumns` `view`, default compact). Compact: today's rows plus the S thumbnail
-  (18 px, the 24 px rows keep their height) in front of the name; the kind and blueprint badges stay.
+  (18 px, the 24 px rows keep their height) in front of the name. No kind or blueprint badges since 2026-10-30 (the thumbnail says it; only the refinery jobs keep theirs).
   Thumbnails: a column first with the M thumbnail (48 px), rows 48 px high, 13 px text. Blueprints show the
   crafted item's (the picked, registered or first match; none when not in the catalog).
 
@@ -391,8 +391,8 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   them, gear counted in pieces per item and stats (ship components do not stack in the game, attachments
   do: 5 tiles hovered, 4 stored, one new; a stack of 3 with 2 stored is new); the ones registered here count first (and always), then the earliest seen. The count, the tab and
   "Register all" only take the rest; the overlay shows them dimmed too. Stock is loaded at the scan's start and after every
-  registration. Stock: an icon-only badge for the kind (no tooltip, like every
-  panel's kind badge), name, quality, amount. Gear: the kind badge, name, type, size, grade (from the catalog in the
+  registration. Stock (no kind badge since 2026-10-30):
+  name, quality (its level before the number like the web app's, "★★★ 734", 2026-10-31; the overlay the number only), amount. Gear: name, type, size, grade (from the catalog in the
   UI language; items show none of these: every bookable item is of the type "Misc.", checked 2026-10-20),
   the stats ("Coolant Rating +12.5 % · Integrity ±0.0 %"; without any gain, or when the tooltip showed none,
   a dimmed "Standard"/"Default" since 0.2.1, before a "–"), the pieces (the overlay shows them only above 1). Both: location last, Register /
@@ -571,21 +571,27 @@ FP16 and a tone map would be the fix); rotated monitors untested.
 game since.
 
 - A frameless, transparent, click-through, non-focusable window holding the mode's panel as a
-  compact fixed-size read-only tile (340×190 logical px, 360×210 in the display "Thumbnails": wider by the rows' S thumbnails (16 px, rounded up), slightly see-through; layout "C" of the concept
+  compact fixed-size read-only tile (300×130 logical px, 340×190 in the display "Thumbnails": wider by the rows' S thumbnails; both narrower since 2026-10-30 without the kind badges, lower since 2026-10-31), slightly see-through; layout "C" of the concept
   https://claude.ai/artifact/1CK7QBiMpLcj7n4efMeybn with the rail on the right, 2026-10-20): a narrow rail
   on the right with the four modes top down, each its icon above its count, exactly as wide as "999"
   (`3ch`, tabular digits; the shown one highlighted; a warning instead of the count when its filters are
   all off or the log is missing); next to it a 22 px line (a line below it) with the picked location after its icon in every
   mode (mono face, clipped at its end; "No location picked" in warn colour), then the newest rows at 20 px
-  without lines between (the inventory's kind badges as small icons), 8 fit; more than that: the last one
+  without lines between (a text tag only where the row has one: refinery states, new/ambiguous unlocks), 5 fit; more than that: the last one
   fades out. No hint texts: without rows only the location line.
 - **Display** (settings "Darstellung", 2026-10-25; `overlayLayout.ts`, the height in `overlay.rs` follows the
   config with the next tick): "Kompakt" is the look above. "Thumbnails" (default) shows the newest row as a
   60 px top row (the M thumbnail at 44 px when the item has one, the name at 14 px above its tag and
-  details at 12 px, the amount right) and 6 rows below it, each with the S thumbnail (16 px) after its tag.
-  The refinery has no single newest item: rows only (9, with the first material's thumbnail).
+  details at 12 px, the amount right) and 5 rows below it, each with the S thumbnail (16 px) after its tag.
+  The refinery has no single newest item: rows only (8, with the first material's thumbnail).
   `OverlayRow.thumb` carries uuid and hash from the panels; the overlay page loads the images itself
   (`thumb` is allowed in every window: the app has no command allowlist).
+- **Flash** (settings "Bei Erkennung aufblinken", config `overlayFlash`, on by default; 2026-10-31): every
+  detection (`detections.ts`): an inventory read that adds or changes a sighting (stock or gear), a refinery read with a
+  new proposal or a job update, a new unlock to register that Game.log adds while the app runs (where the
+  view switches too); each counts
+  `OverlayView.flash` up; the page draws the location line afresh and it lights up in the accent colour
+  (45 %) for 0.7 s.
 - A thread puts it every 250 ms at the configured place (`overlayPosition`: top-left (default), top-center,
   top-right, bottom-left, bottom-center, bottom-right, six buttons in the settings laid out where they are;
   24 px margin, scaled with the game monitor's DPI) of the game window's client area as `HWND_TOPMOST`,
@@ -600,7 +606,7 @@ game since.
   sees (warehouse: Stock, character inventory: Components, terminal: Refinery; nothing in view: it stays) and a blueprint
   unlock Game.log adds while the app runs that is still to register (new or ambiguous, once matched:
   Blueprints; the log's unlocks at its first state and the old logs' do not switch); both can be turned
-  off in the settings ("Modus automatisch wechseln", config `autoTab`, on by default). By hand: a click on a
+  off in the settings ("App-Ansicht automatisch wechseln", config `autoTab`, on by default). By hand: a click on a
   tab, the mode hotkey stepping through the four. Also with the overlay off. A component row shows its name and stats only, a stack its name, quality and amount.
 - Each panel writes its rows into `overlayRows`; `overlay.ts` sends the view as texts (`overlay-view`, on
   every change and on `overlay-request`).

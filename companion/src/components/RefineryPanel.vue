@@ -304,7 +304,7 @@ async function registerAll(value: string) {
   white-space: nowrap;
 }
 
-/* The job badge: icon-only, small, like the inventory's kind badges */
+/* The job badge: icon-only, small */
 .tag.kind {
   height: 16px;
   padding: 0 2px;

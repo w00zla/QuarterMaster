@@ -6,10 +6,10 @@
 // location line (clipped at its end), then the newest rows, 20 px each, as many as fit (more than that:
 // the last one fades out). The display "thumbs" (settings) shows the newest item as a taller top row (its
 // thumbnail, the name above its details, the amount right) and the item's small thumbnail after each
-// row's tag; the refinery keeps rows only. No hint texts: without rows only the location shows.
+// row's tag (if it has one); the refinery keeps rows only. No hint texts: without rows only the location shows.
 // Everything comes as text in the UI language from the main window ("overlay-view", on every change
-// and when this page asks).
-import { computed, onMounted, ref } from "vue";
+// and when this page asks). A detected item (`flash` counts up) lets the location line light up briefly.
+import { computed, onMounted, ref, watch } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import Icon from "../../adminapp/src/components/Icon.vue";
 import Thumb from "./components/Thumb.vue";
@@ -22,6 +22,11 @@ const topDetail = computed(() => {
   return top ? [top.detail, ...top.cols.slice(0, -1)].filter(Boolean).join(" · ") : "";
 });
 const topAmount = computed(() => view.value?.top?.cols.at(-1) ?? null);
+// Each change of the count after the first view starts the flash anew (the line is drawn afresh)
+const flashes = ref(0);
+watch(() => view.value?.flash, (now, before) => {
+  if (before !== undefined && now !== before) flashes.value++;
+});
 
 onMounted(async () => {
   await listen<OverlayView>("overlay-view", (e) => (view.value = e.payload));
@@ -32,7 +37,7 @@ onMounted(async () => {
 <template>
   <section v-if="view" class="tile">
     <div class="main">
-      <div class="place" :class="{ missing: view.placeMissing }">
+      <div :key="flashes" class="place" :class="{ missing: view.placeMissing, flash: flashes > 0 }">
         <Icon :name="view.placeMissing ? 'warning' : 'locate'" :size="12" />
         <span>{{ view.place }}</span>
       </div>
@@ -41,7 +46,7 @@ onMounted(async () => {
         <div class="lines">
           <span class="top-name">{{ view.top.name }}</span>
           <span class="top-sub">
-            <span class="tag" :class="[view.top.cls, { icon: view.top.icon }]"><Icon v-if="view.top.icon" :name="view.top.icon" :size="10" />{{ view.top.tag }}</span>
+            <span v-if="view.top.tag" class="tag" :class="view.top.cls">{{ view.top.tag }}</span>
             <span class="top-detail">{{ topDetail }}</span>
           </span>
         </div>
@@ -50,7 +55,7 @@ onMounted(async () => {
       <!-- More rows than fit: the last one fades out -->
       <div class="rows" :class="{ more: view.more }">
         <div v-for="(r, i) in view.rows" :key="i" class="row" :class="{ dim: r.dim }">
-          <span class="tag" :class="[r.cls, { icon: r.icon }]"><Icon v-if="r.icon" :name="r.icon" :size="10" />{{ r.tag }}</span>
+          <span v-if="r.tag" class="tag" :class="r.cls">{{ r.tag }}</span>
           <Thumb v-if="view.display === 'thumbs'" :item="r.thumb" size="s" :px="16" />
           <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
           <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
@@ -129,6 +134,20 @@ body,
 .place.missing,
 .place.missing > svg {
   color: var(--warn);
+}
+
+/* A detected item: the line lights up in the accent colour and fades back */
+.place.flash {
+  animation: flash 0.7s ease-out;
+}
+
+@keyframes flash {
+  from {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  to {
+    background: transparent;
+  }
 }
 
 /* The modes on the right, top down */
@@ -251,11 +270,6 @@ body,
   height: 16px;
   padding: 0 4px;
   font-size: 10px;
-}
-
-/* An icon-only badge (the inventory's kinds) */
-.tag.icon {
-  padding: 0 2px;
 }
 
 .name {

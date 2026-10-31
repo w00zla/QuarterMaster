@@ -19,6 +19,7 @@ import type { OkResponse, StockBatch, StockListResponse } from "../../src/webapp
 import {
   addRequest as componentRequest, ComponentScan, inStockOf as componentsInStock, proposalsOf as componentProposalsOf, type ComponentProposal, type ComponentSighting,
 } from "./components";
+import { detected } from "./detections";
 import { addRequest, inStockOf, InventoryScan, proposalsOf, type InventoryReadEvent, type Proposal, type Sighting } from "./inventory";
 import { ensureCatalog, syncCatalog } from "./refinerySync";
 import { api, connected, log } from "./state";
@@ -182,7 +183,10 @@ function onRead(e: InventoryReadEvent) {
       const accept = (s: ComponentSighting) => (s.fps === null ? kinds.value.has("comps") || kinds.value.has("fps") : kinds.value.has(s.fps ? "fps" : "comps"));
       changed = !!at.components.feed(e.atMs, e.components, cat.components, accept, e.capture.restMs) || changed;
     }
-    if (changed) publish();
+    if (changed) {
+      detected();
+      publish();
+    }
   });
 }
 

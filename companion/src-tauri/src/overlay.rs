@@ -25,13 +25,13 @@ use crate::capture;
 /// The overlay window's label (capabilities/default.json lists it)
 pub const LABEL: &str = "overlay";
 // The tile's fixed size and its distance to the game window's edges (logical pixels): a 22 px location
-// line and 8 rows of 20 px (OverlayApp.vue, overlayLayout.ts) with the border and padding, the
-// ~28 px mode rail on the right; the display "thumbs" a little higher (a 60 px top row and 6 rows) and
-// wider by the rows' small thumbnails (16 px, rounded up to 20)
-const WIDTH: f64 = 340.0;
-const HEIGHT: f64 = 190.0;
-const WIDTH_THUMBS: f64 = WIDTH + 20.0;
-const HEIGHT_THUMBS: f64 = 210.0;
+// line and 5 rows of 20 px (OverlayApp.vue, overlayLayout.ts) with the border and padding, the
+// ~28 px mode rail on the right; the display "thumbs" higher (a 60 px top row and 5 rows) and
+// wider by the rows' small thumbnails
+const WIDTH: f64 = 300.0;
+const HEIGHT: f64 = 130.0;
+const WIDTH_THUMBS: f64 = 340.0;
+const HEIGHT_THUMBS: f64 = 190.0;
 const MARGIN: f64 = 24.0;
 
 /// The tile's size (width, height) in the configured display ("thumbs" or "compact").
@@ -316,18 +316,18 @@ mod tests {
     #[test]
     fn placed_in_a_corner_or_centred() {
         let game = rect(1000, 0, 4840, 1600);
-        assert_eq!(place(game, 1.0, "top-left", (WIDTH, HEIGHT)), rect(1024, 24, 1364, 214));
-        assert_eq!(place(game, 1.0, "top-right", (WIDTH, HEIGHT)), rect(4476, 24, 4816, 214));
-        assert_eq!(place(game, 1.0, "bottom-left", (WIDTH, HEIGHT)), rect(1024, 1386, 1364, 1576));
-        assert_eq!(place(game, 1.0, "bottom-right", (WIDTH, HEIGHT)), rect(4476, 1386, 4816, 1576));
-        assert_eq!(place(game, 1.0, "top-center", (WIDTH, HEIGHT)), rect(2750, 24, 3090, 214));
-        assert_eq!(place(game, 1.0, "bottom-center", (WIDTH, HEIGHT)), rect(2750, 1386, 3090, 1576));
+        assert_eq!(place(game, 1.0, "top-left", (WIDTH, HEIGHT)), rect(1024, 24, 1324, 154));
+        assert_eq!(place(game, 1.0, "top-right", (WIDTH, HEIGHT)), rect(4516, 24, 4816, 154));
+        assert_eq!(place(game, 1.0, "bottom-left", (WIDTH, HEIGHT)), rect(1024, 1446, 1324, 1576));
+        assert_eq!(place(game, 1.0, "bottom-right", (WIDTH, HEIGHT)), rect(4516, 1446, 4816, 1576));
+        assert_eq!(place(game, 1.0, "top-center", (WIDTH, HEIGHT)), rect(2770, 24, 3070, 154));
+        assert_eq!(place(game, 1.0, "bottom-center", (WIDTH, HEIGHT)), rect(2770, 1446, 3070, 1576));
         // Unknown: top left; scaled with the monitor
-        assert_eq!(place(game, 1.5, "?", (WIDTH, HEIGHT)), rect(1036, 36, 1546, 321));
+        assert_eq!(place(game, 1.5, "?", (WIDTH, HEIGHT)), rect(1036, 36, 1486, 231));
         // The display "thumbs" is higher and wider; at the bottom it grows upwards, at the right to the left
-        assert_eq!(place(game, 1.0, "top-left", size("thumbs")), rect(1024, 24, 1384, 234));
-        assert_eq!(place(game, 1.0, "bottom-left", size("thumbs")), rect(1024, 1366, 1384, 1576));
-        assert_eq!(place(game, 1.0, "top-right", size("thumbs")), rect(4456, 24, 4816, 234));
+        assert_eq!(place(game, 1.0, "top-left", size("thumbs")), rect(1024, 24, 1364, 214));
+        assert_eq!(place(game, 1.0, "bottom-left", size("thumbs")), rect(1024, 1386, 1364, 1576));
+        assert_eq!(place(game, 1.0, "top-right", size("thumbs")), rect(4476, 24, 4816, 214));
         assert_eq!(size("compact"), (WIDTH, HEIGHT));
     }
 

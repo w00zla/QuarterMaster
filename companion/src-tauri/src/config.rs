@@ -49,6 +49,9 @@ pub struct Config {
     /// the window a bit higher) or "compact" (rows only).
     #[serde(default = "default_overlay_display")]
     pub overlay_display: String,
+    /// The overlay's location line flashes briefly when the scan detects an item (the frontend's `overlay.ts`).
+    #[serde(default = "default_true")]
+    pub overlay_flash: bool,
     /// The overlay's hotkeys as accelerators ("Alt+Shift+KeyQ", the on/off default); empty = none (the mode's default).
     #[serde(default = "default_hotkey_overlay")]
     pub hotkey_overlay: String,
@@ -92,6 +95,7 @@ impl Default for Config {
             language: String::new(),
             overlay_position: default_overlay_position(),
             overlay_display: default_overlay_display(),
+            overlay_flash: true,
             hotkey_overlay: default_hotkey_overlay(),
             hotkey_mode: String::new(),
             auto_tab: true,
@@ -174,6 +178,7 @@ mod tests {
         // Missing in files written before it existed: on
         assert!(c.auto_tab);
         assert!(c.gpu);
+        assert!(c.overlay_flash);
         assert_eq!(c.overlay_display, "thumbs");
     }
 
