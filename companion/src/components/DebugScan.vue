@@ -45,7 +45,7 @@ onMounted(async () => {
   try {
     await setDebug(true);
     scanOn.value = await getScan();
-    await listen<InventoryReadEvent>("inventory-read", (e) => (read.value = e.payload));
+    await listen<InventoryReadEvent>("inventory-debug", (e) => (read.value = e.payload));
     await listen<boolean>("scan-changed", (e) => {
       scanOn.value = e.payload;
       if (!e.payload) screen.value = "none";

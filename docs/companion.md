@@ -496,10 +496,16 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
     registered and default ones). "Export" writes `qm-gamelog-debug-<unix s>.json` into a folder the user
     picks (Rust `export_log_debug`: version, platform, game folder, the log state and that report).
 - While it is open (`set_debug`) every read goes with its frame to the **debug writer** thread
-  (`spawn_debug_writer`), which encodes it, keeps the last 3 reads in RAM and emits the event: on the worker,
-  encoding and writing stretched the reads' interval from 1.05 to 1.8 s. The refinery's reads go there too
-  (as `inventory-read` with a `refinery` part: overview, terminal or nothing; the inventory sync ignores
-  them).
+  (`spawn_debug_writer`), which encodes it, keeps the last 3 reads in RAM and emits it as
+  `inventory-debug` (the window listens to that; the scan gets its `inventory-read` right away, without
+  the frame): on the worker, encoding and writing stretched the reads' interval from 1.05 to 1.8 s. The
+  hand-over is a queue of 2 reads (`DEBUG_QUEUE`, `try_send`): a read that finds it full is left out of
+  the view and a recording (logged, debug). Until 2026-10-31 the queue was unbounded and the writer
+  emitted the scan's event itself: at ~290 ms per 3840×1600 frame (`image`'s resize 85 ms, the full JPEG
+  ~190 ms) against ~3.6 reads a second it fell behind, 24 s and ~1.5 GB of waiting frames within three
+  minutes of a recording, and the scan's proposals waited with it until a restart. Now ~220 ms (the
+  preview scaled with the OCR's SIMD resize, 30 ms). The refinery's reads go to the writer only (with a
+  `refinery` part: overview, terminal or nothing).
 - "Record data" asks for a folder and writes a session folder `qm-inventory-debug-<unix s>`: the 3 kept
   reads, then every read while it runs (frame as JPEG quality 90, ~0.6 MB, + JSON with grid, components
   part, refinery part, the cursor and boxes, and `capture` for remote diagnosis since 2026-10-20: `grabMs`,

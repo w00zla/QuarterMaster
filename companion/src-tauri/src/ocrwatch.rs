@@ -15,16 +15,17 @@
 //! visit. The OCR is dropped as soon as the scan stops (its memory arena keeps the full reads' peak);
 //! the next start loads it again.
 //!
-//! Troubleshooting (`Debug`, the inventory panel's debug dialog): while on, every inventory event
-//! carries the frame as a JPEG (scaled to 1280 px wide) for the overlay view, and the last reads are
-//! kept with their full frames (`DebugStore`); a recording the user starts writes them and every
-//! read after into a folder (PNG + JSON per read, an info file) the user can send in.
+//! Troubleshooting (`Debug`, the inventory panel's debug dialog): while on, every read goes out a
+//! second time as `inventory-debug` with the frame as a JPEG (scaled to 1280 px wide) for the overlay
+//! view, and the last reads are kept with their full frames (`DebugStore`); a recording the user
+//! starts writes them and every read after into a folder (JPEG + JSON per read, an info file) the user
+//! can send in. That happens off the worker (`spawn_debug_writer`) and never holds a read back.
 
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -42,11 +43,16 @@ use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
 pub const REFINERY_VISIT: &str = "refinery-visit";
 pub const INVENTORY_READ: &str = "inventory-read";
+pub const INVENTORY_DEBUG: &str = "inventory-debug";
 pub const SCAN_SCREEN: &str = "scan-screen";
 /// Width of the frame sent with an inventory event while debugging
 const DEBUG_FRAME_WIDTH: u32 = 1280;
 /// Reads kept for the debug window and a recording (full frames as JPEG: ~0.6 MB each on 3840×1600)
 const DEBUG_KEEP: usize = 3;
+/// Reads waiting for the debug writer (each with its raw frame: 18 MB on 3840×1600); a read that finds
+/// the queue full is left out of the debug view and a recording. Unbounded, the queue grew to 24 s
+/// behind and ~1.5 GB within three minutes of a recording, and the scan's own events waited in it
+const DEBUG_QUEUE: usize = 2;
 const RECORD_JPEG_QUALITY: u8 = 90;
 // ONNX Runtime threads: the game runs at the same time (3: the inventory reads confirm every stack
 // twice, the user waits for them)
@@ -394,10 +400,11 @@ impl DebugStore {
 
 /// Starts the debug writer: for each read it gets while debugging it encodes the frame (the JPEG
 /// data URL for the event, the full frame for the kept reads and a recording), keeps it, writes it
-/// to a running recording and emits the event. Off the worker: encoding and writing a 3840×1600
-/// frame held the next read back (1.8 s between reads while recording instead of 1.05 s).
-fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> Sender<(RgbImage, InventoryEvent)> {
-    let (tx, rx) = channel::<(RgbImage, InventoryEvent)>();
+/// to a running recording and emits the event as `inventory-debug`. Off the worker: encoding and
+/// writing a 3840×1600 frame held the next read back (1.8 s between reads while recording instead of
+/// 1.05 s). The worker hands reads over with `try_send` (`DEBUG_QUEUE`).
+fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> SyncSender<(RgbImage, InventoryEvent)> {
+    let (tx, rx) = sync_channel::<(RgbImage, InventoryEvent)>(DEBUG_QUEUE);
     std::thread::spawn(move || {
         for (image, mut event) in rx {
             event.frame = jpeg_data_url(&image, DEBUG_FRAME_WIDTH).map_err(|e| log::warn!("debug frame: {e}")).ok();
@@ -432,16 +439,17 @@ fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> Sender<(RgbImage, In
                 }
                 Err(e) => log::warn!("debug frame: {e}"),
             }
-            let _ = app.emit(INVENTORY_READ, event);
+            let _ = app.emit(INVENTORY_DEBUG, event);
         }
     });
     tx
 }
 
-/// The frame as a JPEG data URL, `width` pixels wide.
+/// The frame as a JPEG data URL, `width` pixels wide (scaled with the OCR's SIMD resize: `image`'s
+/// own took a large part of the writer's time).
 fn jpeg_data_url(image: &RgbImage, width: u32) -> Result<String, String> {
     let (w, h) = image.dimensions();
-    let scaled = if w > width { image::imageops::resize(image, width, (h as u64 * width as u64 / w as u64).max(1) as u32, image::imageops::FilterType::Triangle) } else { image.clone() };
+    let scaled = if w > width { crate::ocr::resize(image, width, (h as u64 * width as u64 / w as u64).max(1) as u32, crate::ocr::FilterType::Bilinear) } else { image.clone() };
     let mut bytes = Cursor::new(Vec::new());
     scaled.write_to(&mut bytes, ImageFormat::Jpeg).map_err(|e| e.to_string())?;
     Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())))
@@ -670,7 +678,7 @@ struct Worker {
     scan: Scan,
     debug: Debug,
     /// While debugging, the reads go with their frame to the debug writer (`spawn_debug_writer`)
-    debug_tx: Sender<(RgbImage, InventoryEvent)>,
+    debug_tx: SyncSender<(RgbImage, InventoryEvent)>,
     /// Set while the warehouse or the character inventory is in view: the worker pulls the frames
     fast: FastCapture,
     /// The game in front (else no frames come, and the screen is left)
@@ -991,10 +999,11 @@ impl Worker {
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", screen),
         }
         let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None, capture: self.capture, ocr };
-        // While debugging the debug writer adds the frame and emits; the worker goes on reading
-        if !debug || self.debug_tx.send((image, event.clone())).is_err() {
-            let _ = self.app.emit(INVENTORY_READ, event);
+        // The scan gets the read right away; while debugging a copy goes to the debug writer
+        if debug {
+            self.to_debug(image, event.clone());
         }
+        let _ = self.app.emit(INVENTORY_READ, event);
         self.set_screen(screen, if found { "seen" } else { "nothing seen" });
         // Still on a screen read every frame: the next one is grabbed as soon as the cursor rests
         if matches!(self.screen, Screen::Warehouse | Screen::Inventory) {
@@ -1039,12 +1048,20 @@ impl Worker {
         if self.debug.0.load(Ordering::Relaxed) {
             let (width, height) = image.dimensions();
             let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug), capture: self.capture, ocr: self.take_phases().1 };
-            let _ = self.debug_tx.send((image, event));
+            self.to_debug(image, event);
         }
         if self.screen_misses >= LEAVE_AFTER {
             self.set_screen(Screen::Unknown, "left");
         }
         Ok(())
+    }
+
+    /// Hands a read with its frame to the debug writer, unless it is behind (`DEBUG_QUEUE`): then the
+    /// read is left out of the debug view and a recording, never waited for.
+    fn to_debug(&self, image: RgbImage, event: InventoryEvent) {
+        if let Err(TrySendError::Full(_)) = self.debug_tx.try_send((image, event)) {
+            log::debug!("debug writer behind: a read left out of the debug view and recording");
+        }
     }
 }
 
