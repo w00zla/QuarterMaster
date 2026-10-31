@@ -157,7 +157,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
   and scroll only their rows (head and column titles stay).
 - Settings dialog (`SettingsDialog.vue`): Access Key, language, game folder, the "Bildschirm-Scan" group
-  ("Screen Scan", 2026-10-27: first "GPU-Beschleunigung aktivieren" as a highlighted card (2026-10-30: bolt icon, a state tag "Aktiv" / "CPU" / "Nicht verfügbar" / "Fehler", glowing while on), then "App-Ansicht automatisch wechseln" (the automatic tab switch), switches; the
+  ("Screen Scan", 2026-10-27: first "GPU-Beschleunigung aktivieren" as a highlighted card (2026-10-30: bolt icon, a state tag "Aktiv" / "CPU" / "Nicht verfügbar" / "Fehler", in the accent colour while on), then "App-Ansicht automatisch wechseln" (the automatic tab switch), switches; the
   GPU greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
   place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config

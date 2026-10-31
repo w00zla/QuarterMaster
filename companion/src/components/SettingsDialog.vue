@@ -259,7 +259,7 @@ async function pickFolder() {
 }
 
 /* The GPU acceleration: a card of its own in the accent colour, its icon in a tile, the name above its
-   state tag; on, it glows a little; off, it stays a quiet frame; not possible here, the switch greyed out */
+   state tag; on, in the accent colour; off, a quiet frame; not possible here, the switch greyed out */
 .gpu-card {
   display: flex;
   align-items: center;
@@ -269,13 +269,12 @@ async function pickFolder() {
   border-radius: var(--radius-panel);
   background: var(--bg-surface);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .gpu-card.lit {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
-  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .gpu-icon {
