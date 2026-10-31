@@ -371,8 +371,13 @@ Throwaway script, not in the repo. Result:
   `GPP_Weapon_Recoil_Kick` "-28.44 %", `Recoil_Smoothness`/`Handling` negated: "+28.44 %" for a factor of
   0.7156) show the change itself, no base needed (`tooltipForm`). The others show the absolute value:
   Fire Rate `SCItemWeaponComponentParams.fireActions[0].fireRate` (Gallant 900, CQ7 650 → crafted
-  "713.49 RPM"; a weapon whose first action is a sequence has none there: Killshot shows 535, its
-  sequence says 600, left null), armor `SCItemClothingParams.TemperatureResistance.Min/MaxResistance`
+  "713.49 RPM"); a weapon whose first action is a looping sequence (29 in 4.10) has none there: the
+  pace of its first entry, `sequenceEntries[0].delay` in "RPM" or "Seconds" (60 / delay), is the
+  tooltip's rate, not the shots' inside it (Lumin V 625, its bursts 700; Killshot 535, 600; Scalpel 1.2 s
+  = 50; since 2026-10-31, `BasePath.fallbacks`); **unchecked, possibly wrong** (no tooltip seen): a
+  charged first action's shot after the charge, `weaponAction.fireRate` (Arrowhead 70, Devastator 60,
+  Salvo 170; the charge time not counted), a parallel one's first shot, `weaponActions[0].fireRate`
+  (Tripledown 60, three at once); a beam (Ripper "Sunblock") holds no rate anywhere, left null, armor `SCItemClothingParams.TemperatureResistance.Min/MaxResistance`
   (Canuto -61 / 91), `RadiationResistance.RadiationDissipationRate` (145.8), Damage Mitigation = 1 −
   `PhysicalResistance.Multiplier` of the linked `damage/…armor.json` (0.30; the extractor keeps the linked
   record raw since 2026-10-22, the lookup resolves the link by its path). The item description's own

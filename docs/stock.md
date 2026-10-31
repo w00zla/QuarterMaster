@@ -84,7 +84,8 @@ whole `app`/`bot`/`web` split).
   Integrity last; `base` = the unmodified value as the game's tooltip shows it, read from the item's
   `raw_record` by the jsonpaths in `src/stock/component-base.ts`: Integrity, Coolant Rating, Power Pips,
   Max. Shield Strength, Quantum Speed (× 1e-6), Quantum Fuel Burn (× 1000), the radar assist distances, FPS
-  fire rate, armor temperatures and radiation dissipation, armor damage mitigation (1 − the multiplier in
+  fire rate (a looping fire sequence's pace where the first fire mode has no rate; charged and parallel
+  first actions unchecked against a tooltip; places tried in order, `BasePath.fallbacks`), armor temperatures and radiation dissipation, armor damage mitigation (1 − the multiplier in
   the linked damage record, a second `raw_record` found by its path); null for the rest; `tooltip` =
   `value`, or `change`/`negatedChange` where the tooltip shows the change in percent (from the property's
   display transformation: impact force, recoil; no base needed); the companion converts the tooltip's

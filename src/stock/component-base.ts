@@ -14,9 +14,13 @@ export interface BasePath {
   // A jsonpath to a link ("file://…/libs/foundry/records/…json") in the item's record: `path` is then
   // read in the linked record
   link?: string;
-  // offset + record value × scale = the tooltip's value
+  // offset + record value × scale = the tooltip's value; with `reciprocal` scale / record value (a
+  // period: "1.2" seconds per shot = 50 RPM)
   scale: number;
   offset?: number;
+  reciprocal?: boolean;
+  // Where the record holds no number at `path`: these, the first that holds one counts
+  fallbacks?: BasePath[];
 }
 
 const COMPONENT = (type: string) => `$.Components[*] ? (@._Type_ == "${type}")`;
@@ -33,9 +37,23 @@ export const BASE_PATHS: Record<string, BasePath> = {
   GPP_Quantum_FuelRequirement: { path: `${COMPONENT('SCItemQuantumDriveParams')}.quantumFuelRequirement`, scale: 1000 },
   GPP_Radar_MaxAimAssistDistance: { path: `${COMPONENT('SCItemRadarComponentParams')}.aimAssist.distanceMaxAssignment`, scale: 1 },
   GPP_Radar_MinAimAssistDistance: { path: `${COMPONENT('SCItemRadarComponentParams')}.aimAssist.distanceMinAssignment`, scale: 1 },
-  // The first fire mode's rate; a sequence of modes has none there (the Killshot shows 535 RPM, its
-  // sequence says 600: unknown, left null)
-  GPP_Weapon_FireRate: { path: `${COMPONENT('SCItemWeaponComponentParams')}.fireActions[0].fireRate`, scale: 1 },
+  // The first fire mode's rate; a looping sequence (29 weapons in 4.10: Lumin V, Killshot, Ravager,
+  // Scalpel, Animus) has none there, its first entry's pace is the tooltip's rate, not the shots' inside
+  // it: Lumin V 625 RPM (its bursts 700), Killshot 535 (600), Scalpel 1.2 seconds = 50 RPM (2026-10-31,
+  // the user's recordings). UNCHECKED, possibly wrong (no tooltip seen yet; 2026-10-31): a charged first
+  // action's shot after the charge (Arrowhead 70, Devastator 60, Salvo 170; the charge time not counted)
+  // and a parallel one's first shot (Tripledown: three of 60 at once). A beam (Ripper "Sunblock") holds
+  // no rate anywhere: left null
+  GPP_Weapon_FireRate: {
+    path: `${COMPONENT('SCItemWeaponComponentParams')}.fireActions[0].fireRate`,
+    scale: 1,
+    fallbacks: [
+      { path: `${COMPONENT('SCItemWeaponComponentParams')}.fireActions[0].sequenceEntries[0] ? (@.unit == "RPM").delay`, scale: 1 },
+      { path: `${COMPONENT('SCItemWeaponComponentParams')}.fireActions[0].sequenceEntries[0] ? (@.unit == "Seconds").delay`, scale: 60, reciprocal: true },
+      { path: `${COMPONENT('SCItemWeaponComponentParams')}.fireActions[0] ? (@._Type_ == "SWeaponActionFireChargedParams").weaponAction.fireRate`, scale: 1 },
+      { path: `${COMPONENT('SCItemWeaponComponentParams')}.fireActions[0] ? (@._Type_ == "SWeaponActionParallelParams").weaponActions[0].fireRate`, scale: 1 },
+    ],
+  },
   GPP_Armor_TemperatureMin: { path: `${COMPONENT('SCItemClothingParams')}.TemperatureResistance.MinResistance`, scale: 1 },
   GPP_Armor_TemperatureMax: { path: `${COMPONENT('SCItemClothingParams')}.TemperatureResistance.MaxResistance`, scale: 1 },
   GPP_Armor_RadiationDissipation: { path: `${COMPONENT('SCItemClothingParams')}.RadiationResistance.RadiationDissipationRate`, scale: 1 },
@@ -48,13 +66,19 @@ export const BASE_PATHS: Record<string, BasePath> = {
   },
 };
 
-/** The tooltip's value for a record value; null when the record holds no number there. */
-export function baseValue(key: string, raw: unknown): number | null {
-  const spec = BASE_PATHS[key];
+/** Every place a base can be: [property key, its rank (0 = `path`, then the fallbacks), the place]. */
+export function basePaths(): [string, number, BasePath][] {
+  return Object.entries(BASE_PATHS).flatMap(([key, p]) => [p, ...(p.fallbacks ?? [])].map((place, rank) => [key, rank, place] as [string, number, BasePath]));
+}
+
+/** The tooltip's value for a record value found at the place of `rank` (`basePaths`); null when the
+ * record holds no number there. */
+export function baseValue(key: string, raw: unknown, rank = 0): number | null {
+  const spec = basePaths().find(([k, r]) => k === key && r === rank)?.[2];
   const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
-  if (!spec || !Number.isFinite(n)) return null;
+  if (!spec || !Number.isFinite(n) || (spec.reciprocal && n === 0)) return null;
   // Rounded: 1 - 0.7 is 0.30000000000000004
-  return Math.round(((spec.offset ?? 0) + n * spec.scale) * 1e9) / 1e9;
+  return Math.round(((spec.offset ?? 0) + (spec.reciprocal ? spec.scale / n : n * spec.scale)) * 1e9) / 1e9;
 }
 
 /** How the tooltip shows a stat, from its crafted property's display transformation: its absolute value

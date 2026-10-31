@@ -8,7 +8,7 @@ import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { itemClassText, locText, rows } from '../db/query.ts';
 import type { SubjectKind } from './amount.ts';
-import { BASE_PATHS, baseValue, tooltipForm, type TooltipForm } from './component-base.ts';
+import { basePaths, baseValue, tooltipForm, type TooltipForm } from './component-base.ts';
 import { statBounds, type StatBounds } from './component-stats.ts';
 import type { ModifierRange } from '../planner/types.ts';
 import { componentItemSql, componentStats, selectableLocationSql, type Actor, type Batch } from './service.ts';
@@ -95,12 +95,12 @@ export interface ComponentStat extends StatBounds {
  * Only stats its blueprints change (the only ones shown): spares the jsonpath over every gear record.
  */
 async function componentBaseValues(db: Db): Promise<Map<string, Map<string, number>>> {
-  const paths = sql.join(Object.entries(BASE_PATHS).map(([key, p]) => sql`(${key}, ${p.path}::jsonpath, ${p.link ?? null}::jsonpath)`), sql`, `);
-  const found = await rows<{ item: string; property: string; key: string; raw: string | null }>(db, sql`
-    SELECT i.uuid AS item, cp.uuid AS property, cp.key, jsonb_path_query_first(coalesce(lr.data, rr.data), p.path) #>> '{}' AS raw
+  const paths = sql.join(basePaths().map(([key, rank, p]) => sql`(${key}, ${rank}::int, ${p.path}::jsonpath, ${p.link ?? null}::jsonpath)`), sql`, `);
+  const found = await rows<{ item: string; property: string; key: string; rank: number; raw: string | null }>(db, sql`
+    SELECT i.uuid AS item, cp.uuid AS property, cp.key, p.rank, jsonb_path_query_first(coalesce(lr.data, rr.data), p.path) #>> '{}' AS raw
     FROM catalog.item i
     JOIN catalog.raw_record rr ON rr.uuid = i.uuid
-    CROSS JOIN (VALUES ${paths}) AS p(key, path, link)
+    CROSS JOIN (VALUES ${paths}) AS p(key, rank, path, link)
     -- A linked record ("file://./../…/libs/foundry/records/damage/mediumarmor.json"; raw paths are lower case)
     LEFT JOIN catalog.raw_record lr ON p.link IS NOT NULL
       AND lr.path = lower(substring(jsonb_path_query_first(rr.data, p.link) #>> '{}' from 'libs/foundry/records/.*$'))
@@ -109,11 +109,13 @@ async function componentBaseValues(db: Db): Promise<Map<string, Map<string, numb
       AND (p.link IS NULL OR lr.uuid IS NOT NULL)
       AND EXISTS (SELECT 1 FROM catalog.blueprint cb JOIN catalog.blueprint_slot s ON s.blueprint_uuid = cb.uuid
         CROSS JOIN LATERAL jsonb_array_elements(s.modifiers) m
-        WHERE cb.output_item_uuid = i.uuid AND cb.retired_at IS NULL AND lower(m->>'propertyUuid') = cp.uuid::text)`);
+        WHERE cb.output_item_uuid = i.uuid AND cb.retired_at IS NULL AND lower(m->>'propertyUuid') = cp.uuid::text)
+    ORDER BY p.rank`);
+  // The first place (by rank) that holds a number counts
   const bases = new Map<string, Map<string, number>>();
   for (const r of found) {
-    const value = baseValue(r.key, r.raw);
-    if (value === null) continue;
+    const value = baseValue(r.key, r.raw, r.rank);
+    if (value === null || bases.get(r.item)?.has(r.property)) continue;
     const item = bases.get(r.item) ?? new Map<string, number>();
     item.set(r.property, value);
     bases.set(r.item, item);
