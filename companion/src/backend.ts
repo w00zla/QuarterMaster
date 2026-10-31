@@ -17,8 +17,6 @@ export interface Config {
   overlayPosition: OverlayPosition;
   // How it shows its rows: "thumbs" (the latest item as a taller top row with its thumbnail) or "compact"
   overlayDisplay: OverlayDisplay;
-  // Its location line flashes briefly when the scan detects an item
-  overlayFlash: boolean;
   hotkeyOverlay: string;
   hotkeyMode: string;
   // The tab (= the overlay's mode) switches by itself: with the screen the scan sees, with a new blueprint unlock

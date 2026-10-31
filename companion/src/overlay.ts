@@ -7,7 +7,7 @@
 // a click on a tab or the mode hotkey, stepping through them. Each panel
 // puts its rows into `overlayRows`; the overlay gets them as one read-only view (texts in the UI
 // language, thumbnail references) on every change and when it asks, laid out for the configured display
-// (overlayLayout.ts); with each thing detected (detections.ts) its location line flashes (setting overlayFlash).
+// (overlayLayout.ts); with each thing detected (detections.ts) its location line flashes.
 // Off at every start.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, reactive, ref, watch } from "vue";
@@ -78,7 +78,7 @@ export interface OverlayView {
   rows: OverlayRow[];
   // More rows than shown
   more: boolean;
-  // Counts up with each detected item (settings: overlayFlash); the page flashes the location when it changes
+  // Counts up with each detection (detections.ts); the page flashes the location when it changes
   flash: number;
 }
 
@@ -89,12 +89,6 @@ export const tabCounts = reactive<Record<Tab, number>>({ stock: 0, comps: 0, unl
 
 // Like the web app's navigation
 export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "gear", unlocks: "blueprint", refinery: "drop" };
-
-// Each detection (detections.ts) while the setting is on (on by default)
-const flash = ref(0);
-watch(detections, () => {
-  if (config.value?.overlayFlash !== false) flash.value++;
-});
 
 const view = computed<OverlayView>(() => {
   const m = tab.value;
@@ -114,7 +108,7 @@ const view = computed<OverlayView>(() => {
   const all = overlayRows[m];
   const top = layout.top ? (all[0] ?? null) : null;
   const rest = layout.top ? all.slice(1) : all;
-  return { display, top, place, placeMissing, tabs, rows: rest.slice(0, layout.rows), more: rest.length > layout.rows, flash: flash.value };
+  return { display, top, place, placeMissing, tabs, rows: rest.slice(0, layout.rows), more: rest.length > layout.rows, flash: detections.value };
 });
 
 const publish = () => {

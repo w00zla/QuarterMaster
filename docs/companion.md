@@ -161,7 +161,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   GPU greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
   place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
-  `overlayDisplay`, applied once saved); "Bei Erkennung aufblinken" ("Flash on a detected item", a switch, config `overlayFlash`, on by default, 2026-10-31); the hotkeys "Hotkey Overlay an/aus" and "Hotkey Overlay-Ansicht wechseln"; the UI says "Ansicht" for tab and overlay view alike, since 2026-10-30), in the head's right end
+  `overlayDisplay`, applied once saved); the hotkeys "Hotkey Overlay an/aus" and "Hotkey Overlay-Ansicht wechseln"; the UI says "Ansicht" for tab and overlay view alike, since 2026-10-30), in the head's right end
   a small "Debug" button for the debug window (secondary for the user; what it does as tooltip; the dialog
   closes once the window is open; `ConfirmDialog`'s `head` slot). Labels left, controls right like
   BindSight's settings.
@@ -586,7 +586,7 @@ game since.
   The refinery has no single newest item: rows only (8, with the first material's thumbnail).
   `OverlayRow.thumb` carries uuid and hash from the panels; the overlay page loads the images itself
   (`thumb` is allowed in every window: the app has no command allowlist).
-- **Flash** (settings "Bei Erkennung aufblinken", config `overlayFlash`, on by default; 2026-10-31): every
+- **Flash** (2026-10-31, always on, no setting): every
   detection (`detections.ts`): an inventory read that adds or changes a sighting (stock or gear), a refinery read with a
   new proposal or a job update, a new unlock to register that Game.log adds while the app runs (where the
   view switches too); each counts
