@@ -4,5 +4,6 @@ packages:
   - companion
 
 # pnpm blocks dependency build scripts by default; esbuild (via drizzle-kit) needs its own
-onlyBuiltDependencies:
-  - esbuild
+allowBuilds:
+  esbuild: true
+  sharp: false

@@ -4,11 +4,11 @@
 ARG NODE_IMAGE=docker.io/library/node:22-slim
 
 FROM ${NODE_IMAGE} AS base
-# pnpm in the version from package.json ("packageManager")
-ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm in der Version aus package.json ("packageManager"); per npm statt corepack: pnpm ≥ 11 ist
+# eine native Binary aus einer optionalen Abhängigkeit (@pnpm/exe.<os>), die corepack nicht mitlädt
+RUN npm install -g "$(node -p "require('./package.json').packageManager")"
 COPY adminapp/package.json adminapp/
 COPY webapp/package.json webapp/
 
