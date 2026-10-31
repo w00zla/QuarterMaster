@@ -236,47 +236,59 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 ### The read (Rust)
 
 - Only the pane right of the screen centre is read (the elevator pane is ignored), and only 0.25–0.95 of
-  the height (the grid with room, below it a bottom row's tooltip; the search, filter and capacity rows
-  above cost ~25 % of the read time on 3840×1600). **Since 2026-10-31 with PP-OCRv6 tiny** (small
-  before): the detector's crop is scaled as if the frame were 2400 px high (×1.5 at 3840×1600, ×2.2 at
-  1080p; tiny misses the badges' small texts at native size). The first read of a session sees the whole
-  pane; once a strong layout is known, only the **area around the cursor** is read: 1.6 pitches left and
-  up of it (the hovered tile's anchors and its neighbours'), the tooltip's window right and below (it
-  opens at the cursor: measured over 336 reads x −0.18…+0.47 h, y −0.06…+0.26 h, so +0.50 h and
-  +0.28 h), the size rounded up to 64 px (one detector shape, one GPU session, per layout) and shifted
-  to stay inside the pane. Measured on the recordings of 2026-10-30 (165 reads at 3840×1600, 276 at
-  1080p): 128 and 139 ms per read on the CPU (3 threads), 60 ms on the GPU; small over the whole pane
-  took 373 ms on the CPU (screenshots) and ~1 s in game. Of 159/260 reads with a grid, 141/223 read
-  the same as small (tooltip, quality, SCU, hovered count); the rest are mostly tiny's misspellings
-  ("Silican", "Apharite" in single reads: two agreeing reads book, so a glitch costs a frame) and a few
-  spurious qualities small had read on items (tiny: none, right). A pixel-based read of the hovered
-  tile like the gear scan's was tried first and dropped: the terminal's glare washes the lit frame out
-  on whole sides (3 of 336 reads found all four edges in one variant, 108 in the best).
+  the height (the grid with room, below it a bottom row's tooltip). **Since 2026-10-31 with the
+  warehouse's own layout detector** (`Ocr::detect_layout`, see "The layout detector" below): it finds
+  the badges, quality texts, the tooltip's title and its other lines as boxes of their kind, nothing is
+  recognized for the fit. It sees windows of the frame scaled to 720 px height, 480×320 each (720×480
+  frame pixels at 1080p): the first read of a session covers the pane with overlapping windows (40 px,
+  merged by NMS); once a strong layout is known, **one window around the cursor**, its top left 1.6
+  pitches left and up of it (the hovered tile's anchors and its neighbours'), the rest holding the
+  tooltip's window right and below, shifted to stay inside the pane. Then only the tooltip's lines, the
+  hovered tile's quality text and badge are recognized, scaled up as if the frame were 2400 px high
+  (tiny misspells them at native size: "Dalivine"). The debug view's boxes: the anchors as "[badge]"
+  and "[quality]" with the detector's score, the tooltip's lines with their text. Measured on the recordings of 2026-10-30 (165 reads
+  at 3840×1600, 276 at 1080p; every tile's badge read, as with the debug window open): 26 and 25 ms per
+  read on the CPU (3 threads), 24 ms on the GPU (detector ~4 ms, the rest the recognizer). Before:
+  PP-OCRv6 tiny's detector on the area scaled to 2400 px and every box it found recognized, 128 and 139
+  ms (small over the whole pane 373 ms, ~1 s in game). Against that read: the same material tooltips
+  (109/113, 174/174: the four missing at 3840×1600 are frames whose cursor had left the tooltip's tile,
+  no hovered tile either), the hovered tile's quality in 94/84 and 134/118 frames (where both read one
+  and differ, the new one is right: 510 for "518", 310 for "318"), its count in 125/130 and 207/209,
+  misspelt material names in 4 and 3 of ~290 tooltips ("Dalivine", "Silican"); no more tooltips from
+  the category menu's entries ("rdnance") and no body line as the title ("Registered To You" for
+  "Luminalia '5s Coin"). No grid on 82 screenshots of the character inventory and the refinery terminal
+  (the first model fitted one on 21 of 22 of the looting view's: its "0/0" labels as badges and
+  quality texts): trained with such screenshots as negatives, and only boxes scored ≥ 0.55 anchor the fit
+  (`ANCHOR_SCORE`; the inventory's scored up to 0.5, 97 % of the warehouse's above). A pixel-based read of the hovered tile like the gear
+  scan's was tried first and dropped: the terminal's glare washes the lit frame out on whole sides (3 of
+  336 reads found all four edges in one variant, 108 in the best).
 - The terminal is a screen in the world: the grid's pitch changes with the player's position, resolution
   and FOV (260–290 px at 1600 px height, ~140 px at 1080p 16:9: pitch candidates 0.10–0.20 of the height),
-  so the grid is **fitted per frame** from the detected badge boxes and quality texts (only with their Q,
-  "526Q"/"5260": a bare "526" is the tooltip chip's and pulled the columns off; anchors with weights, the pitch and phase most agree on per axis, the four consecutive columns with the
+  so the grid is **fitted per frame** from the detected badges and quality texts (the tooltip chip's
+  bare "526" is a tooltip line to the detector, no anchor; anchors with weights, the pitch and phase most agree on per axis, the four consecutive columns with the
   most anchors, rows within 0.3–0.84 of the height; at least anchor weight 3). The first strong fit of a
   session (anchor weight ≥ `STRONG_FIT_WEIGHT` on the weaker axis) is the **last layout**: weaker fits
   keep its pitch and fit only the phase, from whatever anchors the area around the cursor holds (one
   suffices, and every anchor anchors both axes; ties between column windows go to the one nearest the
   last layout's first column). Dropped when the warehouse screen is left or the scan stops. The row pitch is bounded to 0.85–1.05 of the column
   pitch. Every cell is a tile (unread fields None). The fit can sit up to ~30 px off the tiles.
-- Quality band of the hovered tile (every tile's without a cursor: the hovered rule below needs them),
-  recognized on its own; not read when the tooltip covers over 20 % of it.
+- Quality of the hovered tile (every tile's without a cursor: the hovered rule below needs them): the
+  quality text the detector found in its band, a quarter of its height grown, else the whole band (it
+  reached into a tooltip's edge next to it: "37104"), recognized on its own; not read when the tooltip
+  covers over 20 % of it.
 - Badges: only the hovered tile's (every tile's while the debug window is open: the costly part). First the
-  nearest detected box of a badge's size around the tile's top right corner (`BADGE_SEARCH`, whatever the
-  general model read there: "X 2" came as "xa"), with room on its right (`BADGE_RIGHT_PAD`: the detector
-  boxes only the "X" of "X 6" now and then, a digit at the crop's edge reads as "8"), then the tile's badge
+  nearest detected badge around the tile's top right corner (`BADGE_SEARCH`), with room on its right
+  (`BADGE_RIGHT_PAD`: a digit at the crop's edge reads as "8"), then the tile's badge
   area; upscaled 3×, recognized with the badge's characters only (`Ocr::recognize_images_only`,
   "Xx× 0123456789": the multi-language model read a "6" as "日"); the first read with digits wins, a bare
   "X" = 1 flagged uncertain (so far always a real X1 whose thin 1 got lost). Not read when the tooltip
   covers over 5 % of the area: it opens at the cursor, near the tile's top over its own badge. The
   recordings of 2026-10-19: the hovered tile's count in 115 of 120 and 52 of 55 frames (34 and 69 before).
-- Tooltip (`tooltip_from_boxes`): titles are Title Case texts with ≥ 3 letters (the panel's capitals and
-  icon texts are none), no SCU amount (the capacity line "Capacity: 1.00mSCU", also misread, when the
-  title went unread), up to 0.06 of the height high (a slanted line's box grows: 53 px for a 12 px text at
-  1080p). The tooltip is see-through: a tile's quality behind it shows in the title's row
+- Tooltip (`tooltip_from_boxes`): only a title the detector found (≥ 3 letters) names it, the first whose
+  cursor point lies in a tile or within 0.01 of the height next to one (the gap between two rows: read
+  216 of the 1080p recording); no title, no tooltip (before, text rules picked titles out of every box,
+  and a body line or the capacity line took the title's place when it went unread; an item's name with
+  an amount, "StorAll 2 SCU Self-", fell to them). The tooltip is see-through: a tile's quality behind it shows in the title's row
   ("Janalite 360" over a 360Q neighbour, at times in the title's own box: "Glacosite 258"), so the
   quality is the number right of the name's repeat in the chip row, else any number below the title row,
   never one in it; a trailing bare number leaves the name when the chip row repeats the name without it.
@@ -284,6 +296,49 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   (`Frame.cursor`, frame pixels; the duplicated image has no pointer). Screenshots without a cursor fall
   back to the tile with the chip's quality or whose quality the tooltip hides (near the right edge the
   tooltip is shifted left over the tile), else the one under the tooltip's cursor point.
+
+### The layout detector
+
+- **Model**: NanoDet-Plus-m (RangiLyu/nanodet, Apache-2.0; ShuffleNetV2 1.0× backbone, GhostPAN, ~1.2 M
+  parameters in the exported graph) with our weights, `companion/src-tauri/resources/layout/warehouse.onnx`
+  (5.7 MB, **in git**: nowhere else to fetch it from; compiled in like the OCR models). Input 1×3×320×480
+  BGR, normalized with the training's mean/std; output per prior point (strides 8–64) the four kinds'
+  scores and per side a distribution over 8 bins (`ocr::layout_boxes`: score ≥ 0.35, NMS 0.5 per kind).
+  Kinds: `badge` (the light box "X 14"), `quality` ("526Q"), `title` (the tooltip's first line),
+  `tipline` (its other lines). On the GPU one DirectML session (fixed shape).
+- **Training** (`companion/detector/`, Python in a uv venv; the data and the NanoDet checkout in
+  `local/detector/`, not in git): `labels.py` makes the data from debug recordings: the frames with a
+  strong fit, each scaled to 720 px height and cut into 480×320 windows (the app's window around the
+  recorded cursor and two random ones in the pane); the labels from what the recording knows (the boxes
+  of the read that recorded it, its fitted tiles, its tooltip) by the read's own rules: badges as the
+  light box (`badge_box`) around a box in the tile's badge area, quality texts in a tile's band (the
+  fitted rows extended over the frame: partly visible rows carry them too), the title (the topmost line
+  over the one the read took, when that was the chip's name) and the lines below it within the
+  tooltip's width and three lines (no tile texts). Screenshots without a warehouse (`--neg`: character
+  inventory, refinery terminal) are windows without labels: without them the detector took the
+  character inventory's "0/0" labels for badges and fitted a grid there. The last 20 % of each recording
+  are the validation (frames in a row look alike). Only for recordings of the read before the detector
+  (up to companion 1.3.1: every box with its text); newer ones hold the detector's own boxes ("[badge]",
+  "[quality]", the tooltip's lines), which `labels.py` does not take yet. `viz.py` draws the labels, `eval.py` measures an ONNX
+  (recall/precision per kind at IoU 0.5, CPU time), `errors.py` draws its misses, `shots.py` runs it
+  over screenshots without labels. The model of 2026-10-31: the recordings of 2026-10-30 (870 windows)
+  and 296 negative windows (`inventory`, `inventory 4`, `refinery flow 1–3`; `inventory 3` held out),
+  the best of 20 epochs (it had converged; the run of 40 was stopped). Validation: recall badge 98.9 %,
+  quality 100 %, title 97.5 %, line 97.4 %, precision 87–94 % (most "misses" are gaps in the labels:
+  badges the old read did not see, tooltips it did not record; the quality texts' include the held-out
+  inventory's "0/0" below the anchor score). An epoch takes ~35 s with 4 data workers on the RTX 5080
+  (the GPU's part ~5 s): NanoDet starts its workers anew every epoch, on Windows ~1 min with 10.
+- **Retraining** (once per checkout: `git clone https://github.com/RangiLyu/nanodet local/detector/nanodet`
+  (be9b4a9), `uv venv --python 3.11 local/detector/.venv`, torch/torchvision from the cu128 index,
+  `pytorch-lightning==1.9.5` and NanoDet's other requirements, `uv pip install --no-deps -e nanodet`;
+  two patches for torch 2: `nanodet/data/collate.py` `string_classes = (str,)` instead of `torch._six`,
+  `tools/export_onnx.py` `dynamo=False`):
+  every script with the venv's own `python.exe` (`-I` for ours; the bare `python3` is the Store stub):
+  `labels.py local/detector/data <recording>... --neg <dir>...`, then in `local/detector/nanodet`
+  `../.venv/Scripts/python.exe tools/train.py ../../../companion/detector/warehouse-480x320.yml` and
+  `tools/export_onnx.py --cfg_path … --model_path ../workspace/warehouse-480x320/model_best/nanodet_model_best.pth
+  --out_path … --input_shape 320,480` (height, width: the script swaps the config's order), `eval.py`
+  against the old model, then `inventory_dump` over the recordings against the read before.
 
 ### Sightings and proposals (frontend)
 
@@ -458,6 +513,9 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 
 ## OCR
 
+- The warehouse's layout detector (`Ocr::detect_layout`, our NanoDet-Plus weights in git, made on its
+  first use) runs on the same engine and threads and counts in the detector's timings: see "The layout
+  detector" under the warehouse scan.
 - `ocr.rs`: PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
   and recognizer, dictionary of 6904 characters, ~6 MB; its detector's normalization and DB thresholds
   from its inference.yml; fetched by `scripts/fetch-ocr-models.mjs` with pinned SHA-256 and compiled in
@@ -643,6 +701,12 @@ GPU process should not compete with the game; not measured yet.
   faster on the CPU, half the time on the GPU, one model's VRAM; chosen over fine-tuning (the data: one
   player, two resolutions; the cost is the detector's input, not the reading) and over a pixel-based
   tile finder like the gear scan's (the terminal's glare washes the hovered frame out).
+- **A layout detector of our own for the warehouse** (2026-10-31, the same day): tiny's detector was ~75
+  of the read's ~135 ms and every box it found was recognized (60 lines) only to sort out the few the read
+  needs. A small object detector that names each box's kind needs ~4 ms and leaves ~6–8 lines to read.
+  NanoDet-Plus-m (Apache-2.0) over Ultralytics YOLO (AGPL-3.0, which Ultralytics extends to the weights it
+  trains: the companion is distributed). Unlike fine-tuning tiny it learns the UI's shapes, not one
+  player's texts; still trained on one player's recordings (two resolutions, one other terminal checked).
 - **Manual scanning** (switched on by hand or with the overlay); **one proposal per stack or component**, nothing summed up; registering asks with
   a switch per org.
 - Identity history: per tile first, which double-counted after a scroll; then per column (equal components

@@ -12,6 +12,11 @@
 //! Simplification: boxes are axis-aligned (the refinery terminal is read frontally), no rotated text.
 //! The models are compiled into the app (the Windows release is a bare exe without resources); they
 //! come from `scripts/fetch-ocr-models.mjs` (`resources/ocr/`, not in git), which every build needs once.
+//!
+//! Besides them the warehouse's own layout detector (`detect_layout`, since 2026-10-31): a NanoDet-Plus-m
+//! trained on the warehouse's recordings (`companion/detector/`, `resources/layout/`, in git) that finds
+//! the count badges, quality texts, the tooltip's title and its other lines as boxes of their kind in a
+//! 480×320 image, in ~4 ms on the CPU where tiny's detector took ~75 ms for the same area.
 
 use fast_image_resize::images::{Image, ImageRef};
 pub use fast_image_resize::FilterType;
@@ -66,11 +71,53 @@ pub struct TextBox {
 pub struct Ocr {
     det: Engine,
     rec: Engine,
+    // The layout detector, made on its first use (only the warehouse needs it)
+    layout: Option<Engine>,
+    threads: usize,
+    on_gpu: bool,
     // Index 0 is the CTC blank
     chars: Vec<String>,
     spec: &'static Spec,
     timings: Timings,
 }
+
+/// What the layout detector finds (its classes, in the model's order).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LayoutKind {
+    /// A tile's count badge, its light box ("X 14")
+    Badge,
+    /// A tile's quality text ("526Q")
+    Quality,
+    /// The tooltip's title (its first line)
+    Title,
+    /// Another line of the tooltip ("Capacity: 1.00mSCU", the chip's name and quality, "0.001 SCU")
+    TipLine,
+}
+
+/// A box the layout detector found, with its score (0–1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Detection {
+    pub kind: LayoutKind,
+    pub score: f32,
+    pub rect: Rect,
+}
+
+/// The layout detector: NanoDet-Plus-m (Apache-2.0, RangiLyu/nanodet) with our weights, a fixed input of
+/// LAYOUT_W×LAYOUT_H in BGR with its training's mean/std (in 0–255: 103.53, 116.28, 123.675 /
+/// 57.375, 57.12, 58.395), output per prior point the classes' scores (sigmoid) and per side a
+/// distribution over LAYOUT_REG_MAX + 1 bins of the stride
+const LAYOUT_MODEL: &[u8] = include_bytes!("../resources/layout/warehouse.onnx");
+pub const LAYOUT_W: u32 = 480;
+pub const LAYOUT_H: u32 = 320;
+const LAYOUT_MEAN: [f32; 3] = [0.406, 0.456, 0.485];
+const LAYOUT_STD: [f32; 3] = [0.225, 0.224, 0.229];
+const LAYOUT_STRIDES: [u32; 4] = [8, 16, 32, 64];
+const LAYOUT_REG_MAX: usize = 7;
+const LAYOUT_KINDS: [LayoutKind; 4] = [LayoutKind::Badge, LayoutKind::Quality, LayoutKind::Title, LayoutKind::TipLine];
+/// A box counts from this score; boxes of one kind overlapping more than LAYOUT_NMS (IoU) are one
+const LAYOUT_SCORE: f32 = 0.35;
+pub const LAYOUT_NMS: f32 = 0.5;
 
 // The recognizer's input widths on the GPU (lines padded to the next; wider ones get their own)
 const REC_WIDTHS_GPU: [usize; 7] = [320, 480, 640, 960, 1280, 1920, 2560];
@@ -232,7 +279,16 @@ impl Ocr {
         let mut chars = vec![String::new()];
         chars.extend(spec.dict.lines().map(|l| l.trim_end_matches('\r').to_string()));
         chars.push(" ".into());
-        Ok(Self { det: Engine::new("det", spec.det, threads, gpu)?, rec: Engine::new("rec", spec.rec, threads, gpu)?, chars, spec, timings: Timings::default() })
+        Ok(Self {
+            det: Engine::new("det", spec.det, threads, gpu)?,
+            rec: Engine::new("rec", spec.rec, threads, gpu)?,
+            layout: None,
+            threads,
+            on_gpu: gpu,
+            chars,
+            spec,
+            timings: Timings::default(),
+        })
     }
 
     /// Whether it runs on the GPU.
@@ -254,7 +310,7 @@ impl Ocr {
         let round32 = |v: f32| (((v / 32.0).round() as u32) * 32).max(32);
         let (rw, rh) = (round32(w as f32 * ratio), round32(h as f32 * ratio));
         let resized = resize(img, rw, rh, FilterType::Bilinear);
-        let input = Tensor::from_array(([1usize, 3, rh as usize, rw as usize], to_chw_bgr(&resized, rw, self.spec))).map_err(|e| e.to_string())?;
+        let input = Tensor::from_array(([1usize, 3, rh as usize, rw as usize], to_chw_bgr(&resized, rw, self.spec.mean, self.spec.std))).map_err(|e| e.to_string())?;
         let prepared = Instant::now();
         let outputs = self.det.session("det", &[1, 3, rh as usize, rw as usize])?.run(ort::inputs![input]).map_err(|e| e.to_string())?;
         let ran = Instant::now();
@@ -275,6 +331,35 @@ impl Ocr {
         boxes.sort_by(|a, b| a.y0.total_cmp(&b.y0).then(a.x0.total_cmp(&b.x0)));
         self.timings.det_post += ran.elapsed();
         Ok(boxes)
+    }
+
+    /// The warehouse's badges, quality texts and tooltip lines in `img` (scaled to the detector's
+    /// LAYOUT_W×LAYOUT_H; the callers crop to that aspect), in `img`'s pixels. Counted in the
+    /// detector's timings.
+    pub fn detect_layout(&mut self, img: &RgbImage) -> Result<Vec<Detection>, String> {
+        let started = Instant::now();
+        if self.layout.is_none() {
+            self.layout = Some(Engine::new("layout", LAYOUT_MODEL, self.threads, self.on_gpu)?);
+        }
+        let (w, h) = img.dimensions();
+        let resized = resize(img, LAYOUT_W, LAYOUT_H, FilterType::Bilinear);
+        let shape = [1usize, 3, LAYOUT_H as usize, LAYOUT_W as usize];
+        let input = Tensor::from_array((shape, to_chw_bgr(&resized, LAYOUT_W, LAYOUT_MEAN, LAYOUT_STD))).map_err(|e| e.to_string())?;
+        let prepared = Instant::now();
+        let outputs = self.layout.as_mut().expect("made above").session("layout", &shape)?.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+        let ran = Instant::now();
+        self.timings.det_prep += prepared - started;
+        self.timings.det_run += ran - prepared;
+        self.timings.det_runs += 1;
+        let (_, out) = outputs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
+        let mut found = layout_boxes(out);
+        let (sx, sy) = (w as f32 / LAYOUT_W as f32, h as f32 / LAYOUT_H as f32);
+        for d in &mut found {
+            let r = d.rect;
+            d.rect = Rect { x0: (r.x0 * sx).clamp(0.0, w as f32), y0: (r.y0 * sy).clamp(0.0, h as f32), x1: (r.x1 * sx).clamp(0.0, w as f32), y1: (r.y1 * sy).clamp(0.0, h as f32) };
+        }
+        self.timings.det_post += ran.elapsed();
+        Ok(found)
     }
 
     /// The text in `rect` of `img` as one line, with its mean character confidence.
@@ -385,12 +470,12 @@ fn crop(img: &RgbImage, rect: Rect) -> RgbImage {
     imageops::crop_imm(img, x0, y0, cw, ch).to_image()
 }
 
-/// CHW planes in BGR order, normalized as the model's spec says.
-fn to_chw_bgr(img: &RgbImage, width: u32, spec: &Spec) -> Vec<f32> {
+/// CHW planes in BGR order, normalized as `(x/255 - mean) / std` per channel (B, G, R).
+fn to_chw_bgr(img: &RgbImage, width: u32, mean: [f32; 3], std: [f32; 3]) -> Vec<f32> {
     let plane = (img.height() * width) as usize;
     let mut data = vec![0f32; 3 * plane];
-    let scale: [f32; 3] = std::array::from_fn(|c| 1.0 / (255.0 * spec.std[c]));
-    let offset: [f32; 3] = std::array::from_fn(|c| spec.mean[c] / spec.std[c]);
+    let scale: [f32; 3] = std::array::from_fn(|c| 1.0 / (255.0 * std[c]));
+    let offset: [f32; 3] = std::array::from_fn(|c| mean[c] / std[c]);
     for (x, y, p) in img.enumerate_pixels() {
         let i = (y * width + x) as usize;
         for (c, v) in [p[2], p[1], p[0]].into_iter().enumerate() {
@@ -398,6 +483,61 @@ fn to_chw_bgr(img: &RgbImage, width: u32, spec: &Spec) -> Vec<f32> {
         }
     }
     data
+}
+
+/// The layout detector's boxes from its output (NanoDet-Plus: prior points of every stride, row by
+/// row, each with its kinds' scores and per side a distribution over the bins), above LAYOUT_SCORE,
+/// one box per overlapping group of a kind (the best scored), in input pixels.
+fn layout_boxes(out: &[f32]) -> Vec<Detection> {
+    let kinds = LAYOUT_KINDS.len();
+    let bins = LAYOUT_REG_MAX + 1;
+    let stride_of = kinds + 4 * bins;
+    let mut found: Vec<Detection> = Vec::new();
+    let mut i = 0;
+    for s in LAYOUT_STRIDES {
+        let (fw, fh) = (LAYOUT_W.div_ceil(s), LAYOUT_H.div_ceil(s));
+        for y in 0..fh {
+            for x in 0..fw {
+                let p = &out[i * stride_of..(i + 1) * stride_of];
+                i += 1;
+                let (k, &score) = p[..kinds].iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).expect("kinds");
+                if score < LAYOUT_SCORE {
+                    continue;
+                }
+                // Each side's distance: the expectation of its bins (softmax), in strides
+                let side = |n: usize| {
+                    let d = &p[kinds + n * bins..kinds + (n + 1) * bins];
+                    let max = d.iter().copied().fold(f32::MIN, f32::max);
+                    let e: Vec<f32> = d.iter().map(|v| (v - max).exp()).collect();
+                    let sum: f32 = e.iter().sum();
+                    e.iter().enumerate().map(|(b, v)| b as f32 * v).sum::<f32>() / sum * s as f32
+                };
+                let (cx, cy) = ((x * s) as f32, (y * s) as f32);
+                let rect = Rect { x0: cx - side(0), y0: cy - side(1), x1: cx + side(2), y1: cy + side(3) };
+                found.push(Detection { kind: LAYOUT_KINDS[k], score, rect });
+            }
+        }
+    }
+    nms(found, LAYOUT_NMS)
+}
+
+/// Of boxes of one kind overlapping more than `limit` (IoU) only the best scored, best first.
+pub fn nms(mut boxes: Vec<Detection>, limit: f32) -> Vec<Detection> {
+    boxes.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let mut kept: Vec<Detection> = Vec::new();
+    for d in boxes {
+        if !kept.iter().any(|k| k.kind == d.kind && iou(k.rect, d.rect) > limit) {
+            kept.push(d);
+        }
+    }
+    kept
+}
+
+fn iou(a: Rect, b: Rect) -> f32 {
+    let w = (a.x1.min(b.x1) - a.x0.max(b.x0)).max(0.0);
+    let h = (a.y1.min(b.y1) - a.y0.max(b.y0)).max(0.0);
+    let i = w * h;
+    i / (a.w() * a.h() + b.w() * b.h() - i).max(1e-6)
 }
 
 /// Boxes of the regions above the threshold in a `w`×`h` probability map (DB post-processing,
@@ -545,5 +685,30 @@ mod tests {
         let boxes = db_boxes(&prob, w, h, &TINY);
         assert_eq!(boxes.len(), 2);
         assert!(boxes.iter().all(|b| b.y0 < 5.0 && b.y1 > 12.0));
+    }
+
+    #[test]
+    fn layout_boxes_from_prior_points() {
+        let per = LAYOUT_KINDS.len() + 4 * (LAYOUT_REG_MAX + 1);
+        let points: u32 = LAYOUT_STRIDES.iter().map(|s| LAYOUT_W.div_ceil(*s) * LAYOUT_H.div_ceil(*s)).sum();
+        let mut out = vec![0f32; points as usize * per];
+        // A quality text at the stride-8 point (10, 5), every side 2 bins (16 px) away, and a weaker
+        // neighbour on almost the same box; a badge somewhere else below the score
+        let mut set = |point: usize, kind: usize, score: f32, bins: [usize; 4]| {
+            let p = &mut out[point * per..(point + 1) * per];
+            p[kind] = score;
+            for (side, b) in bins.into_iter().enumerate() {
+                p[LAYOUT_KINDS.len() + side * (LAYOUT_REG_MAX + 1) + b] = 20.0;
+            }
+        };
+        let fw = LAYOUT_W.div_ceil(8) as usize;
+        set(5 * fw + 10, 1, 0.9, [2, 2, 2, 2]);
+        set(5 * fw + 11, 1, 0.6, [3, 2, 1, 2]);
+        set(9 * fw + 30, 0, 0.2, [1, 1, 1, 1]);
+        let found = layout_boxes(&out);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].kind, LayoutKind::Quality);
+        let r = found[0].rect;
+        assert!((r.x0 - 64.0).abs() < 0.1 && (r.y0 - 24.0).abs() < 0.1 && (r.x1 - 96.0).abs() < 0.1 && (r.y1 - 56.0).abs() < 0.1, "{r:?}");
     }
 }

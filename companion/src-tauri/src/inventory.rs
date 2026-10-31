@@ -11,14 +11,16 @@
 //! fixed on the screen. The grid is fitted per frame: the detected badge boxes and quality texts are
 //! anchors, each implying its tile's corner for a given pitch; the pitch and phase with the most
 //! agreeing anchors win (per axis), and the four consecutive columns with the most anchors are the
-//! warehouse's. The first read of a session sees the whole pane right of the screen centre (the
-//! elevator pane on the left is ignored); once a layout is known, only the area around the cursor
-//! (the hovered tile's and its neighbours' anchors, the tooltip's window) is read, with the last
-//! layout's pitch as the prior, scaled up for PP-OCRv6 tiny (since 2026-10-31; small
-//! read the whole pane before, at ~3× the time). The hovered tile's badge (upscaled) and quality band
-//! are then recognized on their own (the detector merges and misses small texts). The hovered tile
-//! is the one under the cursor, in screenshots the one under the tooltip's cursor point (a little up
-//! and left of the title).
+//! warehouse's. The anchors and the tooltip's lines come from the warehouse's own layout detector
+//! (`Ocr::detect_layout`, since 2026-10-31: badges and quality texts as boxes of their kind, nothing
+//! recognized for the fit; PP-OCRv6 tiny's detector and the recognition of every box found took
+//! ~130 ms before). It sees windows of the frame scaled to LAYOUT_FRAME_H: the first read of a
+//! session the whole pane right of the screen centre in overlapping windows (the elevator pane on
+//! the left is ignored); once a layout is known, one window around the cursor (the hovered tile's and
+//! its neighbours' anchors, the tooltip's window), with the last layout's pitch as the prior. Then
+//! only the tooltip's lines, the hovered tile's badge (upscaled) and quality band are recognized. The
+//! hovered tile is the one under the cursor, in screenshots the one under the tooltip's cursor point
+//! (a little up and left of the title).
 //!
 //! Anything unexpected yields fewer tiles or `None` fields, never a panic.
 
@@ -27,7 +29,7 @@ use image::RgbImage;
 use serde::Serialize;
 
 use crate::locale::norm;
-use crate::ocr::{resize, FilterType, Ocr, Rect, TextBox};
+use crate::ocr::{nms, resize, Detection, FilterType, LayoutKind, Ocr, Rect, TextBox, LAYOUT_H, LAYOUT_NMS, LAYOUT_W};
 
 /// The warehouse pane lies right of this share of the frame's width
 const PANE_LEFT: f32 = 0.45;
@@ -39,26 +41,27 @@ const GRID_BOTTOM: f32 = 0.84;
 /// bottom row tile
 const READ_TOP: f32 = 0.25;
 const READ_BOTTOM: f32 = 0.95;
-/// The detector sees its crop scaled as if the frame were this high (×1.5 at 1600 px): PP-OCRv6 tiny
-/// misses the badges' small texts at native size
-const DET_HEIGHT: f32 = 2400.0;
-/// With a cursor and a known layout only the area around the cursor is read: this many pitches left
-/// and up of it (the hovered tile's anchors and its neighbours'), the tooltip's window right and
-/// below (it opens at the cursor: up to 0.47 h right, 0.26 h down, shares of the height). The area's
-/// size is rounded up to AREA_STEP pixels: one detector shape (one GPU session) per layout
+/// The layout detector's windows: LAYOUT_W×LAYOUT_H of the frame scaled to this height (as it was
+/// trained; at 1080p a window is 720×480 frame pixels), overlapping by WINDOW_OVERLAP (detector
+/// pixels) where they cover the pane
+const LAYOUT_FRAME_H: f32 = 720.0;
+const WINDOW_OVERLAP: f32 = 40.0;
+/// The tooltip's lines and the quality text are recognized scaled up as if the frame were this high
+/// (×1.5 at 1600 px)
+const LINE_HEIGHT: f32 = 2400.0;
+/// A detected quality text is read with this share of its height around it
+const QUALITY_PAD: f32 = 0.25;
+/// Badges and quality texts anchor the fit from this detector score: the character inventory's "0/0"
+/// labels came as both up to 0.5 and fitted a grid there (screenshots of 2026-10-18), the warehouse's
+/// anchors score above it 97 % of the time
+const ANCHOR_SCORE: f32 = 0.55;
+/// With a cursor and a known layout one window is read, its top left this many pitches left and up
+/// of the cursor (the hovered tile's anchors and its neighbours'); the rest of it holds the tooltip's
+/// window right and below (as in training)
 const AROUND: f32 = 1.6;
-const AREA_RIGHT: f32 = 0.50;
-const AREA_BELOW: f32 = 0.28;
-const AREA_STEP: f32 = 64.0;
-/// Height of a badge or quality text (shares of the frame height; PP-OCRv6 tiny's boxes are a little
-/// smaller than small's: a badge 18 px high at 1600 px)
+/// Height of a text line (shares of the frame height: a badge 18 px high at 1600 px)
 const TEXT_MIN_H: f32 = 0.011;
 const TEXT_MAX_H: f32 = 0.032;
-/// A tooltip title's box may be taller: the terminal hangs tilted in the world, a long line's
-/// axis-aligned box grows with its slant (1080p: 53 px for a 12 px text)
-const TITLE_MAX_H: f32 = 0.06;
-/// Badge boxes at most this wide
-const BADGE_MAX_W: f32 = 0.06;
 /// Pitch candidates (shares of the frame height) and the step between them (1080p 16:9 with the
 /// terminal at arm's length: 0.13)
 const PITCH_MIN: f32 = 0.10;
@@ -87,8 +90,8 @@ const QUALITY_BOTTOM: f32 = 0.92;
 /// tile (reaching into the gaps around it: the fitted edges are a few pixels off)
 const QUALITY_BAND: (f32, f32, f32, f32) = (-0.08, 0.76, 0.55, 1.02);
 const BADGE_AREA: (f32, f32, f32, f32) = (0.66, -0.02, 1.06, 0.19);
-/// Where a detected badge box is looked for: the badge area with room for the fit's error (right of
-/// the tile's middle: the quality text of the tile above sits at the left)
+/// Where a detected badge is looked for: the badge area with room for the fit's error (right of the
+/// tile's middle: the quality text of the tile above sits at the left)
 const BADGE_SEARCH: (f32, f32, f32, f32) = (0.55, -0.15, 1.12, 0.32);
 /// The badge crops are upscaled by this before recognition (small text in a dark box)
 const BADGE_SCALE: u32 = 3;
@@ -302,48 +305,6 @@ pub fn parse_scu(text: &str) -> Option<String> {
     ok.then_some(number)
 }
 
-/// Whether a text holds an SCU amount, also misread: a digit followed (a space and the milli's "m"
-/// aside) by "sc" ("1.00SCU", "1.00mSCU", "10scCUu", ".220scu").
-fn has_scu_amount(text: &str) -> bool {
-    let t: Vec<char> = text.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
-    t.windows(3).any(|w| w[0].is_ascii_digit() && w[1] == 's' && w[2] == 'c') || t.windows(4).any(|w| w[0].is_ascii_digit() && w[1] == 'm' && w[2] == 's' && w[3] == 'c')
-}
-
-fn is_text_sized(b: &TextBox, s: f32) -> bool {
-    b.rect.h() >= TEXT_MIN_H * s && b.rect.h() <= TEXT_MAX_H * s
-}
-
-fn is_badge_box(b: &TextBox, s: f32) -> bool {
-    is_text_sized(b, s) && b.rect.w() <= BADGE_MAX_W * s && parse_badge(&b.text).is_some()
-}
-
-fn is_quality_box(b: &TextBox, s: f32) -> bool {
-    is_text_sized(b, s) && b.text.split_whitespace().next().and_then(parse_quality).is_some()
-}
-
-/// A tile's quality text as a fit anchor: with its Q, read as a letter or a fourth digit ("526Q",
-/// "5260"). A bare number ("526") is the tooltip chip's quality, which pulled the fit columns off.
-fn is_quality_anchor(b: &TextBox, s: f32) -> bool {
-    is_quality_box(b, s) && b.text.split_whitespace().next().is_some_and(|t| t.chars().count() >= 4)
-}
-
-/// Whether a detected box may be a tooltip's title: an item name (Title Case: at least three
-/// letters, one of them lower case), not a tile's own text (badge, quality, the info icon, the
-/// small labels), not the tooltip's amount ("0.263 sCU") and not one of the panel's or an icon's
-/// capitals ("CLEAR", "CITIZENCON").
-fn is_title_box(b: &TextBox, s: f32) -> bool {
-    let letters = b.text.chars().filter(|c| c.is_ascii_alphabetic()).count();
-    b.rect.h() >= TEXT_MIN_H * s
-        && b.rect.h() <= TITLE_MAX_H * s
-        && letters >= 3
-        && b.text.chars().any(|c| c.is_ascii_lowercase())
-        && parse_badge(&b.text).is_none()
-        && parse_scu(&b.text).is_none()
-        // The capacity line ("Capacity: 1.00SCU", misread "Caacty,10scCUu") when the title went unread
-        && !has_scu_amount(&b.text)
-        && !is_quality_box(b, s)
-        && !norm(&b.text).is_empty()
-}
 
 // --- the grid fit ----------------------------------------------------------------------------------
 
@@ -435,27 +396,26 @@ fn columns(phase: f32, pitch: f32, xs: &[Anchor], frame_w: f32, last: Option<&La
     Some(candidates[start..start + n].to_vec())
 }
 
-/// The grid's layout from the detected boxes: the badges and quality texts right of the screen
-/// centre as anchors; `last` is the last strong read's layout: a weak fit keeps its pitch, ties
-/// between column windows go to its columns. `None` without any anchor, or without a column with
-/// one. The layout's `weight` tells how strong the weaker axis' fit was.
-pub fn layout_from_boxes(boxes: &[TextBox], frame_w: f32, frame_h: f32, last: Option<&Layout>) -> Option<Layout> {
+/// The grid's layout from the detected badges and quality texts right of the screen centre as
+/// anchors; `last` is the last strong read's layout: a weak fit keeps its pitch, ties between column
+/// windows go to its columns. `None` without any anchor, or without a column with one. The layout's
+/// `weight` tells how strong the weaker axis' fit was.
+pub fn layout_from_anchors(badges: &[Rect], qualities: &[Rect], frame_w: f32, frame_h: f32, last: Option<&Layout>) -> Option<Layout> {
     let s = frame_h;
-    let in_pane = |b: &TextBox| b.rect.x0 >= PANE_LEFT * frame_w && b.rect.y0 >= GRID_TOP * s && b.rect.y1 <= GRID_BOTTOM * s;
-    let badges: Vec<&TextBox> = boxes.iter().filter(|b| in_pane(b) && is_badge_box(b, s)).collect();
-    let qualities: Vec<&TextBox> = boxes.iter().filter(|b| in_pane(b) && is_quality_anchor(b, s)).collect();
+    let in_pane = |r: &&Rect| r.x0 >= PANE_LEFT * frame_w && r.y0 >= GRID_TOP * s && r.y1 <= GRID_BOTTOM * s;
+    let badges: Vec<&Rect> = badges.iter().filter(in_pane).collect();
+    let qualities: Vec<&Rect> = qualities.iter().filter(in_pane).collect();
     let xs: Vec<Anchor> = badges
         .iter()
-        .map(|b| Anchor { base: b.rect.x1, factor: BADGE_RIGHT, weight: 1 })
-        .chain(qualities.iter().map(|b| Anchor { base: b.rect.x0, factor: QUALITY_LEFT, weight: 2 }))
+        .map(|r| Anchor { base: r.x1, factor: BADGE_RIGHT, weight: 1 })
+        .chain(qualities.iter().map(|r| Anchor { base: r.x0, factor: QUALITY_LEFT, weight: 2 }))
         .collect();
     let ys: Vec<Anchor> = badges
         .iter()
-        .map(|b| Anchor { base: b.rect.y0, factor: BADGE_TOP, weight: 1 })
-        .chain(qualities.iter().map(|b| Anchor { base: b.rect.y1, factor: QUALITY_BOTTOM, weight: 2 }))
+        .map(|r| Anchor { base: r.y0, factor: BADGE_TOP, weight: 1 })
+        .chain(qualities.iter().map(|r| Anchor { base: r.y1, factor: QUALITY_BOTTOM, weight: 2 }))
         .collect();
-    // A single anchor (the tooltip chip's number is a quality-like text too) fits anything without a
-    // prior; with one it sets the phase
+    // A single anchor fits anything without a prior; with one it sets the phase
     let (pitch_x, phase_x, weight_x) = fit_or_lock(&xs, (PITCH_MIN * s, PITCH_MAX * s), last.map(|l| l.pitch_x))?;
     let cols = columns(phase_x, pitch_x, &xs, frame_w, last)?;
     // Rows only a little tighter than the columns
@@ -471,24 +431,23 @@ pub fn layout_from_boxes(boxes: &[TextBox], frame_w: f32, frame_h: f32, last: Op
     Some(Layout { cols, rows, pitch_x, pitch_y, weight })
 }
 
-/// The tooltip: its title is a text that is no tile's own and whose cursor point (a little up and
-/// left of it) lies in a tile; the lines below it within the tooltip's reach may hold the material's
-/// "Capacity" line, the chip "<name>" "<quality>" and the amount. Returns the tooltip and the index
-/// of the hovered tile.
-fn tooltip_from_boxes(boxes: &[TextBox], tiles: &[Rect], frame_h: f32) -> Option<(Tooltip, usize)> {
+/// The tooltip: its title is the first of the detector's `titles` (read; at least three letters)
+/// whose cursor point (a little up and left of it) lies in a tile or in the gap next to one; the
+/// `lines` below it within the tooltip's reach may hold the material's "Capacity" line, the chip
+/// "<name>" "<quality>" and the amount. Returns the tooltip and the index of the hovered tile.
+fn tooltip_from_boxes(titles: &[TextBox], lines: &[TextBox], tiles: &[Rect], frame_h: f32) -> Option<(Tooltip, usize)> {
     let s = frame_h;
-    let (title, hovered) = boxes
-        .iter()
-        .filter(|b| is_title_box(b, s))
-        .find_map(|b| {
-            let (cx, cy) = (b.rect.x0 - CURSOR_OFFSET * s, b.rect.y0 - CURSOR_OFFSET * s);
-            tiles.iter().position(|t| contains(*t, cx, cy)).map(|i| (b, i))
-        })?;
+    let near = CURSOR_OFFSET * s;
+    let (title, hovered) = titles.iter().filter(|b| b.text.chars().filter(|c| c.is_alphabetic()).count() >= 3).find_map(|b| {
+        let (cx, cy) = (b.rect.x0 - near, b.rect.y0 - near);
+        let dist = |t: &Rect| (t.x0 - cx).max(cx - t.x1).max(0.0).hypot((t.y0 - cy).max(cy - t.y1).max(0.0));
+        let nearest = (0..tiles.len()).min_by(|&i, &j| dist(&tiles[i]).total_cmp(&dist(&tiles[j])));
+        tiles.iter().position(|t| contains(*t, cx, cy)).or(nearest.filter(|&i| dist(&tiles[i]) <= near)).map(|i| (b, i))
+    })?;
     // A slanted title's box is taller than its line
     let line = title.rect.h().clamp(TEXT_MIN_H * s, TEXT_MAX_H * s);
-    let group: Vec<&TextBox> = boxes
-        .iter()
-        .filter(|b| b.rect.x0 > title.rect.x0 - 2.0 * line && b.rect.x0 < title.rect.x1 + 12.0 * line && b.rect.y0 >= title.rect.y0 && b.rect.y0 < title.rect.y1 + 6.0 * line)
+    let group: Vec<&TextBox> = std::iter::once(title)
+        .chain(lines.iter().filter(|b| b.rect.x0 > title.rect.x0 - 2.0 * line && b.rect.x0 < title.rect.x1 + 12.0 * line && b.rect.y0 >= title.rect.y0 && b.rect.y0 < title.rect.y1 + 6.0 * line))
         .collect();
     let digits = |t: &str| (!t.is_empty() && t.chars().all(|c| c.is_ascii_digit())).then(|| t.parse::<u32>().ok()).flatten().filter(|q| (1..=1000).contains(q));
     let mut quality = None;
@@ -613,72 +572,111 @@ fn badge_box(frame: &RgbImage, rect: Rect) -> Option<Rect> {
     Some(Rect { x0: (x0 + bx0 as u32) as f32, y0: (y0 + by0 as u32) as f32, x1: (x0 + bx1 as u32 + 1) as f32, y1: (y0 + by1 as u32 + 1) as f32 })
 }
 
-/// Reads the warehouse grid in `frame`: the detector over the pane right of the screen centre, or,
-/// with the mouse `cursor` (frame pixels) and the `last` layout, over the area around the cursor
-/// only (the hovered tile's and its neighbours' anchors, the tooltip's window), scaled up for tiny;
-/// the layout from its badges and quality texts (a weak fit keeps the last layout's pitch), then
-/// the hovered tile's quality band and badge (every tile's with
-/// `all_badges`, for the debug view, or without a cursor; both upscaled) recognized from the frame,
-/// and the tooltip. Every cell is a tile (unread fields None). The hovered tile is the one under the
-/// cursor when the capture knows it; else (screenshots) the one with the tooltip chip's quality or
-/// whose quality the tooltip hides, else the one under the tooltip's cursor point. `None` when no
-/// grid is in view.
+/// The text lines in `rects` of `frame`, each scaled up as if the frame were LINE_HEIGHT high (tiny
+/// misspells them at native size: "Dalivine").
+fn read_lines(ocr: &mut Ocr, frame: &RgbImage, rects: &[Rect]) -> Result<Vec<(String, f32)>, String> {
+    let up = (LINE_HEIGHT / frame.height() as f32).max(1.0);
+    let crops: Vec<RgbImage> = rects
+        .iter()
+        .map(|&r| {
+            let c = crop(frame, r);
+            resize(&c, (c.width() as f32 * up) as u32, (c.height() as f32 * up) as u32, FilterType::CatmullRom)
+        })
+        .collect();
+    ocr.recognize_images(&crops)
+}
+
+/// The layout detector's windows over `frame` (frame pixels, of the detector's aspect): one around
+/// the `cursor` when the `last` layout is known, else overlapping ones over the whole `pane`.
+fn windows(pane: Rect, frame_h: f32, cursor: Option<(f32, f32)>, last: Option<&Layout>) -> Vec<Rect> {
+    let k = frame_h / LAYOUT_FRAME_H;
+    let (ww, wh) = (LAYOUT_W as f32 * k, LAYOUT_H as f32 * k);
+    // Shifted to stay inside the pane (a pane narrower than a window: at its left)
+    let at = |x0: f32, y0: f32| {
+        let x0 = x0.min(pane.x1 - ww).max(pane.x0);
+        let y0 = y0.min(pane.y1 - wh).max(pane.y0);
+        Rect { x0, y0, x1: x0 + ww, y1: y0 + wh }
+    };
+    if let (Some((cx, cy)), Some(l)) = (cursor, last) {
+        return vec![at(cx - AROUND * l.pitch_x, cy - AROUND * l.pitch_y)];
+    }
+    // As few windows per axis as cover it with the overlap, spread evenly
+    let starts = |from: f32, len: f32, win: f32| -> Vec<f32> {
+        let n = ((len - win) / (win - WINDOW_OVERLAP * k)).ceil().max(0.0) as usize + 1;
+        (0..n).map(|i| if n == 1 { from } else { from + (len - win).max(0.0) * i as f32 / (n - 1) as f32 }).collect()
+    };
+    let ys = starts(pane.y0, pane.h(), wh);
+    starts(pane.x0, pane.w(), ww).into_iter().flat_map(|x| ys.iter().map(move |&y| at(x, y))).collect()
+}
+
+/// Reads the warehouse grid in `frame`: the layout detector over the pane right of the screen centre,
+/// or, with the mouse `cursor` (frame pixels) and the `last` layout, around the cursor only (see
+/// `windows`); the layout from its badges and quality texts (a weak fit keeps the last layout's
+/// pitch), then the tooltip's lines, the hovered tile's quality band and badge (every tile's with
+/// `all_badges`, for the debug view, or without a cursor; both upscaled) recognized from the frame.
+/// Every cell is a tile (unread fields None). The hovered tile is the one under the cursor when the
+/// capture knows it; else (screenshots) the one with the tooltip chip's quality or whose quality the
+/// tooltip hides, else the one under the tooltip's cursor point. `None` when no grid is in view. The
+/// boxes (for the debug view): the anchors as "[badge]" and "[quality]", the tooltip's lines read.
 pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, last: Option<&Layout>, all_badges: bool) -> Result<(Option<Grid>, Vec<TextBox>), String> {
     let (w, h) = frame.dimensions();
     let s = h as f32;
-    // Only the grid's height and the tooltips' room below it: the search, filter and capacity rows
-    // above cost recognition time (~1 s per read on 3840×1600 before)
+    // Only the grid's height and the tooltips' room below it (the search, filter and capacity rows
+    // above hold nothing of the grid)
     let pane = Rect { x0: PANE_LEFT * w as f32, y0: READ_TOP * s, x1: w as f32, y1: (READ_BOTTOM * s).min(s) };
-    let area = match (cursor, last) {
-        (Some((cx, cy)), Some(l)) => {
-            let step = |v: f32| (v / AREA_STEP).ceil() * AREA_STEP;
-            let aw = step(AROUND * l.pitch_x + AREA_RIGHT * s).min(pane.w());
-            let ah = step(AROUND * l.pitch_y + (AREA_BELOW * s).max(AROUND * l.pitch_y)).min(pane.h());
-            // Of a fixed size, shifted to stay inside the pane
-            let x0 = (cx - AROUND * l.pitch_x).clamp(pane.x0, pane.x1 - aw);
-            let y0 = (cy - AROUND * l.pitch_y).clamp(pane.y0, pane.y1 - ah);
-            Rect { x0, y0, x1: x0 + aw, y1: y0 + ah }
-        }
-        _ => pane,
-    };
-    let scale = (DET_HEIGHT / s).max(1.0);
-    let (ox, oy) = (area.x0.max(0.0), area.y0.max(0.0));
-    let scaled = {
-        let c = crop(frame, area);
-        resize(&c, (c.width() as f32 * scale) as u32, (c.height() as f32 * scale) as u32, FilterType::CatmullRom)
-    };
-    let found = ocr.detect(&scaled, scaled.height())?;
-    let mut texts = ocr.recognize_all(&scaled, &found)?;
-    let rects: Vec<Rect> = found.iter().map(|r| Rect { x0: ox + r.x0 / scale, y0: oy + r.y0 / scale, x1: ox + r.x1 / scale, y1: oy + r.y1 / scale }).collect();
-    // Boxes of a badge's size the general read took for no badge: read again on the light box around
-    // them as a badge's characters only, taken with digits ("X1"). PP-OCRv6 tiny read most badges as
-    // nothing or an icon there, and the fit lacked its anchors
-    let again: Vec<(usize, Rect)> = (0..rects.len())
-        .filter(|&i| {
-            let r = rects[i];
-            r.h() >= TEXT_MIN_H * s && r.h() <= TEXT_MAX_H * s && r.w() <= BADGE_MAX_W * s && parse_badge(&texts[i].0).is_none()
-        })
-        .filter_map(|i| {
-            let (r, m) = (rects[i], rects[i].h() * 0.5);
-            badge_box(frame, Rect { x0: r.x0 - m, y0: r.y0 - m, x1: r.x1 + m, y1: r.y1 + m }).map(|b| (i, b))
-        })
-        .collect();
-    let reads = ocr.recognize_images_only(&again.iter().map(|&(_, b)| upscaled_badge(frame, b)).collect::<Vec<_>>(), BADGE_CHARS)?;
-    for (&(i, _), (text, score)) in again.iter().zip(reads) {
-        if score >= MIN_SCORE && parse_badge(&text).is_some_and(|(_, uncertain)| !uncertain) {
-            texts[i] = (text, score);
+    let mut found: Vec<Detection> = Vec::new();
+    for win in windows(pane, s, cursor, last) {
+        let (ox, oy) = (win.x0.max(0.0).floor(), win.y0.max(0.0).floor());
+        for mut d in ocr.detect_layout(&crop(frame, win))? {
+            d.rect = Rect { x0: ox + d.rect.x0, y0: oy + d.rect.y0, x1: ox + d.rect.x1, y1: oy + d.rect.y1 };
+            found.push(d);
         }
     }
-    let boxes: Vec<TextBox> = rects.into_iter().zip(texts).filter(|(_, (t, _))| !t.trim().is_empty()).map(|(rect, (text, score))| TextBox { rect, text, score }).collect();
-    let Some(layout) = layout_from_boxes(&boxes, w as f32, s, last) else { return Ok((None, boxes)) };
+    // One box where windows overlap
+    let found = nms(found, LAYOUT_NMS);
+    let of = |kind: LayoutKind| -> Vec<Detection> { found.iter().filter(|d| d.kind == kind).copied().collect() };
+    let anchors = |kind: LayoutKind| -> Vec<Detection> { of(kind).into_iter().filter(|d| d.score >= ANCHOR_SCORE).collect() };
+    let (badges, qualities) = (anchors(LayoutKind::Badge), anchors(LayoutKind::Quality));
+    let mut boxes: Vec<TextBox> = badges
+        .iter()
+        .map(|d| TextBox { rect: d.rect, text: "[badge]".into(), score: d.score })
+        .chain(qualities.iter().map(|d| TextBox { rect: d.rect, text: "[quality]".into(), score: d.score }))
+        .collect();
+    let rects = |ds: &[Detection]| -> Vec<Rect> { ds.iter().map(|d| d.rect).collect() };
+    let Some(layout) = layout_from_anchors(&rects(&badges), &rects(&qualities), w as f32, s, last) else { return Ok((None, boxes)) };
     let positions: Vec<(usize, usize)> = (0..layout.rows.len()).flat_map(|r| (0..layout.cols.len()).map(move |c| (r, c))).collect();
     let tile_rects: Vec<Rect> = positions.iter().map(|&(r, c)| layout.tile_rect(r, c)).collect();
-    let tooltip = tooltip_from_boxes(&boxes, &tile_rects, s);
+    // The tooltip's lines, its titles first (best scored first), each scaled up as if the frame were
+    // LINE_HEIGHT high: tiny misspells them at native size ("Dalivine")
+    let tip: Vec<Detection> = of(LayoutKind::Title).into_iter().chain(of(LayoutKind::TipLine)).collect();
+    let texts = read_lines(ocr, frame, &rects(&tip))?;
+    let (mut titles, mut lines) = (Vec::new(), Vec::new());
+    for (d, (text, score)) in tip.into_iter().zip(texts).filter(|(_, (t, _))| !t.trim().is_empty()) {
+        let b = TextBox { rect: d.rect, text, score };
+        if d.kind == LayoutKind::Title { titles.push(b) } else { lines.push(b) }
+    }
+    // Only a title the detector found names the tooltip (a body line like "Registered To You" took
+    // the title's place when it went unread)
+    let tooltip = tooltip_from_boxes(&titles, &lines, &tile_rects, s);
+    boxes.extend(titles);
+    boxes.extend(lines);
     // The hovered tile's quality (every tile's without a cursor: the hovered rule needs them)
     let under_cursor = cursor.and_then(|(cx, cy)| tile_rects.iter().position(|t| contains(*t, cx, cy)));
     let read: Vec<usize> = if cursor.is_some() { under_cursor.into_iter().collect() } else { (0..positions.len()).collect() };
-    let quality_rects: Vec<Rect> = tile_rects.iter().map(|&t| part(t, QUALITY_BAND)).collect();
-    let read_texts = ocr.recognize_all(frame, &read.iter().map(|&i| quality_rects[i]).collect::<Vec<_>>())?;
+    // The quality text the detector found in the tile's band (a little grown), else the whole band
+    // (it reached into a tooltip's edge next to it: "37104")
+    let quality_rects: Vec<Rect> = tile_rects
+        .iter()
+        .map(|&t| {
+            let band = part(t, QUALITY_BAND);
+            let found = qualities.iter().filter(|d| contains(band, d.rect.cx(), d.rect.cy())).max_by(|a, b| a.score.total_cmp(&b.score));
+            found.map_or(band, |d| {
+                let m = QUALITY_PAD * d.rect.h();
+                Rect { x0: d.rect.x0 - m, y0: d.rect.y0 - m, x1: d.rect.x1 + m, y1: d.rect.y1 + m }
+            })
+        })
+        .collect();
+    let read_texts = read_lines(ocr, frame, &read.iter().map(|&i| quality_rects[i]).collect::<Vec<_>>())?;
     let mut quality_texts: Vec<Option<(String, f32)>> = vec![None; positions.len()];
     for (&i, t) in read.iter().zip(read_texts) {
         quality_texts[i] = Some(t);
@@ -710,20 +708,18 @@ pub fn read_grid(ocr: &mut Ocr, frame: &RgbImage, cursor: Option<(f32, f32)>, la
     let mut badge_rects: Vec<(usize, Rect)> = Vec::new();
     for &i in &wanted {
         let area = part(tile_rects[i], BADGE_AREA);
-        // The fitted grid can sit ~30 px off the tiles, the general model reads "X 2" as "xa": any box
-        // of a badge's size around the corner counts, the nearest to where the badge should be. It is
-        // read first: with digits in both reads, the first wins, and the box sits on the badge
+        // The fitted grid can sit ~30 px off the tiles: a detected badge around the corner counts, the
+        // nearest to where the badge should be. It is read first: with digits in both reads, the
+        // first wins, and the box sits on the badge
         let search = part(tile_rects[i], BADGE_SEARCH);
-        let dist = |b: &&TextBox| (b.rect.cx() - area.cx()).abs() + (b.rect.cy() - area.cy()).abs();
-        let found = boxes
-            .iter()
-            .filter(|b| is_text_sized(b, s) && b.rect.w() <= BADGE_MAX_W * s && contains(search, b.rect.cx(), b.rect.cy()))
-            .min_by(|a, b| dist(a).total_cmp(&dist(b)));
+        let dist = |d: &&Detection| (d.rect.cx() - area.cx()).abs() + (d.rect.cy() - area.cy()).abs();
+        let found = badges.iter().filter(|d| contains(search, d.rect.cx(), d.rect.cy())).min_by(|a, b| dist(a).total_cmp(&dist(b)));
         // More room on the right (a share of its height): a digit at the crop's edge is read as "8"
         // or lost ("X 6" -> "X8", "X")
-        if let Some(b) = found {
-            let right = BADGE_PAD.max(BADGE_RIGHT_PAD * b.rect.h());
-            badge_rects.push((i, Rect { x0: b.rect.x0 - BADGE_PAD, y0: b.rect.y0 - BADGE_PAD, x1: b.rect.x1 + right, y1: b.rect.y1 + BADGE_PAD }));
+        if let Some(d) = found {
+            let r = d.rect;
+            let right = BADGE_PAD.max(BADGE_RIGHT_PAD * r.h());
+            badge_rects.push((i, Rect { x0: r.x0 - BADGE_PAD, y0: r.y0 - BADGE_PAD, x1: r.x1 + right, y1: r.y1 + BADGE_PAD }));
         }
         badge_rects.push((i, area));
     }
@@ -794,16 +790,6 @@ mod tests {
     }
 
     #[test]
-    fn scu_amounts_are_no_title() {
-        for t in ["Capacity: 1.00SCU", "Capacity: 1.00mSCU", "Caacty,10scCUu", "Capeciy .220scu", "0.263 sCU"] {
-            assert!(has_scu_amount(t), "{t}");
-        }
-        for t in ["Hephaestanite", "Mil/3/A Blizzard", "Year of the Rat Envelope", "Discord Scarf"] {
-            assert!(!has_scu_amount(t), "{t}");
-        }
-    }
-
-    #[test]
     fn qualities() {
         assert_eq!(parse_quality("523Q"), Some((523, false)));
         assert_eq!(parse_quality("523 Q"), Some((523, false)));
@@ -847,6 +833,14 @@ mod tests {
 
     fn tb(x0: f32, y0: f32, w: f32, h: f32, text: &str) -> TextBox {
         TextBox { rect: Rect { x0, y0, x1: x0 + w, y1: y0 + h }, text: text.into(), score: 1.0 }
+    }
+
+    /// The fit over text boxes as the layout detector would have sorted them: badges and the tiles'
+    /// quality texts (with their Q; a bare number is the tooltip chip's) as anchors.
+    fn layout_from_boxes(boxes: &[TextBox], frame_w: f32, frame_h: f32, last: Option<&Layout>) -> Option<Layout> {
+        let badges: Vec<Rect> = boxes.iter().filter(|b| parse_badge(&b.text).is_some()).map(|b| b.rect).collect();
+        let qualities: Vec<Rect> = boxes.iter().filter(|b| b.text.ends_with('Q') && parse_quality(&b.text).is_some()).map(|b| b.rect).collect();
+        layout_from_anchors(&badges, &qualities, frame_w, frame_h, last)
     }
 
     /// The live frame of 2026-10-18 (3840×1600): badges at a pitch of ~275 px, rows ~250 px apart,
@@ -925,22 +919,27 @@ mod tests {
         let boxes = live_boxes();
         let l = layout_from_boxes(&boxes, 3840.0, 1600.0, None).unwrap();
         let tiles: Vec<Rect> = (0..l.rows.len()).flat_map(|r| (0..4).map(move |c| (r, c))).map(|(r, c)| l.tile_rect(r, c)).collect();
-        let (t, hovered) = tooltip_from_boxes(&boxes, &tiles, 1600.0).expect("tooltip");
+        // The detector's title "Hephaestanite" and the tooltip's other lines
+        let (t, hovered) = tooltip_from_boxes(&boxes[14..15], &boxes[15..], &tiles, 1600.0).expect("tooltip");
         assert_eq!((t.name.as_str(), t.quality, t.scu.as_deref()), ("Hephaestanite", Some(572), Some("0.263")));
         // The title at (2786, 930): the cursor at (2770, 914) is in the row starting near 753, column 2
         let (row, col) = (hovered / 4, hovered % 4);
         assert_eq!(col, 2);
         assert!((l.rows[row] - 753.0).abs() < 15.0, "{}", l.rows[row]);
         assert!(t.rect.x1 >= 3153.0 && t.rect.y1 >= 1020.0);
-        // An item's tooltip: the title alone; an icon's capitals and the panel's labels are no titles
-        let mut item = live_boxes();
-        item.truncate(14);
-        item.push(tb(2500.0, 660.0, 140.0, 28.0, "CITIZENCON"));
-        item.push(tb(2300.0, 820.0, 240.0, 30.0, "RediMake Item Fabricator"));
-        item.push(tb(2300.0, 860.0, 160.0, 24.0, "Registered To You"));
-        let (t, hovered) = tooltip_from_boxes(&item, &tiles, 1600.0).expect("tooltip");
+        // An item's tooltip: the title and a body line
+        let title = [tb(2300.0, 820.0, 240.0, 30.0, "RediMake Item Fabricator")];
+        let (t, hovered) = tooltip_from_boxes(&title, &[tb(2300.0, 860.0, 160.0, 24.0, "Registered To You")], &tiles, 1600.0).expect("tooltip");
         assert_eq!((t.name.as_str(), t.quality, t.scu), ("RediMake Item Fabricator", None, None));
         assert_eq!(hovered % 4, 1);
+        // An item's name with an amount in it ("StorAll 2 SCU Self-"), its cursor point in the gap
+        // a little above a tile's top (1080p recording of 2026-10-30, read 216: 2 px): still the
+        // title, of the tile below
+        let title = [tb(l.cols[2] + 40.0, l.rows[row] - 3.0 + 0.01 * 1600.0, 300.0, 30.0, "StorAll 2 SCU Self-")];
+        let (t, hovered) = tooltip_from_boxes(&title, &[], &tiles, 1600.0).expect("tooltip");
+        assert_eq!((t.name.as_str(), hovered / 4, hovered % 4), ("StorAll 2 SCU Self-", row, 2));
+        // No title read: no tooltip, however title-like a line is
+        assert!(tooltip_from_boxes(&[], &title, &tiles, 1600.0).is_none());
     }
 
     #[test]
@@ -958,18 +957,19 @@ mod tests {
             tb(2345.0, 990.0, 96.0, 25.0, "0.001 SCU"),
         ];
         let tiles = [Rect { x0: 1960.0, y0: 640.0, x1: 2210.0, y1: 960.0 }];
-        let (t, _) = tooltip_from_boxes(&boxes, &tiles, 1600.0).expect("tooltip");
+        // The title and the lines read (the tiles' qualities "269Q", "348Q" are no tooltip lines; the
+        // neighbour's "360" shows through the see-through tooltip and is one)
+        let lines = [&boxes[2..3], &boxes[4..]].concat();
+        let (t, _) = tooltip_from_boxes(&boxes[1..2], &lines, &tiles, 1600.0).expect("tooltip");
         assert_eq!((t.name.as_str(), t.quality, t.scu.as_deref()), ("Janalite", Some(269), Some("0.001")));
         // The neighbour's quality in the title's own box (tiny, 1080p recording of 2026-10-30: "Glacosite 258")
-        let mut merged = boxes.clone();
-        merged.remove(2);
-        merged[1].text = "Janalite 360".into();
-        merged[1].rect.x1 = 2305.0;
-        let (t, _) = tooltip_from_boxes(&merged, &tiles, 1600.0).expect("tooltip");
+        let mut title = boxes[1].clone();
+        title.text = "Janalite 360".into();
+        title.rect.x1 = 2305.0;
+        let (t, _) = tooltip_from_boxes(&[title], &boxes[4..], &tiles, 1600.0).expect("tooltip");
         assert_eq!((t.name.as_str(), t.quality), ("Janalite", Some(269)));
         // An item's name may end in a number: without the chip's repeat it stays
-        let item = vec![tb(2097.0, 924.0, 108.0, 32.0, "Polaris 2955"), tb(2096.0, 961.0, 175.0, 28.0, "Registered To You")];
-        let (t, _) = tooltip_from_boxes(&item, &tiles, 1600.0).expect("tooltip");
+        let (t, _) = tooltip_from_boxes(&[tb(2097.0, 924.0, 108.0, 32.0, "Polaris 2955")], &[tb(2096.0, 961.0, 175.0, 28.0, "Registered To You")], &tiles, 1600.0).expect("tooltip");
         assert_eq!((t.name.as_str(), t.quality), ("Polaris 2955", None));
     }
 
