@@ -49,8 +49,8 @@ export const syncCatalog = shallowRef<SyncCatalog | null>(null);
 export const catalogResponses = shallowRef<Record<"de" | "en", CatalogResponse> | null>(null);
 // The catalog and the player's language pack are being loaded (the state row shows it)
 export const preparing = ref(false);
-// When the catalog was loaded last and how many of the texts asked from the language pack it had (the debug window)
-export const catalogLoad = shallowRef<{ atMs: number; packKeys: number; packFound: number } | null>(null);
+// When the catalog was loaded last, how many of the texts asked from the language pack it had and the keys it lacked (the debug window)
+export const catalogLoad = shallowRef<{ atMs: number; packKeys: number; packFound: number; missing: string[] } | null>(null);
 let jobs: Job[] = [];
 
 const JOBS_KEY = "qm.companion.refinery.jobs";
@@ -83,7 +83,7 @@ async function loadCatalog() {
       console.warn("game names:", e);
     }
     syncCatalog.value = buildCatalog(responses, own);
-    catalogLoad.value = { atMs: Date.now(), packKeys: keys.length, packFound: Object.keys(own).length };
+    catalogLoad.value = { atMs: Date.now(), packKeys: keys.length, packFound: Object.keys(own).length, missing: keys.filter((k) => !(k.toLowerCase() in own)).sort() };
   } finally {
     preparing.value = false;
   }

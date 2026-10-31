@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // The debug window's General tab: the app (version, platform, setup or standalone exe, server, connection,
-// user), its folders (each opens in the file manager), the catalog as loaded (when, entries per language,
+// user), its folders (each opens in the file manager), the catalog as loaded (when, resources, items,
+// locations and blueprints per language,
 // the copy kept on disk with its ETag) and the player's language pack (user.cfg's language, the global.ini
-// the game reads, how many of the texts asked for it had). The app's side comes from the Rust side
+// the game reads, how many of the texts asked for it had; the ones it lacked in a collapsed panel, fetched
+// from the main window once it is opened, "pack-missing"). The app's side comes from the Rust side
 // (debug_info, re-read when the config or the catalog changes), connection, user and catalog from the main
 // window ("general-report", debugReport.ts).
 import { onMounted, ref } from "vue";
@@ -10,17 +12,25 @@ import { emit, listen } from "@tauri-apps/api/event";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import { appInfo, debugInfo, openFolder, type AppFolder, type DebugInfo } from "../backend";
-import type { GeneralReport } from "../debugReport";
+import type { GeneralReport, MissingText } from "../debugReport";
 import { t } from "../i18n";
 import { errorText, toast, toastError } from "../toasts";
 
 const app = ref<Awaited<ReturnType<typeof appInfo>> | null>(null);
 const info = ref<DebugInfo | null>(null);
 const report = ref<GeneralReport | null>(null);
+// The language pack's missing texts: asked for while their panel is open (null: not yet here)
+const missingOpen = ref(false);
+const missing = ref<MissingText[] | null>(null);
 
 const load = async () => {
   info.value = await debugInfo();
 };
+const askMissing = () => void emit("pack-missing-request").catch(() => undefined);
+function onMissingToggle(e: Event) {
+  missingOpen.value = (e.target as HTMLDetailsElement).open;
+  if (missingOpen.value) askMissing();
+}
 
 onMounted(async () => {
   try {
@@ -28,10 +38,14 @@ onMounted(async () => {
     await load();
     await listen("config-changed", () => void load().catch(() => undefined));
     await listen<GeneralReport>("general-report", (e) => {
-      // A catalog loaded again: its copy on disk too
-      if (e.payload.catalog?.atMs !== report.value?.catalog?.atMs) void load().catch(() => undefined);
+      // A catalog loaded again: its copy on disk too, and the missing texts while shown
+      if (e.payload.catalog?.atMs !== report.value?.catalog?.atMs) {
+        void load().catch(() => undefined);
+        if (missingOpen.value) askMissing();
+      }
       report.value = e.payload;
     });
+    await listen<MissingText[]>("pack-missing", (e) => (missing.value = e.payload));
     await emit("general-report-request");
   } catch (e) {
     toast(errorText(e), "error");
@@ -98,6 +112,7 @@ const counts = (lang: string) => report.value?.catalog?.counts.find((c) => c.lan
             <col style="width: 70px" />
             <col style="width: 90px" />
             <col style="width: 70px" />
+            <col style="width: 70px" />
             <col style="width: 80px" />
             <col style="width: 80px" />
             <col style="width: 150px" />
@@ -106,7 +121,8 @@ const counts = (lang: string) => report.value?.catalog?.counts.find((c) => c.lan
           <thead>
             <tr>
               <th>{{ t("debug.col.lang") }}</th>
-              <th class="num">{{ t("debug.col.materials") }}</th>
+              <th class="num">{{ t("debug.col.resources") }}</th>
+              <th class="num">{{ t("debug.col.items") }}</th>
               <th class="num">{{ t("debug.col.locations") }}</th>
               <th class="num">{{ t("debug.col.blueprints") }}</th>
               <th class="num">{{ t("debug.k.size") }}</th>
@@ -117,7 +133,8 @@ const counts = (lang: string) => report.value?.catalog?.counts.find((c) => c.lan
           <tbody>
             <tr v-for="c in info?.catalog ?? []" :key="c.lang">
               <td class="mono white">{{ c.lang }}</td>
-              <td class="num">{{ counts(c.lang)?.materials ?? "–" }}</td>
+              <td class="num">{{ counts(c.lang)?.resources ?? "–" }}</td>
+              <td class="num">{{ counts(c.lang)?.items ?? "–" }}</td>
               <td class="num">{{ counts(c.lang)?.locations ?? "–" }}</td>
               <td class="num">{{ counts(c.lang)?.blueprints ?? "–" }}</td>
               <td class="num">{{ size(c.file.size) }}</td>
@@ -142,6 +159,33 @@ const counts = (lang: string) => report.value?.catalog?.counts.find((c) => c.lan
           <span class="kk">{{ t("debug.k.modified") }}</span><span class="vv">{{ when(info?.pack.modifiedMs) }}</span>
         </div>
       </section>
+
+      <details class="panel" :open="missingOpen" @toggle="onMissingToggle">
+        <summary class="ph">
+          <Icon name="chevron-right" :size="12" class="chev" /> {{ t("debug.packMissing") }}
+          <span class="cnt">{{ report?.catalog ? report.catalog.packKeys - report.catalog.packFound : "–" }}</span>
+        </summary>
+        <div v-if="!missing" class="empty-line">{{ report?.catalog ? t("load.tag") : t("debug.catalog.pending") }}</div>
+        <div v-else-if="!missing.length" class="empty-line">{{ t("debug.packMissingNone") }}</div>
+        <table v-else>
+          <colgroup>
+            <col style="width: 45%" />
+            <col />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>{{ t("debug.col.key") }}</th>
+              <th>{{ t("debug.col.catalog") }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in missing" :key="m.key">
+              <td class="mono white">{{ m.key }}</td>
+              <td>{{ m.name || "–" }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </details>
     </main>
   </section>
 </template>

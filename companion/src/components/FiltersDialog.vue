@@ -39,10 +39,12 @@ const remove = (i: number) => setUserFilters(userFilters.value.filter((_, j) => 
     <template #head>
       <Tooltip :text="t('filters.allTip')">
         <button type="button" class="btn small outline all" :class="{ off: !filtersOn }" :disabled="!userFilters.length" @click="filtersOn = !filtersOn">
-          <Icon :name="filtersOn ? 'check' : 'close'" :size="12" /> {{ t(filtersOn ? "filters.on" : "filters.off") }}
+          <Icon :name="filtersOn ? 'check' : 'close'" :size="12" />
+          <span class="swap"><span :class="{ hidden: !filtersOn }">{{ t("filters.on") }}</span><span :class="{ hidden: filtersOn }">{{ t("filters.off") }}</span></span>
         </button>
       </Tooltip>
     </template>
+    <div class="hint">{{ t("filters.hint") }}</div>
     <form class="add" @submit.prevent="add">
       <input v-model="pattern" class="input mono" type="text" autocomplete="off" spellcheck="false" :placeholder="t('filters.pattern')" />
       <Dropdown v-model="kind" :options="kindOptions" variant="outline" />
@@ -62,15 +64,24 @@ const remove = (i: number) => setUserFilters(userFilters.value.filter((_, j) => 
 </template>
 
 <style scoped>
+/* The wildcards, quiet above the field */
+.hint {
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
 .add {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
 }
 
+/* As high as the dropdown and the button next to it */
 .add .input {
   flex: 1;
   min-width: 0;
+  height: var(--h-control);
 }
 
 /* A long list scrolls inside the dialog */

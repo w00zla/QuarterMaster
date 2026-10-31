@@ -454,8 +454,9 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   scanned, each for one kind or all ("Alle" / the four kinds), with `*` (any text) and `?` (one character),
   matched against the whole name, case aside: the catalog's names in de and en and the tooltip's title. One icon
   button (a funnel, tooltip "Benutzerfilter") after the kind filter in the Gear and Resources heads, both open the
-  same dialog; lit (accent) while some filter applies. The dialog: a term, its kind, "Add" on top, the list below
-  with a remove button each; in its head "Filter an/aus" for all of them (not kept: on at every start; greyed out
+  same dialog; lit (accent) while some filter applies. The dialog: the wildcards as a small quiet line (asked for,
+  2026-10-31), below it a term, its kind, "Add", the list below
+  with a remove button each; in its head "Filter aktiv" / "Filter aus" for all of them (not kept: on at every start; greyed out
   without filters). The list kept in localStorage `qm.companion.inventory.filters`. A filtered item still becomes
   a sighting (the scan, its two agreeing reads, its key as before) but no proposal, so neither the panel, the
   count, the overlay nor "Register all" shows it and the overlay does not flash for it; the debug window's
@@ -488,14 +489,16 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 - `debug.html` + `DebugApp.vue`, opened from the settings (Rust `open_debug_window`, async, with the main
   window's WebView2 browser arguments: another set hangs WebView2; no JS close handler: `destroy` would
   need a permission); closing the main window ends the app, the debug window with it.
-- Three tabs (`DebugApp.vue`, all stay mounted, the OCR scan opens first; the shared table, panel and key/value styles sit unscoped
+- Three tabs (`DebugApp.vue`, all stay mounted, the OCR scan opens first, General is the last on the right; the shared table, panel and key/value styles sit unscoped
   there), the layout after the concept artifact https://claude.ai/artifact/WrWSMUa9T48WVDZCt4WLJL:
   - **General** (`DebugGeneral.vue`, 2026-10-31; "General" in both languages, as the user named it): the app (version,
     platform, setup or standalone exe, server origin, user, connection), its folders (config file, log, cache, game
     folder; each opens in the file manager: Rust `open_folder` with `config`/`log`/`cache`/`game`, never a path from
-    the page), the catalog (when loaded, materials / locations / blueprints per language, the copy kept on disk with
+    the page), the catalog (when loaded, resources / items (ship components and FPS gear among them, by the catalog's `kind`) / locations / blueprints per language, the copy kept on disk with
     size, date and ETag) and the language pack (the `global.ini` the game reads, found or not, `user.cfg`'s language,
-    size, date, how many of the texts asked for it had). The app's side is Rust `debug_info` (re-read on
+    size, date, how many of the texts asked for it had; the ones it lacked, loc key and the catalog's English name,
+    in a collapsed panel below, asked from the main window only while it is open: `pack-missing-request` →
+    `pack-missing`). The app's side is Rust `debug_info` (re-read on
     `config-changed` and when the catalog was loaded again); connection, user and catalog come from the main window
     (`debugReport.ts`: `general-report` on every change, `general-report-request` on open; `catalogLoad` in
     `refinerySync.ts`). No catalog version: `/api/catalog` has none (decided 2026-10-31: no server change for it).

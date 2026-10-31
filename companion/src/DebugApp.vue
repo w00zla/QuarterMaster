@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// The debug window (opened from the settings; remote troubleshooting) in three tabs: General
-// (DebugGeneral.vue: app, folders, catalog, language pack), the OCR scan (DebugScan.vue: the last read with
-// its frame, the detections of both scans, a recording) and Game.log (DebugGamelog.vue: the file, the
-// blueprint unlocks and the location lines as the main window matched them, a static export). All stay
+// The debug window (opened from the settings; remote troubleshooting) in three tabs: the OCR scan
+// (DebugScan.vue: the last read with its frame, the detections of both scans, a recording), Game.log
+// (DebugGamelog.vue: the file, the blueprint unlocks and the location lines as the main window matched
+// them, a static export) and, last, General (DebugGeneral.vue: app, folders, catalog, language pack). All stay
 // mounted (v-show): their listeners and the last read survive a tab switch. The styles below are shared
 // by all (not scoped).
 import { onMounted, ref } from "vue";
@@ -33,9 +33,9 @@ onMounted(async () => {
 <template>
   <div class="debug">
     <nav class="tabs">
-      <button type="button" class="tab" :class="{ active: tab === 'general' }" @click="tab = 'general'">{{ t("debug.tab.general") }}</button>
       <button type="button" class="tab" :class="{ active: tab === 'scan' }" @click="tab = 'scan'">{{ t("debug.tab.scan") }}</button>
       <button type="button" class="tab" :class="{ active: tab === 'log' }" @click="tab = 'log'">{{ t("debug.tab.log") }}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'general' }" @click="tab = 'general'">{{ t("debug.tab.general") }}</button>
     </nav>
     <DebugGeneral v-show="tab === 'general'" />
     <DebugScan v-show="tab === 'scan'" />

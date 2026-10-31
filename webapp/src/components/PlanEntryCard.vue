@@ -412,11 +412,13 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
   background: color-mix(in srgb, #000 35%, var(--bg-base));
 }
 
-/* The part's head as one toggle over its full width (closed: its summary tag on the right) */
+/* The part's head as one toggle over its full width (closed: its summary tag on the right); as high as
+   the tag open or closed */
 .stock-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 20px;
   align-self: stretch;
   padding: 0;
   border: none;

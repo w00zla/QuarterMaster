@@ -337,7 +337,8 @@ function open(batch: StockBatch, action: BatchAction) {
         <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span><span class="head-worth">({{ uecText(listWorth) }} aUEC)</span></span>
         <!-- Offen: als Umriss-Button "Schließen", damit nur der Hinzufügen-Button im Formular gefüllt ist -->
         <button type="button" class="btn small" :class="showAdd ? 'outline' : 'primary'" @click="showAdd = !showAdd">
-          <Icon :name="showAdd ? 'close' : 'plus'" :size="14" /> {{ showAdd ? t("common.close") : t("stock.add") }}
+          <Icon :name="showAdd ? 'close' : 'plus'" :size="14" />
+          <span class="swap"><span :class="{ hidden: !showAdd }">{{ t("common.close") }}</span><span :class="{ hidden: showAdd }">{{ t("stock.add") }}</span></span>
         </button>
       </div>
       <div v-if="showAdd" class="add-area">

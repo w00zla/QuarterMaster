@@ -528,17 +528,6 @@ async function toggleRecording() {
   height: 100%;
 }
 
-.swap {
-  display: grid;
-}
-
-.swap > span {
-  grid-area: 1 / 1;
-}
-
-.swap > .hidden {
-  visibility: hidden;
-}
 
 .legend {
   display: flex;

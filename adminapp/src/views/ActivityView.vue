@@ -155,7 +155,7 @@ const name = (u: UserRef) => u.name ?? u.userId;
         <div v-if="next !== null || error" class="more">
           <span v-if="error" class="warning">{{ error }}</span>
           <button v-if="next !== null" type="button" class="btn outline small" :disabled="loading" @click="load(true)">
-            {{ loading ? "Loading…" : "Load more" }}
+            <span class="swap"><span :class="{ hidden: !loading }">Loading…</span><span :class="{ hidden: loading }">Load more</span></span>
           </button>
         </div>
       </div>

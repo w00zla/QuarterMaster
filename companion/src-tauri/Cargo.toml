@@ -69,3 +69,19 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# `tauri dev` (UI changes through Vite's hot reload, no Rust build): the dependencies optimized once and
+# kept (image, resizing, ONNX Runtime's wrapper: the OCR's hot paths), the app's own code quick to rebuild
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# A test build for the game (`build:fast`): release speed without LTO, incremental, many codegen units;
+# minutes less per change. Releases stay on `release`
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

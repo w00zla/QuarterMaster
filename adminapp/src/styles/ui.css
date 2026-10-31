@@ -97,15 +97,30 @@
   border: 1px solid rgba(255, 255, 255, 0.5);
 }
 
+/* A transparent border as wide as the outline's: switching between the two keeps the button's size */
 .btn.primary {
   background: var(--accent);
   color: var(--accent-text);
-  border: none;
+  border: 1px solid transparent;
 }
 
 .btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* A button whose text changes with its state: every text in one grid cell, only the current one visible,
+   so the button keeps the width of the longest (rule: buttons never change size with their state) */
+.swap {
+  display: inline-grid;
+}
+
+.swap > * {
+  grid-area: 1 / 1;
+}
+
+.swap > .hidden {
+  visibility: hidden;
 }
 
 .icon-btn {

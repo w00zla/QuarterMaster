@@ -31,7 +31,8 @@
     "bot:register": "node --env-file-if-exists=.env src/bot/register.ts",
     "ext": "node --env-file-if-exists=.env src/ext/main.ts",
     "companion:start": "pnpm --filter sc-quartermaster-companion tauri dev",
-    "companion:build": "node -e \"require('node:child_process').execSync('pnpm --filter sc-quartermaster-companion build:' + (process.platform === 'win32' ? 'windows' : 'linux'), { stdio: 'inherit' })\""
+    "companion:build": "node -e \"require('node:child_process').execSync('pnpm --filter sc-quartermaster-companion build:' + (process.platform === 'win32' ? 'windows' : 'linux'), { stdio: 'inherit' })\"",
+    "companion:fast": "node -e \"require('node:child_process').execSync('pnpm --filter sc-quartermaster-companion build:fast:' + (process.platform === 'win32' ? 'windows' : 'linux'), { stdio: 'inherit' })\""
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",

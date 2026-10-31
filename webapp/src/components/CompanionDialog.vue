@@ -111,7 +111,10 @@ async function copyKey() {
         <span v-else-if="keyInfo" class="tag">{{ t("companion.keyNone") }}</span>
         <span class="faint dates">{{ keyText }}</span>
         <button type="button" class="btn small outline" :disabled="busy || !keyInfo" @click="createKey">
-          <Icon name="refresh" :size="14" /> {{ t(keyInfo?.createdAt ? "companion.keyRecreate" : "companion.keyCreate") }}
+          <Icon name="refresh" :size="14" />
+          <span class="swap">
+            <span :class="{ hidden: !keyInfo?.createdAt }">{{ t("companion.keyRecreate") }}</span><span :class="{ hidden: keyInfo?.createdAt }">{{ t("companion.keyCreate") }}</span>
+          </span>
         </button>
       </div>
       <div v-if="newKey" class="key-box">

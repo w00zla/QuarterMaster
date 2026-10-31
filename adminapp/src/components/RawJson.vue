@@ -24,7 +24,8 @@ async function copy() {
         <span class="panel-title">{{ label ?? "Raw record" }}</span>
         <span class="faint size">{{ (text.length / 1024).toFixed(1) }} KB</span>
       </button>
-      <button v-if="open" type="button" class="icon-btn" :title="copied ? 'Copied' : 'Copy'" @click="copy">
+      <!-- Hidden while closed but in place: the toggle keeps its width -->
+      <button type="button" class="icon-btn" :style="{ visibility: open ? 'visible' : 'hidden' }" :title="copied ? 'Copied' : 'Copy'" @click="copy">
         <Icon :name="copied ? 'check' : 'copy'" :size="14" />
       </button>
     </div>

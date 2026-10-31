@@ -85,6 +85,7 @@ const KIND = {
   finished: { tag: "refinery.kind.store", cls: "ok", action: "refinery.store", icon: "type-crate", button: "store", done: "refinery.stored" },
   missing: { tag: "refinery.kind.missing", cls: "warn", action: "refinery.remove", icon: "trash", button: "outline", done: "refinery.removed" },
 } as const;
+const ACTIONS = [...new Set(Object.values(KIND).map((k) => k.action))];
 
 // The scan overlay shows one line per card: station, materials, the end; the first material's thumbnail
 watchEffect(() => {
@@ -196,7 +197,9 @@ async function registerAll(value: string) {
               :disabled="!connected || busy.has(p.id)"
               @click="primary(p)"
             >
-              <Icon :name="KIND[p.kind].icon" :size="14" /> {{ t(KIND[p.kind].action) }}
+              <Icon :name="KIND[p.kind].icon" :size="14" />
+              <!-- Every action's text in one place: a job whose state changes keeps the button's width -->
+              <span class="swap"><span v-for="a in ACTIONS" :key="a" :class="{ hidden: a !== KIND[p.kind].action }">{{ t(a) }}</span></span>
             </button>
             <Tooltip :text="t(p.kind === 'missing' ? 'refinery.keep' : 'refinery.drop')">
               <button type="button" class="icon-btn" @click="dismiss(p)"><Icon name="close" :size="14" /></button>
@@ -321,11 +324,11 @@ async function registerAll(value: string) {
   color: var(--text);
 }
 
-/* Storing: set apart from registering (green, a crate) */
+/* Storing: set apart from registering (green, a crate); the transparent border keeps the size of the other looks */
 .btn.store {
   background: var(--ok);
   color: var(--accent-text);
-  border: none;
+  border: 1px solid transparent;
 }
 
 /* The state tag, the time left and the end, below the head */

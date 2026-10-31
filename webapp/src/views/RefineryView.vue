@@ -224,7 +224,8 @@ const bonusText = (b: StockBatch) => {
         <Icon name="drop" :size="16" />
         <span class="head-title">{{ t("refinery.jobs") }}</span>
         <button type="button" class="btn small" :class="showStart ? 'outline' : 'primary'" @click="showStart = !showStart">
-          <Icon :name="showStart ? 'close' : 'plus'" :size="14" /> {{ showStart ? t("common.close") : t("refinery.start") }}
+          <Icon :name="showStart ? 'close' : 'plus'" :size="14" />
+          <span class="swap"><span :class="{ hidden: !showStart }">{{ t("common.close") }}</span><span :class="{ hidden: showStart }">{{ t("refinery.start") }}</span></span>
         </button>
       </div>
       <div v-if="showStart" class="add-area">

@@ -68,8 +68,9 @@ pnpm webapp:build             # vue-tsc + vite build -> webapp/dist (served by p
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)
 pnpm bot:register [--dry-run] # bulk-overwrite slash commands: DISCORD_DEV_GUILD_ID set = that server only, else global
 pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every 15 minutes
-pnpm companion:start          # companion app: tauri dev (Vite on :1430)
-pnpm companion:build          # release build for this OS: build:linux (AppImage) or build:windows (setup + bare exe); in-game tests need it (the OCR is far too slow in debug), the running exe must be closed first
+pnpm companion:start          # companion app: tauri dev (Vite on :1430): UI changes live via hot reload, Rust rebuilt only when it changed; profile.dev optimizes the dependencies (OCR ~15 % slower than release: 104 vs 90 ms per read, 2026-10-31); no DirectML.dll there (OCR on the CPU)
+pnpm companion:fast           # test build for the game: profile `fast` (release without LTO, incremental) -> target/fast/quartermaster-companion.exe (+ DirectML.dll on Windows), no setup; ~8 s after a UI change instead of ~3 min (release); close the running exe first
+pnpm companion:build          # release build for this OS: build:linux (AppImage) or build:windows (setup + bare exe); only for releases (LTO, minutes), the running exe must be closed first
 pnpm --filter sc-quartermaster-companion build:linux      # standalone AppImage (no installer, like BindSight)
 pnpm --filter sc-quartermaster-companion build:windows    # NSIS setup (DirectML.dll next to the exe, tauri.setup.conf.json) + .sig (self-updating; needs TAURI_SIGNING_PRIVATE_KEY = the key's content) and the bare exe (zip it as …_x64-standalone.zip)
 pnpm --filter sc-quartermaster-companion typecheck        # companion SPA typecheck
@@ -133,3 +134,8 @@ docker compose run --rm bot node src/bot/register.ts    # after command changes
 - **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext` (refinery terminals and yield bonuses, refining methods; terminals, commodities, commodity and item prices, not used yet).
 
 **Tests** (`test/`): `fixtures.ts` builds synthetic DataCore records (no real game data) and runs them through the real normalizer; the resulting snapshot feeds both the pure tests and the DB integration tests. Pure companion logic is tested from `test/companion-*.test.ts`, its Rust side with `cargo test`.
+
+<!-- claude-reflect: learned rules (saved from the band; edit freely) -->
+## Learned rules
+- Ensure buttons keep the same size when their state changes; state switches must not alter button dimensions anywhere in the UI.
+<!-- end claude-reflect -->
