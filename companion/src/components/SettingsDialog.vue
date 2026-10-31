@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // API token (created in the web app's Companion dialog and pasted here), game folder, the UI
-// language; the screen scan group: first, highlighted as a card of its own, the OCR on the GPU with its
-// state as a tag (greyed out, off, when it cannot run there: gpuStatus, event "ocr-gpu"), then the
-// automatic tab switch (overlay.ts); saving checks the connection and reloads the log state (the path may have changed). The
+// language; the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
+// by default) with its state as a tag and a dim note below (greyed out, off, when it cannot run there:
+// gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed). The
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor), display (compact or thumbnails) and hotkeys, saved (on/off is the scan row's
 // toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes the
@@ -27,11 +27,11 @@ const token = ref(config.value?.token ?? "");
 const gameDir = ref(config.value?.gameDir ?? "");
 const language = ref(config.value?.language ?? "");
 const autoTab = ref(config.value?.autoTab ?? true);
-const gpu = ref(config.value?.gpu ?? true);
+const gpu = ref(config.value?.gpu ?? false);
 // Until the Rust side answered: as if it can
 const gpuState = ref<GpuStatus["state"]>("ready");
 const gpuOk = computed(() => gpuState.value === "ready");
-// The card's state at a glance (the switch as set, before saving too): on the GPU, on the CPU, not possible
+// The state at a glance (the switch as set, before saving too): on the GPU, on the CPU, not possible
 const gpuTag = computed(() => {
   if (gpuState.value === "missing") return { cls: "warn", text: t("settings.gpuMissing") };
   if (gpuState.value === "failed") return { cls: "err", text: t("settings.gpuFailed") };
@@ -73,7 +73,7 @@ const changed = computed(() => token.value.trim() !== (config.value?.token ?? ""
   || gameDir.value.trim() !== (config.value?.gameDir ?? "")
   || language.value !== (config.value?.language ?? "")
   || autoTab.value !== (config.value?.autoTab ?? true)
-  || gpu.value !== (config.value?.gpu ?? true)
+  || gpu.value !== (config.value?.gpu ?? false)
   || overlayPosition.value !== config.value?.overlayPosition
   || overlayDisplay.value !== (config.value?.overlayDisplay ?? "thumbs")
   || hotkeyOverlay.value !== config.value?.hotkeyOverlay
@@ -148,19 +148,20 @@ async function pickFolder() {
       </section>
       <section class="group">
         <div class="group-title">{{ t("settings.scan") }}</div>
-        <!-- The GPU first and highlighted: lit while it is on -->
-        <label class="gpu-card" :class="{ lit: gpuOk && gpu, off: !gpuOk }">
-          <span class="gpu-icon"><Icon name="bolt" :size="18" /></span>
-          <span class="gpu-text">
-            <span class="gpu-name">{{ t("settings.gpu") }}</span>
-            <span class="tag" :class="gpuTag.cls">{{ gpuTag.text }}</span>
-          </span>
-          <input class="switch" type="checkbox" :checked="gpuOk && gpu" :disabled="!gpuOk" @change="gpu = ($event.target as HTMLInputElement).checked" />
-        </label>
         <label class="line between">
           <span class="label">{{ t("settings.autoTab") }}</span>
           <input v-model="autoTab" class="switch" type="checkbox" />
         </label>
+        <div class="gpu">
+          <label class="line between" :class="{ off: !gpuOk }">
+            <span class="line">
+              <span class="label">{{ t("settings.gpu") }}</span>
+              <span class="tag" :class="gpuTag.cls">{{ gpuTag.text }}</span>
+            </span>
+            <input class="switch" type="checkbox" :checked="gpuOk && gpu" :disabled="!gpuOk" @change="gpu = ($event.target as HTMLInputElement).checked" />
+          </label>
+          <span class="gpu-note">{{ t("settings.gpuNote") }}</span>
+        </div>
       </section>
       <section class="group">
         <div class="group-title">Star Citizen</div>
@@ -258,63 +259,20 @@ async function pickFolder() {
   justify-content: space-between;
 }
 
-/* The GPU acceleration: a card of its own in the accent colour, its icon in a tile, the name above its
-   state tag; on, in the accent colour; off, a quiet frame; not possible here, the switch greyed out */
-.gpu-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-panel);
-  background: var(--bg-surface);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.gpu-card.lit {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
-}
-
-.gpu-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: var(--radius-control);
-  background: var(--bg-surface-2);
-  color: var(--text-3);
-  transition: color 0.15s, background 0.15s;
-}
-
-.gpu-card.lit .gpu-icon {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  color: var(--accent);
-}
-
-.gpu-text {
-  flex: 1;
-  min-width: 0;
+/* The GPU acceleration: a plain row with its state tag, a dim note below; not possible here, the
+   switch greyed out */
+.gpu {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 4px;
 }
 
-.gpu-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
+.gpu-note {
+  font-size: 11px;
+  color: var(--text-3);
 }
 
-.gpu-card.off {
-  cursor: default;
-}
-
-.gpu-card.off .switch {
+.line.off .switch {
   opacity: 0.5;
   cursor: default;
 }

@@ -157,7 +157,9 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
   and scroll only their rows (head and column titles stay).
 - Settings dialog (`SettingsDialog.vue`): Access Key, language, game folder, the "Bildschirm-Scan" group
-  ("Screen Scan", 2026-10-27: first "GPU-Beschleunigung aktivieren" as a highlighted card (2026-10-30: bolt icon, a state tag "Aktiv" / "CPU" / "Nicht verfügbar" / "Fehler", in the accent colour while on), then "App-Ansicht automatisch wechseln" (the automatic tab switch), switches; the
+  ("Screen Scan": "App-Ansicht automatisch wechseln" (the automatic tab switch), then "GPU-Beschleunigung
+  aktivieren" (since 2026-10-31 a plain row below it, off by default; before, a highlighted card on top) with a state tag "Aktiv" / "CPU" / "Nicht verfügbar" / "Fehler" and a dim
+  note below (pays off only when the scan reads slowly on a weaker CPU, takes VRAM), switches; the
   GPU greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Scan overlay" group
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
   place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
@@ -575,8 +577,9 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   `fast_image_resize` (SIMD, the same kernels as `image`'s; a gear read 447 → 239 ms with small, 299 →
   92 ms with tiny, 3840×1600, 3 threads); the detector needs its input smoothed by that resize (fed the
   crop directly at a size of multiples of 32, it lost page numbers).
-  **On the GPU** (since 2026-10-27, Windows, setting "GPU-Beschleunigung aktivieren", config `gpu`, on by
-  default): ONNX Runtime's DirectML execution provider (pyke's Windows binaries are its DirectML build
+  **On the GPU** (since 2026-10-27, Windows, setting "GPU-Beschleunigung aktivieren", config `gpu`, off by
+  default since 2026-10-31 (on before; stored configs keep their value): on a fast CPU the reads are hardly faster (the
+  warehouse 24 vs. 26 ms), and it holds VRAM next to the game): ONNX Runtime's DirectML execution provider (pyke's Windows binaries are its DirectML build
   anyway; `ort` feature `directml` on Windows only). It needs the redistributable `DirectML.dll` 1.15.4
   (18.5 MB, Microsoft, MIT) next to the exe: Windows' own (`System32`, 1.0 on Windows 10) refuses the
   session; `ocr:models` fetches it into `resources/ocr/` (only that file of the 200 MB NuGet package, by

@@ -58,8 +58,9 @@ pub struct Config {
     /// and with a new blueprint unlock (the frontend's `overlay.ts`).
     #[serde(default = "default_true")]
     pub auto_tab: bool,
-    /// The screen scan's OCR on the GPU where it can (`ocrwatch::Gpu`), else on the CPU.
-    #[serde(default = "default_true")]
+    /// The screen scan's OCR on the GPU where it can (`ocrwatch::Gpu`), else on the CPU. Off by default:
+    /// on fast CPUs it reads hardly faster and holds VRAM next to the game.
+    #[serde(default)]
     pub gpu: bool,
 }
 
@@ -95,7 +96,7 @@ impl Default for Config {
             hotkey_overlay: default_hotkey_overlay(),
             hotkey_mode: String::new(),
             auto_tab: true,
-            gpu: true,
+            gpu: false,
         }
     }
 }
@@ -171,9 +172,9 @@ mod tests {
         let c = parse(r#"{"server":"https://qm.test"}"#).unwrap();
         assert_eq!(c.server, "https://qm.test");
         assert_eq!(c.game_dir, DEFAULT_GAME_DIR);
-        // Missing in files written before it existed: on
+        // Missing in files written before it existed: on (the GPU off)
         assert!(c.auto_tab);
-        assert!(c.gpu);
+        assert!(!c.gpu);
         assert_eq!(c.overlay_display, "thumbs");
     }
 
