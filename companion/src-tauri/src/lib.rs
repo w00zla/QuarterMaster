@@ -549,6 +549,92 @@ async fn set_overlay(app: AppHandle, on: bool) -> Result<(), String> {
     }
 }
 
+/// A file on disk as the debug window shows it; `size` None = not there.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileInfo {
+    path: String,
+    size: Option<u64>,
+    modified_ms: Option<u64>,
+}
+
+fn file_info(path: &std::path::Path) -> FileInfo {
+    let meta = std::fs::metadata(path).ok().filter(|m| m.is_file());
+    FileInfo {
+        path: path.display().to_string(),
+        size: meta.as_ref().map(|m| m.len()),
+        modified_ms: meta.and_then(|m| m.modified().ok()).map(ocrwatch::unix_ms),
+    }
+}
+
+/// The catalog of one language as kept on disk (`server::cached_api`).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeptCatalog {
+    lang: &'static str,
+    file: FileInfo,
+    etag: Option<String>,
+}
+
+/// The debug window's General tab, the app's side: the server, the app's folders, the player's language
+/// pack (`user.cfg`'s language, None = not set: the game's English) and the catalog kept on disk.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DebugInfo {
+    /// The origin, else the configured text (invalid)
+    server: String,
+    config_file: String,
+    log_dir: String,
+    cache_dir: String,
+    game_dir: String,
+    language: Option<String>,
+    pack: FileInfo,
+    catalog: Vec<KeptCatalog>,
+}
+
+#[tauri::command]
+fn debug_info(app: AppHandle) -> DebugInfo {
+    let config = app.state::<Mutex<AppData>>().lock().unwrap().config.clone();
+    let shown = |dir: tauri::Result<PathBuf>| dir.map(|d| d.display().to_string()).unwrap_or_default();
+    let cache = app.path().app_cache_dir().ok();
+    let game_dir = std::path::Path::new(&config.game_dir);
+    let catalog = ["de", "en"]
+        .into_iter()
+        .filter_map(|lang| {
+            let (file, etag) = server::kept_etag(&cache.as_ref()?.join("api"), &format!("/api/catalog?lang={lang}"));
+            Some(KeptCatalog { lang, file: file_info(&file), etag })
+        })
+        .collect();
+    DebugInfo {
+        server: server::origin(&config.server).unwrap_or(config.server.clone()),
+        config_file: shown(app.path().app_config_dir().map(|d| d.join("config.json"))),
+        log_dir: shown(app.path().app_log_dir()),
+        cache_dir: cache.as_ref().map(|d| d.display().to_string()).unwrap_or_default(),
+        game_dir: config.game_dir.clone(),
+        language: locale::language(game_dir),
+        pack: file_info(&locale::ini_path(game_dir)),
+        catalog,
+    }
+}
+
+/// Opens one of the app's folders in the file manager (the debug window): `config`, `log`, `cache` or
+/// the game folder (`game`); only these, never a path from the page.
+#[tauri::command]
+fn open_folder(app: AppHandle, which: String) -> Result<(), String> {
+    let dir = match which.as_str() {
+        "config" => app.path().app_config_dir(),
+        "log" => app.path().app_log_dir(),
+        "cache" => app.path().app_cache_dir(),
+        "game" => Ok(PathBuf::from(&app.state::<Mutex<AppData>>().lock().unwrap().config.game_dir)),
+        _ => return Err("unknown folder".into()),
+    }
+    .map_err(|e| e.to_string())?;
+    if !dir.is_dir() {
+        return Err(format!("{}: not found", dir.display()));
+    }
+    tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|e| e.to_string())
+}
+
 /// Opens the configured server's web app in the browser.
 #[tauri::command]
 fn open_webapp(app: AppHandle) -> Result<(), String> {
@@ -673,6 +759,8 @@ pub fn run() {
             download_update,
             install_update,
             open_webapp,
+            debug_info,
+            open_folder,
             get_scan,
             set_scan,
             set_debug,

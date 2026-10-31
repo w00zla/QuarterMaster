@@ -87,6 +87,27 @@ export const downloadUpdate = (url: string, dest: string) => call<void>("downloa
 // Ends the app when it worked (the setup starts the new version)
 export const installUpdate = () => call<void>("install_update");
 export const openWebapp = () => call<void>("open_webapp");
+// A file as the debug window shows it; size null = not there
+export interface FileInfo {
+  path: string;
+  size: number | null;
+  modifiedMs: number | null;
+}
+// The debug window's General tab, the app's side: server, the app's folders, the player's language pack (language null:
+// user.cfg sets none, the game's English) and the catalog as kept on disk per language
+export interface DebugInfo {
+  server: string;
+  configFile: string;
+  logDir: string;
+  cacheDir: string;
+  gameDir: string;
+  language: string | null;
+  pack: FileInfo;
+  catalog: { lang: string; file: FileInfo; etag: string | null }[];
+}
+export const debugInfo = () => call<DebugInfo>("debug_info");
+export type AppFolder = "config" | "log" | "cache" | "game";
+export const openFolder = (which: AppFolder) => call<void>("open_folder", { which });
 // The scan: what the OCR reads from the screen capture, switched on and off by the user or the overlay. The scope says
 // which screens it reads: the freight manager's warehouse (materials, items), the character inventory's storage pane
 // (ship components), the refinery terminal (jobs)

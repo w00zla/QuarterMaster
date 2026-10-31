@@ -29,7 +29,7 @@ const SCREEN_TEXT = { none: "scan.waiting", warehouse: "scan.warehouse", invento
 const recording = ref<string | null>(null);
 const busy = ref(false);
 // The main window's sightings of both scans (sent on every change and on request)
-const report = ref<SightingsReport>({ materials: [], components: [], registered: [], dismissed: [], locations: {}, statNames: [] });
+const report = ref<SightingsReport>({ materials: [], components: [], registered: [], dismissed: [], locations: {}, statNames: [], filtered: {} });
 const view = ref<"read" | "sightings">("read");
 // The detections table's kind filter (this window's own)
 const KINDS: Kind[] = ["mats", "items", "comps", "fps"];
@@ -133,7 +133,8 @@ const opened = reactive({ tiles: true, lines: true, orders: true, cells: false, 
 const onToggle = (key: keyof typeof opened, e: Event) => (opened[key] = (e.target as HTMLDetailsElement).open);
 
 // The detections: one table for both scans: source (the freight manager's warehouse or the character
-// inventory), what was read, where, and why it is no proposal (or that it is one, was registered or discarded)
+// inventory), what was read, where, and why it is no proposal (a user filter took it, with its term, or a
+// problem; or that it is one, was registered or discarded)
 const PROBLEM = { unknownMaterial: "inventory.unknown", component: "inventory.component", noQuality: "inventory.noQuality", noAmount: "inventory.noAmount", amountFlicker: "inventory.amountFlicker" } as const;
 const COMPONENT_PROBLEM = { unknownComponent: "components.unknown", ambiguousComponent: "components.ambiguous", statsUnreadable: "components.statsUnreadable" } as const;
 const amount = (s: Sighting) => (s.amount === null ? "–" : s.unit === "SCU" ? `${s.amount} SCU` : t("inventory.pieces", { n: s.amount })) + (s.amountUncertain ? "?" : "");
@@ -156,6 +157,8 @@ interface Row {
   atMs: number;
 }
 const stateOf = (key: string, problem: string | null) => {
+  const filter = report.value.filtered[key];
+  if (filter) return { state: t("filters.filtered"), stateClass: "", why: filter };
   if (problem) return { state: t("debug.state.problem"), stateClass: "warn", why: problem };
   if (report.value.registered.includes(key)) return { state: t("debug.state.registered"), stateClass: "ok", why: "" };
   if (report.value.dismissed.includes(key)) return { state: t("debug.state.dismissed"), stateClass: "", why: "" };

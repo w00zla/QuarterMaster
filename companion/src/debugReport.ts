@@ -1,12 +1,13 @@
 // What the main window tells the debug window about Game.log (event "gamelog-report" on every change and
 // on "gamelog-report-request"): every blueprint unlock with how it matched the catalog, and the location
 // keys of the log's location lines resolved to the selectable locations. The debug window reads the log
-// itself (log_state); the catalog and the registered blueprints are only here.
+// itself (log_state); the catalog and the registered blueprints are only here. Likewise for the General
+// tab ("general-report", "general-report-request"): the connection, the user and the catalog as loaded.
 import { emit, listen } from "@tauri-apps/api/event";
 import { ref, watch } from "vue";
 import { autoLocation, locationUuid } from "./inventorySync";
-import { syncCatalog } from "./refinerySync";
-import { log } from "./state";
+import { catalogLoad, catalogResponses, syncCatalog } from "./refinerySync";
+import { connected, connectionText, log, meName } from "./state";
 
 export type UnlockState = "loading" | "owned" | "default" | "unknown" | "new" | "pick";
 
@@ -49,7 +50,43 @@ function report(): GamelogReport {
 
 const publish = () => void emit("gamelog-report", report()).catch(() => undefined);
 
+export interface GeneralReport {
+  connected: boolean;
+  // "Connection successful" or why not (the UI language)
+  connection: string;
+  user: string | null;
+  // The catalog as loaded (null: not yet): when, its entries per language, the language pack's texts found of those asked
+  catalog: {
+    atMs: number;
+    counts: { lang: "de" | "en"; materials: number; locations: number; blueprints: number }[];
+    packKeys: number;
+    packFound: number;
+  } | null;
+}
+
+function generalReport(): GeneralReport {
+  const load = catalogLoad.value;
+  const r = catalogResponses.value;
+  return {
+    connected: connected.value,
+    connection: connectionText.value,
+    user: meName.value,
+    catalog: load && r
+      ? {
+        atMs: load.atMs,
+        counts: (["de", "en"] as const).map((lang) => ({ lang, materials: r[lang].materials.length, locations: r[lang].locations.length, blueprints: r[lang].blueprints.length })),
+        packKeys: load.packKeys,
+        packFound: load.packFound,
+      }
+      : null,
+  };
+}
+
+const publishGeneral = () => void emit("general-report", generalReport()).catch(() => undefined);
+
 export async function watchDebugReport() {
   watch([unlockRows, autoLocation, locationUuid, syncCatalog, log], publish);
   await listen("gamelog-report-request", publish);
+  watch([connected, connectionText, meName, catalogLoad], publishGeneral);
+  await listen("general-report-request", publishGeneral);
 }

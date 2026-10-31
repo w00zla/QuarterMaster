@@ -105,6 +105,18 @@ fn kept_file(dir: &Path, path: &str) -> PathBuf {
     dir.join(format!("{name}.json"))
 }
 
+/// The file an API path's answer is kept in and its ETag (the debug window); None for the ETag
+/// without a readable file.
+pub fn kept_etag(dir: &Path, path: &str) -> (PathBuf, Option<String>) {
+    #[derive(Deserialize)]
+    struct Etag {
+        etag: String,
+    }
+    let file = kept_file(dir, path);
+    let etag = std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice::<Etag>(&bytes).ok()).map(|k| k.etag);
+    (file, etag)
+}
+
 /// A GET whose answer is kept in `dir` with its ETag (the catalog: ~1 MB per language): sent with
 /// `If-None-Match`, a 304 answers the kept body as 200. The ETag hashes the content, so another server or
 /// user can never get a wrong kept answer. A broken or unwritable file only costs the transfer.

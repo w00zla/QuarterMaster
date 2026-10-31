@@ -12,7 +12,9 @@
 // (Rust `log_state`): a key that is no selectable location clears the pick, so nothing is booked at
 // the place before; a pick by hand holds until the log names another place. Starting the scan clears
 // the sightings of the run before. The catalog (names in both languages plus the player's language
-// pack) is the refinery sync's.
+// pack) is the refinery sync's. The user's own filters (userFilters.ts; the list kept, the switch for all of
+// them on at every start) keep what they match out of the proposals: its sightings stay, marked filtered for
+// the debug window, and come back as proposals once the filter goes.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, ref, watch } from "vue";
 import type { OkResponse, StockBatch, StockListResponse } from "../../src/webapp/api-types";
@@ -21,16 +23,17 @@ import {
 } from "./components";
 import { detected } from "./detections";
 import { addRequest, inStockOf, InventoryScan, proposalsOf, type InventoryReadEvent, type Proposal, type Sighting } from "./inventory";
-import { ensureCatalog, syncCatalog } from "./refinerySync";
+import { catalogResponses, ensureCatalog, syncCatalog } from "./refinerySync";
 import { api, connected, log } from "./state";
 import { toastError } from "./toasts";
+import { filteredBy, parseFilters, type Kind, type UserFilter } from "./userFilters";
 
 const LOCATION_KEY = "qm.companion.inventory.location";
 const AUTO_LOCATION_KEY = "qm.companion.inventory.autoLocation";
 const KINDS_KEY = "qm.companion.inventory.kinds";
+const FILTERS_KEY = "qm.companion.inventory.filters";
 
-// comps = ship components, fps = FPS gear (2026-10-22)
-export type Kind = "mats" | "items" | "comps" | "fps";
+export type { Kind };
 export const KINDS: Kind[] = ["mats", "items", "comps", "fps"];
 // Each kind's tag colour and icon (panel rows, filter chips, the overlay's head)
 export const KIND_CLASS = { mats: "ok", items: "", comps: "accent", fps: "app" } as const satisfies Record<Kind, string>;
@@ -112,19 +115,53 @@ watch([autoLocation, loggedLocation, catalogReady], () => {
   if (autoLocation.value && loggedLocation.value && syncCatalog.value) setLocation(loggedLocationUuid.value);
 });
 
+// The user's filters (kept) and the switch for all of them (on at every start, not kept)
+function storedFilters(): UserFilter[] {
+  try {
+    return parseFilters(JSON.parse(localStorage.getItem(FILTERS_KEY) ?? "[]"));
+  } catch {
+    return [];
+  }
+}
+export const userFilters = ref<UserFilter[]>(storedFilters());
+export const filtersOn = ref(true);
+// Some filter applies (the head button's state)
+export const filtersActive = computed(() => filtersOn.value && userFilters.value.length > 0);
+
+export function setUserFilters(list: UserFilter[]) {
+  userFilters.value = list;
+  localStorage.setItem(FILTERS_KEY, JSON.stringify(list));
+}
+
+// An item's catalog names in both languages (the filters match them and the tooltip's title)
+const catalogNames = computed(() => {
+  const names = new Map<string, string[]>();
+  for (const r of [catalogResponses.value?.de, catalogResponses.value?.en]) for (const m of r?.materials ?? []) names.set(m.uuid, [...(names.get(m.uuid) ?? []), m.name]);
+  return names;
+});
+const namesOf = (uuid: string | null, read: string) => [read, ...(uuid ? catalogNames.value.get(uuid) ?? [] : [])];
+/** The pattern of the filter a sighting falls under, null when none does (or the filters are off). */
+function filterOf(s: Sighting | ComponentSighting): string | null {
+  if (!filtersActive.value) return null;
+  return "unit" in s
+    ? filteredBy(userFilters.value, s.unit === "SCU" ? "mats" : "items", namesOf(s.materialUuid, s.name))
+    : filteredBy(userFilters.value, s.fps === null ? null : s.fps ? "fps" : "comps", namesOf(s.componentUuid, s.title));
+}
+const unfiltered = <T extends Sighting | ComponentSighting>(list: T[]) => list.filter((s) => !filterOf(s));
+
 const kept = (p: { id: string }) => !dismissed.value.has(p.id);
 const locationsOf = (list: { locationUuid: string }[]) => [...new Set(list.map((s) => s.locationUuid))];
-// Per location: its sightings against its stored stock; the discarded ones go, the ones the stock holds stay marked
+// Per location: its sightings (the filtered ones left out) against its stored stock; the discarded ones go, the ones the stock holds stay marked
 export const proposals = computed<Listed<Proposal>[]>(() =>
   locationsOf(sightings.value).flatMap((location) => {
-    const list = proposalsOf(sightings.value.filter((s) => s.locationUuid === location), batches.value, location).filter(kept);
+    const list = proposalsOf(unfiltered(sightings.value.filter((s) => s.locationUuid === location)), batches.value, location).filter(kept);
     const held = inStockOf(list, batches.value, location, registered.value);
     return list.map((p) => ({ ...p, locationUuid: location, inStock: held.has(p.id) }));
   }),
 );
 export const componentProposals = computed<Listed<ComponentProposal>[]>(() =>
   locationsOf(componentSightings.value).flatMap((location) => {
-    const list = componentProposalsOf(componentSightings.value.filter((s) => s.locationUuid === location)).filter(kept);
+    const list = componentProposalsOf(unfiltered(componentSightings.value.filter((s) => s.locationUuid === location))).filter(kept);
     const held = componentsInStock(list, batches.value, location, registered.value);
     return list.map((p) => ({ ...p, locationUuid: location, inStock: held.has(p.id) }));
   }),
@@ -140,6 +177,8 @@ export interface SightingsReport {
   locations: Record<string, string>;
   // Every stat name the component scan matches tooltip lines against (normalized, every language)
   statNames: string[];
+  // Sighting key -> the pattern of the user filter it falls under
+  filtered: Record<string, string>;
 }
 
 const newestFirst = (a: { atMs: number }, b: { atMs: number }) => b.atMs - a.atMs;
@@ -151,7 +190,13 @@ const publish = () => {
   const used = new Set(scans.keys());
   const locations = Object.fromEntries((syncCatalog.value?.locations ?? []).filter((l) => used.has(l.uuid)).map((l) => [l.uuid, l.short]));
   const statNames = [...new Set([...(syncCatalog.value?.components.statNames.values() ?? [])].flatMap((names) => [...names]))];
-  const report: SightingsReport = { materials: sightings.value, components: componentSightings.value, registered: [...registered.value], dismissed: [...dismissed.value], locations, statNames };
+  const filtered = Object.fromEntries([...sightings.value, ...componentSightings.value].flatMap((s) => {
+    const pattern = filterOf(s);
+    return pattern ? [[s.key, pattern]] : [];
+  }));
+  const report: SightingsReport = {
+    materials: sightings.value, components: componentSightings.value, registered: [...registered.value], dismissed: [...dismissed.value], locations, statNames, filtered,
+  };
   void emit("inventory-sightings", report).catch(() => undefined);
 };
 
@@ -173,18 +218,21 @@ function onRead(e: InventoryReadEvent) {
     await ensureCatalog();
     const cat = syncCatalog.value!;
     const at = scansAt(location);
-    let changed = false;
+    const fresh: (Sighting | ComponentSighting)[] = [];
     if (e.grid) {
       const inventoryCatalog = { materials: cat.allMaterials, units: cat.units, components: new Set(cat.components.components.map((c) => c.uuid)) };
-      changed = !!at.stacks.feed(e, inventoryCatalog, (s) => kinds.value.has(s.unit === "SCU" ? "mats" : "items"));
+      const s = at.stacks.feed(e, inventoryCatalog, (s) => kinds.value.has(s.unit === "SCU" ? "mats" : "items"));
+      if (s) fresh.push(s);
     }
     if (e.components) {
       // An unknown title (no kind yet) only while either gear kind is on (it is listed in the debug window)
       const accept = (s: ComponentSighting) => (s.fps === null ? kinds.value.has("comps") || kinds.value.has("fps") : kinds.value.has(s.fps ? "fps" : "comps"));
-      changed = !!at.components.feed(e.atMs, e.components, cat.components, accept, e.capture.restMs) || changed;
+      const s = at.components.feed(e.atMs, e.components, cat.components, accept, e.capture.restMs);
+      if (s) fresh.push(s);
     }
-    if (changed) {
-      detected();
+    if (fresh.length) {
+      // A filtered one makes no proposal: the overlay does not flash for it
+      if (fresh.some((s) => !filterOf(s))) detected();
       publish();
     }
   });
@@ -199,6 +247,8 @@ export function resetSightings() {
 }
 
 export async function watchInventory() {
+  // The debug window's filtered marks follow the filters
+  watch([userFilters, filtersOn], publish);
   await listen<InventoryReadEvent>("inventory-read", (e) => onRead(e.payload));
   await listen("inventory-sightings-request", () => publish());
 }

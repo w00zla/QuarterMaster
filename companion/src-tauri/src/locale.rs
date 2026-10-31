@@ -18,13 +18,15 @@ pub fn norm(text: &str) -> String {
 
 /// The `global.ini` the game reads (it may not exist: no pack installed).
 pub fn ini_path(game_dir: &Path) -> PathBuf {
-    let language = std::fs::read_to_string(game_dir.join("user.cfg"))
-        .ok()
-        .and_then(|cfg| language_of(&cfg))
-        .unwrap_or_else(|| "english".into());
+    let language = language(game_dir).unwrap_or_else(|| "english".into());
     // On Linux (Wine) the case matters: the game's folder is "data", some installs have "Data"
     let dir = ["data", "Data"].iter().map(|d| game_dir.join(d)).find(|d| d.is_dir()).unwrap_or_else(|| game_dir.join("data"));
     dir.join("Localization").join(language).join("global.ini")
+}
+
+/// The game folder's `user.cfg` `g_language`, None when it sets none (the game's English).
+pub fn language(game_dir: &Path) -> Option<String> {
+    std::fs::read_to_string(game_dir.join("user.cfg")).ok().and_then(|cfg| language_of(&cfg))
 }
 
 /// `g_language` of a `user.cfg` ("g_language = german_(germany)").

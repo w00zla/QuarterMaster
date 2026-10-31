@@ -448,7 +448,19 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   title with count, the part's kind filter, toggle chips Materials / Harvestables ("Sammelobjekte", until 2026-10-20 "Items") (Resources) or "Ship comp." ("Schiffs-Komp.") / "FPS gear" ("FPS-Ausrüstung", since 2026-10-22) (Gear; on =
   the kind's badge colour with a check, off = dashed and dimmed with an x; what the scan detects from then
   on, all may be off; localStorage `qm.companion.inventory.kinds` as `{on, known}`: a kind added later
-  starts on; the plain list before FPS gear is read as known = the three of then), "Register all" (the panel's rows only).
+  starts on; the plain list before FPS gear is read as known = the three of then), the "Benutzerfilter" button
+  ("User filters", below), "Register all" (the panel's rows only).
+- **User filters** (2026-10-31; `userFilters.ts`, `FiltersButton.vue`, `FiltersDialog.vue`): terms that are not
+  scanned, each for one kind or all ("Alle" / the four kinds), with `*` (any text) and `?` (one character),
+  matched against the whole name, case aside: the catalog's names in de and en and the tooltip's title. One icon
+  button (a funnel, tooltip "Benutzerfilter") after the kind filter in the Gear and Resources heads, both open the
+  same dialog; lit (accent) while some filter applies. The dialog: a term, its kind, "Add" on top, the list below
+  with a remove button each; in its head "Filter an/aus" for all of them (not kept: on at every start; greyed out
+  without filters). The list kept in localStorage `qm.companion.inventory.filters`. A filtered item still becomes
+  a sighting (the scan, its two agreeing reads, its key as before) but no proposal, so neither the panel, the
+  count, the overlay nor "Register all" shows it and the overlay does not flash for it; the debug window's
+  detections list it as "Filtered" with the term. The filter is applied to the list each time (`proposals` in
+  `inventorySync.ts`): a filter removed or switched off brings the sightings back as proposals at once.
   Then one compact row per proposal. What the stored stock at the location already holds stays listed,
   dimmed, without Register / Discard (2026-10-20; `inStockOf` in `inventory.ts` and `components.ts`,
   `inStock` on the listed proposals): stacks per material and quality as long as the stored amount covers
@@ -476,8 +488,17 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 - `debug.html` + `DebugApp.vue`, opened from the settings (Rust `open_debug_window`, async, with the main
   window's WebView2 browser arguments: another set hangs WebView2; no JS close handler: `destroy` would
   need a permission); closing the main window ends the app, the debug window with it.
-- Two tabs (`DebugApp.vue`, both stay mounted; the shared table, panel and key/value styles sit unscoped
+- Three tabs (`DebugApp.vue`, all stay mounted, the OCR scan opens first; the shared table, panel and key/value styles sit unscoped
   there), the layout after the concept artifact https://claude.ai/artifact/WrWSMUa9T48WVDZCt4WLJL:
+  - **General** (`DebugGeneral.vue`, 2026-10-31; "General" in both languages, as the user named it): the app (version,
+    platform, setup or standalone exe, server origin, user, connection), its folders (config file, log, cache, game
+    folder; each opens in the file manager: Rust `open_folder` with `config`/`log`/`cache`/`game`, never a path from
+    the page), the catalog (when loaded, materials / locations / blueprints per language, the copy kept on disk with
+    size, date and ETag) and the language pack (the `global.ini` the game reads, found or not, `user.cfg`'s language,
+    size, date, how many of the texts asked for it had). The app's side is Rust `debug_info` (re-read on
+    `config-changed` and when the catalog was loaded again); connection, user and catalog come from the main window
+    (`debugReport.ts`: `general-report` on every change, `general-report-request` on open; `catalogLoad` in
+    `refinerySync.ts`). No catalog version: `/api/catalog` has none (decided 2026-10-31: no server change for it).
   - **OCR scan** (`DebugScan.vue`), two views and "Record data" in its row. "Last read": first the frame (a
     JPEG data URL, 1280 px wide, CSP `img-src data:`, in a box of the frame's aspect that stays while what
     follows changes; its height can be dragged, the image then fits in centred) with SVG overlays (OCR boxes, read cells, tiles, hovered tile, tooltip, or the
@@ -494,7 +515,7 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
     `inventory-sightings` on every change, `inventory-sightings-request` on open, with the locations' short
     names: the window has no catalog; own kind filter; columns source (FE = warehouse, INV = character
     inventory), name, quality, amount or stats, location, page and cell, state (Proposal / Registered /
-    Discarded, or Problem with the reason), time).
+    Discarded, Filtered with the user filter's term, or Problem with the reason), time).
   - **Game.log** (`DebugGamelog.vue`): the file (path, created, modified, size, read up to: `log_state`'s
     `file`, re-read every 2 s besides `log-changed`), every blueprint unlock (current log and old logs,
     registered and default ones included; time, logged name, matched catalog labels, state with a filter

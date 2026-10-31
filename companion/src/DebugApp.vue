@@ -1,20 +1,22 @@
 <script setup lang="ts">
-// The debug window (opened from the settings; remote troubleshooting) in two tabs: the OCR scan
-// (DebugScan.vue: the last read with its frame, the detections of both scans, a recording) and Game.log
-// (DebugGamelog.vue: the file, the blueprint unlocks and the location lines as the main window matched
-// them, a static export). Both stay mounted (v-show): their listeners and the last read survive a tab
-// switch. The styles below are shared by both (not scoped).
+// The debug window (opened from the settings; remote troubleshooting) in three tabs: General
+// (DebugGeneral.vue: app, folders, catalog, language pack), the OCR scan (DebugScan.vue: the last read with
+// its frame, the detections of both scans, a recording) and Game.log (DebugGamelog.vue: the file, the
+// blueprint unlocks and the location lines as the main window matched them, a static export). All stay
+// mounted (v-show): their listeners and the last read survive a tab switch. The styles below are shared
+// by all (not scoped).
 import { onMounted, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { getConfig } from "./backend";
 import { applyLangSetting, t } from "./i18n";
 import { errorText, toast } from "./toasts";
 import DebugGamelog from "./components/DebugGamelog.vue";
+import DebugGeneral from "./components/DebugGeneral.vue";
 import DebugScan from "./components/DebugScan.vue";
 import Toasts from "./components/Toasts.vue";
 import ClipTip from "./components/ClipTip.vue";
 
-const tab = ref<"scan" | "log">("scan");
+const tab = ref<"general" | "scan" | "log">("scan");
 
 const applyLanguage = async () => applyLangSetting((await getConfig()).language);
 
@@ -31,9 +33,11 @@ onMounted(async () => {
 <template>
   <div class="debug">
     <nav class="tabs">
+      <button type="button" class="tab" :class="{ active: tab === 'general' }" @click="tab = 'general'">{{ t("debug.tab.general") }}</button>
       <button type="button" class="tab" :class="{ active: tab === 'scan' }" @click="tab = 'scan'">{{ t("debug.tab.scan") }}</button>
       <button type="button" class="tab" :class="{ active: tab === 'log' }" @click="tab = 'log'">{{ t("debug.tab.log") }}</button>
     </nav>
+    <DebugGeneral v-show="tab === 'general'" />
     <DebugScan v-show="tab === 'scan'" />
     <DebugGamelog v-show="tab === 'log'" />
     <Toasts />

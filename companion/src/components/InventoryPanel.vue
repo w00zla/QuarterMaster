@@ -3,7 +3,7 @@
 // ScanBar.vue), one panel per part: stock (the user hovers every stack in the freight manager's
 // warehouse) and comps (every gear item, ship component or FPS gear, in the character inventory's storage
 // pane). "Register all" in the head, after the count the part's kind filter (what the scan detects; off: its
-// screen is not read), then the proposals of every location as a compact table with resizable columns, one
+// screen is not read) and the user's own filters (FiltersButton.vue), then the proposals of every location as a compact table with resizable columns, one
 // row per stack (name, quality, amount, location) or gear tile (name, type, size, grade, stats,
 // pieces, location), each with
 // Register / Discard; the item's thumbnail in front of the name, or in the display "thumbs" larger
@@ -39,6 +39,7 @@ import { catalogResponses, materialName, materialThumb, syncCatalog } from "../r
 import { connected, meOrgs } from "../state";
 import type { ThumbRef } from "../thumbs";
 import { toast } from "../toasts";
+import FiltersButton from "./FiltersButton.vue";
 import Thumb from "./Thumb.vue";
 
 // One row per proposal: a stack (materials, items) or a component
@@ -227,6 +228,7 @@ const lockTip = computed(() => (connected.value ? null : t("conn.off")));
           </button>
         </Tooltip>
       </div>
+      <FiltersButton />
       <span class="spacer" />
       <Tooltip :text="lockTip">
         <button type="button" class="btn small primary" :disabled="!connected || !openRows.length || busy" @click="registering = [...openRows]">

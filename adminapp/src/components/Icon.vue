@@ -93,6 +93,8 @@ export const ICONS = {
   trade: '<path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 12 4 4-4 4"/><path d="M21 16H7"/>',
   // The mining dialog's target quality
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+  // For the companion: a funnel, the user's own scan filters
+  filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
 } as const
 
 export type IconName = keyof typeof ICONS
