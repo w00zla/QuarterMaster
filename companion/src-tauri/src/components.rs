@@ -364,11 +364,12 @@ fn scaled_crop(frame: &RgbImage, rect: Rect, scale: f32) -> RgbImage {
 }
 
 /// Reads the texts in `rect` of `frame` (scaled up by `scale` first); boxes in frame pixels. Only the
-/// detected lines `keep` (their boxes in frame pixels) picks are recognized.
-fn read_area(ocr: &mut Ocr, frame: &RgbImage, rect: Rect, scale: f32, keep: impl FnOnce(&[Rect]) -> Vec<bool>) -> Result<Vec<TextBox>, String> {
+/// detected lines `keep` (their boxes in frame pixels) picks are recognized. `cpu`: detected on the CPU in GPU
+/// mode too (`Ocr::detect_on_cpu`).
+fn read_area(ocr: &mut Ocr, frame: &RgbImage, rect: Rect, scale: f32, cpu: bool, keep: impl FnOnce(&[Rect]) -> Vec<bool>) -> Result<Vec<TextBox>, String> {
     let crop = scaled_crop(frame, rect, scale);
     let (ox, oy) = (rect.x0.max(0.0), rect.y0.max(0.0));
-    let found = ocr.detect(&crop, crop.height())?;
+    let found = if cpu { ocr.detect_on_cpu(&crop, crop.height())? } else { ocr.detect(&crop, crop.height())? };
     let in_frame: Vec<Rect> = found.iter().map(|r| Rect { x0: ox + r.x0 / scale, y0: oy + r.y0 / scale, x1: ox + r.x1 / scale, y1: oy + r.y1 / scale }).collect();
     let keep = keep(&in_frame);
     let picked: Vec<usize> = (0..found.len()).filter(|&i| keep[i]).collect();
@@ -445,7 +446,7 @@ pub fn read_page(ocr: &mut Ocr, frame: &RgbImage, hint: Option<f32>) -> Result<(
             Rect { x0: lo.x(PAGE_CX) - pad(lo), y0: lo.y(0.5 + PAGE_CY) - pad(lo), x1: hi.x(PAGE_CX) + pad(hi), y1: hi.y(0.5 + PAGE_CY) + pad(hi) }
         }
     };
-    let boxes = read_area(ocr, frame, area, PAGE_SCALE as f32, all)?;
+    let boxes = read_area(ocr, frame, area, PAGE_SCALE as f32, hint.is_none(), all)?;
     Ok((page_and_scale(&boxes, frame), boxes))
 }
 
@@ -453,7 +454,7 @@ pub fn read_page(ocr: &mut Ocr, frame: &RgbImage, hint: Option<f32>) -> Result<(
 pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage, ui: Ui) -> Result<(Option<Tooltip>, Vec<TextBox>), String> {
     let tip_area = Rect { x0: ui.x(TIP_LEFT), y0: ui.y(TIP_TOP), x1: ui.x(TIP_RIGHT), y1: ui.y(TIP_BOTTOM) };
     let s = ui.len(1.0);
-    let boxes = read_area(ocr, frame, tip_area, TIP_SCALE_HEIGHT / s, |rects| tooltip_block(rects, s))?;
+    let boxes = read_area(ocr, frame, tip_area, TIP_SCALE_HEIGHT / s, false, |rects| tooltip_block(rects, s))?;
     let tooltip = tooltip_of(lines_of(&boxes, ui.len(1.0)), ui.len(1.0));
     Ok((tooltip, boxes))
 }
@@ -462,7 +463,7 @@ pub fn read_tooltip(ocr: &mut Ocr, frame: &RgbImage, ui: Ui) -> Result<(Option<T
 pub fn read_count(ocr: &mut Ocr, frame: &RgbImage, tile: Rect) -> Result<(Option<u32>, Vec<TextBox>), String> {
     let (w, h) = (tile.x1 - tile.x0, tile.y1 - tile.y0);
     let area = Rect { x0: tile.x1 - COUNT_W * w, y0: tile.y0, x1: tile.x1, y1: tile.y0 + COUNT_H * h };
-    let boxes = read_area(ocr, frame, area, COUNT_SCALE, all)?;
+    let boxes = read_area(ocr, frame, area, COUNT_SCALE, false, all)?;
     let count = boxes.iter().filter(|b| b.score >= MIN_SCORE).find_map(|b| parse_count(&b.text));
     Ok((count, boxes))
 }

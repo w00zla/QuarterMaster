@@ -83,6 +83,9 @@ cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example com
 #   (setup, NanoDet checkout and retraining: docs/companion.md "The layout detector")
 local/detector/.venv/Scripts/python.exe -I companion/detector/labels.py local/detector/data <recording>... --neg <dir>...   # training data from debug recordings (before the detector), screenshots without a warehouse as negatives
 local/detector/.venv/Scripts/python.exe -I companion/detector/eval.py <model.onnx> local/detector/data                     # recall/precision per kind, CPU time
+# Text recognizer (resources/rec/rec-tiny-latin.onnx in git: cut to Latin, fine-tuned on the game's font Blender Pro): scripts in companion/ocrtrain/
+#   (same venv, needs transformers; the font from Data.p4k stays in local/fonts-sc/, never in git; steps and numbers: docs/companion.md "The recognizer's fine-tune")
+local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/eval.py onnx:<model.onnx>      # exact lines / character error rate on the labelled real tooltip lines (local/ocr-eval/)
 # Companion log: %LOCALAPPDATA%\com.w00zla.quartermaster.companion\logs\companion.log (Linux: ~/.local/share/…/logs; 2 MB, 3 old files kept); every OCR read is logged
 #   ("scan on/off", "scan screen none|warehouse|inventory|refinery (<why>)", "inventory read in … ms: 4×3 tiles at pitch …, cursor …, tooltip …, hovered …", "components read in … ms: page …, cursor … in tile (row, col, span), tooltip "<title>" with n lines: …", "refinery visit started/ended", "refinery overview read in …", "read phases: rgb …, tiny: det prep+run+post …, rec prep+run+post …, rest …" (debug), "overlay on/off", "OCR GPU: Ready|Missing", "OCR Tiny loaded in … on the GPU|CPU", "OCR GPU failed, on the CPU from now on: …", "screen capture: …"):
 #   no read lines during a scan = the capture (game not in front) or the gate, reads without tiles = the layout, a tooltip without a hovered tile = the hover rule.

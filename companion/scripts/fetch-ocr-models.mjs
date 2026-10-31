@@ -2,7 +2,9 @@
 // Apache-2.0; multi-language, one dictionary of 6904 characters; `ocr::Model::Tiny`) into
 // src-tauri/resources/ocr/, checked against pinned SHA-256 hashes: its dictionary is the list
 // `PostProcess.character_dict` of the recognizer's inference.yml, written one character per line
-// (PP-OCRv6 "small" from RapidOCR read the warehouse until 2026-10-31).
+// (PP-OCRv6 "small" from RapidOCR read the warehouse until 2026-10-31). The app compiles in the
+// detector; the recognizer and its dictionary are the input of cut-rec.py, whose Latin cut in
+// src-tauri/resources/rec/ (in git) the app reads.
 // On Windows also DirectML.dll 1.15.4 (Microsoft's redistributable, MIT; ONNX Runtime's GPU
 // acceleration needs it next to the exe, Windows' own is too old; the setup bundles it): out of the
 // NuGet package Microsoft.AI.DirectML (200 MB) only that one file, by HTTP ranges, checked against

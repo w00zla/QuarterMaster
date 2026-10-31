@@ -280,7 +280,7 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   nearest detected badge around the tile's top right corner (`BADGE_SEARCH`), with room on its right
   (`BADGE_RIGHT_PAD`: a digit at the crop's edge reads as "8"), then the tile's badge
   area; upscaled 3×, recognized with the badge's characters only (`Ocr::recognize_images_only`,
-  "Xx× 0123456789": the multi-language model read a "6" as "日"); the first read with digits wins, a bare
+  "Xx× 0123456789": the multi-language model read a "6" as "日" before the cut, see "OCR"); the first read with digits wins, a bare
   "X" = 1 flagged uncertain (so far always a real X1 whose thin 1 got lost). Not read when the tooltip
   covers over 5 % of the area: it opens at the cursor, near the tile's top over its own badge. The
   recordings of 2026-10-19: the hovered tile's count in 115 of 120 and 52 of 55 frames (34 and 69 before).
@@ -556,10 +556,17 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   first use) runs on the same engine and threads and counts in the detector's timings: see "The layout
   detector" under the warehouse scan.
 - `ocr.rs`: PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
-  and recognizer, dictionary of 6904 characters, ~6 MB; its detector's normalization and DB thresholds
+  and recognizer, dictionary of 6904 characters, mostly CJK; its detector's normalization and DB thresholds
   from its inference.yml; fetched by `scripts/fetch-ocr-models.mjs` with pinned SHA-256 and compiled in
-  with `include_bytes!`: the Windows release is a bare exe) on ONNX Runtime via `ort` (prebuilt, static);
-  pre/post-processing after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar
+  with `include_bytes!`: the Windows release is a bare exe) on ONNX Runtime via `ort` (prebuilt, static).
+  The app's recognizer is **ours** (in git under `src-tauri/resources/rec/`, 2.3 MB): tiny's recognizer with its
+  output layer **cut to Latin** (2026-10-31, `scripts/cut-rec.py`: blank, ASCII, Latin-1, Latin-Ext-A for Polish
+  and Czech packs, μ, ▲▼ and the space, 320 of 6906 classes; its dictionary `rec_dict-tiny-latin.txt` is the app's
+  charset) and then **fine-tuned on the game's font** (see "The recognizer's fine-tune" below). The CJK classes
+  gave misreads ("日", "团", "物") and on the GPU every recognizer session held outputs over all 6906 (~240 MB VRAM
+  in the gear scan). A Chinese pack is no longer read; Cyrillic never was (the dictionary has none).
+  `cut-rec.py` writes the dictionary and, to `local/ocr-train/`, the bare cut model (the fine-tune's teacher).
+  Pre/post-processing after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar
   shape (~8 % faster). History: PP-OCRv6 small (RapidOCR's ONNX, 18708 characters, ~31 MB) replaced v5
   on 2026-10-18; from 2026-10-27 tiny read the character inventory and the refinery terminal, small the
   warehouse grid (tiny missed the badges at native size); since 2026-10-31 tiny reads everything, with
@@ -578,7 +585,14 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   DirectML compiles a session's graph for the first input shape it runs, every other shape cost ~20 ms
   of CPU per run: `ocr::Engine` keeps one session per input shape with its dimensions fixed (the
   detector's shapes are fixed per screen area and resolution; the recognizer's batches are padded to 6
-  lines of a width out of 320–2560). A probe session at load tells whether DirectML works. Measured
+  lines of a width out of 320–2560). A probe session at load tells whether DirectML works. Each session
+  keeps its largest run's buffers until the scan stops, so the VRAM is the sum over the shapes (2026-10-31,
+  DXGI's per-process usage, `components_dump`/`inventory_dump` flows, no game running): DirectML itself
+  ~100 MB, the gear scan's page probe without a scale (det 896×1600 at 3840×1600, 608×1024 at 1080p)
+  ~315 / ~150 MB, the tooltip's det ~150 MB, each small det ~13 MB. So detector inputs up to 192 px high
+  (`DET_CPU_MAX_HEIGHT`, ~1 ms on the CPU) and the page probe (`Ocr::detect_on_cpu`, ~43 / ~16 ms on 3
+  threads, every frame while no screen is known) run on the CPU in GPU mode too. With the cut recognizer:
+  gear scan 1073 → 446 MB (3840×1600), 852 → 446 MB (1080p); warehouse 238 → 182, 307 → 215 MB. Measured
   (3840×1600, RTX 5080, whole dump processes incl. JPEG decoding): gear read with tiny 97 → 67 ms, CPU
   238 → 81 ms per read; warehouse with small 382 → 135 ms, CPU 1093 → 203 ms. The warehouse reads the
   same on CPU and GPU, tiny's gear tooltips differ in spaces and punctuation of the description (the
@@ -598,6 +612,54 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   language pack, also one replacing the English texts like StarStrings; keys case-insensitive, a pack's
   `key,P=` suffix dropped; re-read when `user.cfg` or the file change, checked every 10 s); every label
   matches in English and the pack's wording; Rust `game_names(keys)` returns pack texts for loc keys.
+
+### The recognizer's fine-tune
+
+Since 2026-10-31 (asked for: fewer misreads, speed no goal). Scripts in `companion/ocrtrain/` (Python in the
+detector's uv venv, which got `transformers` for it; `label.ts` in Node), all data in `local/` (gitignored).
+- **Why**: the game draws its UI in **Blender Pro** (Medium in the tooltips; the warehouse and the refinery
+  terminal too), whose "&" looks like an "Ɛ": tiny read "Klaus & Werner" as "Klaus ε/E/6/8 Werner" (0.9 % of
+  the "&" lines right). The font is commercial ("All rights reserved"): it is taken from `Data.p4k`
+  (`Data\UI\fonts\Shared\fonts_en.swf`, a Scaleform library of 29 fonts, converted to TTF into
+  `local/fonts-sc/ttf/`) for local training only and never goes into git or a build.
+- **Model**: PyTorch via Hugging Face Transformers' port (`PPOCRV6TinyRecForTextRecognition`,
+  `PaddlePaddle/PP-OCRv6_tiny_rec_safetensors`): Paddle on Windows has no working training on an RTX 50.
+  Its weights are another snapshot than the ONNX the app had (same architecture and BGR input, 96 % of real
+  lines read the same, as good on the eval set): the fine-tune starts from it, its head cut like
+  `cut-rec.py` (`common.py`). CTC only, BatchNorm frozen, AdamW 1e-4 cosine, batch 128, 10 epochs (~4 min
+  each on the RTX 5080). `export.py`: ONNX opset 17 with the input's batch and width as **named** dynamic
+  dimensions (`ocr::Engine` fixes them by name for DirectML), softmax output like the original; checked
+  against PyTorch (≤ 2e-4).
+- **Data**: 100k synthetic lines (`render.py --mix v2`, needs `--pack` = a `global.ini`): Blender Pro
+  Medium at the measured cap heights (~9 px at 1080p, ~13 at 3840×1600), widths and margins of the
+  detector's boxes, backgrounds from real tooltip and terminal areas (text inpainted), JPEG/blur/noise;
+  texts: the pack's item names (with its prefixes, "Mil/3/A Blizzard") and descriptions word-wrapped,
+  stat lines in the tooltip formats (coloured values, ▲▼ drawn), German pack texts, terminal lines in
+  upper case, ~25 % random strings of the charset, ~5 % "&" lines; 37 % in other game fonts. Plus 2525
+  real warehouse and refinery lines labelled with what the bare cut model reads there with confidence
+  ≥ 0.95 (`teacher_crops.py`, weighted ×10): the first run on synthetic gear lines alone forgot the
+  other screens ("SILIcON", "MiI/3/A", 4 screenshot tests failed).
+- **Evaluation**: 21,881 real gear tooltip lines from the debug recordings (`make_crops.py` from
+  `components_dump` outputs), labelled from independent sources (`label.ts`): the pack's name of the item
+  the title resolves to, the span of the pack's description nearest to a line, stat names from the
+  catalog with the read value (a sample of 36 disputed lines checked by eye: all labels right). Plus the
+  teacher lines of warehouse recording `…6994` and the refinery test frames. The Rust screenshot tests are
+  the gate.
+- **Result** (all real gear lines, bare cut → fine-tune): lines exactly right 90.4 → 99.0 %, character
+  error rate 0.26 → 0.04 %, titles 86.8 → 98.3 %, "&" lines 0.9 → 98.6 %; refinery lines agree with the
+  old reads to 97 % (spaces and punctuation), warehouse lines to 86 % (corrections like "Apharite" →
+  "Aphorite" and new small errors like "Janalita"). What the app makes of it changed little: titles
+  resolving to exactly one item 1571 → 1576 of ~1805 frames (the folding of look-alikes caught most
+  misreads before), crafted stats read 90.2 → 91.0 %, warehouse material names the same. VRAM unchanged.
+- Run (repo root; `PY` = `local/detector/.venv/Scripts/python.exe -I`): `PY companion/scripts/cut-rec.py`
+  (the charset, the teacher in `local/ocr-train/`), `PY companion/ocrtrain/render.py --mix v2 --n 100000
+  --out local/ocr-train/synth2 --seed 2 --pack <global.ini>` (and `-val` with 5000), the teacher dumps
+  (`inventory_dump`/`ocr_dump` built with the bare cut model into `local/ocr-teacher/`) then
+  `PY companion/ocrtrain/teacher_crops.py`, `PY companion/ocrtrain/train.py --data synth2 --data teacher
+  ×10 --val synth2-val --out run3` (`last.pt`: the end of the cosine schedule; `best.pt` only when the sum
+  of real and teacher error rates beat the untrained model's), `PY companion/ocrtrain/eval.py
+  onnx:<model>`, `PY companion/ocrtrain/export.py <pt> <onnx>`, copy to `resources/rec/rec-tiny-latin.onnx`,
+  `cargo test` as the gate.
 
 ## Refinery
 

@@ -1,5 +1,7 @@
 //! Text detection and recognition with PaddleOCR's PP-OCRv6 "tiny" models (PaddlePaddle's own ONNX,
-//! Apache-2.0; multi-language with one dictionary of 6904 characters; since 2026-10-31 for every
+//! Apache-2.0; multi-language with one dictionary of 6904 characters; the recognizer in git under
+//! `resources/rec/`: cut to 318 Latin characters, `scripts/cut-rec.py`, and fine-tuned on the game's
+//! font, `ocrtrain/`, docs/companion.md "OCR"; since 2026-10-31 for every
 //! screen, PP-OCRv6 "small" read the warehouse before, PP-OCRv5 mobile/latin until 2026-10-18) on
 //! ONNX Runtime. Pre- and post-processing follow RapidOCR (`rapidocr` 3.x) with tiny's own detector
 //! input and thresholds (its inference.yml): the detector sees the image in BGR `/255` with the
@@ -70,6 +72,8 @@ pub struct TextBox {
 
 pub struct Ocr {
     det: Engine,
+    // The detector on the CPU in GPU mode (`detect_on_cpu`, inputs up to DET_CPU_MAX_HEIGHT), made on first use
+    det_cpu: Option<Engine>,
     rec: Engine,
     // The layout detector, made on its first use (only the warehouse needs it)
     layout: Option<Engine>,
@@ -118,6 +122,10 @@ const LAYOUT_KINDS: [LayoutKind; 4] = [LayoutKind::Badge, LayoutKind::Quality, L
 /// A box counts from this score; boxes of one kind overlapping more than LAYOUT_NMS (IoU) are one
 const LAYOUT_SCORE: f32 = 0.35;
 pub const LAYOUT_NMS: f32 = 0.5;
+
+// Detector inputs up to this height run on the CPU in GPU mode too: ~1 ms each there, while each of
+// their shapes held a DirectML session of its own (~13 MB VRAM each, 2026-10-31)
+const DET_CPU_MAX_HEIGHT: u32 = 192;
 
 // The recognizer's input widths on the GPU (lines padded to the next; wider ones get their own)
 const REC_WIDTHS_GPU: [usize; 7] = [320, 480, 640, 960, 1280, 1920, 2560];
@@ -260,8 +268,8 @@ struct Spec {
 // PaddleX applies the ImageNet mean/std (given in RGB) to the BGR image as it is
 const TINY: Spec = Spec {
     det: include_bytes!("../resources/ocr/det-tiny.onnx"),
-    rec: include_bytes!("../resources/ocr/rec-tiny.onnx"),
-    dict: include_str!("../resources/ocr/rec_dict-tiny.txt"),
+    rec: include_bytes!("../resources/rec/rec-tiny-latin.onnx"),
+    dict: include_str!("../resources/rec/rec_dict-tiny-latin.txt"),
     mean: [0.485, 0.456, 0.406],
     std: [0.229, 0.224, 0.225],
     thresh: 0.2,
@@ -281,6 +289,7 @@ impl Ocr {
         chars.push(" ".into());
         Ok(Self {
             det: Engine::new("det", spec.det, threads, gpu)?,
+            det_cpu: None,
             rec: Engine::new("rec", spec.rec, threads, gpu)?,
             layout: None,
             threads,
@@ -302,8 +311,19 @@ impl Ocr {
     }
 
     /// Text boxes in `img`, detected on a copy scaled down to at most `max_height` pixels high (never
-    /// up), in `img`'s pixels, top to bottom.
+    /// up), in `img`'s pixels, top to bottom. In GPU mode small inputs run on the CPU (DET_CPU_MAX_HEIGHT).
     pub fn detect(&mut self, img: &RgbImage, max_height: u32) -> Result<Vec<Rect>, String> {
+        self.detect_in(img, max_height, false)
+    }
+
+    /// The same on the CPU in GPU mode too: for a large input read while no screen is known (the
+    /// character inventory's page probe), whose DirectML session held ~150 (1080p) to ~315 MB
+    /// (3840×1600) of VRAM for the whole scan; ~16 / ~43 ms on 3 threads (2026-10-31).
+    pub fn detect_on_cpu(&mut self, img: &RgbImage, max_height: u32) -> Result<Vec<Rect>, String> {
+        self.detect_in(img, max_height, true)
+    }
+
+    fn detect_in(&mut self, img: &RgbImage, max_height: u32, cpu: bool) -> Result<Vec<Rect>, String> {
         let started = Instant::now();
         let (w, h) = img.dimensions();
         let ratio = (max_height as f32 / h as f32).min(1.0);
@@ -312,7 +332,15 @@ impl Ocr {
         let resized = resize(img, rw, rh, FilterType::Bilinear);
         let input = Tensor::from_array(([1usize, 3, rh as usize, rw as usize], to_chw_bgr(&resized, rw, self.spec.mean, self.spec.std))).map_err(|e| e.to_string())?;
         let prepared = Instant::now();
-        let outputs = self.det.session("det", &[1, 3, rh as usize, rw as usize])?.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+        let det = if self.det.gpu() && (cpu || rh <= DET_CPU_MAX_HEIGHT) {
+            if self.det_cpu.is_none() {
+                self.det_cpu = Some(Engine::new("det", self.spec.det, self.threads, false)?);
+            }
+            self.det_cpu.as_mut().expect("made above")
+        } else {
+            &mut self.det
+        };
+        let outputs = det.session("det", &[1, 3, rh as usize, rw as usize])?.run(ort::inputs![input]).map_err(|e| e.to_string())?;
         let ran = Instant::now();
         self.timings.det_prep += prepared - started;
         self.timings.det_run += ran - prepared;
@@ -382,7 +410,7 @@ impl Ocr {
     }
 
     /// The same, picking only characters of `allowed` (a count badge: "Xx× 0123456789"): the
-    /// multi-language recognizer otherwise takes a thin "6" for "日" now and then.
+    /// recognizer otherwise takes a look-alike now and then (a thin "6" for "日" before the cut).
     pub fn recognize_images_only(&mut self, crops: &[RgbImage], allowed: &str) -> Result<Vec<(String, f32)>, String> {
         let mask: Vec<bool> = self.chars.iter().map(|c| c.chars().count() == 1 && c.chars().all(|ch| allowed.contains(ch))).collect();
         self.recognize_images_in(crops, Some(&mask))
