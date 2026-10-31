@@ -377,7 +377,16 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   the centre, 0.22–0.76 of the height, scaled to 1800 px height: up for the small texts, down on larger
   frames, 3840×2160 ~8 % faster) and the page
   number's go through the OCR, ~0.25–0.4 s per read on 3840×1600 (~0.2–0.3 s at 1080p), and only while the
-  cursor is on a lit tile.
+  cursor is on a lit tile. Measured 2026-10-31 (the recordings of that day): the app's read (page where
+  the known scale puts it, tooltip, stack count) ~57 ms on the CPU (3 threads) at 1080p and 3840×1600,
+  tooltip ~50 of it (tiny's detector ~18, ~18 lines recognized in ~30); in game on the GPU median 55 ms
+  at 1080p, ~195 ms at 3840×1600 (offline the GPU reads in ~45: in game it waits for the GPU the game
+  holds). Tried and dropped (do not re-try): a layout detector of our own for the tooltip (NanoDet,
+  kinds title/field/description, only title and fields recognized): its own boxes for the lines cut
+  letters (edges up to ~13 px off; 93–97 % of the stat lines as before even with the edges widened by
+  the pixels), as a hybrid with tiny's boxes the same texts as before but only ~42 instead of ~50 ms on
+  the CPU, 41 instead of 45 offline on the GPU and in game at 3840×1600 no faster (median 201 ms), for
+  5.7 MB more app, +30–50 MB RAM.
   A tooltip needs ≥ 4 body lines and 3 letters in the title (real ones have 13–17 lines, stray reads of the
   scene 1–3); lines above the first with 3 letters are strays of the scene and skipped (a lamp above the
   panel read as "I", 3840×2160, a user's recording of 2026-10-25); the Rust side emits the title and the

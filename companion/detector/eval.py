@@ -9,7 +9,6 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
-CLASSES = ["badge", "quality", "title", "tipline"]
 STRIDES = [8, 16, 32, 64]
 REG_MAX = 7
 MEAN = np.array([103.53, 116.28, 123.675], np.float32)
@@ -34,7 +33,7 @@ def priors(w, h):
 
 def decode(out, pri, thr=0.35, iou=0.5):
     """NanoDet-Plus-Ausgabe [N, C + 4·(REG_MAX+1)] -> [(class, score, x0, y0, x1, y1)] nach NMS je Klasse."""
-    nc = len(CLASSES)
+    nc = out.shape[1] - 4 * (REG_MAX + 1)
     scores, reg = out[:, :nc], out[:, nc:].reshape(-1, 4, REG_MAX + 1)
     cls = scores.argmax(1)
     sc = scores.max(1)
@@ -82,7 +81,8 @@ def main():
     for an in coco["annotations"]:
         x, y, w, h = an["bbox"]
         gts.setdefault(an["image_id"], []).append((an["category_id"] - 1, x, y, x + w, y + h))
-    tp, fp, fn = np.zeros(4, int), np.zeros(4, int), np.zeros(4, int)
+    names = [c["name"] for c in coco["categories"]]
+    tp, fp, fn = np.zeros(len(names), int), np.zeros(len(names), int), np.zeros(len(names), int)
     times = []
     for im in coco["images"]:
         img = cv2.imread(os.path.join(a.data, "val", im["file_name"]))
@@ -110,7 +110,7 @@ def main():
                 fn[g[0]] += 1
     t = np.array(times[3:]) * 1000
     print(f"{os.path.basename(a.model)} {W}x{H} scale {a.scale}: {len(times)} images, {np.median(t):.1f} ms median, {np.percentile(t, 90):.1f} ms p90 ({a.threads} threads)")
-    for c, n in enumerate(CLASSES):
+    for c, n in enumerate(names):
         print(f"  {n:8s} recall {tp[c] / max(tp[c] + fn[c], 1):.3f}  precision {tp[c] / max(tp[c] + fp[c], 1):.3f}  (tp {tp[c]}, fp {fp[c]}, fn {fn[c]})")
     if a.tiny:
         # tiny-Det auf der Eingabe, die die App heute für denselben Bereich nimmt: 480×320 bei 720 px

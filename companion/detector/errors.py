@@ -4,7 +4,7 @@ import json, os, sys
 import cv2
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
-from eval import CLASSES, MEAN, STD, decode, iou, priors, session
+from eval import MEAN, STD, decode, iou, priors, session
 
 COLORS = [(0, 255, 255), (255, 0, 255), (0, 255, 0), (255, 160, 0)]
 model, data, out = sys.argv[1:4]
@@ -14,6 +14,7 @@ inp = sess.get_inputs()[0]
 _, _, H, W = inp.shape
 pri = priors(W, H)
 coco = json.load(open(os.path.join(data, "val.json")))
+CLASSES = [c["name"] for c in coco["categories"]]
 gts = {}
 for an in coco["annotations"]:
     x, y, w, h = an["bbox"]

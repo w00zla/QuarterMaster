@@ -4,7 +4,9 @@ import os, sys
 import cv2
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
-from eval import CLASSES, MEAN, STD, decode, priors, session
+from eval import MEAN, STD, decode, priors, session
+
+CLASSES = ["badge", "quality", "title", "tipline"]
 
 COLORS = [(0, 255, 255), (255, 0, 255), (0, 255, 0), (255, 160, 0)]
 model, out, images = sys.argv[1], sys.argv[2], sys.argv[3:]
