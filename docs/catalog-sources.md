@@ -461,8 +461,14 @@ pictures with gaps), so the icons are rendered from the models:
    companion's debug recordings (30 items: armour, weapons, ship components, minerals). Ray tracing on for the scene; the addon
    gives the `GlassPBR` materials raytraced refraction (dithered): they are pure transmission, without it Eevee
    only refracts the grey world and visors render as flat grey. The minerals use the `Organic` shader, whose colour
-   is the first layer's `TintColor` (the crystal; layer 2 is grey sand): the addon multiplies the grey diffuse by
-   it. Beradom (tint 1,1,1) and Sadaryx (light grey tint) stay grey; not compared in game. Fixed in the addon on
+   is the first layer's `TintColor` (the crystal; layer 2 is grey sand) times that layer material's own `Diffuse`
+   (Beradom: tint white, crystal_beradom.mtl Diffuse violet), doubled for the grey diffuse (a detail map), with the
+   layer material's coloured `Specular` as specular tint and level; fitted to the game's warehouse tiles. Sadaryx
+   stays light grey. The ore thumbnails (`ui_ore_*_1_a`, HardSurface with `WEAR_LAYER`) have no wear mask of their
+   own: their layer materials carry the vein pattern `ore_raw_1_a_blend.tif` as `TexSlot8`, used as the wear factor
+   (red, smoothstep 0.6-0.8, not scaled by the scene's wear strength). Silicon's wear flecks render brighter than in
+   game (its wear layer is a light metal). The warehouse tiles under the cursor are covered by the tooltip: compare
+   against a later frame's free tile. Fixed in the addon on
    2026-11-01: a submaterial name with a trailing space (`"ore_hephaestanite "`, 5 ores) never matched its slot and
    rendered white; the emission strength of materials without their own emission input is `Glow` (× `EmissiveOpacity`),
    not the mean of the `Emissive` colour (the Hill Horror helmet's visor, `Emissive` 1,1,1 with `Glow` 0.01, glowed white).
