@@ -40,8 +40,8 @@ export function isFpsType(type: string | null | undefined, subType: string | nul
 
 /**
  * Items the shops sell that are no gear: catalog-only, for the item finder (where to buy item X); NEVER
- * bookable (stock, crafting, bot, `/api/catalog` and the icon renderer use COMPONENT_TYPES/FPS_TYPES only,
- * see `componentItemSql`). Per item type: the sub types that count (null = all) and, optionally, the record
+ * bookable (stock, crafting, bot and `/api/catalog` use COMPONENT_TYPES/FPS_TYPES only, see `componentItemSql`;
+ * the icon renderer renders them too, `shopItemSql`, since the finder shows their thumbnails). Per item type: the sub types that count (null = all) and, optionally, the record
  * paths (lower case, as in the RecordStore) that restrict it. `Misc` is mostly props nobody sells (1519
  * records, ~37 sold): only the carryables count. `Cargo` (boxes) and `Paints` (ship liveries) stay out on
  * purpose (decided 2026-11-01), vehicles too.
@@ -79,6 +79,12 @@ export function isShopItem(type: string | null | undefined, subType: string | nu
   if (rule.subTypes && !(subType && rule.subTypes.includes(subType))) return false;
   return !rule.paths || rule.paths.some((p) => path.includes(p));
 }
+
+/** SQL condition: the catalog.item row `alias` is a shop item. The extract stores exactly these without a raw
+ * record (normalize.ts); the type rule alone does not tell, Misc counts only under the carryables' paths, which
+ * the DB does not keep (a harvestable under carryables/ is a recipe input with its raw record). */
+export const shopItemSql = (alias: string): string =>
+  `NOT EXISTS (SELECT 1 FROM catalog.raw_record shop_r WHERE shop_r.uuid = ${alias}.uuid)`;
 
 /** SQL condition: the catalog.item row `alias` has an FPS gear type (as isFpsType). */
 export const fpsTypeSql = (alias: string): string => `(${Object.entries(FPS_TYPES).map(([type, subTypes]) =>

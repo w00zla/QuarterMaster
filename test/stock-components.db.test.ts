@@ -13,6 +13,7 @@ import { formatAmount } from '../src/stock/amount.ts';
 import { blueprintStatNames, materialCatalog, stockList } from '../src/stock/lookup.ts';
 import { orgMetrics } from '../src/stock/org-summary.ts';
 import { add, adjust, COMPONENT_QUALITY, StockError, type Actor } from '../src/stock/service.ts';
+import { shopItemSql } from '../src/catalog/components.ts';
 import { FPS, FPS_RECORDS, RECORDS, SHOP, SHOP_RECORDS, U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -70,6 +71,12 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     for (const u of [FPS.jacket, FPS.magazine, FPS.grenade, SHOP.food, SHOP.miscCarry, SHOP.blade]) assert.equal(materials.has(u), false, u);
     await assert.rejects(add(db, mia, { kind: 'item', uuid: SHOP.food, locationUuid: U.station, quality: COMPONENT_QUALITY, amount: '1' }),
       (e: unknown) => e instanceof StockError && e.code === 'notBookable');
+  });
+
+  it('tells the shop items apart in SQL (the icon renderer renders them too), gear stays out', async () => {
+    const rows = await db.execute<{ uuid: string }>(sql`SELECT uuid FROM catalog.item i WHERE ${sql.raw(shopItemSql('i'))}`);
+    assert.deepEqual(rows.map((r) => r.uuid).sort(),
+      [FPS.jacket, FPS.magazine, FPS.grenade, SHOP.food, SHOP.miscCarry, SHOP.blade].sort());
   });
 
   it('books components with the fixed quality only', async () => {

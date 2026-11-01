@@ -408,7 +408,9 @@ Throwaway script, not in the repo. Result:
 Inventory-style icons for everything the app books: the gear items (`componentItemSql`, ship components and FPS
 gear, no consumables), the harvestables (items used as recipe inputs, the stock service's bookable rule: 11
 `Misc/Harvestable`, e.g. Hadanite) and the ore chunks (`catalog.resource.data.rttThumbnailEntityClass`: 25 thumbnail
-entities, an ore and its refined material share one). `Data.p4k` holds no 2D item images (`displayIcon` is
+entities, an ore and its refined material share one); since 2026-11-01 also the shop items (`shopItemSql`: clothing,
+food, consumables, …, 2941), whose thumbnails the item finder shows; clothing renders worn like armour. 6734
+entities in all. `Data.p4k` holds no 2D item images (`displayIcon` is
 empty or a generic loadout icon; the commodity logos under `ui/sharedassets/commoditylogos/` are category
 pictures with gaps), so the icons are rendered from the models:
 
