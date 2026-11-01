@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Every known user (app_user, web logins, companion tokens) with a rough look at their data; read-only except
-// their privileges (tab Privileges: assign, take back, expiry).
+// their privileges (section Privileges: assign, take back, expiry).
 import { computed, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import DataTable from "../components/DataTable.vue";
@@ -10,7 +10,6 @@ import StockTotals from "../components/StockTotals.vue";
 import Tooltip from "../components/Tooltip.vue";
 import { send, useFetch } from "../api";
 import { dateTime, matches } from "../format";
-import { useStoredTab } from "../storedTab";
 import type { ActivitySource, UserDetail, UserPrivilege, UserRow } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
@@ -66,21 +65,27 @@ function valueOf(u: UserRow, key: string): string | number {
   }
 }
 
-const TABS = ["overview", "stock", "refinery", "blueprints", "privileges", "history"] as const;
-const TAB_LABELS: Record<(typeof TABS)[number], string> = {
-  overview: "Overview", stock: "Stock", refinery: "Refinery", blueprints: "Blueprints", privileges: "Privileges", history: "History",
-};
-const tab = useStoredTab("qm.users.tab", TABS, "overview");
-// Entries per tab, shown in its chip (none for the overview)
-function tabCount(t: (typeof TABS)[number]): number | null {
-  const d = detail.data.value;
-  if (!d) return null;
-  if (t === "stock") return d.stock.length;
-  if (t === "refinery") return d.jobs.length;
-  if (t === "blueprints") return d.blueprintList.length;
-  if (t === "history") return d.history.length;
-  if (t === "privileges") return privileges.data.value?.filter(held).length ?? null;
-  return null;
+// The detail: identity and key figures on top, below it folding sections; which are open is remembered per browser
+const SECTIONS = ["account", "orgs", "stock", "refinery", "blueprints", "privileges", "history"] as const;
+type Section = (typeof SECTIONS)[number];
+const OPEN_KEY = "qm.users.sections";
+const open = ref<Set<Section>>(new Set(["account", "orgs"]));
+try {
+  const stored = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "null") as unknown;
+  if (Array.isArray(stored)) open.value = new Set(SECTIONS.filter((x) => stored.includes(x)));
+} catch {
+  // Not readable: the default
+}
+function onToggle(section: Section, ev: Event) {
+  const next = new Set(open.value);
+  if ((ev.target as HTMLDetailsElement).open) next.add(section);
+  else next.delete(section);
+  open.value = next;
+  try {
+    localStorage.setItem(OPEN_KEY, JSON.stringify([...next]));
+  } catch {
+    // Not remembered
+  }
 }
 
 // Privileges: assigned (an expired one still counts as assigned until taken back), expiry as a date (end of that day, local)
@@ -187,72 +192,72 @@ function revoke(p: UserPrivilege) {
       @close="router.push('/users')"
     >
       <template v-if="detail.data.value">
-        <div class="chips">
-          <button v-for="t in TABS" :key="t" type="button" class="chip" :class="{ active: tab === t }" @click="tab = t">
-            {{ TAB_LABELS[t] }} <span v-if="tabCount(t) !== null" class="count">{{ tabCount(t) }}</span>
-          </button>
-        </div>
+        <section class="ident">
+          <div class="ident-line">
+            <span :class="{ faint: !detail.data.value.discordUsername }">@{{ detail.data.value.discordUsername ?? "—" }}</span>
+            <span class="dim">RSI {{ detail.data.value.rsiHandle ?? "—" }}</span>
+            <span v-for="c in channelsOf(detail.data.value)" :key="c" class="tag">{{ CHANNELS[c] }}</span>
+          </div>
+          <div class="figures">
+            <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.batches }">{{ detail.data.value.batches }}</span><span class="figure-label">Batches</span></div>
+            <div class="figure"><span class="figure-value mono" :class="{ faint: detail.data.value.resourceScu === '0' }">{{ detail.data.value.resourceScu }}</span><span class="figure-label">SCU</span></div>
+            <div class="figure"><span class="figure-value mono" :class="{ faint: detail.data.value.harvestablePcs === '0' }">{{ detail.data.value.harvestablePcs }}</span><span class="figure-label">Harvestables</span></div>
+            <div class="figure"><span class="figure-value mono" :class="{ faint: detail.data.value.gearPcs === '0' }">{{ detail.data.value.gearPcs }}</span><span class="figure-label">Gear</span></div>
+            <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.refineryJobs }">{{ detail.data.value.refineryJobs }}</span><span class="figure-label">Refinery jobs</span></div>
+            <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.blueprints }">{{ detail.data.value.blueprints }}</span><span class="figure-label">Blueprints</span></div>
+          </div>
+        </section>
 
-        <template v-if="tab === 'overview'">
-          <section>
-            <dl class="kv">
-              <dt>Discord ID</dt>
-              <dd class="mono">{{ detail.data.value.userId }}</dd>
-              <dt>Username</dt>
-              <dd :class="{ faint: !detail.data.value.discordUsername }">{{ detail.data.value.discordUsername ?? "—" }}</dd>
-              <dt>RSI handle</dt>
-              <dd :class="{ faint: !detail.data.value.rsiHandle }">{{ detail.data.value.rsiHandle ?? "—" }}</dd>
-              <dt>Known since</dt>
-              <dd>{{ dateTime(detail.data.value.createdAt) }}</dd>
-              <dt>Last action</dt>
-              <dd>{{ dateTime(detail.data.value.lastActivity) }}</dd>
-              <dt>Web app</dt>
-              <dd>
-                <template v-if="detail.data.value.lastSeen">
-                  last seen {{ dateTime(detail.data.value.lastSeen) }} · {{ detail.data.value.sessions }} valid sessions
-                </template>
-                <span v-else class="faint">never logged in</span>
-              </dd>
-              <dt>Companion</dt>
-              <dd>
-                <template v-if="detail.data.value.tokenCreatedAt">
-                  token since {{ dateTime(detail.data.value.tokenCreatedAt) }} · last used {{ dateTime(detail.data.value.tokenLastUsedAt) }}
-                </template>
-                <span v-else class="faint">no token</span>
-              </dd>
-            </dl>
-          </section>
-
-          <section>
-            <span class="panel-title">Actions in the last 30 days</span>
-            <dl class="kv">
-              <template v-for="(label, c) in CHANNELS" :key="c">
-                <dt>{{ label }}</dt>
-                <dd class="mono" :class="{ faint: !detail.data.value.actions[c] }">{{ detail.data.value.actions[c] }}</dd>
+        <details class="section" :open="open.has('account')" @toggle="onToggle('account', $event)">
+          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Account</span></summary>
+          <dl class="kv">
+            <dt>Discord ID</dt>
+            <dd class="mono">{{ detail.data.value.userId }}</dd>
+            <dt>Known since</dt>
+            <dd>{{ dateTime(detail.data.value.createdAt) }}</dd>
+            <dt>Last action</dt>
+            <dd>{{ dateTime(detail.data.value.lastActivity) }}</dd>
+            <dt>Web app</dt>
+            <dd>
+              <template v-if="detail.data.value.lastSeen">
+                last seen {{ dateTime(detail.data.value.lastSeen) }} · {{ detail.data.value.sessions }} valid sessions
               </template>
-            </dl>
-          </section>
-
-          <section>
-            <span class="panel-title">Orgs</span>
-            <table v-if="detail.data.value.memberships.length" class="mini">
-              <thead><tr><th>Org</th><th>Nickname</th><th>State</th><th>Since</th></tr></thead>
-              <tbody>
-                <tr v-for="m in detail.data.value.memberships" :key="m.guildId" class="link" @click="router.push(`/orgs/${m.guildId}`)">
-                  <td>{{ m.org }}</td>
-                  <td class="dim">{{ m.displayName }}</td>
-                  <td><span class="tag" :class="m.active ? 'ok' : ''">{{ m.active ? "Active" : "Inactive" }}</span></td>
-                  <td>{{ dateTime(m.active ? m.firstSeenAt : m.inactiveSince) }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-else class="faint">None</div>
-          </section>
-        </template>
-
-        <StockTotals v-else-if="tab === 'stock'" :stock="detail.data.value.stock" />
-
-        <section v-else-if="tab === 'refinery'">
+              <span v-else class="faint">never logged in</span>
+            </dd>
+            <dt>Companion</dt>
+            <dd>
+              <template v-if="detail.data.value.tokenCreatedAt">
+                token since {{ dateTime(detail.data.value.tokenCreatedAt) }} · last used {{ dateTime(detail.data.value.tokenLastUsedAt) }}
+              </template>
+              <span v-else class="faint">no token</span>
+            </dd>
+            <template v-for="(label, c) in CHANNELS" :key="c">
+              <dt>{{ label }} (30 d)</dt>
+              <dd class="mono" :class="{ faint: !detail.data.value.actions[c] }">{{ detail.data.value.actions[c] }} actions</dd>
+            </template>
+          </dl>
+        </details>
+        <details class="section" :open="open.has('orgs')" @toggle="onToggle('orgs', $event)">
+          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Orgs</span> <span class="count">{{ detail.data.value.memberships.length }}</span></summary>
+          <table v-if="detail.data.value.memberships.length" class="mini">
+            <thead><tr><th>Org</th><th>Nickname</th><th>State</th><th>Since</th></tr></thead>
+            <tbody>
+              <tr v-for="m in detail.data.value.memberships" :key="m.guildId" class="link" @click="router.push(`/orgs/${m.guildId}`)">
+                <td>{{ m.org }}</td>
+                <td class="dim">{{ m.displayName }}</td>
+                <td><span class="tag" :class="m.active ? 'ok' : ''">{{ m.active ? "Active" : "Inactive" }}</span></td>
+                <td>{{ dateTime(m.active ? m.firstSeenAt : m.inactiveSince) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="faint">None</div>
+        </details>
+        <details class="section" :open="open.has('stock')" @toggle="onToggle('stock', $event)">
+          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Stock</span> <span class="count">{{ detail.data.value.stock.length }}</span></summary>
+          <StockTotals :stock="detail.data.value.stock" />
+        </details>
+        <details class="section" :open="open.has('refinery')" @toggle="onToggle('refinery', $event)">
+          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Refinery</span> <span class="count">{{ detail.data.value.jobs.length }}</span></summary>
           <table v-if="detail.data.value.jobs.length" class="mini">
             <thead><tr><th>Station</th><th>Materials (expected)</th><th class="num">SCU</th><th>Ends</th></tr></thead>
             <tbody>
@@ -269,9 +274,9 @@ function revoke(p: UserPrivilege) {
             </tbody>
           </table>
           <div v-else class="faint">No running jobs</div>
-        </section>
-
-        <section v-else-if="tab === 'blueprints'">
+        </details>
+        <details class="section" :open="open.has('blueprints')" @toggle="onToggle('blueprints', $event)">
+          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Blueprints</span> <span class="count">{{ detail.data.value.blueprintList.length }}</span></summary>
           <table v-if="detail.data.value.blueprintList.length" class="mini">
             <tbody>
               <tr v-for="b in detail.data.value.blueprintList" :key="b.uuid">
@@ -280,9 +285,9 @@ function revoke(p: UserPrivilege) {
             </tbody>
           </table>
           <div v-else class="faint">None</div>
-        </section>
-
-        <section v-else-if="tab === 'privileges'">
+        </details>
+        <details class="section" :open="open.has('privileges')" @toggle="onToggle('privileges', $event)">
+          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Privileges</span> <span class="count">{{ privileges.data.value?.filter(held).length ?? 0 }}</span></summary>
           <div v-if="privilegeError" class="err">{{ privilegeError }}</div>
           <div v-if="privileges.error.value" class="faint">{{ privileges.error.value }}</div>
           <table v-else-if="privileges.data.value?.length" class="mini">
@@ -312,9 +317,9 @@ function revoke(p: UserPrivilege) {
           </table>
           <div v-else class="faint">No privileges defined</div>
           <RouterLink to="/privileges">All privileges</RouterLink>
-        </section>
-
-        <section v-else>
+        </details>
+        <details class="section" :open="open.has('history')" @toggle="onToggle('history', $event)">
+          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">History</span> <span class="count">{{ detail.data.value.history.length }}</span></summary>
           <table v-if="detail.data.value.history.length" class="mini">
             <thead><tr><th>Time</th><th>Source</th><th>Action</th><th>Target</th><th class="num">Amount</th><th>Org</th></tr></thead>
             <tbody>
@@ -330,13 +335,91 @@ function revoke(p: UserPrivilege) {
           </table>
           <div v-else class="faint">None</div>
           <RouterLink :to="{ path: '/activity', query: { user: detail.data.value.userId } }">All in Activity</RouterLink>
-        </section>
+        </details>
       </template>
     </DetailPanel>
   </div>
 </template>
 
 <style scoped>
+.ident {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ident-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface-2);
+}
+
+.figure-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.figure-label {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* Folding sections: the head a full-width row, the chevron turning when open */
+.section {
+  border-top: 1px solid var(--border-dim);
+  padding-top: 10px;
+}
+
+.section > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.section > summary .count {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.chev {
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+
+.section[open] > summary .chev {
+  transform: rotate(90deg);
+}
+
+.section[open] > summary {
+  margin-bottom: 10px;
+}
+
 .date {
   height: var(--h-chip-sm);
   padding: 0 8px;

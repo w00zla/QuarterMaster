@@ -71,10 +71,12 @@ removing imported text sources), the bot's status texts and assigning privileges
 - **Users** (`/users/:userId?`, `GET /api/users[/:userId]`, `src/adminapp/users.ts`, tested in
   `test/admin-users.db.test.ts`): everyone in `app_user`, `web.session` or `web.api_token`; channels (sources of
   their own actions in the last 30 days), stored batches, SCU, harvestable and gear pieces, refinery jobs,
-  blueprints, last action, last web login, companion token. Detail tabs (remembered per browser): Overview
-  (identity, web sessions and token, actions per source in 30 days, memberships), Stock (Resources /
-  Harvestables / Gear), Refinery (running jobs with their refined materials, expected yield and quality),
-  Blueprints, History (newest 50 rows, link to Activity). Names (`userNames`): the newest web session's
+  blueprints, last action, last web login, companion token. The detail: on top the username, RSI
+  handle and channels, key figures as small tiles (batches, SCU, harvestables, gear, refinery jobs, blueprints);
+  below them folding sections with their count (which are open is remembered per browser; Account and Orgs by
+  default): Account (Discord ID, known since, last action, web sessions and token, actions per source in 30 days),
+  Orgs (memberships), Stock (Resources / Harvestables / Gear), Refinery (running jobs with their refined
+  materials, expected yield and quality), Blueprints, Privileges, History (newest 50 rows, link to Activity). Names (`userNames`): the newest web session's
   Discord profile, else the companion token's, else the org nickname, else only the ID.
 - **Orgs** (`/orgs/:guildId?`, `GET /api/orgs[/:guildId]`): bot presence, settings (language, logs, board),
   active/inactive members, batches shared there by active members, last history row naming the org. Detail
@@ -88,7 +90,7 @@ removing imported text sources), the bot's status texts and assigning privileges
   mark's hash differs). "Export ZIP" (`GET /api/privileges/:key/export`, `zip.ts`, uncompressed): `entries.json`
   (key, description, one object per row with subject, name, class, type, author, payload, current thumbnail
   hash, `stale`, image path) and `images/<subject>_<userId>.<ext>`: unpacked into `local/` it is what Claude reads
-  to fix the renders. Assigning lives in **Users**, tab Privileges: every key not retired with its state
+  to fix the renders. Assigning lives in **Users**, section Privileges: every key not retired with its state
   (Held / Expired / Not held), assign (`PUT /api/users/:id/privileges/:key` `{ expiresAt }`), an expiry date (end
   of that local day, empty = never) and take back (`DELETE`, confirmed; the user's rows stay).
 
