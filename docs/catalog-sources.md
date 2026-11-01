@@ -412,20 +412,25 @@ entities, an ore and its refined material share one). `Data.p4k` holds no 2D ite
 empty or a generic loadout icon; the commodity logos under `ui/sharedassets/commoditylogos/` are category
 pictures with gaps), so the icons are rendered from the models:
 
-1. **Export:** StarBreaker `entity export <class_name> --kind decomposed` (`--worn` for armour: the worn model
-   instead of the loot crate; `--variant-tags` for paint variants: `…_tan01` gets its own tagged SubGeometry
-   instead of the base colours, checked on 58 entities: only 3 changed, the rest bit-identical) writes
-   `Packages/<name>_LOD1_TEX2/scene.blend` plus a `Data/` tree, one export root per entity
-   (`local/work/icons/export/<8 hex of the class name's SHA-256>/`): variants share mesh files under `Data/`, but
-   each export rewrites the mesh to match its own `scene.blend`, so in a shared tree every variant exported before
-   the last one rendered empty ("keine Meshes in der Szene", 27 armour pieces in the first full run). Paths inside
-   an export reach ~160 characters; Blender on Windows reads none over 259 (an empty scene, or missing textures
-   that render silently white), so the root is a short hash and the CLI fails an export whose longest path is
-   longer ("Pfad zu lang": move `--work` to a shorter folder). The export is deleted after a successful render
-   (~2 MB each), failed ones stay for inspection. The
+1. **Export:** StarBreaker `entity export-batch <jobs.json> --kind decomposed --variant-tags --icon-files`, one
+   process per block of 50 entities (P4k and DataCore load once, ~1.5 s; an entity then takes ~0.2 s instead of
+   ~1.9 s for a single `entity export`). Jobs name the exact class and `worn` for armour (the worn model instead of
+   the loot crate; no usable worn model: the exporter falls back to the default geometry itself);
+   `--variant-tags` gives paint variants (`…_tan01`) their own tagged SubGeometry; `--icon-files` leaves out
+   animation clips and diagnostics. Each package lands in `Packages/<name>_LOD1_TEX2/scene.blend`, all of a block
+   share one `Data/` tree (`local/work/icons/export/b<n>/`): a mesh file carries its material in the name
+   (`ui_ore_raw_1_a_LOD1_ui_ore_gold_1_a.blend`), because its slots are named after the material and variants on
+   one geometry used to overwrite each other ("keine Meshes in der Szene", 27 armour pieces in the first full
+   run). A record's material comes from `SGeometryResourceParams.Geometry.Geometry.Material`, else from its
+   `Material` node (`SMaterialNodeParams`, variants by tags): 70 items (54 backpacks, paint editions of weapons)
+   name it only there and rendered white or in the base look before. Paths inside an export reach ~160
+   characters; Blender on Windows reads none over 259 (missing textures render silently white), so the CLI
+   reports a block with a longer path ("Pfade über 259 Zeichen": move `--work` to a shorter folder). The block's
+   export is deleted after its render, one with failures stays for inspection. The
    **our fork starbreaker-qm** (`local/starbreaker-qm/`, MIT, built from the repo `../starbreaker-qm`, public at
    github.com/w00zla/starbreaker-qm as a GitHub fork of diogotr7/StarBreaker, version
-   `0.3.2-qm.n`, commit in `COMMIT`; the catalog extract uses it too) is required. History: the 0.3.2 release
+   `0.3.2-qm.n`, commit in `COMMIT`; the catalog extract uses it too) is required. qm.2 (2026-11-01) added
+   `export-batch`, the material node, the material in mesh file names and the addon fixes in step 2. History: the 0.3.2 release
    misplaced weapon magazines and its addon did not stack LayerBlend layers, so the icons were rendered with the
    fleetyards fork (github.com/fleetyards/StarBreaker) until 2026-11-01. Upstream main (diogotr7) had fixed the magazines
    by then, but rendered armour as its loot crate (worn model only via `--geometry-tag Male`, with T-posed arms and
@@ -437,14 +442,17 @@ pictures with gaps), so the icons are rendered from the models:
    detail texture as base colour, and the vertex colours are blend masks.
 2. **Render:** `src/icons/render.py` in a portable Blender (`local/blender/<version>/`, config under its
    `portable/`; `portable/scripts/addons/starbreaker_addon` is a junction to the fork repo's
-   `blender_addon/starbreaker_addon`, so addon and exporter always match; the bundle copies its content). The addon rebuilds the
-   materials (`starbreaker.refresh_materials`, called explicitly: its load handler needs timers that background
-   mode lacks). Eevee, 16 samples, Standard view transform, transparent film, 256 px. Ray tracing on, with
-   raytraced refraction (dithered) for the `SB_GlassPBR` materials: they are pure transmission, without it Eevee
+   `blender_addon/starbreaker_addon`, so addon and exporter always match; the bundle copies its content). The addon
+   builds every package's materials when `scene.blend` opens; in background mode (`blender -b`) at once and in
+   full, as `starbreaker.refresh_materials` does (its UI path waits for a timer that background mode never runs).
+   Eevee, 16 samples, Standard view transform, transparent film, 256 px. Ray tracing on for the scene; the addon
+   gives the `GlassPBR` materials raytraced refraction (dithered): they are pure transmission, without it Eevee
    only refracts the grey world and visors render as flat grey. The minerals use the `Organic` shader, whose colour
-   is the first layer's `TintColor` (the crystal; layer 2 is grey sand): the addon builds it as a plain principled
-   material from the grey diffuse, so `render.py` multiplies the base colour by that tint (linear). Beradom
-   (tint 1,1,1) and Sadaryx (light grey tint) stay grey; not compared in game.
+   is the first layer's `TintColor` (the crystal; layer 2 is grey sand): the addon multiplies the grey diffuse by
+   it. Beradom (tint 1,1,1) and Sadaryx (light grey tint) stay grey; not compared in game. Fixed in the addon on
+   2026-11-01: a submaterial name with a trailing space (`"ore_hephaestanite "`, 5 ores) never matched its slot and
+   rendered white; the emission strength of materials without their own emission input is `Glow` (× `EmissiveOpacity`),
+   not the mean of the `Emissive` colour (the Hill Horror helmet's visor, `Emissive` 1,1,1 with `Glow` 0.01, glowed white).
 3. **Pose and light from the game:** `PlayerChoice_PITConfig.inventoryParams` (`dcb query`) gives
    `defaultOrientation` (90, 0, 0) plus an offset per item type/sub type (45 entries) and a light group per
    category (39 entries, default `inventorylightgroup_other`); the groups are entities under
@@ -462,8 +470,10 @@ pictures with gaps), so the icons are rendered from the models:
    `local/icons/<Name> (<class>) <uuid>.png` per catalog UUID (English name, so the renders can be checked by eye
    in Explorer and re-rendered with `--filter <class>`; `icons:pack` reads only the UUID at the end and stops when
    a UUID has two files). A run without `--force` renames existing icons to this pattern. Renders are reused unless `--force`; `--filter` re-renders
-   single entities. ~2 s export + ~2 s render per entity (Blender runs 50 per process), the full set (~3800
-   entities) took 4 h on the render PC. Log: `render.log` (the console plus full error messages) and
+   single entities. Per block one export-batch and one Blender process; the next block exports while the previous
+   one renders. Measured 2026-11-01 (dev PC, 89 entities): 0.17 s export and 0.55 s render per entity, so the
+   render sets the pace (full set estimated ~35 min; the first full run, single exports, took 4 h on the render
+   PC). Log: `render.log` (the console plus full error messages) and
    `blender.log` (Blender's output, tracebacks of `render.py`) in the work directory, appended per run. Known
    failures of the first full run (2026-10-26) besides the armour: ~20 entities whose files are missing from
    `Data.p4k` or that have no geometry (docking tubes, ship-built missile racks, `RADR_S02_Fake`, …), not fixable here. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`

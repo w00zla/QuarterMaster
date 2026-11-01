@@ -1,14 +1,14 @@
 // Rendert Icons für alle Gear-Items der App (Schiffskomponenten + FPS-Ausrüstung, dieselbe Regel wie der
 // Stock-Service), für die Sammelobjekte und für Rohstoffe mit Thumbnail-Entity (roh und raffiniert teilen sich den Brocken).
-// Pipeline je Entity: StarBreaker (eigener Fork starbreaker-qm) `entity export --kind decomposed` -> scene.blend ->
-// Blender headless (src/icons/render.py, StarBreaker-Addon) mit Pose und Licht-Rig des Spiels aus dem
-// DataCore (`PlayerChoice_PITConfig.inventoryParams`, `inventorylightgroup_*`) -> PNG je Katalog-UUID.
+// Pipeline je Block: StarBreaker (eigener Fork starbreaker-qm) `entity export-batch` (decomposed, ein Prozess je
+// Block) -> scene.blend je Entity -> Blender headless (src/icons/render.py, StarBreaker-Addon) mit Pose und
+// Licht-Rig des Spiels aus dem DataCore (`PlayerChoice_PITConfig.inventoryParams`, `inventorylightgroup_*`)
+// -> PNG je Katalog-UUID. Der nächste Block exportiert, während der vorige rendert.
 // Usage: pnpm icons:render [--sample n] [--filter <substring>] [--force] [--size 256] [--dry-run]
 //        [--p4k <Data.p4k>] [--starbreaker <bin>] [--blender <bin>] [--out local/icons] [--work local/work/icons]
 // Auf einem anderen Rechner ohne DB und Repo (scripts/icons-bundle.ps1 packt alles): --targets <targets.json>
 // mit der Zielliste, die --write-targets hier aus der DB schreibt; die DB-Module werden dann nicht geladen.
 import { execFile, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,8 +28,7 @@ const HELP = `Usage: pnpm icons:render [options]
   --write-targets <file> Zielliste aus der DB schreiben und beenden
   --out <dir>           Ziel, ein PNG je UUID (default: local/icons)
   --work <dir>          Arbeitsverzeichnis: DataCore-Dumps, Exporte, Renders (default: local/work/icons)
-  --chunk <n>           Entities je Block: erst exportieren, dann ein Blender-Prozess (default 50)
-  --parallel <n>        Gleichzeitige StarBreaker-Exporte (default 4; jeder lädt die DataCore für sich)`;
+  --chunk <n>           Entities je Block: ein StarBreaker- und ein Blender-Prozess (default 50)`;
 
 interface Category { type: string; subType: string; requiredTag: unknown }
 // names: Klarname je UUID (gleiche Reihenfolge) für die Dateinamen; fehlt in targets.json von vor 2026-10-26
@@ -59,7 +58,6 @@ interface PitConfig {
   } };
 }
 
-const PACKAGE_SUFFIX = '_LOD1_TEX2';
 const DEFAULT_RIG = 'inventorylightgroup_other';
 const LIGHT_GROUPS_PATH = 'libs/foundry/records/entities/lights/scene/inventory';
 
@@ -233,20 +231,44 @@ function sample(targets: Target[], n: number): Target[] {
   return out;
 }
 
-/** Export-Verzeichnis einer Entity: 8 Hex-Zeichen statt des Klassennamens. Die Pfade darin werden bis ~160
- * Zeichen lang, mit dem Klassennamen davor lag der volle Pfad über den 260, die Blender liest ("keine Meshes"). */
-function entityRoot(exportRoot: string, entity: string): string {
-  return join(exportRoot, createHash('sha256').update(entity).digest('hex').slice(0, 8));
-}
+interface BatchResult { name: string; ok: boolean; package?: string; worn?: boolean; seconds: number; error?: string }
 
-/** Das Paketverzeichnis eines Exports: StarBreaker ersetzt Unterstriche durch Leerzeichen, die
- * Groß-/Kleinschreibung folgt dem DataCore-Namen, nicht dem gesuchten. */
-function packageDir(exportRoot: string, entity: string): string | undefined {
-  const wanted = `${entity.replace(/_/g, ' ')}${PACKAGE_SUFFIX}`.toLowerCase();
-  const packages = join(exportRoot, 'Packages');
-  if (!existsSync(packages)) return undefined;
-  const hit = readdirSync(packages).find((d) => d.toLowerCase() === wanted);
-  return hit ? join(packages, hit) : undefined;
+/** Exportiert einen Block mit einem `entity export-batch` (P4k und DataCore einmal geladen) in ein eigenes
+ * Verzeichnis: Varianten teilen sich dort Meshes und Texturen (die Mesh-Datei trägt das Material im Namen).
+ * Jede Ergebniszeile kommt live über onResult. Gibt die Paketverzeichnisse je Entity zurück. */
+async function exportBlock(bin: string, p4k: string, root: string, block: Target[], onResult: (r: BatchResult) => void): Promise<Map<string, string>> {
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+  const jobsFile = join(root, 'jobs.json');
+  writeFileSync(jobsFile, JSON.stringify(block.map((t) => ({ name: t.entity, output: root, worn: t.worn }))));
+  const packages = new Map<string, string>();
+  await new Promise<void>((resolveRun, rejectRun) => {
+    // --variant-tags: Lackvarianten (…_tan01) mit ihrer eigenen SubGeometry statt in der Grundfarbe;
+    // --icon-files: ohne Animationen und Diagnose-Dateien
+    const child = spawn(bin, ['entity', 'export-batch', jobsFile, '--p4k', p4k, '--kind', 'decomposed', '--variant-tags', '--icon-files'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let buffer = '';
+    let stderr = '';
+    const onLine = (line: string) => {
+      if (!line.trim().startsWith('{')) return;
+      const r = JSON.parse(line) as BatchResult;
+      if (r.ok && r.package) packages.set(r.name, r.package);
+      onResult(r);
+    };
+    child.stdout.on('data', (data: Buffer) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const l of lines) onLine(l);
+    });
+    child.stderr.on('data', (data: Buffer) => { stderr = (stderr + data.toString()).slice(-4000); });
+    child.on('close', (code) => {
+      if (buffer) onLine(buffer);
+      if (code === 0) resolveRun();
+      else rejectRun(new Error(`${bin} entity export-batch failed (${code}): ${stderr.trim()}`));
+    });
+    child.on('error', rejectRun);
+  });
+  return packages;
 }
 
 async function main() {
@@ -265,7 +287,6 @@ async function main() {
       out: { type: 'string', default: 'local/icons' },
       work: { type: 'string', default: 'local/work/icons' },
       chunk: { type: 'string', default: '50' },
-      parallel: { type: 'string', default: '4' },
       help: { type: 'boolean', default: false },
     },
   });
@@ -286,7 +307,6 @@ async function main() {
   const renderDir = join(work, 'render');
   const size = Number(args.size);
   const chunk = Number(args.chunk);
-  const parallel = Math.max(1, Number(args.parallel));
   for (const d of [out, exportRoot, renderDir]) mkdirSync(d, { recursive: true });
   logFile = join(work, 'render.log');
   log(`=== ${new Date().toISOString()} icons:render ${process.argv.slice(2).join(' ')}`, true);
@@ -311,8 +331,8 @@ async function main() {
     return;
   }
 
-  // Blockweise: einen Block exportieren (StarBreaker nutzt selbst alle Kerne, daher nacheinander), dann
-  // rendern (ein Blender-Prozess je Block). So landen die ersten Icons nach Minuten, nicht nach Stunden.
+  // Blockweise: ein StarBreaker- und ein Blender-Prozess je Block; der nächste Block exportiert, während der
+  // vorige rendert. So landen die ersten Icons nach Minuten, nicht nach Stunden.
   const started = Date.now();
   const failures: string[] = [];
   let exported = 0;
@@ -341,68 +361,63 @@ async function main() {
     });
   };
 
-  for (let b0 = 0; b0 < targets.length; b0 += chunk) {
-    const jobs: { index: number; target: Target; job: Job }[] = [];
-    // Exporte parallel: jeder StarBreaker-Aufruf lädt erst die DataCore (~2 s), das überlappt so
-    const block = targets.slice(b0, Math.min(b0 + chunk, targets.length)).map((t, k) => ({ index: b0 + k, t }));
+  // Schon Gerendertes bleibt (außer --force), der Rest geht blockweise durch Export und Render
+  const todo: { index: number; t: Target }[] = [];
+  targets.forEach((t, index) => {
+    const png = join(renderDir, `${t.entity}.png`);
+    if (!args.force && existsSync(png)) {
+      placeIcons(png, t, true);
+      skipped++;
+    } else {
+      todo.push({ index, t });
+    }
+  });
+  const blocks: { index: number; t: Target }[][] = [];
+  for (let b0 = 0; b0 < todo.length; b0 += chunk) blocks.push(todo.slice(b0, b0 + chunk));
+  const blockRoot = (k: number) => join(exportRoot, `b${k}`);
+
+  /** Export eines Blocks; Fehler einzelner Entities landen in failures, die Pakete je Index kommen zurück. */
+  const runExport = async (k: number): Promise<Map<number, string>> => {
+    const block = blocks[k]!;
+    const root = blockRoot(k);
+    const byName = new Map(block.map((e) => [e.t.entity.toLowerCase(), e]));
     const packages = new Map<number, string>();
-    let next = 0;
-    const exportOne = async (i: number, t: Target) => {
-      const png = join(renderDir, `${t.entity}.png`);
-      if (!args.force && existsSync(png)) {
-        placeIcons(png, t, true);
-        skipped++;
-        return;
-      }
-      // Eigenes Export-Verzeichnis je Entity: Varianten teilen sich Meshes unter Data/, und jeder Export schreibt
-      // das Mesh passend zu seiner eigenen scene.blend neu; im gemeinsamen Data/ fand eine früher exportierte
-      // Variante ihr Mesh danach nicht mehr ("keine Meshes in der Szene")
-      const root = entityRoot(exportRoot, t.entity);
-      let pkg = packageDir(root, t.entity);
-      if (args.force || !pkg) {
-        // --variant-tags: Lackvarianten (…_tan01) mit ihrer eigenen SubGeometry statt in der Grundfarbe
-        const base = ['entity', 'export', '--p4k', p4k, t.entity, root, '--kind', 'decomposed', '--variant-tags'];
-        const t0 = Date.now();
-        try {
-          try {
-            await run(starbreaker, t.worn ? [...base, '--worn'] : base);
-          } catch (err) {
-            if (!t.worn) throw err;
-            await run(starbreaker, base); // kein getragenes Modell: das Standardmodell nehmen
-          }
+    try {
+      const byEntity = await exportBlock(starbreaker, p4k, root, block.map((e) => e.t), (r) => {
+        const e = byName.get(r.name.toLowerCase());
+        if (!e) return;
+        if (r.ok) {
           exported++;
-          progress(i + 1, 'export', t.entity, `${((Date.now() - t0) / 1000).toFixed(1)} s`);
-        } catch (err) {
-          failures.push(`${t.entity}: ${(err as Error).message.split('\n').pop()}`);
-          log(`    ${(err as Error).message}`, true);
-          progress(i + 1, 'export', t.entity, 'FEHLER');
-          return;
+          progress(e.index + 1, 'export', e.t.entity, `${r.seconds.toFixed(1)} s${e.t.worn && !r.worn ? ' (ohne worn)' : ''}`);
+        } else {
+          failures.push(`${e.t.entity}: ${r.error}`);
+          log(`    ${r.error}`, true);
+          progress(e.index + 1, 'export', e.t.entity, 'FEHLER');
         }
-        pkg = packageDir(root, t.entity);
-        if (!pkg) {
-          failures.push(`${t.entity}: package directory not found after export`);
-          progress(i + 1, 'export', t.entity, 'FEHLER kein Paketverzeichnis');
-          return;
-        }
-        // Blender liest unter Windows keine Pfade über 259 Zeichen: fehlende Texturen rendern still weiß
-        const longest = readdirSync(root, { recursive: true }).reduce((n, f) => Math.max(n, join(root, String(f)).length), 0);
-        if (longest > 259) {
-          failures.push(`${t.entity}: Pfad zu lang (${longest} Zeichen), --work in einen kürzeren Ordner legen`);
-          progress(i + 1, 'export', t.entity, 'FEHLER Pfad zu lang');
-          return;
-        }
-      } else {
-        progress(i + 1, 'export', t.entity, 'vorhanden');
+      });
+      for (const e of block) {
+        const pkg = byEntity.get(e.t.entity);
+        if (pkg) packages.set(e.index, pkg);
       }
-      packages.set(i, pkg);
-    };
-    await Promise.all(Array.from({ length: Math.min(parallel, block.length) }, async () => {
-      while (next < block.length) {
-        const { index, t } = block[next++]!;
-        await exportOne(index, t);
-      }
-    }));
-    for (const { index, t } of block) {
+    } catch (err) {
+      for (const e of block) failures.push(`${e.t.entity}: export-batch abgebrochen`);
+      log(`    ${(err as Error).message}`);
+      return packages;
+    }
+    // Blender liest unter Windows keine Pfade über 259 Zeichen: fehlende Texturen rendern still weiß
+    const tooLong = readdirSync(root, { recursive: true }).map((f) => join(root, String(f))).filter((f) => f.length > 259);
+    if (tooLong.length) {
+      failures.push(`Block ${k + 1}: ${tooLong.length} Pfade über 259 Zeichen (${tooLong[0]}), --work in einen kürzeren Ordner legen`);
+    }
+    return packages;
+  };
+
+  let nextExport = blocks.length ? runExport(0) : undefined;
+  for (let k = 0; k < blocks.length; k++) {
+    const packages = await nextExport!;
+    nextExport = k + 1 < blocks.length ? runExport(k + 1) : undefined;
+    const jobs: { index: number; target: Target; job: Job }[] = [];
+    for (const { index, t } of blocks[k]!) {
       const pkg = packages.get(index);
       if (!pkg) continue;
       jobs.push({ index, target: t, job: { src: join(pkg, 'scene.blend'), out: join(renderDir, `${t.entity}.png`), pose: tables.pose(t.type, t.subType), rig: tables.rig(t.type, t.subType), size } });
@@ -410,7 +425,7 @@ async function main() {
     if (!jobs.length) continue;
 
     // render.py meldet jedes Item ("icon: <png> …" / "failed: <png> …"), die Zeilen werden live zu Fortschritt
-    const jobsFile = join(work, 'jobs.json');
+    const jobsFile = join(work, `render-jobs-b${k}.json`);
     writeFileSync(jobsFile, JSON.stringify(jobs.map((j) => j.job)));
     const byOut = new Map(jobs.map((j) => [j.job.out.toLowerCase(), j]));
     const done = new Set<string>();
@@ -451,19 +466,24 @@ async function main() {
         resolveRun();
       });
     });
+    let blockOk = jobs.length === blocks[k]!.length;
     for (const j of jobs) {
       const failed = failures.some((f) => f.startsWith(`${j.target.entity}: `));
       if (!failed && existsSync(j.job.out)) {
         rendered++;
         placeIcons(j.job.out, j.target, false);
-        // Export nach erfolgreichem Render weg (je Entity ~2 MB, der volle Satz wären ~7 GB); Fehlschläge bleiben zur Diagnose
-        rmSync(entityRoot(exportRoot, j.target.entity), { recursive: true, force: true });
-      } else if (!failed) {
-        failures.push(`${j.target.entity}: no render output (Blender abgebrochen?)`);
-        progress(j.index + 1, 'render', j.target.entity, 'FEHLER kein Bild');
+      } else {
+        blockOk = false;
+        if (!failed) {
+          failures.push(`${j.target.entity}: no render output (Blender abgebrochen?)`);
+          progress(j.index + 1, 'render', j.target.entity, 'FEHLER kein Bild');
+        }
       }
     }
-    log(`Block fertig: ${rendered} gerendert, ${skipped} übersprungen, ${failures.length} Fehler, ${elapsed()}`);
+    // Export des Blocks nach dem Render weg (der volle Satz wären Gigabytes); mit Fehlschlägen bleibt er zur Diagnose
+    if (blockOk) rmSync(blockRoot(k), { recursive: true, force: true });
+    rmSync(jobsFile, { force: true });
+    log(`Block ${k + 1}/${blocks.length} fertig: ${rendered} gerendert, ${skipped} übersprungen, ${failures.length} Fehler, ${elapsed()}`);
   }
   log(`Fertig: ${rendered} gerendert, ${skipped} übersprungen, ${exported} exportiert, ${failures.length} Fehler, ${elapsed()} -> ${out}`);
   for (const f of failures) log(`  ! ${f}`);

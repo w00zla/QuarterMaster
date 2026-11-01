@@ -38,41 +38,12 @@ def parse_args():
 
 def load(path):
     if path.lower().endswith('.blend'):
-        # StarBreaker decomposed: scene.blend öffnen, Materialien vom Addon aufbauen lassen (der
-        # Load-Handler des Addons läuft über Timer, die es im Hintergrundmodus nicht gibt)
+        # StarBreaker decomposed: das Addon baut die Materialien beim Öffnen auf (im Hintergrundmodus sofort)
         bpy.ops.wm.open_mainfile(filepath=path)
-        for root in [o for o in bpy.data.objects if any('package_root' in k for k in o.keys())]:
-            bpy.ops.starbreaker.refresh_materials(package_root_name=root.name)
-        tint_organic()
     else:
         bpy.ops.wm.read_factory_settings(use_empty=True)  # deaktiviert Addons, daher nur hier
         bpy.ops.import_scene.gltf(filepath=path)
     return bpy.context.scene
-
-
-def tint_organic():
-    # Organic-Shader (Mineralien wie Hadanit): die Farbe steckt im Tint der ersten Layer (der Kristall), das
-    # Addon nimmt nur die graue Diffuse. Base Color mit dem Tint multiplizieren (linear, wie im Material).
-    for m in bpy.data.materials:
-        if m.get('starbreaker_shader_family') != 'Organic' or not m.node_tree:
-            continue
-        layers = json.loads(m.get('starbreaker_submaterial_json', '{}')).get('layer_manifest') or []
-        tint = layers[0].get('tint_color') if layers else None
-        bsdf = next((n for n in m.node_tree.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
-        if not tint or bsdf is None:
-            continue
-        nodes, links = m.node_tree.nodes, m.node_tree.links
-        base = bsdf.inputs['Base Color']
-        mix = nodes.new('ShaderNodeMix')
-        mix.data_type = 'RGBA'
-        mix.blend_type = 'MULTIPLY'
-        mix.inputs[0].default_value = 1.0
-        if base.is_linked:
-            links.new(base.links[0].from_socket, mix.inputs[6])
-        else:
-            mix.inputs[6].default_value = base.default_value
-        mix.inputs[7].default_value = (*tint[:3], 1.0)
-        links.new(mix.outputs[2], base)
 
 
 def mesh_corners(objects):
@@ -207,13 +178,9 @@ def render(job, a):
     # Render: Eevee, transparenter Film, Standard-Farbkurve (AgX würde entsättigen)
     scene.render.engine = 'BLENDER_EEVEE'
     scene.eevee.taa_render_samples = a.samples
-    # Glas (Visiere): SB_GlassPBR ist reine Transmission; ohne Raytracing bricht Eevee nur die graue Welt
-    # und das Visier wird eine flache graue Fläche. Mit Raytracing-Refraktion sieht man ins Helminnere.
+    # Glas (Visiere): das Addon schaltet die Raytracing-Refraktion je Material ein, die Szene muss mitmachen;
+    # sonst bricht Eevee nur die graue Welt und das Visier wird eine flache graue Fläche
     scene.eevee.use_raytracing = True
-    for m in bpy.data.materials:
-        if m.node_tree and any(getattr(n, 'node_tree', None) and n.node_tree.name.startswith('SB_GlassPBR') for n in m.node_tree.nodes):
-            m.use_raytrace_refraction = True
-            m.surface_render_method = 'DITHERED'
     scene.render.film_transparent = True
     scene.render.image_settings.file_format = 'PNG'
     scene.render.image_settings.color_mode = 'RGBA'
