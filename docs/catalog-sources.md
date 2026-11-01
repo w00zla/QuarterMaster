@@ -475,7 +475,12 @@ pictures with gaps), so the icons are rendered from the models:
    The Illum path keeps its own rule (mean of `Emissive`): with `Glow` as the strength the Hill Horror LEDs came out
    darker than in game. `render.py` hides meshes that carry only UI screen materials (template `screen_hud`, e.g. the
    mobiGlas display, invisible without UI content) and leaves them out of the fit, unless they are all the item has:
-   the mobiGlas' 25 × 41 cm screen plane shrank the bracelet to a dot.
+   the mobiGlas' 25 × 41 cm screen plane shrank the bracelet to a dot. An item of exactly one mesh renders without
+   that mesh's node rotation: the game shows it in the mesh's own axes. The FPS minerals' root node (glacosite_fps,
+   carinite_fps, …) turns +90° about X and they stood upright where the warehouse tiles show them lying (8 of 10
+   minerals, all 10 free tiles match); the fork keeps the rotation, the same mesh .blend is linked into assemblies
+   where it holds (upstream test `collapsed_wrapper_node_preserves_non_identity_root_transform`). In 70 other sampled
+   items (armour, weapons, components, ores) no single mesh carried a rotation.
 3. **Pose and light from the game:** `PlayerChoice_PITConfig.inventoryParams` (`dcb query`) gives
    `defaultOrientation` (90, 0, 0) plus an offset per item type/sub type (45 entries) and a light group per
    category (39 entries, default `inventorylightgroup_other`); the groups are entities under

@@ -62,6 +62,24 @@ def hide_screens(scene):
             o['icon_screen'] = True
 
 
+def unturn_single_mesh(scene):
+    # Ein Modell aus genau einem Mesh zeigt das Spiel im Inventar in den Achsen des Meshes, ohne die Drehung seiner
+    # NMC-Knoten: die FPS-Minerale (glacosite_fps, carinite_fps, …) tragen am Root +90° um X und standen bei uns
+    # hochkant, wo die Lager-Kacheln sie liegend zeigen (alle 10 freien Kacheln passen ohne die Drehung). Im Fork
+    # bleibt sie: dort wird dasselbe Mesh auch in Baugruppen verlinkt, wo die Drehung gilt.
+    bpy.context.view_layer.update()
+    meshes = [o for o in scene.objects if o.type == 'MESH' and o.data.polygons and not o.hide_render]
+    if len(meshes) != 1:
+        return
+    o = meshes[0]
+    loc, rot, scale = o.matrix_world.decompose()
+    if rot.angle < math.radians(0.5):
+        return
+    print(f'Knotendrehung entfernt: {o.name} ({math.degrees(rot.angle):.0f}°)')
+    o.parent = None
+    o.matrix_world = Matrix.LocRotScale(loc, None, scale)
+
+
 def mesh_corners(objects):
     for o in objects:
         if o.type != 'MESH' or not o.data.vertices or o.get('icon_screen'):
@@ -75,6 +93,7 @@ def render(job, a):
     pose, rig, size = job.get('pose'), job.get('rig'), job.get('size', a.size)
     scene = load(src)
     hide_screens(scene)
+    unturn_single_mesh(scene)
 
     if pose:
         # Pose des Spiels: alles unter ein Empty mit Euler XYZ hängen, Kamera auf -Z, Bild-oben = -Y
