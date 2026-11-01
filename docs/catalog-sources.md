@@ -471,9 +471,21 @@ pictures with gaps), so the icons are rendered from the models:
    own: their layer materials carry the vein pattern `ore_raw_1_a_blend.tif` as `TexSlot8`, used as the wear factor
    (red, smoothstep 0.6-0.8, not scaled by the scene's wear strength). Silicon's wear flecks render brighter than in
    game (its wear layer is a light metal). A metal LayerBlend layer on a palette channel takes that channel's
-   finish specular as its colour (F0), not tint × palette tint: the Artimex Chairman's Club's gold (tertiary, tint
-   0.007, specular 0.73/0.43/0.11) drew black, the Geist helmet's gun_metal_03 (primary, finish 0.093) a black mirror
-   where the game shows the ASD Edition's dark grey. The warehouse tiles under the cursor are covered by the tooltip: compare
+   finish specular in place of its own, times the slot's `TintColor` (its F0), not tint × palette tint: the Artimex
+   Chairman's Club's gold (tertiary, palette tint 0.007, specular 0.73/0.43/0.11) drew black, the Geist helmet's
+   gun_metal_03 (primary, finish 0.093) a black mirror where the game shows the ASD Edition's dark grey; without the
+   slot tint the Geist Whiteout's chin (iron_scratched_01, TintColor 0.175, secondary finish 125/146/171 sRGB) came out
+   a bright steel blue about 4× the game's dark slate (measured against the wiki shots of six Geist helmets).
+   LayerBlend_V2 `%DECALS` draws its decals "via 2nd UV set" (`Shaders/LayerBlend_V2.ext` in
+   `Engine/ShaderCache_EXT.pak`). A mesh without a second-UV stream keeps that set in its vertex colour, two 12-bit
+   fields (`R<<4 | G>>4`, `(G&15)<<8 | B`, 1/1024 steps, shifted by half): the exporter decodes it when the mesh's
+   material set has such a submaterial (not for HardSurface `%VERTCOLORS`, real colours). Undecorated vertices
+   (160, 21, 254) land on the sheet's empty corner. The plain sheet is TexSlot9 (`DiffuseDecalSpec` as F0 through the
+   Khronos spec→metal solve, `DiffuseDecalGloss`): the ASD Edition's visor logo, the Golden Blossom's gold blossoms.
+   Some materials carry a parallax occlusion set in TexSlot1/2/4/8 (colour + coverage, normal, spec, height: the
+   Morozov-SH armour's stitching, rivets and emblem); it is laid over through the second set too (normal in its own
+   tangent frame, height as bump, no ray-marched parallax) and is not the material's own base texture (taken as
+   such, the Morozov-SH cores drew their stitching normals through UV1 as their surface). The warehouse tiles under the cursor are covered by the tooltip: compare
    against a later frame's free tile. Fixed in the addon on
    2026-11-01: a submaterial name with a trailing space (`"ore_hephaestanite "`, 5 ores) never matched its slot and
    rendered white; the emission strength of materials without their own emission input is `Glow` (× `EmissiveOpacity`),
@@ -531,8 +543,8 @@ pictures with gaps), so the icons are rendered from the models:
    hold the game's own inventory and warehouse tiles, found by the tooltip title plus the cursor (character
    inventory) or the hovered tile's rect (warehouse). A hovered warehouse tile is covered by its tooltip: take the
    same grid cell from a later frame where the cursor has moved on. The tiles are ~100 px at 1080p: good for colour,
-   brightness and pose, not for fine detail. Open: the Geist ASD Edition's visor logo (in its decal sheet, but no
-   second UV set in the prop or the worn model and no other mapping found).
+   brightness and pose, not for fine detail. Wiki item pages (starcitizen.tools) carry in-game screenshots of the
+   worn item, good for decals and colours.
 
 Fan content of this kind is fine (the Star Citizen wiki renders its thumbnails the same way). Open: in-game
 comparison for the types without an orientation entry (radar, EMP, QDMP, tractor
