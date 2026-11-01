@@ -2,6 +2,7 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import type { Lang, MeResponse } from './api-types.ts';
+import { privilegesOf } from './features.ts';
 import type { Session } from './session.ts';
 
 const CDN = 'https://cdn.discordapp.com';
@@ -30,5 +31,6 @@ export async function getMe(db: Db, session: Session): Promise<MeResponse> {
     orgs: orgs.map((o) => ({ guildId: o.guild_id, name: o.name, displayName: o.display_name })),
     rsiHandle: profile?.rsi_handle ?? null,
     langOverride: profile?.lang ?? null,
+    privileges: await privilegesOf(db, userId),
   };
 }

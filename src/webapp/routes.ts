@@ -25,6 +25,7 @@ import { registerTradeRoutes, stockValues } from './trade.ts';
 import { materialTrade } from '../ext/trade.ts';
 import { loadUnlocks, registerUnlockRoutes, unlockSummary } from './unlocks.ts';
 import { registerMiningRoutes } from './mining.ts';
+import { registerFeatureRoutes } from './features.ts';
 import { minableUuids } from './mining-query.ts';
 import { unlockableBlueprints } from './unlock-query.ts';
 import { refineryMatch } from '../ext/refineries.ts';
@@ -510,4 +511,5 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
   registerUnlockRoutes(api, db);
   registerMiningRoutes(api, db, thumbs);
   registerTradeRoutes(api, db);
+  registerFeatureRoutes(api, db, thumbs);
 }

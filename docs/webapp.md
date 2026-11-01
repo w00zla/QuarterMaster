@@ -23,7 +23,8 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~1 MB per language
   spared; the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
   per session), then for `/api/*` the session check (401 for every route, unknown ones too), JSON-only
-  writes (415) and a 16 KB body limit.
+  writes (415, `DELETE` included) and a 16 KB body limit (a privilege feature's image upload: its own, see
+  "Privileges").
 - Client IP: socket address, or the last `X-Forwarded-For` entry with `WEBAPP_TRUST_PROXY=1` (Caddy drops
   the client's own header).
 
@@ -105,6 +106,35 @@ One per user for the companion app, managed in the top bar's "Companion" dialog 
 replaces the old). `Authorization: Bearer qmt_…` authenticates `/api/*` as the user (never falls back to the
 cookie) and skips the same-origin check (a cross-site page cannot set the header without a preflight);
 `/api/token` itself is session-only. Requests made with it are history source `companion`.
+
+### Privileges (`features.ts`, `app.privilege`, `app.user_privilege`, `app.feature_entry`)
+
+Features beyond the roles for single users, e.g. supporter tools. A privilege is a key (`^[a-z][a-z0-9-]{1,40}$`)
+with a description; each key comes with the migration of the feature that checks it (never deleted, retired
+instead). The admin assigns keys to users, optionally until a date (`docs/adminapp.md` "Privileges"). In force =
+assigned, not expired, the key not retired; read on every request (`privilegesOf`), `/api/me` lists them
+(`privileges`, the companion gets the same through its token).
+
+A feature keeps its data in `app.feature_entry`: one row per key, user and subject (e.g. a thumbnail's UUID)
+with a JSON payload and optionally one image (`bytea` + MIME type; rows stay when the key is taken back). The DB
+grants `qm_web` writes on every key's rows: the rights live in `features.ts` only. `FEATURES` there defines per
+key the subject's format, the payload's Zod schema and the image types; a key without an entry there is 404.
+Generic endpoints, each checking the key (403 `noPrivilege`):
+
+- `GET /api/features/:key/entries`: every row of the key, newest first, with the author's name (newest web
+  session, the token's profile, the roster) and `own`. Everyone with the key sees everyone's rows.
+- `PUT /api/features/:key/entries/:subject` `{ payload }`: creates or replaces the own row (the image stays);
+  `DELETE` (body `{}`: writes take JSON only) removes it. Only ever the own row: one row per reviewer, nobody
+  overwrites another's.
+- `PUT …/entries/:subject/blob` `{ type, data }` (base64 in JSON; the only route with a larger body limit,
+  `BLOB_BODY_LIMIT`, 512 KB per image): the own row's image, checked against its type's signature (PNG, WebP).
+  `GET /api/features/:key/blob/:id`: any row's image.
+- Realtime: triggers send `privilege` (the user reloads `/api/me`) and `feature` with the key as `g`; the hub
+  sends `{type:'feature', key}` to every holder of the key.
+
+Features so far: **`thumb-review`** (subject = catalog UUID, payload `{ hash }` = the thumbnail it was marked on,
+a WebP reference image): `GET /api/features/thumb-review/subjects?lang` lists every thumbnail of the index
+with name, class name, type and item class label. The SPA view: "Views".
 
 ### Companion release (`companion.ts`)
 
@@ -278,6 +308,16 @@ blocks".
   names from the catalog, components by their `label`; the pick kept for the session), UEX's averages dimmed at
   the bar's end, below it the trading dialog's `TradeTables` for the pick (`GET /api/trade/:uuid`).
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
+- **Thumbnail-Prüfung** (route `/review/thumbs`, `ThumbReviewView.vue`, privilege `thumb-review`; without it the
+  view says so and no button shows): every thumbnail (the L file at 132 CSS px) in a grid per item class and sub type,
+  resources apart, sorted by name; search over name and class name, a chip "Nur markierte". A click on a thumbnail
+  marks it as wrong (own row) or takes the mark back (with a reference: confirmed in a dialog). A marked tile has a
+  camera button: "Quelle wählen" picks a screen, window or tab once (`getDisplayMedia`, the stream stays open, a
+  tag shows its state), each capture takes its current frame into a dialog where the mouse draws the region (none =
+  the whole frame); saved as WebP (scaled down until under 512 KB). Tiles: red border = marked by you, yellow =
+  only by others, a count tag with several reviewers, their names in the tooltip, the reference inset (yours, else
+  the newest), "Neu gerendert" when a mark was set on another hash than the current thumbnail. Others' marks arrive
+  live (realtime `feature`).
 - Info cards: hovering a blueprint name or a material shows game data from `GET /api/info/...`
   (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records).
   A blueprint's card ends with "Freischaltung" (`BlueprintInfo.unlocks`): one line per kind ("126 Missionen",
@@ -288,7 +328,8 @@ blocks".
   Verkauf/Kauf with the range and, dim, UEX's average (items: the number of terminals); no locations.
 - Profile (RSI handle, language) is a dialog from the settings icon button next to the avatar (the avatar
   itself is not clickable), saved with Save; no language switch in the header.
-- Top bar right: History (a route link styled as a button), Companion (`desktop` icon), divider, avatar with
+- Top bar right: the privileges' features as outline buttons (route links; Thumbnail-Prüfung, icon `eye`, accent on
+  its page; only for holders), Companion (`desktop` icon), divider, avatar with
   name, profile, logout (icon only). Footer (from BindSight, one line, sticky): credits, "Powered by:" with
   a logo link to UEX (`uex-logo-{20,40}.png`, Lanczos from its touch icon), a divider, a short CIG fan site disclaimer (the full text on hover) and the Star Citizen
   logo from the official fankit (`webapp/src/assets/sc-logo-{20,40}.png`), on every page incl. login.
@@ -352,7 +393,7 @@ blocks".
 | Injection | Parameterized `sql` templates, Zod for every body/query/param, 16 KB body limit, amounts via `parseAmount`. |
 | Session theft | HttpOnly, Secure, HSTS (Caddy), hashed tokens, no Discord tokens stored, `Referrer-Policy: no-referrer`, `no-store` on API responses (the catalog, game data only: `private, no-cache`). |
 | Abuse | Rate limits in memory (one process): `/auth/*` per IP, `/api/*` per session. |
-| DB privileges | Own role `qm_web` (see `docs/deploy.md` "DB roles"): no writes to `app.org`/`app.member` (role IDs, roster), no access to schema `bot`. |
+| DB privileges | Own role `qm_web` (see `docs/deploy.md` "DB roles"): no writes to `app.org`/`app.member` (role IDs, roster) nor `app.user_privilege` (who holds a privilege), no access to schema `bot`. |
 | Leaks | Generic errors, stack traces in the log only; logs never hold cookies, codes or tokens. |
 | Secrets, CORS | `DISCORD_CLIENT_SECRET` only in the `webapp` container; no CORS middleware (same origin only). |
 | Dependencies, container | `pnpm audit --prod` before a deploy; containers read-only, `cap_drop: ALL`, `no-new-privileges`. |

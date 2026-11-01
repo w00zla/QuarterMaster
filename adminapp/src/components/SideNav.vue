@@ -17,6 +17,7 @@ const GROUPS: { label: string; items: { to: string; label: string; icon: IconNam
   { label: "Community", items: [
     { to: "/orgs", label: "Orgs", icon: "users" },
     { to: "/users", label: "Users", icon: "user" },
+    { to: "/privileges", label: "Privileges", icon: "lock" },
   ] },
   { label: "Stock", items: [
     { to: "/stock", label: "Stock", icon: "stock" },

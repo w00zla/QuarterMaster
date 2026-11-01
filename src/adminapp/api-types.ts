@@ -806,3 +806,56 @@ export interface RefineryJob {
   materials: { name: string; quantity: string; quality: number }[];
   scu: string;
 }
+
+// --- privileges (GET /api/privileges[/:key], /api/privileges/:key/blob/:id, /api/privileges/:key/export;
+// GET/PUT/DELETE /api/users/:userId/privileges[/:key]) ---
+export interface PrivilegeRow {
+  key: string;
+  description: string;
+  createdAt: string;
+  retiredAt: string | null;
+  // Assignments in force (not expired)
+  holderCount: number;
+  entryCount: number;
+}
+
+export interface PrivilegeHolder {
+  userId: string;
+  name: string | null;
+  grantedAt: string;
+  expiresAt: string | null;
+  // Not expired
+  active: boolean;
+}
+
+// One row of the key's feature data; a UUID subject with the catalog's name, class and type
+export interface PrivilegeEntry {
+  id: number;
+  userId: string;
+  userName: string | null;
+  subject: string;
+  subjectName: string | null;
+  className: string | null;
+  type: string | null;
+  subType: string | null;
+  payload: Record<string, unknown>;
+  blobType: string | null;
+  // The subject's current thumbnail hash (thumb-review: payload.hash differs = re-rendered since)
+  thumb: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrivilegeDetail extends PrivilegeRow {
+  holders: PrivilegeHolder[];
+  entries: PrivilegeEntry[];
+}
+
+// A user's assignment per key (grantedAt null = not held)
+export interface UserPrivilege {
+  key: string;
+  description: string;
+  retired: boolean;
+  grantedAt: string | null;
+  expiresAt: string | null;
+}

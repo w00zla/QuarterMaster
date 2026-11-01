@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The app bar in the admin UI's look: wordmark, tabs, then the companion app (Access Key, download),
 // the user with avatar, profile, your history and logout.
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import Icon, { type IconName } from "../../../adminapp/src/components/Icon.vue";
 import logo from "../../../adminapp/src/assets/logo-128.png";
@@ -25,6 +25,11 @@ const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [
   { to: "/mining", label: "nav.mining", icon: "pickaxe" },
   { to: "/trade", label: "nav.trade", icon: "trade" },
 ];
+// Features behind a privilege (docs/webapp.md "Privileges"): a button left of Companion, only for its holders
+const privilegeTabs: Array<{ to: string; label: Key; icon: IconName; key: string }> = [
+  { to: "/review/thumbs", label: "nav.thumbReview", icon: "eye", key: "thumb-review" },
+];
+const supportTabs = computed(() => privilegeTabs.filter((tab) => me.value?.privileges.includes(tab.key)));
 
 const profileOpen = ref(false);
 const companionOpen = ref(false);
@@ -64,6 +69,9 @@ onUnmounted(() => {
       </nav>
     </div>
     <div class="spacer" />
+    <RouterLink v-for="tab in supportTabs" :key="tab.to" :to="tab.to" class="btn small outline support" :class="{ active: $route.path === tab.to }">
+      <Icon :name="tab.icon" :size="14" /> {{ t(tab.label) }}
+    </RouterLink>
     <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="desktop" :size="14" /> {{ t("companion.open") }}</button>
     <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
     <span class="tab-divider" />
@@ -167,6 +175,16 @@ onUnmounted(() => {
 }
 
 .link-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A privilege's feature: a route as an outline button; on its page in the accent (same border width, no jump) */
+.support {
+  text-decoration: none;
+}
+
+.support.active {
   border-color: var(--accent);
   color: var(--accent);
 }

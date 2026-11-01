@@ -166,7 +166,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.deepEqual(await res.json(), {
       userId: USER, name: 'Tester', username: 'tester',
       avatarUrl: `https://cdn.discordapp.com/embed/avatars/${(BigInt(USER) >> 22n) % 6n}.png`,
-      orgs: [], rsiHandle: null, langOverride: null,
+      orgs: [], rsiHandle: null, langOverride: null, privileges: [],
     });
   });
 

@@ -5,7 +5,8 @@
 #   qm_app:   DML for bot and admin; app.stock_journal and app.history are append-only (SELECT, INSERT); in schema
 #             web only SELECT on the session/token columns without hashes (bot and admin must not forge web sessions)
 #   qm_web:   user web app; reads catalog and app, writes users, stock and its shares, journal and history (INSERT only) and
-#             blueprints, but not org/member (role IDs, roster); no access to schema bot;
+#             blueprints and feature data (app.feature_entry), but not org/member (role IDs, roster) nor who holds which
+#             privilege (app.user_privilege: the admin's); no access to schema bot;
 #             full DML in web; reads ext
 # Grants for new tables come from default privileges, which only cover objects created BY qm_owner:
 # never run migrations as the superuser. They cover qm_app only; qm_web's grants are explicit and
@@ -67,6 +68,9 @@ SELECT 'GRANT INSERT ON app.stock_journal TO qm_web' WHERE to_regclass('app.stoc
 SELECT 'GRANT INSERT ON app.history TO qm_web' WHERE to_regclass('app.history') IS NOT NULL \gexec
 SELECT 'GRANT INSERT, DELETE ON app.user_blueprint TO qm_web'
   WHERE to_regclass('app.user_blueprint') IS NOT NULL \gexec
+-- The privilege check is the web app's code (src/webapp/features.ts): the grant covers every key's rows
+SELECT 'GRANT INSERT, UPDATE, DELETE ON app.feature_entry TO qm_web'
+  WHERE to_regclass('app.feature_entry') IS NOT NULL \gexec
 -- Nothing from bot (it read bot.guild until migration 0018): taken back where an older run granted it
 SELECT 'REVOKE ALL ON ALL TABLES IN SCHEMA bot FROM qm_web' WHERE to_regnamespace('bot') IS NOT NULL \gexec
 SELECT 'REVOKE ALL ON SCHEMA bot FROM qm_web' WHERE to_regnamespace('bot') IS NOT NULL \gexec

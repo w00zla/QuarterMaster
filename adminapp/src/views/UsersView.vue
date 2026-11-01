@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Every known user (app_user, web logins, companion tokens) with a rough look at their data; read-only.
+// Every known user (app_user, web logins, companion tokens) with a rough look at their data; read-only except
+// their privileges (tab Privileges: assign, take back, expiry).
 import { computed, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import DataTable from "../components/DataTable.vue";
@@ -7,10 +8,10 @@ import DetailPanel from "../components/DetailPanel.vue";
 import Icon from "../components/Icon.vue";
 import StockTotals from "../components/StockTotals.vue";
 import Tooltip from "../components/Tooltip.vue";
-import { useFetch } from "../api";
+import { send, useFetch } from "../api";
 import { dateTime, matches } from "../format";
 import { useStoredTab } from "../storedTab";
-import type { ActivitySource, UserDetail, UserRow } from "../../../src/adminapp/api-types";
+import type { ActivitySource, UserDetail, UserPrivilege, UserRow } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
 const route = useRoute();
@@ -65,9 +66,9 @@ function valueOf(u: UserRow, key: string): string | number {
   }
 }
 
-const TABS = ["overview", "stock", "refinery", "blueprints", "history"] as const;
+const TABS = ["overview", "stock", "refinery", "blueprints", "privileges", "history"] as const;
 const TAB_LABELS: Record<(typeof TABS)[number], string> = {
-  overview: "Overview", stock: "Stock", refinery: "Refinery", blueprints: "Blueprints", history: "History",
+  overview: "Overview", stock: "Stock", refinery: "Refinery", blueprints: "Blueprints", privileges: "Privileges", history: "History",
 };
 const tab = useStoredTab("qm.users.tab", TABS, "overview");
 // Entries per tab, shown in its chip (none for the overview)
@@ -78,7 +79,38 @@ function tabCount(t: (typeof TABS)[number]): number | null {
   if (t === "refinery") return d.jobs.length;
   if (t === "blueprints") return d.blueprintList.length;
   if (t === "history") return d.history.length;
+  if (t === "privileges") return privileges.data.value?.filter(held).length ?? null;
   return null;
+}
+
+// Privileges: assigned (an expired one still counts as assigned until taken back), expiry as a date (end of that day, local)
+const privileges = useFetch<UserPrivilege[]>(() => (selected.value ? `/users/${selected.value}/privileges` : null), false);
+const held = (p: UserPrivilege) => p.grantedAt !== null;
+const expired = (p: UserPrivilege) => p.expiresAt !== null && new Date(p.expiresAt).getTime() <= Date.now();
+const privilegeBusy = ref(false);
+const privilegeError = ref("");
+const dateValue = (iso: string | null) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+async function changePrivilege(action: () => Promise<unknown>) {
+  privilegeBusy.value = true;
+  privilegeError.value = "";
+  try {
+    await action();
+  } catch (e) {
+    privilegeError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    privilegeBusy.value = false;
+    privileges.reload();
+  }
+}
+const grant = (p: UserPrivilege, date: string) => changePrivilege(() =>
+  send("PUT", `/users/${selected.value}/privileges/${p.key}`, { expiresAt: date ? new Date(`${date}T23:59:59`).toISOString() : null }));
+function revoke(p: UserPrivilege) {
+  if (!confirm(`Take back "${p.key}"? Their data stays.`)) return;
+  void changePrivilege(() => send("DELETE", `/users/${selected.value}/privileges/${p.key}`));
 }
 </script>
 
@@ -250,6 +282,38 @@ function tabCount(t: (typeof TABS)[number]): number | null {
           <div v-else class="faint">None</div>
         </section>
 
+        <section v-else-if="tab === 'privileges'">
+          <div v-if="privilegeError" class="err">{{ privilegeError }}</div>
+          <div v-if="privileges.error.value" class="faint">{{ privileges.error.value }}</div>
+          <table v-else-if="privileges.data.value?.length" class="mini">
+            <thead><tr><th>Privilege</th><th>State</th><th>Expires</th><th /></tr></thead>
+            <tbody>
+              <tr v-for="p in privileges.data.value" :key="p.key">
+                <td><Tooltip :text="p.key" mono>{{ p.description }}</Tooltip></td>
+                <td>
+                  <span v-if="!held(p)" class="tag">Not held</span>
+                  <span v-else-if="expired(p)" class="tag warn">Expired</span>
+                  <span v-else class="tag ok">Held</span>
+                  <span v-if="p.retired" class="tag err">Retired</span>
+                </td>
+                <td>
+                  <input
+                    type="date" class="date" :value="dateValue(p.expiresAt)" :disabled="!held(p) || privilegeBusy"
+                    title="Expires at the end of this day; empty = never"
+                    @change="grant(p, ($event.target as HTMLInputElement).value)"
+                  />
+                </td>
+                <td class="actions">
+                  <button v-if="held(p)" type="button" class="icon-btn" title="Take back" :disabled="privilegeBusy" @click="revoke(p)"><Icon name="trash" :size="16" /></button>
+                  <button v-else type="button" class="icon-btn" title="Assign" :disabled="privilegeBusy || p.retired" @click="grant(p, '')"><Icon name="plus" :size="16" /></button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="faint">No privileges defined</div>
+          <RouterLink to="/privileges">All privileges</RouterLink>
+        </section>
+
         <section v-else>
           <table v-if="detail.data.value.history.length" class="mini">
             <thead><tr><th>Time</th><th>Source</th><th>Action</th><th>Target</th><th class="num">Amount</th><th>Org</th></tr></thead>
@@ -273,6 +337,29 @@ function tabCount(t: (typeof TABS)[number]): number | null {
 </template>
 
 <style scoped>
+.date {
+  height: var(--h-chip-sm);
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--bg-surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.date:disabled {
+  opacity: 0.4;
+}
+
+.err {
+  color: var(--err);
+}
+
+.actions {
+  width: 1%;
+}
+
 .channels {
   display: inline-flex;
   gap: 4px;

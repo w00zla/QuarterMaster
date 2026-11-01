@@ -461,6 +461,9 @@ pictures with gaps), so the icons are rendered from the models:
    ~0.9 KB, M ~1.8 KB, L ~3.8 KB each; the PNGs average 50 KB). Measured against PNG, 8-bit PNG and WebP: AVIF is
    the smallest from 96 px up and even with WebP at 40 px. Upload: `scripts/push-thumbs.sh`
    (`docs/deploy.md` § 8), served by the web app (`docs/webapp.md` "Thumbnails").
+6. **Review:** holders of the privilege `thumb-review` mark wrong thumbnails in the web app and cut a reference out
+   of a screenshot (`docs/webapp.md` "Privileges"); the admin's ZIP export of those rows (`docs/adminapp.md`
+   "Privileges") is the input for fixing pose, light or material, then `icons:render --filter <class> --force`.
 
 Fan content of this kind is fine (the Star Citizen wiki renders its thumbnails the same way). Open: in-game
 comparison for the types without an orientation entry (radar, EMP, QDMP, tractor

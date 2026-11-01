@@ -1,4 +1,5 @@
-// Admin web UI: JSON API (catalog reads, catalog/localization imports, read-only user data, the bot's status texts) plus the built SPA (adminapp/dist),
+// Admin web UI: JSON API (catalog reads, catalog/localization imports, read-only user data, the bot's status texts,
+// assigning privileges) plus the built SPA (adminapp/dist),
 // behind HTTP basic auth. Binds to 127.0.0.1 unless ADMINAPP_HOST says otherwise; in production it sits
 // behind Caddy (TLS) and is published on the host's loopback only (compose.yaml).
 import { existsSync, readFileSync } from 'node:fs';
@@ -18,6 +19,7 @@ import { loadSnapshot } from '../catalog/import/load.ts';
 import { parseIniFile, runLocImport, runLocRemove } from '../catalog/import/loc-import.ts';
 import type { CatalogImportResponse, LocImportResponse } from './api-types.ts';
 import { getMiningProvider, getMiningProviders } from './mining.ts';
+import * as p from './privileges.ts';
 import * as q from './queries.ts';
 import { getStatus } from './status.ts';
 import * as s from './status-quotes.ts';
@@ -256,6 +258,54 @@ api.put('/status-quotes/:id', requireWriteHeader, async (c) => {
 api.delete('/status-quotes/:id', requireWriteHeader, async (c) => {
   const id = quoteId(c);
   return id && (await s.deleteStatusQuote(db, id)) ? c.body(null, 204) : c.json({ error: 'not found' }, 404);
+});
+
+// --- privileges (write: assigning them, JSON body { expiresAt: ISO | null }) ----------------
+const PRIVILEGE_KEY = /^[a-z][a-z0-9-]{1,40}$/;
+const privilegeKey = (c: Context) => {
+  const key = c.req.param('key') ?? '';
+  return PRIVILEGE_KEY.test(key) ? key : null;
+};
+api.get('/privileges', async (c) => c.json(await p.getPrivileges(db)));
+api.get('/privileges/:key', async (c) => {
+  const key = privilegeKey(c);
+  return found(c, key ? await p.getPrivilege(db, key, lang(c), thumbs()) : null);
+});
+api.get('/privileges/:key/blob/:id', async (c) => {
+  const key = privilegeKey(c);
+  const id = quoteId(c);
+  const blob = key && id ? await p.getEntryBlob(db, key, id) : null;
+  if (!blob) return c.json({ error: 'not found' }, 404);
+  c.header('Content-Type', blob.blobType);
+  c.header('Cache-Control', 'private, max-age=86400');
+  return c.body(new Uint8Array(blob.blob));
+});
+api.get('/privileges/:key/export', async (c) => {
+  const key = privilegeKey(c);
+  const archive = key ? await p.exportFeature(db, key, thumbs()) : null;
+  if (!archive || !key) return c.json({ error: 'not found' }, 404);
+  c.header('Content-Type', 'application/zip');
+  c.header('Content-Disposition', `attachment; filename="${key}-${new Date().toISOString().slice(0, 10)}.zip"`);
+  return c.body(new Uint8Array(archive));
+});
+api.get('/users/:userId/privileges', async (c) => {
+  const id = snowflake(c, 'userId');
+  return found(c, id ? await p.getUserPrivileges(db, id) : null);
+});
+api.put('/users/:userId/privileges/:key', requireWriteHeader, async (c) => {
+  const id = snowflake(c, 'userId');
+  const key = privilegeKey(c);
+  const raw = ((await c.req.json().catch(() => null)) as { expiresAt?: unknown } | null)?.expiresAt;
+  const expiresAt = typeof raw === 'string' ? new Date(raw) : null;
+  if (raw !== null && (!expiresAt || Number.isNaN(expiresAt.getTime()))) return c.json({ error: 'expiresAt must be an ISO date or null' }, 400);
+  return id && key && (await p.grantPrivilege(db, id, key, expiresAt)) ? c.body(null, 204) : c.json({ error: 'not found' }, 404);
+});
+api.delete('/users/:userId/privileges/:key', requireWriteHeader, async (c) => {
+  const id = snowflake(c, 'userId');
+  const key = privilegeKey(c);
+  if (!id || !key) return c.json({ error: 'not found' }, 404);
+  await p.revokePrivilege(db, id, key);
+  return c.body(null, 204);
 });
 
 api.notFound((c) => c.json({ error: 'not found' }, 404));

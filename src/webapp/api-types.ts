@@ -20,6 +20,8 @@ export interface MeResponse {
   rsiHandle: string | null;
   // The web app's language override (the bot keeps its own); null = follow the browser
   langOverride: Lang | null;
+  // Privilege keys in force (docs/webapp.md "Privileges"): the features beyond the roles this user may use
+  privileges: string[];
 }
 
 export type Lang = 'de' | 'en';
@@ -723,6 +725,53 @@ export interface HistoryResponse {
   more: boolean;
 }
 
+// --- privileges' features (GET/PUT/DELETE /api/features/:key/entries[/:subject[/blob]], GET /api/features/:key/blob/:id) ---
+// Every holder of the key sees every row; only the own row (`own`) can be changed. 403 noPrivilege without the key.
+export interface FeatureEntry {
+  id: number;
+  userId: string;
+  // Newest web session's Discord name, else the companion token's, else the org nickname
+  userName: string | null;
+  subject: string;
+  payload: Record<string, unknown>;
+  // The row's image (GET /api/features/:key/blob/:id?v=<updatedAt>); null = none
+  blobType: string | null;
+  own: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeatureEntriesResponse {
+  entries: FeatureEntry[];
+}
+
+// PUT …/entries/:subject: { payload } (the feature's schema); PUT …/entries/:subject/blob: { type, data } (base64)
+export interface FeaturePutRequest {
+  payload: Record<string, unknown>;
+}
+
+export interface FeatureBlobRequest {
+  type: 'image/webp' | 'image/png';
+  data: string;
+}
+
+// thumb-review (GET /api/features/thumb-review/subjects?lang): every thumbnail; payload { hash } = the one it was
+// marked on (a re-render brings a new hash)
+export interface ThumbReviewSubject {
+  uuid: string;
+  name: string;
+  className: string;
+  // Items only (null = a resource's chunk); typeLabel = the item class's display name
+  type: string | null;
+  subType: string | null;
+  typeLabel: string | null;
+  hash: string;
+}
+
+export interface ThumbReviewSubjectsResponse {
+  subjects: ThumbReviewSubject[];
+}
+
 // --- realtime (WebSocket /api/ws) ------------------------------------------------------------
 // The server only says what changed; the SPA fetches it through the normal endpoints.
 
@@ -740,6 +789,8 @@ export type ServerMessage =
   // A new history entry concerning you (yours, someone acted on your data, or stock shared in one of
   // your orgs): GET /api/history?after
   | { type: 'history'; id: number; source: HistorySource; actor: string }
+  // A privilege's feature data changed (to every holder of the key): GET /api/features/:key/entries
+  | { type: 'feature'; key: string }
   // Changes may have been missed (the server lost its DB listener): reload everything
   | { type: 'resync' }
   | { type: 'pong' };

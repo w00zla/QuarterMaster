@@ -12,6 +12,7 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import type { ServerMessage } from './api-types.ts';
+import { holdersOf } from './features.ts';
 import { clientAddress, rateKey } from './ip.ts';
 import { SESSION_COOKIE, validateSession } from './session.ts';
 
@@ -126,6 +127,17 @@ export class RealtimeHub {
         const users = new Set([change.a, u, change.o].filter((x): x is string => Boolean(x)));
         const org = change.x === 'share' ? g : null;
         this.send((c) => users.has(c.userId) || (!!org && c.orgs.has(org)), { type: 'history', id: change.id, source: change.s, actor: change.a });
+        break;
+      }
+      case 'privilege':
+        // Assigned or taken back in the admin UI: part of /api/me
+        if (u) this.send((c) => c.userId === u, { type: 'me' });
+        break;
+      case 'feature': {
+        // A feature's data ("g" carries its key): every holder of the key
+        if (!g) break;
+        const holders = await holdersOf(this.db, g);
+        this.send((c) => holders.has(c.userId), { type: 'feature', key: g });
         break;
       }
       case 'blueprint':

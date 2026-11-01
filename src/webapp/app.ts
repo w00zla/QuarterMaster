@@ -16,6 +16,7 @@ import type { Db } from '../db/client.ts';
 import type { ApiTokenCreated, CompanionInfo, CompanionOutdated } from './api-types.ts';
 import { COMPANION_HEADER, PLATFORMS, UPDATE_FEED, companionRelease, compareVersions, downloadPath, updateFeed } from './companion.ts';
 import type { DiscordLogin } from './discord.ts';
+import { BLOB_BODY_LIMIT, BLOB_ROUTE } from './features.ts';
 import { clientAddress, rateKey } from './ip.ts';
 import { getMe } from './me.ts';
 import { HttpError, registerRoutes } from './routes.ts';
@@ -205,7 +206,11 @@ export function createApp(db: Db, login: DiscordLogin, config: WebappConfig) {
     }
     return next();
   });
-  api.use('*', bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: 'request too large' }, 413) }));
+  // A feature's image upload (base64 in JSON) gets its own limit
+  const tooLarge = (c: Context) => c.json({ error: 'request too large' }, 413);
+  const smallBody = bodyLimit({ maxSize: 16 * 1024, onError: tooLarge });
+  const blobBody = bodyLimit({ maxSize: BLOB_BODY_LIMIT, onError: tooLarge });
+  api.use('*', (c, next) => (BLOB_ROUTE.test(c.req.path) ? blobBody : smallBody)(c, next));
 
   api.get('/me', async (c) => c.json(await getMe(db, c.get('session'))));
   registerRoutes(api, db, thumbs);

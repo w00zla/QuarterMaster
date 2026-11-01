@@ -5,7 +5,7 @@
 // catalog rows are never deleted either, only retired.
 import { sql, type SQLWrapper } from 'drizzle-orm';
 import {
-  bigint, boolean, check, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, unique, uuid,
+  bigint, boolean, check, customType, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core';
 import { item, location, resource, blueprint } from './catalog.ts';
 
@@ -198,4 +198,60 @@ export const history = app.table('history', {
   index().on(t.actorUserId, t.id),
   index().on(t.ownerUserId, t.id),
   index().on(t.toOwnerUserId, t.id),
+]);
+
+// Bytes (postgres.js hands out a Buffer); drizzle's pg-core has no bytea column
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+
+/**
+ * A privilege: grants single users a feature outside the roles, e.g. a supporter tool (docs/webapp.md "Privileges").
+ * Each key comes with the migration of the feature that checks it; never deleted (its feature data keeps
+ * referencing it), retired instead.
+ */
+export const privilege = app.table('privilege', {
+  key: text('key').primaryKey(),
+  description: text('description').notNull(),
+  createdAt: createdAt(),
+  retiredAt: timestamp('retired_at', { withTimezone: true }),
+}, (t) => [check('privilege_key_format', sql`${t.key} ~ '^[a-z][a-z0-9-]{1,40}$'`)]);
+
+/**
+ * Who holds which privilege, assigned in the admin UI. No FK to app.app_user: the roster cleanup deletes users
+ * without data and does not know this table.
+ */
+export const userPrivilege = app.table('user_privilege', {
+  userId: text('user_id').notNull(),
+  key: text('key').notNull().references(() => privilege.key),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+  // NULL = until taken back
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+}, (t) => [
+  primaryKey({ columns: [t.userId, t.key] }),
+  check('user_privilege_user_id_format', snowflake(t.userId)),
+  index().on(t.key),
+]);
+
+/**
+ * The data of a privilege's feature: one row per user and subject (e.g. a thumbnail marked as wrong), the
+ * payload checked by the feature's schema in code (src/webapp/features.ts), optionally one file (an image).
+ * Every holder of the key sees every row, only the row's user changes it. Rows stay when the privilege is
+ * taken back. No FK to app.app_user, like user_privilege.
+ */
+export const featureEntry = app.table('feature_entry', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  key: text('key').notNull().references(() => privilege.key),
+  userId: text('user_id').notNull(),
+  subject: text('subject').notNull(),
+  payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+  blob: bytea('blob'),
+  blobType: text('blob_type'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  unique('feature_entry_user_subject').on(t.key, t.userId, t.subject),
+  check('feature_entry_user_id_format', snowflake(t.userId)),
+  check('feature_entry_subject', sql`length(${t.subject}) BETWEEN 1 AND 200`),
+  check('feature_entry_payload', sql`jsonb_typeof(${t.payload}) = 'object'`),
+  check('feature_entry_blob', sql`(${t.blob} IS NULL) = (${t.blobType} IS NULL)`),
+  index().on(t.key, t.subject),
 ]);
