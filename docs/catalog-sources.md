@@ -467,7 +467,10 @@ pictures with gaps), so the icons are rendered from the models:
    stays light grey. The ore thumbnails (`ui_ore_*_1_a`, HardSurface with `WEAR_LAYER`) have no wear mask of their
    own: their layer materials carry the vein pattern `ore_raw_1_a_blend.tif` as `TexSlot8`, used as the wear factor
    (red, smoothstep 0.6-0.8, not scaled by the scene's wear strength). Silicon's wear flecks render brighter than in
-   game (its wear layer is a light metal). The warehouse tiles under the cursor are covered by the tooltip: compare
+   game (its wear layer is a light metal). A metal LayerBlend layer on a palette channel takes that channel's
+   finish specular as its colour (F0), not tint × palette tint: the Artimex Chairman's Club's gold (tertiary, tint
+   0.007, specular 0.73/0.43/0.11) drew black, the Geist helmet's gun_metal_03 (primary, finish 0.093) a black mirror
+   where the game shows the ASD Edition's dark grey. The warehouse tiles under the cursor are covered by the tooltip: compare
    against a later frame's free tile. Fixed in the addon on
    2026-11-01: a submaterial name with a trailing space (`"ore_hephaestanite "`, 5 ores) never matched its slot and
    rendered white; the emission strength of materials without their own emission input is `Glow` (× `EmissiveOpacity`),
