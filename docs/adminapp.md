@@ -69,14 +69,13 @@ removing imported text sources), the bot's status texts and assigning privileges
 ## Community
 
 - **Users** (`/users/:userId?`, `GET /api/users[/:userId]`, `src/adminapp/users.ts`, tested in
-  `test/admin-users.db.test.ts`): everyone in `app_user`, `web.session` or `web.api_token`; channels (sources of
-  their own actions in the last 30 days), stored batches, SCU, harvestable and gear pieces, refinery jobs,
-  blueprints, last action, last web login, companion token. The detail: on top the username, RSI
-  handle and channels, key figures as small tiles (batches, SCU, harvestables, gear, refinery jobs, blueprints);
-  below them folding sections with their count (which are open is remembered per browser; Account and Orgs by
-  default): Account (Discord ID, known since, last action, web sessions and token, actions per source in 30 days),
-  Orgs (memberships), Stock (Resources / Harvestables / Gear), Refinery (running jobs with their refined
-  materials, expected yield and quality), Blueprints, Privileges, History (newest 50 rows, link to Activity). Names (`userNames`): the newest web session's
+  `test/admin-users.db.test.ts`): everyone in `app_user`, `web.session` or `web.api_token`, stored batches, SCU, harvestable and gear pieces, refinery jobs,
+  blueprints, last action, last web login, companion token. The detail: on top the username and RSI
+  handle; below them two tabs of folding sections with their count (tab and open sections remembered per browser; the App
+  tab's sections open by default): **App** with Account (Discord ID, known since, last action, web sessions and
+  token, actions per source in 30 days), Privileges and Orgs (memberships); **Stats** with the key figures as small tiles (batches, SCU, harvestables, gear, refinery jobs, blueprints), Stock (Resources /
+  Harvestables / Gear), Refinery (running jobs with their refined materials, expected yield and quality),
+  Blueprints and History (newest 50 rows, link to Activity). Names (`userNames`): the newest web session's
   Discord profile, else the companion token's, else the org nickname, else only the ID.
 - **Orgs** (`/orgs/:guildId?`, `GET /api/orgs[/:guildId]`): bot presence, settings (language, logs, board),
   active/inactive members, batches shared there by active members, last history row naming the org. Detail

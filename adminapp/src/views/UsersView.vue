@@ -10,6 +10,7 @@ import StockTotals from "../components/StockTotals.vue";
 import Tooltip from "../components/Tooltip.vue";
 import { send, useFetch } from "../api";
 import { dateTime, matches } from "../format";
+import { useStoredTab } from "../storedTab";
 import type { ActivitySource, UserDetail, UserPrivilege, UserRow } from "../../../src/adminapp/api-types";
 import type { ColumnSpec } from "../tableColumns";
 
@@ -29,13 +30,11 @@ const noOrgCount = computed(() => (list.data.value ?? []).filter((u) => !u.orgs.
 
 // Where actions come from, in this order
 const CHANNELS: Record<ActivitySource, string> = { bot: "Bot", webapp: "Web", companion: "Companion" };
-const channelsOf = (u: UserRow) => (Object.keys(CHANNELS) as ActivitySource[]).filter((c) => u.channels.includes(c));
 
 const COLUMNS: ColumnSpec[] = [
   { key: "name", label: "Name", width: 200 },
   { key: "rsi", label: "RSI handle", width: 140 },
   { key: "orgs", label: "Orgs", width: 180 },
-  { key: "channels", label: "Channels (30 d)", width: 170 },
   { key: "batches", label: "Batches", width: 90 },
   { key: "scu", label: "SCU", width: 100 },
   { key: "harvestables", label: "Harvestables", width: 120 },
@@ -52,7 +51,6 @@ function valueOf(u: UserRow, key: string): string | number {
     case "name": return u.name ?? u.userId;
     case "rsi": return u.rsiHandle ?? "";
     case "orgs": return u.orgs.join(", ");
-    case "channels": return channelsOf(u).join(" ");
     case "batches": return u.batches;
     case "scu": return Number(u.resourceScu);
     case "harvestables": return Number(u.harvestablePcs);
@@ -65,11 +63,15 @@ function valueOf(u: UserRow, key: string): string | number {
   }
 }
 
-// The detail: identity and key figures on top, below it folding sections; which are open is remembered per browser
-const SECTIONS = ["account", "orgs", "stock", "refinery", "blueprints", "privileges", "history"] as const;
+// The detail: identity on top, below it two tabs of folding sections: App (account,
+// privileges, orgs) and Stats (the user's data, small key figures first); the tab and which sections are open are remembered per browser
+const TABS = ["app", "stats"] as const;
+const TAB_LABELS: Record<(typeof TABS)[number], string> = { app: "App", stats: "Stats" };
+const tab = useStoredTab("qm.users.detailTab", TABS, "app");
+const SECTIONS = ["account", "privileges", "orgs", "stock", "refinery", "blueprints", "history"] as const;
 type Section = (typeof SECTIONS)[number];
 const OPEN_KEY = "qm.users.sections";
-const open = ref<Set<Section>>(new Set(["account", "orgs"]));
+const open = ref<Set<Section>>(new Set(["account", "privileges", "orgs"]));
 try {
   const stored = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "null") as unknown;
   if (Array.isArray(stored)) open.value = new Set(SECTIONS.filter((x) => stored.includes(x)));
@@ -157,12 +159,6 @@ function revoke(p: UserPrivilege) {
         </template>
         <template #cell-rsi="{ row }"><span :class="{ faint: !row.rsiHandle }">{{ row.rsiHandle ?? "—" }}</span></template>
         <template #cell-orgs="{ row }"><span :class="{ faint: !row.orgs.length }">{{ row.orgs.join(", ") || "—" }}</span></template>
-        <template #cell-channels="{ row }">
-          <span v-if="row.channels.length" class="channels">
-            <span v-for="c in channelsOf(row)" :key="c" class="tag">{{ CHANNELS[c] }}</span>
-          </span>
-          <span v-else class="faint">—</span>
-        </template>
         <template #cell-batches="{ row }"><span :class="{ faint: !row.batches }">{{ row.batches }}</span></template>
         <template #cell-scu="{ row }"><span class="mono" :class="{ faint: row.resourceScu === '0' }">{{ row.resourceScu }}</span></template>
         <template #cell-harvestables="{ row }"><span class="mono" :class="{ faint: row.harvestablePcs === '0' }">{{ row.harvestablePcs }}</span></template>
@@ -189,8 +185,83 @@ function revoke(p: UserPrivilege) {
           <div class="ident-line">
             <span :class="{ faint: !detail.data.value.discordUsername }">@{{ detail.data.value.discordUsername ?? "—" }}</span>
             <span class="dim">RSI {{ detail.data.value.rsiHandle ?? "—" }}</span>
-            <span v-for="c in channelsOf(detail.data.value)" :key="c" class="tag">{{ CHANNELS[c] }}</span>
           </div>
+        </section>
+
+        <div class="chips">
+          <button v-for="t in TABS" :key="t" type="button" class="chip" :class="{ active: tab === t }" @click="tab = t">{{ TAB_LABELS[t] }}</button>
+        </div>
+
+        <template v-if="tab === 'app'">
+          <details class="section" :open="open.has('account')" @toggle="onToggle('account', $event)">
+            <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Account</span></summary>
+            <dl class="kv">
+              <dt>Discord ID</dt>
+              <dd class="mono">{{ detail.data.value.userId }}</dd>
+              <dt>Known since</dt>
+              <dd>{{ dateTime(detail.data.value.createdAt) }}</dd>
+              <dt>Last action</dt>
+              <dd>{{ dateTime(detail.data.value.lastActivity) }}</dd>
+              <dt>Web app</dt>
+              <dd>
+                <template v-if="detail.data.value.lastSeen">
+                  last seen {{ dateTime(detail.data.value.lastSeen) }} · {{ detail.data.value.sessions }} valid sessions
+                </template>
+                <span v-else class="faint">never logged in</span>
+              </dd>
+              <dt>Companion</dt>
+              <dd>
+                <template v-if="detail.data.value.tokenCreatedAt">
+                  token since {{ dateTime(detail.data.value.tokenCreatedAt) }} · last used {{ dateTime(detail.data.value.tokenLastUsedAt) }}
+                </template>
+                <span v-else class="faint">no token</span>
+              </dd>
+              <template v-for="(label, c) in CHANNELS" :key="c">
+                <dt>{{ label }} (30 d)</dt>
+                <dd class="mono" :class="{ faint: !detail.data.value.actions[c] }">{{ detail.data.value.actions[c] }} actions</dd>
+              </template>
+            </dl>
+          </details>
+          <details class="section" :open="open.has('privileges')" @toggle="onToggle('privileges', $event)">
+            <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Privileges</span> <span class="count">{{ privileges.data.value?.filter(held).length ?? 0 }}</span></summary>
+            <div v-if="privilegeError" class="err">{{ privilegeError }}</div>
+            <div v-if="privileges.error.value" class="faint">{{ privileges.error.value }}</div>
+            <table v-else-if="privileges.data.value?.length" class="mini">
+              <thead><tr><th>Privilege</th><th>State</th><th /></tr></thead>
+              <tbody>
+                <tr v-for="p in privileges.data.value" :key="p.key">
+                  <td><Tooltip :text="p.key" mono>{{ p.description }}</Tooltip></td>
+                  <td>
+                    <span v-if="!held(p)" class="tag">Not held</span>
+                    <span v-else class="tag ok">Held</span>
+                    <span v-if="p.retired" class="tag err">Retired</span>
+                  </td>
+                  <td class="actions">
+                    <button v-if="held(p)" type="button" class="icon-btn" title="Take back" :disabled="privilegeBusy" @click="revoke(p)"><Icon name="trash" :size="16" /></button>
+                    <button v-else type="button" class="icon-btn" title="Assign" :disabled="privilegeBusy || p.retired" @click="grant(p)"><Icon name="plus" :size="16" /></button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="faint">No privileges defined</div>
+          </details>
+          <details class="section" :open="open.has('orgs')" @toggle="onToggle('orgs', $event)">
+            <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Orgs</span> <span class="count">{{ detail.data.value.memberships.length }}</span></summary>
+            <table v-if="detail.data.value.memberships.length" class="mini">
+              <thead><tr><th>Org</th><th>Nickname</th><th>State</th><th>Since</th></tr></thead>
+              <tbody>
+                <tr v-for="m in detail.data.value.memberships" :key="m.guildId" class="link" @click="router.push(`/orgs/${m.guildId}`)">
+                  <td>{{ m.org }}</td>
+                  <td class="dim">{{ m.displayName }}</td>
+                  <td><span class="tag" :class="m.active ? 'ok' : ''">{{ m.active ? "Active" : "Inactive" }}</span></td>
+                  <td>{{ dateTime(m.active ? m.firstSeenAt : m.inactiveSince) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="faint">None</div>
+          </details>
+        </template>
+        <template v-else>
           <div class="figures">
             <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.batches }">{{ detail.data.value.batches }}</span><span class="figure-label">Batches</span></div>
             <div class="figure"><span class="figure-value mono" :class="{ faint: detail.data.value.resourceScu === '0' }">{{ detail.data.value.resourceScu }}</span><span class="figure-label">SCU</span></div>
@@ -199,128 +270,59 @@ function revoke(p: UserPrivilege) {
             <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.refineryJobs }">{{ detail.data.value.refineryJobs }}</span><span class="figure-label">Refinery jobs</span></div>
             <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.blueprints }">{{ detail.data.value.blueprints }}</span><span class="figure-label">Blueprints</span></div>
           </div>
-        </section>
-
-        <details class="section" :open="open.has('account')" @toggle="onToggle('account', $event)">
-          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Account</span></summary>
-          <dl class="kv">
-            <dt>Discord ID</dt>
-            <dd class="mono">{{ detail.data.value.userId }}</dd>
-            <dt>Known since</dt>
-            <dd>{{ dateTime(detail.data.value.createdAt) }}</dd>
-            <dt>Last action</dt>
-            <dd>{{ dateTime(detail.data.value.lastActivity) }}</dd>
-            <dt>Web app</dt>
-            <dd>
-              <template v-if="detail.data.value.lastSeen">
-                last seen {{ dateTime(detail.data.value.lastSeen) }} · {{ detail.data.value.sessions }} valid sessions
-              </template>
-              <span v-else class="faint">never logged in</span>
-            </dd>
-            <dt>Companion</dt>
-            <dd>
-              <template v-if="detail.data.value.tokenCreatedAt">
-                token since {{ dateTime(detail.data.value.tokenCreatedAt) }} · last used {{ dateTime(detail.data.value.tokenLastUsedAt) }}
-              </template>
-              <span v-else class="faint">no token</span>
-            </dd>
-            <template v-for="(label, c) in CHANNELS" :key="c">
-              <dt>{{ label }} (30 d)</dt>
-              <dd class="mono" :class="{ faint: !detail.data.value.actions[c] }">{{ detail.data.value.actions[c] }} actions</dd>
-            </template>
-          </dl>
-        </details>
-        <details class="section" :open="open.has('orgs')" @toggle="onToggle('orgs', $event)">
-          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Orgs</span> <span class="count">{{ detail.data.value.memberships.length }}</span></summary>
-          <table v-if="detail.data.value.memberships.length" class="mini">
-            <thead><tr><th>Org</th><th>Nickname</th><th>State</th><th>Since</th></tr></thead>
-            <tbody>
-              <tr v-for="m in detail.data.value.memberships" :key="m.guildId" class="link" @click="router.push(`/orgs/${m.guildId}`)">
-                <td>{{ m.org }}</td>
-                <td class="dim">{{ m.displayName }}</td>
-                <td><span class="tag" :class="m.active ? 'ok' : ''">{{ m.active ? "Active" : "Inactive" }}</span></td>
-                <td>{{ dateTime(m.active ? m.firstSeenAt : m.inactiveSince) }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="faint">None</div>
-        </details>
-        <details class="section" :open="open.has('stock')" @toggle="onToggle('stock', $event)">
-          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Stock</span> <span class="count">{{ detail.data.value.stock.length }}</span></summary>
-          <StockTotals :stock="detail.data.value.stock" />
-        </details>
-        <details class="section" :open="open.has('refinery')" @toggle="onToggle('refinery', $event)">
-          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Refinery</span> <span class="count">{{ detail.data.value.jobs.length }}</span></summary>
-          <table v-if="detail.data.value.jobs.length" class="mini">
-            <thead><tr><th>Station</th><th>Materials (expected)</th><th class="num">SCU</th><th>Ends</th></tr></thead>
-            <tbody>
-              <tr v-for="j in detail.data.value.jobs" :key="j.jobId">
-                <td>{{ j.location }}</td>
-                <td>
-                  <div v-for="(m, i) in j.materials" :key="i">
-                    {{ m.name }} <span class="mono dim">{{ m.amount }} SCU · Q{{ m.quality }}</span>
-                  </div>
-                </td>
-                <td class="num mono">{{ j.scu }}</td>
-                <td>{{ dateTime(j.endsAt) }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="faint">No running jobs</div>
-        </details>
-        <details class="section" :open="open.has('blueprints')" @toggle="onToggle('blueprints', $event)">
-          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Blueprints</span> <span class="count">{{ detail.data.value.blueprintList.length }}</span></summary>
-          <table v-if="detail.data.value.blueprintList.length" class="mini">
-            <tbody>
-              <tr v-for="b in detail.data.value.blueprintList" :key="b.uuid">
-                <td><RouterLink :to="`/blueprints/${b.uuid}`">{{ b.name }}</RouterLink></td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="faint">None</div>
-        </details>
-        <details class="section" :open="open.has('privileges')" @toggle="onToggle('privileges', $event)">
-          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Privileges</span> <span class="count">{{ privileges.data.value?.filter(held).length ?? 0 }}</span></summary>
-          <div v-if="privilegeError" class="err">{{ privilegeError }}</div>
-          <div v-if="privileges.error.value" class="faint">{{ privileges.error.value }}</div>
-          <table v-else-if="privileges.data.value?.length" class="mini">
-            <thead><tr><th>Privilege</th><th>State</th><th /></tr></thead>
-            <tbody>
-              <tr v-for="p in privileges.data.value" :key="p.key">
-                <td><Tooltip :text="p.key" mono>{{ p.description }}</Tooltip></td>
-                <td>
-                  <span v-if="!held(p)" class="tag">Not held</span>
-                  <span v-else class="tag ok">Held</span>
-                  <span v-if="p.retired" class="tag err">Retired</span>
-                </td>
-                <td class="actions">
-                  <button v-if="held(p)" type="button" class="icon-btn" title="Take back" :disabled="privilegeBusy" @click="revoke(p)"><Icon name="trash" :size="16" /></button>
-                  <button v-else type="button" class="icon-btn" title="Assign" :disabled="privilegeBusy || p.retired" @click="grant(p)"><Icon name="plus" :size="16" /></button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="faint">No privileges defined</div>
-          <RouterLink to="/privileges">All privileges</RouterLink>
-        </details>
-        <details class="section" :open="open.has('history')" @toggle="onToggle('history', $event)">
-          <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">History</span> <span class="count">{{ detail.data.value.history.length }}</span></summary>
-          <table v-if="detail.data.value.history.length" class="mini">
-            <thead><tr><th>Time</th><th>Source</th><th>Action</th><th>Target</th><th class="num">Amount</th><th>Org</th></tr></thead>
-            <tbody>
-              <tr v-for="h in detail.data.value.history" :key="h.id">
-                <td>{{ dateTime(h.at) }}</td>
-                <td class="dim">{{ h.source }}</td>
-                <td>{{ h.category }} · {{ h.action }}<span v-if="h.byOther" class="faint"> (by someone else)</span></td>
-                <td>{{ h.target }}</td>
-                <td class="num mono">{{ h.amount ? `${h.amount} ${h.unit}` : "" }}</td>
-                <td class="dim">{{ h.org ?? "" }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="faint">None</div>
-          <RouterLink :to="{ path: '/activity', query: { user: detail.data.value.userId } }">All in Activity</RouterLink>
-        </details>
+          <details class="section" :open="open.has('stock')" @toggle="onToggle('stock', $event)">
+            <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Stock</span> <span class="count">{{ detail.data.value.stock.length }}</span></summary>
+            <StockTotals :stock="detail.data.value.stock" />
+          </details>
+          <details class="section" :open="open.has('refinery')" @toggle="onToggle('refinery', $event)">
+            <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Refinery</span> <span class="count">{{ detail.data.value.jobs.length }}</span></summary>
+            <table v-if="detail.data.value.jobs.length" class="mini">
+              <thead><tr><th>Station</th><th>Materials (expected)</th><th class="num">SCU</th><th>Ends</th></tr></thead>
+              <tbody>
+                <tr v-for="j in detail.data.value.jobs" :key="j.jobId">
+                  <td>{{ j.location }}</td>
+                  <td>
+                    <div v-for="(m, i) in j.materials" :key="i">
+                      {{ m.name }} <span class="mono dim">{{ m.amount }} SCU · Q{{ m.quality }}</span>
+                    </div>
+                  </td>
+                  <td class="num mono">{{ j.scu }}</td>
+                  <td>{{ dateTime(j.endsAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="faint">No running jobs</div>
+          </details>
+          <details class="section" :open="open.has('blueprints')" @toggle="onToggle('blueprints', $event)">
+            <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Blueprints</span> <span class="count">{{ detail.data.value.blueprintList.length }}</span></summary>
+            <table v-if="detail.data.value.blueprintList.length" class="mini">
+              <tbody>
+                <tr v-for="b in detail.data.value.blueprintList" :key="b.uuid">
+                  <td><RouterLink :to="`/blueprints/${b.uuid}`">{{ b.name }}</RouterLink></td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="faint">None</div>
+          </details>
+          <details class="section" :open="open.has('history')" @toggle="onToggle('history', $event)">
+            <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">History</span> <span class="count">{{ detail.data.value.history.length }}</span></summary>
+            <table v-if="detail.data.value.history.length" class="mini">
+              <thead><tr><th>Time</th><th>Source</th><th>Action</th><th>Target</th><th class="num">Amount</th><th>Org</th></tr></thead>
+              <tbody>
+                <tr v-for="h in detail.data.value.history" :key="h.id">
+                  <td>{{ dateTime(h.at) }}</td>
+                  <td class="dim">{{ h.source }}</td>
+                  <td>{{ h.category }} · {{ h.action }}<span v-if="h.byOther" class="faint"> (by someone else)</span></td>
+                  <td>{{ h.target }}</td>
+                  <td class="num mono">{{ h.amount ? `${h.amount} ${h.unit}` : "" }}</td>
+                  <td class="dim">{{ h.org ?? "" }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="faint">None</div>
+            <RouterLink :to="{ path: '/activity', query: { user: detail.data.value.userId } }">All in Activity</RouterLink>
+          </details>
+        </template>
       </template>
     </DetailPanel>
   </div>
@@ -341,24 +343,25 @@ function revoke(p: UserPrivilege) {
   font-size: 13px;
 }
 
+/* The Stats tab's key figures: small, in one row as far as the panel allows */
 .figures {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .figure {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 8px;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-control);
   background: var(--bg-surface-2);
 }
 
 .figure-value {
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
 }
@@ -411,10 +414,5 @@ function revoke(p: UserPrivilege) {
 
 .actions {
   width: 1%;
-}
-
-.channels {
-  display: inline-flex;
-  gap: 4px;
 }
 </style>
