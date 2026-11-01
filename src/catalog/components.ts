@@ -38,6 +38,48 @@ export function isFpsType(type: string | null | undefined, subType: string | nul
   return !subTypes || (!!subType && subTypes.includes(subType));
 }
 
+/**
+ * Items the shops sell that are no gear: catalog-only, for the item finder (where to buy item X); NEVER
+ * bookable (stock, crafting, bot, `/api/catalog` and the icon renderer use COMPONENT_TYPES/FPS_TYPES only,
+ * see `componentItemSql`). Per item type: the sub types that count (null = all) and, optionally, the record
+ * paths (lower case, as in the RecordStore) that restrict it. `Misc` is mostly props nobody sells (1519
+ * records, ~37 sold): only the carryables count. `Cargo` (boxes) and `Paints` (ship liveries) stay out on
+ * purpose (decided 2026-11-01), vehicles too.
+ */
+export interface ShopRule { subTypes: readonly string[] | null; paths?: readonly string[] }
+export const SHOP_TYPES: Readonly<Record<string, ShopRule>> = {
+  Char_Clothing_Torso_0: { subTypes: null },
+  Char_Clothing_Torso_1: { subTypes: null },
+  Char_Clothing_Legs: { subTypes: null },
+  Char_Clothing_Feet: { subTypes: null },
+  Char_Clothing_Hat: { subTypes: null },
+  Char_Clothing_Hands: { subTypes: null },
+  Food: { subTypes: null },
+  Drink: { subTypes: null },
+  FPS_Consumable: { subTypes: null },
+  FlightController: { subTypes: null },
+  MobiGlas: { subTypes: null },
+  WeaponAttachment: { subTypes: ['Magazine'] },
+  WeaponPersonal: { subTypes: null },
+  ExternalFuelTank: { subTypes: null },
+  JumpDrive: { subTypes: null },
+  Bomb: { subTypes: null },
+  BombLauncher: { subTypes: null },
+  InventoryContainer: { subTypes: null },
+  Flair_Surface: { subTypes: null },
+  Misc: { subTypes: null, paths: ['/scitem/carryables/1h/', '/scitem/carryables/2h/'] },
+};
+
+/** Whether the record at `path` (lower case, as in the RecordStore) is a shop item (SHOP_TYPES). Never gear:
+ * the bookable rule goes by type alone, so a gear-typed record outside the gear folders (glowsticks,
+ * `WeaponPersonal/Gadget` in carryables) must not enter the catalog through the shop. */
+export function isShopItem(type: string | null | undefined, subType: string | null | undefined, path: string): boolean {
+  if (!type || !Object.hasOwn(SHOP_TYPES, type) || isComponentType(type) || isFpsType(type, subType)) return false;
+  const rule = SHOP_TYPES[type]!;
+  if (rule.subTypes && !(subType && rule.subTypes.includes(subType))) return false;
+  return !rule.paths || rule.paths.some((p) => path.includes(p));
+}
+
 /** SQL condition: the catalog.item row `alias` has an FPS gear type (as isFpsType). */
 export const fpsTypeSql = (alias: string): string => `(${Object.entries(FPS_TYPES).map(([type, subTypes]) =>
   `(${alias}.type = '${type}'${subTypes ? ` AND ${alias}.sub_type IN (${subTypes.map((s) => `'${s}'`).join(', ')})` : ''})`).join(' OR ')})`;

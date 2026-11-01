@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { blueprintCategoryGroup, blueprintCategoryLocKey, itemClassLocKey, labelFromKey, typeLabel } from '../src/catalog/labels.ts';
+import { blueprintCategoryGroup, blueprintCategoryLocKey, descriptionInLang, itemClassLocKey, labelFromKey, typeLabel } from '../src/catalog/labels.ts';
 
 describe('labels', () => {
   it('derives readable names from technical keys', () => {
@@ -29,5 +29,15 @@ describe('labels', () => {
     assert.equal(typeLabel('SalvageModifier', null), 'Salvage Modifier');
     assert.equal(typeLabel('UNDEFINED', null), null);
     assert.equal(typeLabel(null, null), null);
+  });
+
+  it('keeps a description line stated in both languages only in the one asked for', () => {
+    const text = 'Hersteller: KE Group\nTyp (En): Item Fabricator\nTyp (De): Gegenstandsdrucker\n\nDieser Drucker ist bekannt.';
+    assert.equal(descriptionInLang(text, 'de'), 'Hersteller: KE Group\nTyp: Gegenstandsdrucker\n\nDieser Drucker ist bekannt.');
+    assert.equal(descriptionInLang(text, 'en'), 'Hersteller: KE Group\nTyp: Item Fabricator\n\nDieser Drucker ist bekannt.');
+    assert.equal(descriptionInLang('Fokus (En): Light Fighter\nFokus (DE): Jäger (leicht)', 'de'), 'Fokus: Jäger (leicht)');
+    // No line in the language asked for: the label keeps its lines
+    assert.equal(descriptionInLang('Typ (En): Light Helmet', 'de'), 'Typ (En): Light Helmet');
+    assert.equal(descriptionInLang('Item Type: Cooler\nSize: 1', 'de'), 'Item Type: Cooler\nSize: 1');
   });
 });

@@ -345,8 +345,8 @@ export const FPS = {
   damage: '10000000-0000-0000-0000-000000000038',
 };
 
-/** FPS gear outside the blueprints (looted or bought), with what must stay out: stackables, templates,
- * nameless records, clothing. Kept apart from RECORDS: only the tests that need FPS gear add them. */
+/** FPS gear outside the blueprints (looted or bought), with what must stay out of the gear: stackables, templates,
+ * nameless records, clothing (the stackables and clothing are shop items, see SHOP_RECORDS). Kept apart from RECORDS: only the tests that need FPS gear add them. */
 export const FPS_RECORDS: Record<string, unknown> = {
   'entities/scitem/weapons/fps_weapons/test_rifle.json': gearItem('test_rifle', FPS.rifle,
     { Type: 'WeaponPersonal', SubType: 'Medium', Size: 3, Localization: { Name: '@item_Nametest_rifle' } }),
@@ -370,7 +370,37 @@ export const FPS_RECORDS: Record<string, unknown> = {
     { Type: 'Char_Clothing_Torso_1', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_jacket' } }),
 };
 
-export const INI_EN = '\uFEFFitems_commodities_testmetal=Test Metal\r\nitems_commodities_testmetal_ore=Test Metal (Ore)\r\n'
+export const SHOP = {
+  food: '10000000-0000-0000-0000-000000000040',
+  miscCarry: '10000000-0000-0000-0000-000000000041',
+  miscProp: '10000000-0000-0000-0000-000000000042',
+  cargo: '10000000-0000-0000-0000-000000000043',
+  blade: '10000000-0000-0000-0000-000000000044',
+  unnamed: '10000000-0000-0000-0000-000000000045',
+  template: '10000000-0000-0000-0000-000000000046',
+};
+
+/** Sold items that are no gear (the item finder): catalog-only, never bookable; with what stays out: Misc
+ * outside the carryables, Cargo, nameless records, templates. Add to FPS_RECORDS (jacket, magazine and grenade
+ * are shop items too). */
+export const SHOP_RECORDS: Record<string, unknown> = {
+  'entities/scitem/consumables/test_burrito.json': gearItem('test_burrito', SHOP.food,
+    { Type: 'Food', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_burrito' } }),
+  'entities/scitem/carryables/1h/test_mug.json': gearItem('test_mug', SHOP.miscCarry,
+    { Type: 'Misc', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_mug' } }),
+  'entities/scitem/props/test_crate.json': gearItem('test_crate', SHOP.miscProp,
+    { Type: 'Misc', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_crate' } }),
+  'entities/scitem/cargo/test_box.json': gearItem('test_box', SHOP.cargo,
+    { Type: 'Cargo', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_box' } }),
+  'entities/scitem/ships/controller/test_blade.json': gearItem('test_blade', SHOP.blade,
+    { Type: 'FlightController', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_blade' } }),
+  'entities/scitem/consumables/test_unnamed_drink.json': gearItem('test_unnamed_drink', SHOP.unnamed,
+    { Type: 'Drink', SubType: 'UNDEFINED', Localization: { Name: '@LOC_PLACEHOLDER' } }),
+  'entities/scitem/consumables/test_drink_template.json': gearItem('test_drink_template', SHOP.template,
+    { Type: 'Drink', SubType: 'UNDEFINED', Localization: { Name: '@item_Nametest_drink' } }),
+};
+
+export const INI_EN ='\uFEFFitems_commodities_testmetal=Test Metal\r\nitems_commodities_testmetal_ore=Test Metal (Ore)\r\n'
   + 'item_NameTEST_Output=Test Cooler \\n\r\ncrafting_ui_slotname_frame,P=Frame\r\nunrelated_key=Not referenced\r\n'
   // A no-break space after "Class:" as in the QuikCool's text
   + 'item_DescTEST_Output=Item Type: Cooler\\nGrade: B\\nClass: Military\\n\\nKeeps things cool.\r\n'

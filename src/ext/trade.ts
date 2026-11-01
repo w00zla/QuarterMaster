@@ -1,6 +1,7 @@
 // Trading prices from the latest UEX snapshots (community reports, aUEC): per catalog material the
 // terminals that buy or sell it. Commodities have no UUIDs: they are matched to catalog resources by
-// their English name (`nameKey`); items carry the game's UUID (`item_uuid`). A price of 0 = not traded on
+// their English name (`nameKey`); items carry the game's UUID (`item_uuid`); item rows with an empty UUID
+// fall back to the English item name, counted only when exactly one catalog item has it. A price of 0 = not traded on
 // that side. UEX fields (commodities_prices_all): price_sell / scu_sell (+ _avg) = what the terminal
 // pays and takes when the player sells, price_buy / scu_buy = what it asks and has in stock when the
 // player buys; items_prices_all has no stock. `commodities` holds UEX's average prices (items have none).
@@ -45,6 +46,12 @@ export interface ResourceName {
   scu?: number;
 }
 
+/** A catalog item: its English name (for UEX item rows without a UUID). */
+export interface ItemName {
+  uuid: string;
+  nameEn: string;
+}
+
 /** "Quantainium", "Agricium (Ore)" -> "quantainium", "agriciumore" (exact names, case and punctuation dropped). */
 export const nameKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -76,8 +83,14 @@ export function terminalPlace(t: Row): { location: string; shop: string } {
 
 /** Pure: the trade data per catalog material UUID from the UEX `data` arrays. */
 export function buildTrade(
-  data: Partial<Record<Endpoint, Row[]>>, resources: Iterable<ResourceName>,
+  data: Partial<Record<Endpoint, Row[]>>, resources: Iterable<ResourceName>, items: Iterable<ItemName> = [],
 ): Map<string, MaterialTrade> {
+  // Item rows without a UUID: matched by name, but only when exactly one catalog item has that name
+  const itemByName = new Map<string, string | null>();
+  for (const i of items) {
+    const k = nameKey(i.nameEn);
+    itemByName.set(k, itemByName.has(k) ? null : i.uuid.toLowerCase());
+  }
   const terminals = new Map<number, { location: string; shop: string; system: string | null }>();
   for (const t of data.terminals ?? []) {
     if (typeof t.id === 'number') terminals.set(t.id, { ...terminalPlace(t), system: str(t.star_system_name) });
@@ -120,7 +133,7 @@ export function buildTrade(
     }
   }
   for (const r of data.items_prices_all ?? []) {
-    const uuid = str(r.item_uuid)?.toLowerCase();
+    const uuid = str(r.item_uuid)?.toLowerCase() ?? (typeof r.item_name === 'string' ? itemByName.get(nameKey(r.item_name)) : undefined);
     if (!uuid) continue;
     const sell = positive(r.price_sell);
     const buy = positive(r.price_buy);
@@ -158,7 +171,11 @@ const resourceNames = importCache(async (db): Promise<ResourceName[]> => rows<{ 
   WHERE i.retired_at IS NULL AND i.sub_type = 'Harvestable' AND v.micro > 0`)
   .then((found) => found.map(({ scu, ...r }) => (scu === null ? r : { ...r, scu }))));
 
-let cached: { key: string; resources: ResourceName[]; value: Promise<Map<string, MaterialTrade>> } | null = null;
+/** Every item not retired, by English name (the fallback for UEX item rows without a UUID), reloaded with the catalog. */
+const itemNames = importCache(async (db): Promise<ItemName[]> => rows<ItemName>(db, sql`
+  SELECT i.uuid, coalesce(${locText('en', sql`i.name_key`)}, i.class_name) AS "nameEn" FROM catalog.item i WHERE i.retired_at IS NULL`));
+
+let cached: { key: string; resources: ResourceName[]; items: ItemName[]; value: Promise<Map<string, MaterialTrade>> } | null = null;
 
 /** The trade data of the latest snapshots; empty while there are none. Rebuilt when a snapshot or the catalog changes. */
 export async function tradeData(db: Db): Promise<Map<string, MaterialTrade>> {
@@ -167,13 +184,14 @@ export async function tradeData(db: Db): Promise<Map<string, MaterialTrade>> {
     WHERE source = 'uex' AND endpoint IN (${sql.join(TRADE_ENDPOINTS.map((e) => sql`${e}`), sql`, `)}) GROUP BY endpoint ORDER BY endpoint`);
   const resources = await resourceNames(db, 'en');
   const key = latest.map((l) => `${l.endpoint}:${l.id}`).join(',');
-  if (cached?.key === key && cached.resources === resources) return cached.value;
+  const items = await itemNames(db, 'en');
+  if (cached?.key === key && cached.resources === resources && cached.items === items) return cached.value;
   const value = (async () => {
     const data: Partial<Record<Endpoint, Row[]>> = {};
     for (const l of latest) data[l.endpoint] = (await one<{ data: Row[] }>(db, sql`SELECT data FROM ext.snapshot WHERE id = ${l.id}`))?.data ?? [];
-    return buildTrade(data, resources);
+    return buildTrade(data, resources, items);
   })();
-  cached = { key, resources, value };
+  cached = { key, resources, items, value };
   value.catch(() => { if (cached?.value === value) cached = null; });
   return value;
 }

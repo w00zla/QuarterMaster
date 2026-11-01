@@ -13,7 +13,7 @@ import { formatAmount } from '../src/stock/amount.ts';
 import { blueprintStatNames, materialCatalog, stockList } from '../src/stock/lookup.ts';
 import { orgMetrics } from '../src/stock/org-summary.ts';
 import { add, adjust, COMPONENT_QUALITY, StockError, type Actor } from '../src/stock/service.ts';
-import { FPS, FPS_RECORDS, RECORDS, U, fixtureSnapshot } from './fixtures.ts';
+import { FPS, FPS_RECORDS, RECORDS, SHOP, SHOP_RECORDS, U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const G = '940000000000000001';
@@ -30,7 +30,7 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
   before(async () => {
     await prepareDb(url);
     ({ db, close } = connectAs(url, 'qm_app'));
-    const snap = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS });
+    const snap = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS, ...SHOP_RECORDS });
     await runImport(db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
     // The fixture's blueprint (output: a cooler) becomes a ship component blueprint
     await db.execute(sql`UPDATE catalog.blueprint_category SET key = 'VehicleComponentS2' WHERE uuid = ${U.category}`);
@@ -61,6 +61,15 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     assert.equal(cooler.label, 'Test Cooler · Cooler · S2 · B Military');
     assert.equal(materials.get(U.gem)!.component, false);
     assert.equal(materials.get(U.metal)!.component, false);
+  });
+
+  it('keeps the shop items (clothing, food, ...) in the catalog but out of the material catalog and the stock', async () => {
+    const [shop] = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM catalog.item WHERE uuid IN (${FPS.jacket}, ${SHOP.food}, ${SHOP.miscCarry}, ${SHOP.blade})`);
+    assert.equal(shop?.n, 4);
+    const materials = await materialCatalog(db, 'en');
+    for (const u of [FPS.jacket, FPS.magazine, FPS.grenade, SHOP.food, SHOP.miscCarry, SHOP.blade]) assert.equal(materials.has(u), false, u);
+    await assert.rejects(add(db, mia, { kind: 'item', uuid: SHOP.food, locationUuid: U.station, quality: COMPONENT_QUALITY, amount: '1' }),
+      (e: unknown) => e instanceof StockError && e.code === 'notBookable');
   });
 
   it('books components with the fixed quality only', async () => {

@@ -4,7 +4,8 @@ import { displayText, isMissingTranslation, locKey, parseGlobalIni } from '../sr
 import { partQuality } from '../src/catalog/extract/mining.ts';
 import { refPath } from '../src/catalog/extract/records.ts';
 import { snapshotSchema } from '../src/catalog/snapshot.ts';
-import { FPS, FPS_RECORDS, RECORDS, U, fixtureSnapshot } from './fixtures.ts';
+import { isShopItem } from '../src/catalog/components.ts';
+import { FPS, FPS_RECORDS, RECORDS, SHOP, SHOP_RECORDS, U, fixtureSnapshot } from './fixtures.ts';
 
 describe('localization', () => {
   it('parses global.ini with BOM, CRLF, suffixes and "=" in values', () => {
@@ -90,14 +91,42 @@ describe('normalize', () => {
     assert.deepEqual(s.manufacturers.map((m) => [m.code, m.descriptionKey]), [['TEST', null]]);
   });
 
-  it('takes named FPS gear outside the blueprints, but no stackables, templates, nameless records or clothing', () => {
+  it('takes named FPS gear outside the blueprints, and the stackables and clothing only as shop items, no templates or nameless records', () => {
     const fps = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS });
-    assert.deepEqual(fps.items.map((i) => i.uuid).sort(), [U.output, U.gem, FPS.rifle, FPS.helmet, FPS.optic].sort());
+    const gear = [U.output, U.gem, FPS.rifle, FPS.helmet, FPS.optic];
+    // magazine, grenade and jacket are shop items (catalog-only): in the snapshot, without raw record
+    assert.deepEqual(fps.items.map((i) => i.uuid).sort(), [...gear, FPS.magazine, FPS.grenade, FPS.jacket].sort());
+    assert.deepEqual(fps.rawRecords.filter((r) => [FPS.magazine, FPS.grenade, FPS.jacket].includes(r.uuid)), []);
     const helmet = fps.items.find((i) => i.uuid === FPS.helmet)!;
     assert.deepEqual([helmet.type, helmet.subType], ['Char_Armor_Helmet', 'Light']);
     // Its damage resistance record is kept raw (the base of the crafted damage mitigation)
     assert.ok(fps.rawRecords.some((r) => r.uuid === FPS.damage && r.path === 'libs/foundry/records/damage/lightarmor.json'));
     assert.ok(!s.rawRecords.some((r) => r.uuid === FPS.damage), 'no armor, no damage record');
+  });
+
+  it('takes the sold non-gear items (SHOP_TYPES), but no Misc outside the carryables, no Cargo, templates or nameless records', () => {
+    const snap = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS, ...SHOP_RECORDS });
+    const uuids = snap.items.map((i) => i.uuid);
+    for (const u of [SHOP.food, SHOP.miscCarry, SHOP.blade, FPS.jacket]) assert.ok(uuids.includes(u), u);
+    for (const u of [SHOP.miscProp, SHOP.cargo, SHOP.unnamed, SHOP.template]) assert.ok(!uuids.includes(u), u);
+    assert.deepEqual(snap.items.find((i) => i.uuid === SHOP.food)!.type, 'Food');
+    assert.ok(!snap.rawRecords.some((r) => [SHOP.food, SHOP.miscCarry, SHOP.blade].includes(r.uuid)), 'shop items carry no raw record');
+  });
+
+  it('tells shop items by type, sub type and path', () => {
+    const carry = 'libs/foundry/records/entities/scitem/carryables/1h/x.json';
+    assert.ok(isShopItem('Food', 'UNDEFINED', 'libs/foundry/records/entities/scitem/x.json'));
+    assert.ok(isShopItem('Misc', null, carry));
+    assert.ok(!isShopItem('Misc', null, 'libs/foundry/records/entities/scitem/props/x.json'));
+    assert.ok(isShopItem('WeaponAttachment', 'Magazine', carry));
+    assert.ok(!isShopItem('WeaponAttachment', 'Barrel', carry));
+    assert.ok(isShopItem('WeaponPersonal', 'Grenade', carry));
+    // gear types never: the bookable rule goes by type alone
+    assert.ok(!isShopItem('WeaponPersonal', 'Gadget', carry));
+    assert.ok(!isShopItem('WeaponAttachment', 'Barrel', carry));
+    assert.ok(!isShopItem('Cargo', null, carry));
+    assert.ok(!isShopItem('Paints', null, carry));
+    assert.ok(!isShopItem(null, null, carry));
   });
 
   it('derives blueprint sources from released contracts and event tiers', () => {

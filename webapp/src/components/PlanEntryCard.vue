@@ -14,24 +14,24 @@ export interface BlueprintOwners {
 // events. Nothing in the card changes its height while qualities or the slot choice change: a
 // wrong slot choice shows next to the slot count, and the stats list every stat the recipe's slots
 // can give.
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
-import type { StockBatch } from "../../../src/webapp/api-types";
+import type { MaterialInfo, StockBatch } from "../../../src/webapp/api-types";
 import { blueprints, materials } from "../catalog";
 import { craftingUi, toggleIn, warningText } from "../crafting";
 import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../../../src/planner/stock";
 import { duration, qty, unitText } from "../format";
-import { t } from "../i18n";
+import { lang, t } from "../i18n";
 import { memberLabel } from "../orgs";
 import { me } from "../session";
 import ChipButton from "./ChipButton.vue";
 import CoverageTag from "./CoverageTag.vue";
+import { loadInfo } from "./InfoCard.vue";
+import InfoTile from "./InfoTile.vue";
 import StockBatchList from "./StockBatchList.vue";
-import Thumb from "./Thumb.vue";
-import TypeLabel from "./TypeLabel.vue";
 import { blueprintThumb } from "../thumbs";
 import MiningDialog from "./MiningDialog.vue";
 import UnlocksDialog from "./UnlocksDialog.vue";
@@ -66,6 +66,17 @@ function clamped(e: Event, min: number, max: number): number {
 const setQuality = (s: EntryResult["slots"][number], e: Event) => emit("quality", s.index, clamped(e, minQuality(s), MAX_QUALITY));
 const setCount = (e: Event) => emit("count", clamped(e, MIN_COUNT, MAX_COUNT));
 const step = (by: number) => emit("count", clampCount(props.result.count + by));
+
+// The crafted item's info card (GET /api/info/material/:output) for the head's tile; null while it loads or without one
+const outputInfo = ref<MaterialInfo | null>(null);
+const outputUuid = computed(() => blueprints.value.get(props.result.blueprintUuid)?.outputUuid ?? null);
+let infoSeq = 0;
+watch([outputUuid, lang], () => {
+  const mine = ++infoSeq;
+  outputInfo.value = null;
+  if (!outputUuid.value) return;
+  loadInfo("material", outputUuid.value).then((i) => { if (mine === infoSeq) outputInfo.value = i as MaterialInfo; }, () => {});
+}, { immediate: true });
 
 // The stock part: each card on its own (nothing reserved across cards), closed by default
 const stockOpen = computed(() => craftingUi.stockOpen.includes(props.result.blueprintUuid));
@@ -119,32 +130,33 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
 
 <template>
   <div class="entry">
+    <!-- The crafted item's info tile: the blueprint's name, its category before the facts; count and remove
+         at the top right, Freischaltung at the bottom right; no prices (Kaufen/Verkaufen has them) -->
     <div class="entry-head">
-      <div class="head-line">
-        <Thumb v-bind="blueprintThumb(result.blueprintUuid)" size="m" :px="36" :icon="typeIcon(recipe?.outputType)" :icon-size="18" class="entry-icon" />
-        <span class="entry-name">{{ result.name }}</span>
-        <div class="spacer" />
-        <span class="count">
-          <button type="button" class="icon-btn" :title="t('crafting.less')" :disabled="result.count <= MIN_COUNT" @click="step(-1)"><Icon name="minus" :size="14" /></button>
-          <input class="mono q-num count-num" type="number" :min="MIN_COUNT" :max="MAX_COUNT" :value="result.count" :aria-label="t('crafting.count')" :title="t('crafting.count')" @change="setCount" />
-          <button type="button" class="icon-btn" :title="t('crafting.more')" :disabled="result.count >= MAX_COUNT" @click="step(1)"><Icon name="plus" :size="14" /></button>
-        </span>
-        <div class="divider" />
-        <button type="button" class="icon-btn" :title="t('crafting.remove')" @click="emit('remove')"><Icon name="trash" :size="14" /></button>
-      </div>
-      <div v-if="recipe" class="head-line tags">
-        <span v-if="recipe.categoryLabel" class="meta">{{ recipe.categoryLabel }}</span>
-        <span v-if="recipe.outputTypeLabel" class="meta">
-          <TypeLabel :type="recipe.outputType" :label="recipe.outputSubTypeLabel ? `${recipe.outputTypeLabel} / ${recipe.outputSubTypeLabel}` : recipe.outputTypeLabel" :size="11" />
-        </span>
-        <span v-if="recipe.size !== null" class="meta" :title="t('crafting.size')">S{{ recipe.size }}</span>
-        <span v-if="recipe.itemClass" class="meta">{{ recipe.itemClass }}</span>
-        <span v-if="recipe.gradeLetter" class="meta">{{ t("crafting.grade", { grade: recipe.gradeLetter }) }}</span>
-        <span v-if="recipe.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
-        <span v-if="recipe.retired" class="tag err">{{ t("crafting.retired") }}</span>
-        <div class="divider" />
-        <ChipButton :label="t('unlock.title')" icon="lock" :disabled="!blueprints.get(result.blueprintUuid)?.unlockable" @click="unlocksOpen = true" />
-      </div>
+      <InfoTile
+        :thumb="blueprintThumb(result.blueprintUuid)"
+        :icon="typeIcon(recipe?.outputType)"
+        :info="outputInfo"
+        :title="result.name"
+        :lead="recipe?.categoryLabel"
+      >
+        <template #tags>
+          <span v-if="recipe?.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
+          <span v-if="recipe?.retired" class="tag err">{{ t("crafting.retired") }}</span>
+        </template>
+        <template #actions>
+          <span class="count">
+            <button type="button" class="icon-btn" :title="t('crafting.less')" :disabled="result.count <= MIN_COUNT" @click="step(-1)"><Icon name="minus" :size="14" /></button>
+            <input class="mono q-num count-num" type="number" :min="MIN_COUNT" :max="MAX_COUNT" :value="result.count" :aria-label="t('crafting.count')" :title="t('crafting.count')" @change="setCount" />
+            <button type="button" class="icon-btn" :title="t('crafting.more')" :disabled="result.count >= MAX_COUNT" @click="step(1)"><Icon name="plus" :size="14" /></button>
+          </span>
+          <div class="divider" />
+          <button type="button" class="icon-btn" :title="t('crafting.remove')" @click="emit('remove')"><Icon name="trash" :size="14" /></button>
+        </template>
+        <template #corner>
+          <ChipButton :label="t('unlock.title')" icon="lock" :disabled="!blueprints.get(result.blueprintUuid)?.unlockable" @click="unlocksOpen = true" />
+        </template>
+      </InfoTile>
       <UnlocksDialog v-if="unlocksOpen" :uuid="result.blueprintUuid" :name="result.name" @close="unlocksOpen = false" />
     </div>
 
@@ -310,47 +322,10 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
 }
 
 .entry-head {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 16px 12px;
+  padding: 12px 16px;
   background: var(--bg-surface-2);
   border-bottom: 1px solid var(--border);
   font-size: 13px;
-}
-
-.head-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.head-line.tags {
-  flex-wrap: wrap;
-}
-
-/* Before the unlocks button: the global divider has the head's colour, here it takes the chips' */
-.head-line.tags .divider {
-  margin: 0 6px;
-  background: rgba(173, 211, 235, 0.35);
-}
-
-.entry-icon {
-  flex-shrink: 0;
-  color: var(--text-2);
-}
-
-/* Without a thumbnail: the type icon at full strength, as before */
-.entry-icon :deep(.thumb-icon) {
-  opacity: 1;
-}
-
-.entry-name {
-  min-width: 0;
-  font-weight: 600;
-  color: var(--text);
-  font-size: 18px;
-  overflow-wrap: anywhere;
 }
 
 /* The count between its buttons, tight */
@@ -369,22 +344,6 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
   width: 2.5ch;
   padding: 0;
   background: none;
-}
-
-/* The blueprint's facts (category, type, size, class, grade) as chips, like the filter chips but not
-   clickable; states (default, retired) stay tags */
-.meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 7px;
-  border: 1px solid rgba(173, 211, 235, 0.35);
-  border-radius: var(--radius-control);
-  color: var(--text-2);
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
 }
 
 .entry-foot {

@@ -49,3 +49,19 @@ export function labelFromKey(key: string): string {
     .replace(/_/g, ' ')
     .trim();
 }
+
+/**
+ * A game description in one language: the German pack (sc-deutsch) states some lines in both
+ * ("Typ (En): Light Helmet" and "Typ (De): Helm (leicht)", "Fokus (En)/(De)"); of such a label only the
+ * line in `lang` stays, without its tag ("Typ: Helm (leicht)"). A label without a line in `lang` keeps its lines.
+ */
+export function descriptionInLang(text: string, lang: string): string {
+  const tagged = /^(.+?) \((en|de)\):[ \t]*(.*)$/i;
+  const lines = text.split('\n');
+  const inLang = new Set(lines.map((l) => l.match(tagged)).filter((m) => m && m[2]!.toLowerCase() === lang).map((m) => m![1]));
+  return lines.flatMap((line) => {
+    const m = line.match(tagged);
+    if (!m || !inLang.has(m[1])) return [line];
+    return m[2]!.toLowerCase() === lang ? [`${m[1]}: ${m[3]}`] : [];
+  }).join('\n');
+}

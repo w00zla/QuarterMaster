@@ -476,6 +476,8 @@ export interface UnlocksResponse {
 
 export interface MaterialInfo {
   kind: 'resource' | 'item';
+  // Items: the blueprints (not retired) that craft it, with their unlocks as in BlueprintInfo; resources: none
+  craftedBy: Array<{ uuid: string; name: string; isDefault: boolean; craftSeconds: number | null; unlocks: UnlockSummary[] }>;
   name: string;
   // Items: the item type (icon)
   type: string | null;
@@ -570,6 +572,9 @@ export interface MiningResponse {
 
 // --- trading (UEX community prices in aUEC per SCU or piece) --------------------------------------
 // GET /api/trade/prices    TradePricesResponse: the summary of every bookable material with a price
+// GET /api/trade/items?lang=       TradeItemsResponse: every material with an offer, best buy/sell price
+// GET /api/trade/places            TradePlacesResponse: every place with an offer
+// GET /api/trade/place?system=&location=  TradePlaceResponse: its materials per shop (404 for an unknown place)
 // GET /api/trade/:uuid     TradeResponse: every terminal (404 without any price)
 
 export interface PriceRange {
@@ -611,6 +616,53 @@ export interface TradeResponse {
   // Best price first: sell highest, buy lowest
   sell: TradeOffer[];
   buy: TradeOffer[];
+}
+
+// The item finder: every catalog material with at least one offer
+export interface TradeItem {
+  uuid: string;
+  kind: 'resource' | 'item';
+  name: string;
+  // Items: the item type and its display name (FPS gear with its sub type: "Helmets · Light"); resources: null
+  type: string | null;
+  typeLabel: string | null;
+  size: number | null;
+  gradeLetter: string | null;
+  // Can be booked in the stock (as the catalog's materials); else a shop item only
+  bookable: boolean;
+  // Lowest price a terminal asks (the player buys) and highest it pays (the player sells); null = none
+  buy: number | null;
+  sell: number | null;
+}
+
+export interface TradeItemsResponse {
+  items: TradeItem[];
+}
+
+export interface TradePlace {
+  system: string | null;
+  location: string;
+  // Distinct shops/terminals there and distinct materials traded
+  shops: number;
+  items: number;
+}
+
+export interface TradePlacesResponse {
+  places: TradePlace[];
+}
+
+// One material in one shop of a place (names: GET /api/trade/items)
+export interface TradePlaceOffer {
+  uuid: string;
+  shop: string;
+  buy: number | null;
+  sell: number | null;
+  // The latest report of the two (ISO)
+  date: string;
+}
+
+export interface TradePlaceResponse {
+  offers: TradePlaceOffer[];
 }
 
 // --- profile (POST /api/profile) ------------------------------------------------------------------

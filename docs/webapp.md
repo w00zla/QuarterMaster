@@ -73,7 +73,13 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   `web.user_setting` (the bot keeps its own in `bot.user_config`).
 - Trading (`trade.ts`, UEX prices from `src/ext/trade.ts`, see `docs/ext.md`): `GET /api/trade/prices` (the
   `PriceSummary` of every bookable material with a price: sell/buy min, max, UEX average, terminals, latest
-  date), `GET /api/trade/:uuid` (every terminal per side, best first; 404 without a price). `MaterialInfo.prices`
+  date), `GET /api/trade/items?lang=` (the item finder: every non-retired catalog material, resource or item incl.
+  shop items, with an offer: name, type label (FPS gear with its sub type), size, grade, `bookable`, lowest buy and
+  highest sell price; cached per language until the trade snapshot or catalog changes), `GET /api/trade/places`
+  (every place with an offer, by system then location, with its distinct shops and materials),
+  `GET /api/trade/place?system=&location=` (its materials, one row per material and shop with buy/sell price and the
+  later report date, no names; 404 for an unknown place, `system` absent = offers without a system),
+  `GET /api/trade/:uuid` (every terminal per side, best first; 404 without a price). `MaterialInfo.prices`
   and `value` in the summary (personal and per org: the same stored batches as the other figures, at the best
   sell price, whole aUEC, Ressourcen and Ausrüstung apart; unpriced batches left out; null without UEX data).
 - `GET /api/summary` (overview tiles), `GET /api/info/blueprint|material/:uuid` (info cards),
@@ -227,10 +233,12 @@ blocks".
   aUEC)" (its stored batches with a price, like the overview's total; every scope, "(0 aUEC)" without any price).
   Ressourcen and Ausrüstung: a last fixed column with the "Handel" button
   (`ChipButton`) on each material's row, disabled without a UEX price; it opens `TradeDialog.vue`: tabs
-  "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal (Terminal as "place – shop", e.g. "ARC-L1 Wide Forest Station – Admin",
-  System, Preis, Nachfrage / Bestand as a bar against the tab's largest amount with a tick at the terminal's
-  average, the figures on hover, Stand dimmed; items without that column), best price
-  first, scrolling inside (the tabs and tables: `TradeTables.vue`, shared with Handel); UEX's averages in the head.
+  "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal grouped by system (`groupOf`: a head row per system, by name, the rows' first cell indented; Terminal as
+  "place – shop", e.g. "ARC-L1 Wide Forest Station – Admin", its tooltip adds the report's date "· Stand …"; Preis,
+  Nachfrage / Bestand as a bar against the side's largest amount with a tick at the terminal's average, the figures
+  on hover; items without that column; no System or Stand column since 2026-11-01), Kaufen by terminal name,
+  Verkaufen best price first, a system filter ("Alle Systeme", right of the tabs; a system the next pick lacks
+  goes back to all), widths `qm.webapp.columns.trade-dialog-{buy,sell}`, scrolling inside (the tabs and tables: `TradeTables.vue`, shared with Handel); UEX's averages in the head.
 - **Ausrüstung** (route `/gear`, until 2026-10-20 "Komponenten" at `/components`; `?scope=` like Ressourcen;
   `ComponentsView` = `StockView` with `components`; icon `gear`, a case with a handle): the ship components and
   FPS gear (since 2026-10-22; their type reads "Helmets · Light", "Attachment · Barrel": `itemTypes` in
@@ -271,7 +279,7 @@ blocks".
   head: count, systems, rank span, best chance), every row listed (title with the game's placeholders as "…",
   rank, systems · bound place, markers Kette/Illegal/Annahme/event, chance), the list scrolls inside with a
   sticky head row; event tiers with event, points and chance. Wording in `webapp/src/unlocks.ts`.
-- **Crafting** (the third tab bar, the tools, with Bergbau and Handel; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
+- **Crafting** (the third tab bar, the tools, with Bergbau and Kaufen/Verkaufen; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
   field that stop at the slot's minimum (`withQualityFloor`; the track keeps the full 0–1000 scale). Below the
@@ -285,8 +293,8 @@ blocks".
   ("Standard" for a default blueprint, then nothing more), then each of your orgs with its active members who
   registered it ("niemand" without) and their count; from `GET /api/blueprints` and
   `GET /api/orgs/:g/blueprints` per org, loaded once per view and on blueprints/members/profile/resync
-  messages. The chips line under the name ends with a divider and the "Freischaltung" button (as in the
-  Blueprints list). Each material line of the Resources panel ends with a pickaxe icon button (grey without
+  messages. The card's head is the crafted item's info tile (see "Info tiles"); its title row's right holds
+  the "Freischaltung" button (as in the Blueprints list), the count and remove. Each material line of the Resources panel ends with a pickaxe icon button (grey without
   mining data) that opens `MiningDialog.vue` with the `MiningTable` (see Bergbau) against the material's target
   quality (the need's `quality`): a green chip "Ziel-Qualität 600" first in the toolbar (changeable, 500–1000 in
   steps of 50, not written back to the card), the card dims the values below it, shows those reaching it in green and
@@ -294,22 +302,32 @@ blocks".
 - **Bergbau** ("Mining", route `/mining`, the tab right of Crafting): `MiningView`, one section per mining
   feature; the first, "Fundorte" ("Where to mine", locate icon), holds a picker over the mined resources (ores,
   raw materials, gems; what an ore refines into searched too) and the `MiningTable` (layout A of the concept
-  https://claude.ai/artifact/ERWoBH6j1SZi5oD5g5zj1x, the same in the dialog): a toolbar with a system and a
+  https://claude.ai/artifact/ERWoBH6j1SZi5oD5g5zj1x, the same in the dialog): a system and a
   method filter (`Dropdown` chips like the stock's, "Alle Systeme"/"Alle Methoden"; shared with the dialog for the
-  session), then `MiningQualityCard` with the quality once: per part of the ore (rich part, "Rest ×0,49") its
+  session; in the view right of the picker, `filtersOutside`, in the dialog in the table's toolbar), then `MiningQualityCard` with the quality once: per part of the ore (rich part, "Rest ×0,49") its
   content range and one bar per set of systems with the same values ("Stanton · Nyx", "Pyro": the game's values
   differ only by system), a thin bar (segments by chance) with every value of half a percent and more below it in plain text (wrapping where narrow),
   colored by level (grey below 500, the accent from dim to full, gold at 1000; no level marks: too wide), then
   the shared `DataTable` (resizable, sortable, widths per browser: `qm.webapp.columns.mining`, `…mining-ores` with
-  the ore column), one row per place, method and ore: place (a moon with its planet, grouped places with their
-  count), system, method (Schiff/ROC/Hand), the ore when the rows come from several, share of the method's rocks
+  the ore column), grouped by system (a head row per system), one row per place, method and ore: place (a moon
+  with its planet, grouped places with their count), method (Schiff/ROC/Hand), the ore when the rows come from several, share of the method's rocks
   there ("Häufigkeit", with a bar in the color of the rock's rarity class, the class in its tooltip, and a help tooltip in the head; not "Anteil": next to "Gehalt" both would read as a share; rarity has no column of its own: two columns read alike), the parts' content ("Gehalt (gut · Rest)", the lean ones dimmed, a help tooltip); no
   quality column (the system says which bar applies). Wording, the card's grouping and filters in
   `webapp/src/mining.ts`.
-- **Handel** ("Trading", route `/trade`, the tab right of Bergbau, icon `trade`): `TradeView`, a section "Preise"
-  with a picker over every bookable material and gear item with a UEX price (`GET /api/trade/prices`, per visit;
-  names from the catalog, components by their `label`; the pick kept for the session), UEX's averages dimmed at
-  the bar's end, below it the trading dialog's `TradeTables` for the pick (`GET /api/trade/:uuid`).
+- **Kaufen/Verkaufen** ("Buy/Sell", tab and title since 2026-11-01, before "Handel"/"Trading"; route `/trade`, the tab right of Bergbau, icon `trade`;
+  the stock rows' button and dialog keep "Handel"): `TradeView`, the item finder. A section "Preise"
+  with a picker over everything UEX has a price for (`GET /api/trade/items`, per visit and language: resources,
+  gear and the catalog-only shop items; bookable components by their catalog `label`, the rest by name, the type
+  as the hint; the pick kept for the session), UEX's averages dimmed at
+  the bar's end, below it the pick's info tile (`InfoTile.vue`, see "Info tiles"; no prices: the tables have them) and the
+  trading dialog's `TradeTables` for the pick (`GET /api/trade/:uuid`) with `split`: both sides as two columns
+  (Kaufen left, Verkaufen right, one below the other under 1100 px; an empty side "Keine Terminals"; own column
+  widths `qm.webapp.columns.trade-view-{buy,sell}`); the system filter right of the picker, kept for the session; tile and tables appear together once both are loaded. The
+  trading dialog keeps its tabs. Below, a section "Nach Ort" (locate icon): a picker over the places with offers
+  (`GET /api/trade/places`; the location, its system as the hint; narrowed by the same system filter, which sits
+  right of it too; a place the filter hides is unpicked), then a `DataTable` of everything its shops trade
+  (`GET /api/trade/place`), grouped by shop: Item (type icon, the info card on hover), Typ, Kaufen, Verkaufen
+  (the best price there, "—" without), by name; widths `qm.webapp.columns.trade-place`.
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
 - **Thumbnail-Prüfung** (route `/feature/thumb-review`, as every feature `/feature/<key>`, `ThumbReviewView.vue`, privilege `thumb-review.mark`; without it the
   view says so and no button shows): every thumbnail (the L file at 132 CSS px) in a grid per item class and sub type,
@@ -323,7 +341,25 @@ blocks".
   the newest), "Neu gerendert" when a mark was set on another hash than the current thumbnail. Others' marks arrive
   live (realtime `feature`).
 - Info cards: hovering a blueprint name or a material shows game data from `GET /api/info/...`
-  (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records).
+  (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records; the
+  card's content and its loader `loadInfo` are `InfoCard.vue`). No maker anywhere (card, tile; decided
+  2026-11-01: it only takes room). The meta line after a bullet (the tile's facts line too; the values below it set apart by the mono face). The game's text in two parts (`descriptionParts`): its remaining head lines
+  ("Batteriekapazität: 80 Schuss", in the meta line's colour and the mono face, the blank lines between them gone), then the prose
+  (the quietest colour); head
+  lines the card shows anyway (type, size, grade, class, German and English) go where the card has that value,
+  the maker's always. The server keeps of a line the German pack states in both languages ("Typ (En): …" /
+  "Typ (De): …", "Fokus") only the one in the asked language, without the tag (`descriptionInLang` in
+  `src/catalog/labels.ts`). An item's card shows "Bauplan" for the blueprints that craft it
+  (`MaterialInfo.craftedBy`): per blueprint Standard and the craft time (its name only when it differs from the
+  item's or there are several), then the unlock lines as on a blueprint's card.
+- Info tiles (`InfoTile.vue`, layout "Kopfband" of https://claude.ai/artifact/7E3fP8B5PczRWeWbexVDAG, 2026-11-01):
+  the same data as a header band, for Kaufen/Verkaufen's pick and as the head of each Crafting card (the crafted
+  item, `outputUuid`): the M thumbnail at 96 px (72 px on phones), name with its tags (slot; Crafting:
+  Standard/Ausgemustert), one line of plain facts (Crafting: the blueprint category first; item: type ·
+  S1 · Grade C · class; resource: group, Raffiniert zu, Aus Erz, Verwendet in), the text's head values in one
+  line and, a little apart, its prose (one line with an ellipsis; all of each on hover); no boxes and no prices (nothing in the band looks like an input). At the right
+  the caller's `actions` at the top (Crafting: count, remove) and its `corner` at the bottom (Crafting:
+  Freischaltung). While the card loads the band stands (thumbnail, name, the lines' height): nothing moves.
   A blueprint's card ends with "Freischaltung" (`BlueprintInfo.unlocks`): one line per kind ("126 Missionen",
   "1 Event-Stufe"; code per kind, more kinds can follow), marker tags only when every source of that kind has
   them (Illegal red, Event yellow; Kette, Rang, Zufall, Annahme grey), right the best chance ("bis 1 von 6",
@@ -375,10 +411,10 @@ blocks".
   item it crafts): a fixed box, `<img>` lazy; without a hash or when loading fails the type icon in the same
   box. The S thumbnail (20 px) stands where the type icon stood before the name: Ressourcen/Ausrüstung group
   rows, Raffinerie material rows, Blueprints names, History targets, the Bergbau table's ore column. The
-  Crafting card's head shows the crafted item's M thumbnail at 36 px (the type icon stays in the tag line).
+  Crafting card's head is the crafted item's info tile (`InfoTile.vue`, L thumbnail at 128 px).
   Info cards (`InfoTip.vue`) show the L thumbnail at 128 px left of the text (above it below 560 px wide),
   loading from the start of the hover, so it is there when the card opens.
-- List views: every table (Ressourcen, Ausrüstung, Raffinerie, Blueprints, History, Bergbau) has the view
+- List views: every table (Ressourcen, Ausrüstung, Raffinerie, Blueprints, History; Bergbau not since 2026-11-01) has the view
   toggle (`ViewToggle.vue`, right of the column chooser or the last filter): "Kompakt" (default) or
   "Thumbnails" (`.table.view-thumbs`: rows at least 48 px, 14 px text, a first column with an empty head,
   `THUMB_COLUMN`, the M thumbnail at 48 px instead of the small one before the name; Ressourcen/Ausrüstung on

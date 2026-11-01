@@ -64,6 +64,26 @@ describe('UEX trade prices', () => {
     assert.equal(trade.size, 3);
   });
 
+  it('item rows without a UUID: matched by English name, only when unique', () => {
+    const A = '10000000-0000-0000-0000-0000000000b1';
+    const B1 = '10000000-0000-0000-0000-0000000000b2';
+    const B2 = '10000000-0000-0000-0000-0000000000b3';
+    const row = (name: string, uuid: string | null, buy: number) =>
+      ({ item_uuid: uuid, item_name: name, id_terminal: 1, price_sell: 0, price_buy: buy, date_modified: T1 });
+    const trade = buildTrade({
+      terminals,
+      items_prices_all: [
+        row('Unique-Radar', '', 10), row('UNIQUE RADAR', null, 20), row('Twin Radar', '', 30), row('Not in catalog', '', 40),
+        // With a UUID: the UUID wins, even if the name is ambiguous
+        row('Twin Radar', B1.toUpperCase(), 50),
+      ],
+    }, [], [{ uuid: A, nameEn: 'Unique Radar' }, { uuid: B1, nameEn: 'Twin Radar' }, { uuid: B2, nameEn: 'Twin-Radar' }]);
+    assert.deepEqual(trade.get(A)!.buy.map((o) => o.price), [10, 20]);
+    assert.deepEqual(trade.get(B1)!.buy.map((o) => o.price), [50]);
+    assert.equal(trade.has(B2), false);
+    assert.equal(trade.size, 2);
+  });
+
   it('harvestables: the commodity of their name, priced per piece by their volume', () => {
     const PIECE = '10000000-0000-0000-0000-0000000000a4';
     const trade = buildTrade({

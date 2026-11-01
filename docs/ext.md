@@ -17,7 +17,9 @@ location bonuses (server-side).
 - **Trading** (`trade.ts`, read by the web app: `docs/webapp.md`): `terminals`, `commodities`,
   `commodities_prices_all` and `items_prices_all` per catalog material. Commodities are matched to catalog
   resources (not retired, ores too) by `nameKey` of the English name (lower case, only letters and digits:
-  exact names, unlike `oreKey`), items by `item_uuid` (the game's UUID). Harvestables (items of sub type
+  exact names, unlike `oreKey`), items by `item_uuid` (the game's UUID). Item rows with an empty `item_uuid` (~3,200 of 24,000) fall back to
+  `nameKey` of the English name against all non-retired catalog items, counted only when exactly one item has
+  that name (an ambiguous name such as `Ecouter` or `Broadspec` stays unmatched). Harvestables (items of sub type
   `Harvestable`, booked in pieces; none of them in `items_prices_all`) are matched to commodities by name as
   well, their prices (offers and averages; stock and demand stay SCU) scaled to one piece by the item's
   inventory volume (`SAttachableComponentParams.AttachDef.inventoryOccupancyVolume.microSCU` in its

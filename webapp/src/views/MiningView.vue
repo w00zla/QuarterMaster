@@ -5,10 +5,11 @@ import { computed, ref, watch } from "vue";
 import type { MiningIndexResponse, MiningResource, MiningResponse } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
+import Dropdown from "../components/Dropdown.vue";
 import MiningTable from "../components/MiningTable.vue";
 import Picker from "../components/Picker.vue";
 import { lang, t } from "../i18n";
-import { miningPick } from "../mining";
+import { methodOptions, miningFilter, miningPick, systemOptions } from "../mining";
 import { toastError } from "../toasts";
 
 const resources = ref<MiningResource[] | null>(null);
@@ -55,10 +56,13 @@ watch([miningPick, lang], async () => {
           <span class="panel-title">{{ t("mining.open") }}</span>
           <div class="divider bar-divider" />
           <Picker v-model="miningPick" class="section-picker" :options="options" :placeholder="t('mining.pick')" strong />
+          <!-- The table's filters right of the picker (the dialog keeps them in the table's toolbar) -->
+          <Dropdown v-model="miningFilter.system" variant="chip" :options="systemOptions()" />
+          <Dropdown v-model="miningFilter.method" variant="chip" :options="methodOptions()" />
         </div>
         <div v-if="!miningPick" class="empty-line">{{ t("mining.empty") }}</div>
         <div v-else-if="!result" class="empty-line">{{ t("common.loading") }}</div>
-        <MiningTable v-else :rows="result.rows" />
+        <MiningTable v-else :rows="result.rows" filters-outside />
       </section>
     </section>
   </div>

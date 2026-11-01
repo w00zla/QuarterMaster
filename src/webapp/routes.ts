@@ -7,6 +7,7 @@ import type { Context, Hono } from 'hono';
 import { etag } from 'hono/etag';
 import { z } from 'zod';
 import { isFpsType } from '../catalog/components.ts';
+import { descriptionInLang } from '../catalog/labels.ts';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
 import { rows } from '../db/query.ts';
@@ -454,20 +455,31 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
     const id = uuid.safeParse(c.req.param('uuid'));
     if (!id.success) throw new HttpError(400, 'invalid');
     const lang = langOf(c);
-    const blank = { group: null, isOre: false, refined: null, ores: [], typeLabel: null, subTypeLabel: null, size: null, gradeLetter: null, itemClass: null, manufacturer: null };
+    const blank = { craftedBy: [], group: null, isOre: false, refined: null, ores: [], typeLabel: null, subTypeLabel: null, size: null, gradeLetter: null, itemClass: null, manufacturer: null };
     const distinct = (uses: Array<{ uuid: string }>) => new Set(uses.map((u) => u.uuid)).size;
     const resource = await getResource(db, id.data, lang);
     if (resource) {
       return c.json({
-        ...blank, kind: 'resource', name: resource.name, type: null, description: resource.description,
+        ...blank, kind: 'resource', name: resource.name, type: null, description: resource.description && descriptionInLang(resource.description, lang),
         group: resource.groupPath.join(' › ') || null, isOre: resource.isOre, refined: resource.refined?.name ?? null,
         ores: resource.ores.map((o) => o.name), usedIn: distinct(resource.usedBy), prices: (await materialTrade(db, id.data))?.summary ?? null,
       } satisfies MaterialInfo);
     }
     const item = await getItem(db, id.data, lang);
     if (!item) throw new HttpError(404, 'notFound');
+    // The blueprints that craft it (usually one), each with its unlocks as on the blueprint's card
+    const craftedBy = [];
+    for (const ref of item.outputOf) {
+      const bp = await getBlueprint(db, ref.uuid, lang);
+      if (!bp) continue;
+      craftedBy.push({
+        uuid: ref.uuid, name: bp.name, isDefault: bp.isDefault, craftSeconds: bp.tiers[0]?.craftSeconds ?? null,
+        unlocks: unlockSummary(await loadUnlocks(db, ref.uuid, lang)),
+      });
+    }
     return c.json({
-      ...blank, kind: 'item', name: item.name, type: item.type, description: item.description, typeLabel: item.typeLabel, subTypeLabel: item.subTypeLabel,
+      ...blank, kind: 'item', name: item.name, craftedBy, type: item.type, description: item.description && descriptionInLang(item.description, lang),
+      typeLabel: item.typeLabel, subTypeLabel: item.subTypeLabel,
       size: item.size, gradeLetter: item.gradeLetter, itemClass: item.itemClass,
       manufacturer: item.manufacturer?.name ?? item.manufacturer?.code ?? null, usedIn: distinct(item.inputOf),
       prices: (await materialTrade(db, id.data))?.summary ?? null,

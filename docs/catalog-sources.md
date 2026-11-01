@@ -355,11 +355,26 @@ Throwaway script, not in the repo. Result:
   `AttachDef.Type`/`SubType` is in `FPS_TYPES` (`src/catalog/components.ts`): 1931 items on top of the ~1300
   blueprint outputs (snapshot 24 → 43 MB gz, mostly the armor and weapon raw records, 40–180 KB each). Left
   out by type: `WeaponPersonal/Grenade`, `WeaponAttachment/Magazine` (also blueprint outputs, in the catalog
-  but not bookable), `FPS_Consumable/*`, `Food`/`Drink`, `Char_Clothing_*`, `Light/Weapon` (unnamed parts of
+  but not bookable), `FPS_Consumable/*`, `Food`/`Drink`, `Char_Clothing_*` (these now come in as shop items, next bullet), `Light/Weapon` (unnamed parts of
   flashlights), `Suit/ThrusterPack`. By folder: carryables (glowsticks are `WeaponPersonal/Gadget`, cutlery
   `WeaponPersonal/Knife`). Type names have game texts (`item_Type…`), sub types partly (`IronSight` =
   "Optics Attachment"; `Barrel`, `BottomAttachment`, `Light`, `Heavy` have none in either language: derived
   from the key).
+- **Shop items, no gear** (2026-11-01, for the item finder "where can I buy X"): the snapshot also takes every
+  named item below `entities/scitem/` (no `template` in the path) of a `SHOP_TYPES` type (`components.ts`,
+  `isShopItem`: type, optional sub types, optional path restriction) that is not gear: clothing
+  (`Char_Clothing_*`), `Food`, `Drink`, `FPS_Consumable`, `FlightController`, `MobiGlas`, `WeaponAttachment/Magazine`,
+  `WeaponPersonal` (grenades), `ExternalFuelTank`, `JumpDrive`, `Bomb`, `BombLauncher`, `InventoryContainer`,
+  `Flair_Surface`, and `Misc` only below `carryables/1h/` and `carryables/2h/` (`Misc` has 1519 records, ~37 sold).
+  Left out by decision: `Cargo` (1748 records, 8 sold), `Paints` (ship liveries), vehicles. A gear type never
+  enters through this path (`isShopItem` is false for `COMPONENT_TYPES`/`FPS_TYPES`: the bookable rule goes by
+  type alone). **Catalog-only, never bookable**: stock, crafting, bot, `/api/catalog` and the icon renderer use
+  the gear rule (`componentItemSql`). Shop items carry **no raw record** (the finder needs none; clothing
+  records are large). Build 12913470 / 4.10.2: 2941 items on top of the 4326 before (the clothing types 1901,
+  `FlightController` 271, `Misc` 331, `Food` 128, `Drink` 84, `Flair_Surface` 60, `ExternalFuelTank` 29,
+  `WeaponAttachment/Magazine` 27, `MobiGlas` 23, `FPS_Consumable` 32, `InventoryContainer` 18, `WeaponPersonal` 15,
+  `BombLauncher` 14, `JumpDrive` 5, `Bomb` 3) and 32 manufacturers (clothing brands). Items missing later are
+  retired as always.
 - **FPS crafted stats** (blueprints of build 12913470): weapons `GPP_Weapon_Damage`, `GPP_Weapon_FireRate`,
   `GPP_Weapon_Recoil_{Handling,Kick,Smoothness}` (1.2→0.8 or 1.4→0.6: lower is the improvement), tools
   `GPP_Weapon_Tractor_*`/`GPP_Weapon_HullScraping_*`; armor `GPP_Armor_DamageMitigation`,
