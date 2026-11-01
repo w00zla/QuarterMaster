@@ -45,7 +45,7 @@ const HELP = `Usage: pnpm catalog:extract [options]
 
   --p4k <path>          Data.p4k of the game install (default: $SC_DATA_P4K)
   --out <file>          Snapshot file (default: local/snapshots/catalog-<channel>-<build>.json.gz)
-  --starbreaker <bin>   StarBreaker CLI (default: local/starbreaker, on Windows local/starbreaker.exe)
+  --starbreaker <bin>   StarBreaker CLI, our fork (default: local/starbreaker-qm/starbreaker, on Windows starbreaker.exe)
   --work <dir>          Working directory for extracted files (default: local/work/<channel>-<build>)
   --keep-work           Keep the working directory afterwards
   --reuse-work          Skip the extraction when the working directory holds it already (normalizer changes)
@@ -56,8 +56,8 @@ async function main() {
     options: {
       'p4k': { type: 'string' },
       'out': { type: 'string' },
-      // The CLI binary per platform: local/starbreaker (Linux) next to local/starbreaker.exe (Windows)
-      'starbreaker': { type: 'string', default: process.platform === 'win32' ? 'local/starbreaker.exe' : 'local/starbreaker' },
+      // Our fork's CLI per platform: starbreaker (Linux) next to starbreaker.exe (Windows), both built from starbreaker-qm
+      'starbreaker': { type: 'string', default: process.platform === 'win32' ? 'local/starbreaker-qm/starbreaker.exe' : 'local/starbreaker-qm/starbreaker' },
       'work': { type: 'string' },
       'keep-work': { type: 'boolean', default: false },
       'reuse-work': { type: 'boolean', default: false },

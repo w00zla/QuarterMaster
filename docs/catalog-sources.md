@@ -7,7 +7,8 @@ As of 2026-10-04, game build `4.10.1-LIVE.12660092`.
 
 ## Decision
 
-- **Primary source: own extract** from the local `Data.p4k` via StarBreaker (`local/starbreaker`, MIT, v0.3.2).
+- **Primary source: own extract** from the local `Data.p4k` via StarBreaker (MIT; v0.3.2 until 2026-11-01, since then
+  our fork starbreaker-qm in `local/starbreaker-qm/`, see "Icons").
 - **Reference / fallback: [StarCitizenWiki/scunpacked-data](https://github.com/StarCitizenWiki/scunpacked-data)** (ScDataDumper output, one commit per patch, no LICENSE).
 - **Extractor and importer in TypeScript.** The extractor runs locally per patch; the importer is a CLI with metrics, safeguards and dry-run.
 - **Contract = our own snapshot format** (versioned: `schemaVersion` + game build). Extractor implementations are swappable behind it.
@@ -407,12 +408,20 @@ pictures with gaps), so the icons are rendered from the models:
    that render silently white), so the root is a short hash and the CLI fails an export whose longest path is
    longer ("Pfad zu lang": move `--work` to a shorter folder). The export is deleted after a successful render
    (~2 MB each), failed ones stay for inspection. The
-   **fleetyards fork** (`local/starbreaker-fy/`, MIT, built from github.com/fleetyards/StarBreaker main; commit in
-   `COMMIT`) is required: the 0.3.2 release misplaces weapon magazines and its addon does not stack LayerBlend
-   layers. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable
+   **our fork starbreaker-qm** (`local/starbreaker-qm/`, MIT, built from the repo `../starbreaker-qm`, version
+   `0.3.2-qm.n`, commit in `COMMIT`; the catalog extract uses it too) is required. History: the 0.3.2 release
+   misplaced weapon magazines and its addon did not stack LayerBlend layers, so the icons were rendered with the
+   fleetyards fork (github.com/fleetyards/StarBreaker) until 2026-11-01. Upstream main (diogotr7) had fixed the magazines
+   by then, but rendered armour as its loot crate (worn model only via `--geometry-tag Male`, with T-posed arms and
+   white palettes), lost paint variants and drew visors flat. starbreaker-qm is the fleetyards fork with upstream
+   merged in (merge commit 70560578): fleetyards' item, material and addon work, upstream's rest (skinning,
+   characters, `--geometry-tag`, quick_xml, fixes such as the Sion compensator's texture); the Blender addon is
+   fleetyards' unchanged (both rebuilt the decal system, a mix did not run). Remotes `fleetyards` and `upstream` in
+   that repo; a sync is a merge there, checked by rendering a sample against the current icons. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable
    detail texture as base colour, and the vertex colours are blend masks.
-2. **Render:** `src/icons/render.py` in a portable Blender (`local/blender/<version>/`, config and the fork's
-   `blender_addon/starbreaker_addon` under its `portable/`; addon and exporter must match). The addon rebuilds the
+2. **Render:** `src/icons/render.py` in a portable Blender (`local/blender/<version>/`, config under its
+   `portable/`; `portable/scripts/addons/starbreaker_addon` is a junction to the fork repo's
+   `blender_addon/starbreaker_addon`, so addon and exporter always match; the bundle copies its content). The addon rebuilds the
    materials (`starbreaker.refresh_materials`, called explicitly: its load handler needs timers that background
    mode lacks). Eevee, 16 samples, Standard view transform, transparent film, 256 px. Ray tracing on, with
    raytraced refraction (dithered) for the `SB_GlassPBR` materials: they are pure transmission, without it Eevee

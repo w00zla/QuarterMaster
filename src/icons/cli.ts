@@ -1,6 +1,6 @@
 // Rendert Icons für alle Gear-Items der App (Schiffskomponenten + FPS-Ausrüstung, dieselbe Regel wie der
 // Stock-Service), für die Sammelobjekte und für Rohstoffe mit Thumbnail-Entity (roh und raffiniert teilen sich den Brocken).
-// Pipeline je Entity: StarBreaker (fleetyards-Fork) `entity export --kind decomposed` -> scene.blend ->
+// Pipeline je Entity: StarBreaker (eigener Fork starbreaker-qm) `entity export --kind decomposed` -> scene.blend ->
 // Blender headless (src/icons/render.py, StarBreaker-Addon) mit Pose und Licht-Rig des Spiels aus dem
 // DataCore (`PlayerChoice_PITConfig.inventoryParams`, `inventorylightgroup_*`) -> PNG je Katalog-UUID.
 // Usage: pnpm icons:render [--sample n] [--filter <substring>] [--force] [--size 256] [--dry-run]
@@ -22,7 +22,7 @@ const HELP = `Usage: pnpm icons:render [options]
   --size <px>           Kantenlänge (default 256)
   --dry-run             Nur auflisten, was gerendert würde
   --p4k <path>          Data.p4k (default: $SC_DATA_P4K)
-  --starbreaker <bin>   StarBreaker-CLI, fleetyards-Fork (default: local/starbreaker-fy/starbreaker.exe)
+  --starbreaker <bin>   StarBreaker-CLI, eigener Fork (default: local/starbreaker-qm/starbreaker[.exe])
   --blender <bin>       Blender (default: local/blender/*/blender.exe)
   --targets <file>      Zielliste aus --write-targets statt der DB (Bundle auf einem anderen Rechner)
   --write-targets <file> Zielliste aus der DB schreiben und beenden
@@ -276,7 +276,7 @@ async function main() {
   if (!args.p4k && !process.env.SC_DATA_P4K) throw new Error('No Data.p4k given (--p4k or $SC_DATA_P4K)');
   const p4k = resolve(args.p4k ?? process.env.SC_DATA_P4K ?? '');
   if (!existsSync(p4k)) throw new Error(`Data.p4k not found: ${p4k}`);
-  const starbreaker = resolve(args.starbreaker ?? 'local/starbreaker-fy/starbreaker.exe');
+  const starbreaker = resolve(args.starbreaker ?? (process.platform === 'win32' ? 'local/starbreaker-qm/starbreaker.exe' : 'local/starbreaker-qm/starbreaker'));
   if (!existsSync(starbreaker)) throw new Error(`StarBreaker not found: ${starbreaker}`);
   const blender = args.blender ? resolve(args.blender) : findBlender();
   const renderScript = fileURLToPath(new URL('./render.py', import.meta.url));

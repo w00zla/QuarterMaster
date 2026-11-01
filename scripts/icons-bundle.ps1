@@ -1,5 +1,5 @@
 # Packt alles, was `pnpm icons:render` auf einem anderen Windows-Rechner braucht, in einen Ordner:
-# portables Node, Blender (portabel, mit StarBreaker-Addon), die StarBreaker-CLI (fleetyards-Fork), die CLI
+# portables Node, Blender (portabel, mit StarBreaker-Addon), die StarBreaker-CLI (eigener Fork starbreaker-qm), die CLI
 # samt Blender-Skript, die Zielliste aus der lokalen DB (targets.json) und ein run.cmd. Der Zielrechner
 # braucht nur noch die Data.p4k. Aufruf aus dem Repo-Root (pwsh oder Windows PowerShell 5.1):
 #   scripts/icons-bundle.ps1 [-Out local/icons-bundle] [-NodeVersion 22.19.0]
@@ -38,9 +38,9 @@ if (-not (Test-Path (Join-Path $nodeDir 'node.exe'))) {
   Remove-Item -Force $zip
 }
 
-# StarBreaker (fleetyards-Fork, local/starbreaker-fy)
+# StarBreaker (eigener Fork, local/starbreaker-qm: starbreaker.exe und COMMIT)
 New-Item -ItemType Directory -Force -Path (Join-Path $Out 'starbreaker') | Out-Null
-Copy-Item local/starbreaker-fy/* (Join-Path $Out 'starbreaker') -Force
+Copy-Item local/starbreaker-qm/starbreaker.exe, local/starbreaker-qm/COMMIT (Join-Path $Out 'starbreaker') -Force
 
 # Blender portabel samt portable/ (Config und das StarBreaker-Addon): robocopy spiegelt, 1 = kopiert, 0 = unverändert
 $blenderSrc = Get-ChildItem local/blender -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'blender.exe') } | Select-Object -First 1
