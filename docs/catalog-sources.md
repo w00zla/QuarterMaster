@@ -521,11 +521,18 @@ pictures with gaps), so the icons are rendered from the models:
    render sets the pace; the full run of the 3793 gear targets took 52 min on the render PC (the first one, single
    exports, 4 h). Log: `render.log` (the console plus full error messages) and
    `blender.log` (Blender's output, tracebacks of `render.py`) in the work directory, appended per run. Known
-   failures (23 in the 2026-11-01 run): entities whose files are missing from `Data.p4k` or that have no geometry
-   (docking tubes, ship-built missile racks, `RADR_S02_Fake`, …), not fixable here; 8 ship components fail with
-   `file not found in P4k: Data\m` (Javelin cooler, 890J parts, …): ship-only parts that are neither bought nor
-   kept in an inventory, left out like the turrets' paint-tag variants, `Default_Fixed_Mount_S4` (no material) and
-   the thrusters. `sc_nvy_medical_corpsman_boots_02` renders its shoe box: `Data.p4k` holds only its textures
+   failures (52 of 6734 in the last 2026-11-01 run, not fixable here): 23 `file not found in P4k: Data\m` -- the
+   record names no geometry at all (every `path` of its `SGeometryResourceParams` empty; the message is the
+   exporter's, misleading): Javelin cooler, 890J/Idris parts, but also `Food_box_bbk_01_*`, `Food_box_noodle_02_*`,
+   `kegr_fire_extinguisher_01_mag`, `vlk_spewgun_ballistic_01_mag*`, `sc_nvy_bdu_trouser_01_01_01`; 15 whose
+   geometry file is missing from `Data.p4k` (`rrs_consumable_sedative_01`, `grin_cutter_01`,
+   `lbco_pistol_energy_cen01`, `CargoPod_MISC_Eriesium_*`, several `MRCK_*`); 11 without a geometry component
+   (`Flair_*` models, docking tubes, `Controller_Flight_XIAN_Nox`); 3 ship-built racks whose scene has no mesh.
+   Ship-only parts are neither bought nor kept in an inventory, left out like the turrets' paint-tag variants,
+   `Default_Fixed_Mount_S4` (no material) and the thrusters. The 35 `missing sidecar submaterial` warnings of that
+   run (paint variants of the P4-AR, P8-SC, Gemini S71/R97, KSAR Karna/Scalpel, Kel-To Lumin: the part materials
+   their CDF appends were missing from the variant's sidecar when the base entity of the batch wrote it first) are
+   fixed in the fork (23679ae6). `sc_nvy_medical_corpsman_boots_02` renders its shoe box: `Data.p4k` holds only its textures
    (Squadron 42 content), the box is its default geometry. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
    packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
    Windows PC (`run.cmd`, needs only `Data.p4k`).
@@ -549,7 +556,13 @@ pictures with gaps), so the icons are rendered from the models:
 Fan content of this kind is fine (the Star Citizen wiki renders its thumbnails the same way). Open: in-game
 comparison for the types without an orientation entry (radar, EMP, QDMP, tractor
 beam, container, shield); the `requiredTag` entries (sidearms get the primary weapons rig); paint variants
-sharing a model are rendered separately.
+sharing a model are rendered separately. Unproven: the palette-metal slot tint is fitted to wiki shots (the
+calibration scatters by about 2×, no shader source in `Data.p4k`); the Golden Blossom's ochre blossoms stay more
+ochre in game than through the Khronos spec→metal solve; POM decals are not ray-marched (≤ 5 mm, below a pixel at
+256 px, matters for larger renders); the rig's Khronos PBR Neutral view transform oversaturates dark metals a little
+(its toe subtracts up to 0.04 per channel: the Whiteout's chin B/R 1.66 against 1.37 in game). Harmless for pristine
+icons and therefore not read: the extra `IVOCOLORS2` stream of 290 helmet skins (wear/dirt-like) and the main
+colour's alpha (255 − submaterial index).
 
 ## Open points
 
