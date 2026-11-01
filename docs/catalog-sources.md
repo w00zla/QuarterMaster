@@ -438,7 +438,10 @@ pictures with gaps), so the icons are rendered from the models:
    **our fork starbreaker-qm** (`local/starbreaker-qm/`, MIT, built from the repo `../starbreaker-qm`, public at
    github.com/w00zla/starbreaker-qm as a GitHub fork of diogotr7/StarBreaker, version
    `0.3.2-qm.n`, commit in `COMMIT`; the catalog extract uses it too) is required. qm.2 (2026-11-01) added
-   `export-batch`, the material node, the material in mesh file names and the addon fixes in step 2. History: the 0.3.2 release
+   `export-batch`, the material node, the material in mesh file names and the addon fixes in step 2; after it, still
+   as qm.2: the worn node table (182d229f), the palette fallback (559cb793), Organic and ore veins (2435146f), palette
+   metals (bfb057e9), character packages without the material suffix (ddf92d00; the real-P4K character tests
+   failed since qm.2), all on 2026-11-01. A `catalog:extract` with ddf92d00 gives a snapshot identical to qm.2's. History: the 0.3.2 release
    misplaced weapon magazines and its addon did not stack LayerBlend layers, so the icons were rendered with the
    fleetyards fork (github.com/fleetyards/StarBreaker) until 2026-11-01. Upstream main (diogotr7) had fixed the magazines
    by then, but rendered armour as its loot crate (worn model only via `--geometry-tag Male`, with T-posed arms and
@@ -508,7 +511,10 @@ pictures with gaps), so the icons are rendered from the models:
    `blender.log` (Blender's output, tracebacks of `render.py`) in the work directory, appended per run. Known
    failures (23 in the 2026-11-01 run): entities whose files are missing from `Data.p4k` or that have no geometry
    (docking tubes, ship-built missile racks, `RADR_S02_Fake`, …), not fixable here; 8 ship components fail with
-   `file not found in P4k: Data\m` (Javelin cooler, 890J parts, …), not looked into. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
+   `file not found in P4k: Data\m` (Javelin cooler, 890J parts, …): ship-only parts that are neither bought nor
+   kept in an inventory, left out like the turrets' paint-tag variants, `Default_Fixed_Mount_S4` (no material) and
+   the thrusters. `sc_nvy_medical_corpsman_boots_02` renders its shoe box: `Data.p4k` holds only its textures
+   (Squadron 42 content), the box is its default geometry. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
    packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
    Windows PC (`run.cmd`, needs only `Data.p4k`).
 5. **Pack:** `pnpm icons:pack [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
@@ -521,6 +527,12 @@ pictures with gaps), so the icons are rendered from the models:
 6. **Review:** holders of the privilege `thumb-review.mark` mark wrong thumbnails in the web app and cut a reference out
    of a screenshot (`docs/webapp.md` "Features and privileges"); the admin's ZIP export of those rows (`docs/adminapp.md`
    "Features") is the input for fixing pose, light or material, then `icons:render --filter <class> --force`.
+   References without the review: the companion's debug recordings (`local/stock_scan_debug/*/read-N.{jpg,json}`)
+   hold the game's own inventory and warehouse tiles, found by the tooltip title plus the cursor (character
+   inventory) or the hovered tile's rect (warehouse). A hovered warehouse tile is covered by its tooltip: take the
+   same grid cell from a later frame where the cursor has moved on. The tiles are ~100 px at 1080p: good for colour,
+   brightness and pose, not for fine detail. Open: the Geist ASD Edition's visor logo (in its decal sheet, but no
+   second UV set in the prop or the worn model and no other mapping found).
 
 Fan content of this kind is fine (the Star Citizen wiki renders its thumbnails the same way). Open: in-game
 comparison for the types without an orientation entry (radar, EMP, QDMP, tractor

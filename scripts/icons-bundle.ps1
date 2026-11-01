@@ -13,11 +13,19 @@ Set-Location $root
 $Out = [System.IO.Path]::GetFullPath((Join-Path $root $Out))
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
-# Zielliste aus der DB (braucht DATABASE_URL aus .env und SC_DATA_P4K nur pro forma nicht)
+# Zielliste aus der DB (braucht DATABASE_URL aus .env und SC_DATA_P4K nur pro forma nicht). Der Platzhalter gilt
+# nur für diesen Aufruf: das Skript läuft in der Sitzung des Aufrufers, und ein dort stehengebliebenes SC_DATA_P4K
+# schlägt den Pfad aus .env (node --env-file überschreibt nichts), danach scheiterte jedes icons:render an
+# package.json als Data.p4k.
 Write-Host "Zielliste aus der DB ..."
-$env:SC_DATA_P4K = if ($env:SC_DATA_P4K) { $env:SC_DATA_P4K } else { Join-Path $root 'package.json' }  # nur der Existenz-Check
-pnpm icons:render --write-targets (Join-Path $Out 'targets.json')
-if ($LASTEXITCODE -ne 0) { throw 'targets.json konnte nicht geschrieben werden' }
+$savedP4k = $env:SC_DATA_P4K
+try {
+  if (-not $env:SC_DATA_P4K) { $env:SC_DATA_P4K = Join-Path $root 'package.json' }  # nur der Existenz-Check
+  pnpm icons:render --write-targets (Join-Path $Out 'targets.json')
+  if ($LASTEXITCODE -ne 0) { throw 'targets.json konnte nicht geschrieben werden' }
+} finally {
+  $env:SC_DATA_P4K = $savedP4k
+}
 
 # Die CLI und das Blender-Skript
 New-Item -ItemType Directory -Force -Path (Join-Path $Out 'cli') | Out-Null
