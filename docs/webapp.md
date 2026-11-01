@@ -23,8 +23,8 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~1 MB per language
   spared; the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
   per session), then for `/api/*` the session check (401 for every route, unknown ones too), JSON-only
-  writes (415, `DELETE` included) and a 16 KB body limit (a privilege feature's image upload: its own, see
-  "Privileges").
+  writes (415, `DELETE` included) and a 16 KB body limit (a feature's image upload: its own, see
+  "Features and privileges").
 - Client IP: socket address, or the last `X-Forwarded-For` entry with `WEBAPP_TRUST_PROXY=1` (Caddy drops
   the client's own header).
 
@@ -107,34 +107,37 @@ replaces the old). `Authorization: Bearer qmt_…` authenticates `/api/*` as the
 cookie) and skips the same-origin check (a cross-site page cannot set the header without a preflight);
 `/api/token` itself is session-only. Requests made with it are history source `companion`.
 
-### Privileges (`features.ts`, `app.privilege`, `app.user_privilege`, `app.feature_entry`)
+### Features and privileges (`features.ts`, `app.feature`, `app.privilege`, `app.user_privilege`, `app.feature_entry`)
 
-Features beyond the roles for single users, e.g. supporter tools. A privilege is a key (`^[a-z][a-z0-9-]{1,40}$`)
-with a description; each key comes with the migration of the feature that checks it (never deleted, retired
-instead). The admin assigns keys to users until taken back (`docs/adminapp.md` "Privileges"). In force =
-assigned, the key not retired; read on every request (`privilegesOf`), `/api/me` lists them
+Features beyond the roles for single users, e.g. supporter tools. A **feature** (key `^[a-z][a-z0-9-]{1,40}$`, a
+description) has one or more **privileges**, each one right within it (key `<feature>.<right>`, e.g.
+`thumb-review.mark`). Both come with the feature's migrations, are never deleted but retired. The admin assigns
+privileges to users until taken back (`docs/adminapp.md` "Features"). In force = assigned, neither the privilege
+nor its feature retired; read on every request (`privilegesOf`), `/api/me` lists the privilege keys
 (`privileges`, the companion gets the same through its token).
 
-A feature keeps its data in `app.feature_entry`: one row per key, user and subject (e.g. a thumbnail's UUID)
-with a JSON payload and optionally one image (`bytea` + MIME type; rows stay when the key is taken back). The DB
-grants `qm_web` writes on every key's rows: the rights live in `features.ts` only. `FEATURES` there defines per
-key the subject's format, the payload's Zod schema and the image types; a key without an entry there is 404.
-Generic endpoints, each checking the key (403 `noPrivilege`):
+A feature keeps its data in `app.feature_entry`: one row per feature, user and subject (e.g. a thumbnail's UUID)
+with a JSON payload and optionally one image (`bytea` + MIME type; rows stay when privileges are taken back). The
+DB grants `qm_web` writes on every feature's rows: the rights live in `features.ts` only. `FEATURES` there
+defines per feature the subject's format, the payload's Zod schema, the image types and which privilege reads
+(`read`) and which writes (`write`); a feature without an entry there is 404. Generic endpoints (`:key` = the
+feature), each checking the privilege it needs (403 `noPrivilege`):
 
-- `GET /api/features/:key/entries`: every row of the key, newest first, with the author's name (newest web
-  session, the token's profile, the roster) and `own`. Everyone with the key sees everyone's rows.
-- `PUT /api/features/:key/entries/:subject` `{ payload }`: creates or replaces the own row (the image stays);
-  `DELETE` (body `{}`: writes take JSON only) removes it. Only ever the own row: one row per reviewer, nobody
-  overwrites another's.
-- `PUT …/entries/:subject/blob` `{ type, data }` (base64 in JSON; the only route with a larger body limit,
+- `GET /api/features/:key/entries` (read): every row, newest first, with the author's name (newest web session,
+  the token's profile, the roster) and `own`. Everyone who reads sees everyone's rows.
+- `PUT /api/features/:key/entries/:subject` `{ payload }` (write): creates or replaces the own row (the image
+  stays); `DELETE` (body `{}`: writes take JSON only) removes it. Only ever the own row: one row per reviewer,
+  nobody overwrites another's.
+- `PUT …/entries/:subject/blob` `{ type, data }` (write; base64 in JSON; the only route with a larger body limit,
   `BLOB_BODY_LIMIT`, 512 KB per image): the own row's image, checked against its type's signature (PNG, WebP).
-  `GET /api/features/:key/blob/:id`: any row's image.
-- Realtime: triggers send `privilege` (the user reloads `/api/me`) and `feature` with the key as `g`; the hub
-  sends `{type:'feature', key}` to every holder of the key.
+  `GET /api/features/:key/blob/:id` (read): any row's image.
+- Realtime: triggers send `privilege` (the user reloads `/api/me`) and `feature` with the feature as `g`; the hub
+  sends `{type:'feature', key}` to whoever holds the feature's reading privilege.
 
-Features so far: **`thumb-review`** (subject = catalog UUID, payload `{ hash }` = the thumbnail it was marked on,
-a WebP reference image): `GET /api/features/thumb-review/subjects?lang` lists every thumbnail of the index
-with name, class name, type and item class label. The SPA view: "Views".
+Features so far: **`thumb-review`** "Thumbnail-Prüfung", one privilege `thumb-review.mark` (reads and writes;
+subject = catalog UUID, payload `{ hash }` = the thumbnail it was marked on, a WebP reference image):
+`GET /api/features/thumb-review/subjects?lang` lists every thumbnail of the index with name, class name, type and
+item class label. The SPA view: "Views".
 
 ### Companion release (`companion.ts`)
 
@@ -308,7 +311,7 @@ blocks".
   names from the catalog, components by their `label`; the pick kept for the session), UEX's averages dimmed at
   the bar's end, below it the trading dialog's `TradeTables` for the pick (`GET /api/trade/:uuid`).
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
-- **Thumbnail-Prüfung** (route `/review/thumbs`, `ThumbReviewView.vue`, privilege `thumb-review`; without it the
+- **Thumbnail-Prüfung** (route `/review/thumbs`, `ThumbReviewView.vue`, privilege `thumb-review.mark`; without it the
   view says so and no button shows): every thumbnail (the L file at 132 CSS px) in a grid per item class and sub type,
   resources apart, sorted by name; above it a panel "Worum geht's?": one line that wrongly rendered thumbnails get marked to be fixed later, one
   on how it works, one on the yellow border; it folds by a click on its title row or the chevron at its top right, remembered per browser; search over name and class name, a chip "Nur markierte". A click on a thumbnail

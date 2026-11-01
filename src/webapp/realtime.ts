@@ -12,7 +12,7 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import type { ServerMessage } from './api-types.ts';
-import { holdersOf } from './features.ts';
+import { FEATURES, holdersOf } from './features.ts';
 import { clientAddress, rateKey } from './ip.ts';
 import { SESSION_COOKIE, validateSession } from './session.ts';
 
@@ -134,9 +134,10 @@ export class RealtimeHub {
         if (u) this.send((c) => c.userId === u, { type: 'me' });
         break;
       case 'feature': {
-        // A feature's data ("g" carries its key): every holder of the key
-        if (!g) break;
-        const holders = await holdersOf(this.db, g);
+        // A feature's data ("g" carries its key): whoever holds the privilege that reads it
+        const reads = g && Object.hasOwn(FEATURES, g) ? FEATURES[g]!.read : null;
+        if (!reads || !g) break;
+        const holders = await holdersOf(this.db, reads);
         this.send((c) => holders.has(c.userId), { type: 'feature', key: g });
         break;
       }

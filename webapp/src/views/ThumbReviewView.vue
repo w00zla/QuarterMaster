@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Thumbnail-Prüfung (privilege thumb-review, docs/webapp.md "Privileges"): every item thumbnail in a grid per
+// Thumbnail-Prüfung (feature thumb-review, privilege thumb-review.mark, docs/webapp.md "Features and privileges"): every item thumbnail in a grid per
 // type. A click on a thumbnail marks it as wrong (the own row of app.feature_entry, payload = the thumbnail's
 // hash), the camera takes a reference: a frame of a screen, window or tab picked once (getDisplayMedia, the
 // stream stays open), cut to a region with the mouse. Everyone with the privilege sees every mark.
@@ -17,10 +17,12 @@ import { me } from "../session";
 import { toast, toastError } from "../toasts";
 
 const KEY = "thumb-review";
+// The privilege the view needs (src/webapp/features.ts: reads and writes)
+const PRIVILEGE = "thumb-review.mark";
 // The server's limit for one image (src/webapp/features.ts)
 const MAX_IMAGE_BYTES = 512 * 1024;
 
-const allowed = computed(() => me.value?.privileges.includes(KEY) ?? false);
+const allowed = computed(() => me.value?.privileges.includes(PRIVILEGE) ?? false);
 
 // The explanation panel folds; remembered per browser
 const INTRO_KEY = "qm.review.introOpen";

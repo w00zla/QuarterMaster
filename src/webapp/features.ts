@@ -1,8 +1,9 @@
-// Privileges and their features' data (docs/webapp.md "Privileges"): a privilege key (app.privilege) unlocks a
-// feature for the users the admin assigned it to (app.user_privilege). Such a feature keeps its data in
-// app.feature_entry, one row per user and subject with a JSON payload and optionally one image. Every holder of
-// the key sees every row, only the row's user changes it. The DB grants cover every key: the check lives here,
-// read on every request (rights are never cached). Registered by registerRoutes.
+// Features and their privileges (docs/webapp.md "Features and privileges"): a feature (app.feature) is used through
+// its privileges (app.privilege, `<feature>.<right>`), which the admin assigns to single users (app.user_privilege).
+// A feature keeps its data in app.feature_entry, one row per user and subject with a JSON payload and optionally one
+// image; which privilege reads and which writes is defined here per feature, only the row's user changes it. The DB
+// grants cover every feature: the check lives here, read on every request (rights are never cached). Registered by
+// registerRoutes.
 import { sql } from 'drizzle-orm';
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
@@ -26,34 +27,44 @@ const isImage: Record<ImageType, (b: Buffer) => boolean> = {
   'image/webp': (b) => b.length > 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP',
 };
 
-/** What a feature accepts: the subject's format, the payload's schema, the image types (none = no image). */
+/**
+ * What a feature accepts: the subject's format, the payload's schema, the image types (none = no image), and the
+ * privilege that reads its rows (`read`) and the one that writes the own row (`write`).
+ */
 interface FeatureDef {
   subject: RegExp;
   payload: z.ZodType<Record<string, unknown>>;
   images: readonly ImageType[];
+  read: string;
+  write: string;
 }
 
-// Each key here comes with the migration that inserts it into app.privilege
+// Each feature and privilege here comes with the migration that inserts it into app.feature / app.privilege
 export const FEATURES: Record<string, FeatureDef> = {
   // A thumbnail marked as wrong: the subject is the catalog UUID, hash the thumbnail it was marked on
   // (a re-render brings a new hash), the image the reference the user cut out of a screenshot
-  'thumb-review': { subject: UUID, payload: z.object({ hash: z.string().regex(/^[0-9a-f]{8}$/) }).strict(), images: IMAGE_TYPES },
+  'thumb-review': {
+    subject: UUID, payload: z.object({ hash: z.string().regex(/^[0-9a-f]{8}$/) }).strict(), images: IMAGE_TYPES,
+    read: 'thumb-review.mark', write: 'thumb-review.mark',
+  },
 };
 
-/** The user's privileges in force: assigned, the key not retired. */
+/** The user's privileges in force: assigned, neither the privilege nor its feature retired. */
 export async function privilegesOf(db: Db, userId: string): Promise<string[]> {
   const found = await rows<{ key: string }>(db, sql`
-    SELECT up.key FROM app.user_privilege up JOIN app.privilege p ON p.key = up.key
-    WHERE up.user_id = ${userId} AND p.retired_at IS NULL
-    ORDER BY up.key`);
+    SELECT p.key FROM app.user_privilege up
+    JOIN app.privilege p ON p.key = up.privilege_key JOIN app.feature f ON f.key = p.feature_key
+    WHERE up.user_id = ${userId} AND p.retired_at IS NULL AND f.retired_at IS NULL
+    ORDER BY p.key`);
   return found.map((r) => r.key);
 }
 
-/** Who holds a privilege in force (realtime: who gets a feature's changes). */
-export async function holdersOf(db: Db, key: string): Promise<Set<string>> {
+/** Who holds a privilege in force (realtime: who gets the changes of the feature it reads). */
+export async function holdersOf(db: Db, privilege: string): Promise<Set<string>> {
   const found = await rows<{ userId: string }>(db, sql`
-    SELECT up.user_id AS "userId" FROM app.user_privilege up JOIN app.privilege p ON p.key = up.key
-    WHERE up.key = ${key} AND p.retired_at IS NULL`);
+    SELECT up.user_id AS "userId" FROM app.user_privilege up
+    JOIN app.privilege p ON p.key = up.privilege_key JOIN app.feature f ON f.key = p.feature_key
+    WHERE p.key = ${privilege} AND p.retired_at IS NULL AND f.retired_at IS NULL`);
   return new Set(found.map((r) => r.userId));
 }
 
@@ -65,12 +76,12 @@ async function jsonBody(c: Context): Promise<unknown> {
   }
 }
 
-/** The feature of the path, after checking the caller holds its key. */
-async function feature(c: Context<Env>, db: Db): Promise<{ key: string; def: FeatureDef }> {
+/** The feature of the path, after checking the caller holds the privilege the action needs. */
+async function feature(c: Context<Env>, db: Db, need: 'read' | 'write'): Promise<{ key: string; def: FeatureDef }> {
   const key = c.req.param('key') ?? '';
   const def = KEY.test(key) && Object.hasOwn(FEATURES, key) ? FEATURES[key]! : null;
   if (!def) throw new HttpError(404, 'notFound');
-  if (!(await privilegesOf(db, c.get('session').userId)).includes(key)) throw new HttpError(403, 'noPrivilege');
+  if (!(await privilegesOf(db, c.get('session').userId)).includes(def[need])) throw new HttpError(403, 'noPrivilege');
   return { key, def };
 }
 
@@ -90,7 +101,7 @@ export async function featureEntries(db: Db, key: string, viewer: string): Promi
         (SELECT coalesce(t.discord_global_name, t.discord_username) FROM web.api_token t WHERE t.user_id = e.user_id),
         (SELECT m.display_name FROM app.member m WHERE m.user_id = e.user_id ORDER BY m.active DESC, m.updated_at DESC LIMIT 1)
       ) AS "userName"
-    FROM app.feature_entry e WHERE e.key = ${key} ORDER BY e.updated_at DESC, e.id DESC`);
+    FROM app.feature_entry e WHERE e.feature_key = ${key} ORDER BY e.updated_at DESC, e.id DESC`);
   return found.map((e) => ({ ...e, own: e.userId === viewer }));
 }
 
@@ -99,33 +110,34 @@ const blobSchema = z.object({ type: z.enum(IMAGE_TYPES), data: z.string().max(BL
 
 export function registerFeatureRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap<string, string>) {
   api.get('/features/:key/entries', async (c) => {
-    const { key } = await feature(c, db);
+    const { key } = await feature(c, db, 'read');
     return c.json({ entries: await featureEntries(db, key, c.get('session').userId) } satisfies FeatureEntriesResponse);
   });
 
   // Creates or replaces the own row for the subject (its image stays)
   api.put('/features/:key/entries/:subject', async (c) => {
-    const { key, def } = await feature(c, db);
+    const { key, def } = await feature(c, db, 'write');
     const subject = subjectOf(c, def);
     const parsed = putSchema.safeParse(await jsonBody(c));
     const payload = parsed.success ? def.payload.safeParse(parsed.data.payload) : null;
     if (!payload?.success) throw new HttpError(400, 'invalid');
     await db.execute(sql`
-      INSERT INTO app.feature_entry (key, user_id, subject, payload) VALUES (${key}, ${c.get('session').userId}, ${subject}, ${JSON.stringify(payload.data)}::jsonb)
-      ON CONFLICT (key, user_id, subject) DO UPDATE SET payload = excluded.payload, updated_at = now()`);
+      INSERT INTO app.feature_entry (feature_key, user_id, subject, payload)
+      VALUES (${key}, ${c.get('session').userId}, ${subject}, ${JSON.stringify(payload.data)}::jsonb)
+      ON CONFLICT (feature_key, user_id, subject) DO UPDATE SET payload = excluded.payload, updated_at = now()`);
     return c.json({ ok: true } satisfies OkResponse);
   });
 
   api.delete('/features/:key/entries/:subject', async (c) => {
-    const { key, def } = await feature(c, db);
+    const { key, def } = await feature(c, db, 'write');
     const subject = subjectOf(c, def);
-    await db.execute(sql`DELETE FROM app.feature_entry WHERE key = ${key} AND user_id = ${c.get('session').userId} AND subject = ${subject}`);
+    await db.execute(sql`DELETE FROM app.feature_entry WHERE feature_key = ${key} AND user_id = ${c.get('session').userId} AND subject = ${subject}`);
     return c.json({ ok: true } satisfies OkResponse);
   });
 
   // The own row's image: base64 in JSON (writes take JSON only), checked against its type's signature
   api.put('/features/:key/entries/:subject/blob', async (c) => {
-    const { key, def } = await feature(c, db);
+    const { key, def } = await feature(c, db, 'write');
     const subject = subjectOf(c, def);
     const parsed = blobSchema.safeParse(await jsonBody(c));
     if (!parsed.success || !def.images.includes(parsed.data.type)) throw new HttpError(400, 'invalid');
@@ -133,18 +145,18 @@ export function registerFeatureRoutes(api: Hono<Env>, db: Db, thumbs: () => Read
     if (bytes.length > MAX_BLOB_BYTES || !isImage[parsed.data.type](bytes)) throw new HttpError(400, 'invalid');
     const updated = await rows<{ id: number }>(db, sql`
       UPDATE app.feature_entry SET blob = ${bytes}, blob_type = ${parsed.data.type}, updated_at = now()
-      WHERE key = ${key} AND user_id = ${c.get('session').userId} AND subject = ${subject} RETURNING id`);
+      WHERE feature_key = ${key} AND user_id = ${c.get('session').userId} AND subject = ${subject} RETURNING id`);
     if (!updated.length) throw new HttpError(404, 'notFound');
     return c.json({ ok: true } satisfies OkResponse);
   });
 
-  // Any row's image (every holder sees every row); the URL carries the row's updated_at
+  // Any row's image (whoever reads the feature sees every row); the URL carries the row's updated_at
   api.get('/features/:key/blob/:id', async (c) => {
-    const { key } = await feature(c, db);
+    const { key } = await feature(c, db, 'read');
     const id = Number(c.req.param('id'));
     if (!Number.isSafeInteger(id) || id < 1) throw new HttpError(400, 'invalid');
     const [found] = await rows<{ blob: Buffer | null; blobType: string | null }>(db, sql`
-      SELECT blob, blob_type AS "blobType" FROM app.feature_entry WHERE key = ${key} AND id = ${id}`);
+      SELECT blob, blob_type AS "blobType" FROM app.feature_entry WHERE feature_key = ${key} AND id = ${id}`);
     if (!found?.blob || !found.blobType) throw new HttpError(404, 'notFound');
     c.header('Content-Type', found.blobType);
     c.header('Cache-Control', 'private, max-age=86400');
@@ -153,7 +165,7 @@ export function registerFeatureRoutes(api: Hono<Env>, db: Db, thumbs: () => Read
 
   // thumb-review: every thumbnail with its name and type, grouped in the SPA
   api.get('/features/thumb-review/subjects', async (c) => {
-    if (!(await privilegesOf(db, c.get('session').userId)).includes('thumb-review')) throw new HttpError(403, 'noPrivilege');
+    if (!(await privilegesOf(db, c.get('session').userId)).includes(FEATURES['thumb-review']!.read)) throw new HttpError(403, 'noPrivilege');
     const lang: Lang = c.req.query('lang') === 'de' ? 'de' : 'en';
     const index = thumbs();
     const found = await rows<{ uuid: string; name: string; className: string; type: string | null; subType: string | null; typeLabel: string | null }>(db, sql`

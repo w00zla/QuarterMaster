@@ -1,5 +1,5 @@
 {
-  "id": "0eddb0ac-42f5-4157-bf90-fa114e59aaba",
+  "id": "03e87bfd-9f54-4794-9e3d-b6e0a5b3cf65",
   "prevId": "39b8c7b9-13ec-473e-a2a9-bbdfbbabd9fa",
   "version": "7",
   "dialect": "postgresql",
@@ -48,6 +48,49 @@
       },
       "isRLSEnabled": false
     },
+    "app.feature": {
+      "name": "feature",
+      "schema": "app",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "feature_key_format": {
+          "name": "feature_key_format",
+          "value": "\"app\".\"feature\".\"key\" ~ '^[a-z][a-z0-9-]{1,40}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "app.feature_entry": {
       "name": "feature_entry",
       "schema": "app",
@@ -69,8 +112,8 @@
             "cycle": false
           }
         },
-        "key": {
-          "name": "key",
+        "feature_key": {
+          "name": "feature_key",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -122,11 +165,11 @@
         }
       },
       "indexes": {
-        "feature_entry_key_subject_index": {
-          "name": "feature_entry_key_subject_index",
+        "feature_entry_feature_key_subject_index": {
+          "name": "feature_entry_feature_key_subject_index",
           "columns": [
             {
-              "expression": "key",
+              "expression": "feature_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -145,13 +188,13 @@
         }
       },
       "foreignKeys": {
-        "feature_entry_key_privilege_key_fk": {
-          "name": "feature_entry_key_privilege_key_fk",
+        "feature_entry_feature_key_feature_key_fk": {
+          "name": "feature_entry_feature_key_feature_key_fk",
           "tableFrom": "feature_entry",
-          "tableTo": "privilege",
+          "tableTo": "feature",
           "schemaTo": "app",
           "columnsFrom": [
-            "key"
+            "feature_key"
           ],
           "columnsTo": [
             "key"
@@ -166,7 +209,7 @@
           "name": "feature_entry_user_subject",
           "nullsNotDistinct": false,
           "columns": [
-            "key",
+            "feature_key",
             "user_id",
             "subject"
           ]
@@ -548,6 +591,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "feature_key": {
+          "name": "feature_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "description": {
           "name": "description",
           "type": "text",
@@ -568,15 +617,46 @@
           "notNull": false
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "privilege_feature_key_index": {
+          "name": "privilege_feature_key_index",
+          "columns": [
+            {
+              "expression": "feature_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "privilege_feature_key_feature_key_fk": {
+          "name": "privilege_feature_key_feature_key_fk",
+          "tableFrom": "privilege",
+          "tableTo": "feature",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "feature_key"
+          ],
+          "columnsTo": [
+            "key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "privilege_key_format": {
           "name": "privilege_key_format",
-          "value": "\"app\".\"privilege\".\"key\" ~ '^[a-z][a-z0-9-]{1,40}$'"
+          "value": "\"app\".\"privilege\".\"key\" ~ '^[a-z][a-z0-9-]{1,40}[.][a-z][a-z0-9-]{1,40}$' AND split_part(\"app\".\"privilege\".\"key\", '.', 1) = \"app\".\"privilege\".\"feature_key\""
         }
       },
       "isRLSEnabled": false
@@ -1278,8 +1358,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "key": {
-          "name": "key",
+        "privilege_key": {
+          "name": "privilege_key",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1293,11 +1373,11 @@
         }
       },
       "indexes": {
-        "user_privilege_key_index": {
-          "name": "user_privilege_key_index",
+        "user_privilege_privilege_key_index": {
+          "name": "user_privilege_privilege_key_index",
           "columns": [
             {
-              "expression": "key",
+              "expression": "privilege_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1310,13 +1390,13 @@
         }
       },
       "foreignKeys": {
-        "user_privilege_key_privilege_key_fk": {
-          "name": "user_privilege_key_privilege_key_fk",
+        "user_privilege_privilege_key_privilege_key_fk": {
+          "name": "user_privilege_privilege_key_privilege_key_fk",
           "tableFrom": "user_privilege",
           "tableTo": "privilege",
           "schemaTo": "app",
           "columnsFrom": [
-            "key"
+            "privilege_key"
           ],
           "columnsTo": [
             "key"
@@ -1326,11 +1406,11 @@
         }
       },
       "compositePrimaryKeys": {
-        "user_privilege_user_id_key_pk": {
-          "name": "user_privilege_user_id_key_pk",
+        "user_privilege_user_id_privilege_key_pk": {
+          "name": "user_privilege_user_id_privilege_key_pk",
           "columns": [
             "user_id",
-            "key"
+            "privilege_key"
           ]
         }
       },

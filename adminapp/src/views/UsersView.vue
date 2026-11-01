@@ -109,7 +109,7 @@ async function changePrivilege(action: () => Promise<unknown>) {
 }
 const grant = (p: UserPrivilege) => changePrivilege(() => send("PUT", `/users/${selected.value}/privileges/${p.key}`, {}));
 function revoke(p: UserPrivilege) {
-  if (!confirm(`Take back "${p.key}"? Their data stays.`)) return;
+  if (!confirm(`Take back "${p.featureDescription}: ${p.description}"? Their data stays.`)) return;
   void changePrivilege(() => send("DELETE", `/users/${selected.value}/privileges/${p.key}`));
 }
 </script>
@@ -227,9 +227,10 @@ function revoke(p: UserPrivilege) {
             <div v-if="privilegeError" class="err">{{ privilegeError }}</div>
             <div v-if="privileges.error.value" class="faint">{{ privileges.error.value }}</div>
             <table v-else-if="privileges.data.value?.length" class="mini">
-              <thead><tr><th>Privilege</th><th>State</th><th /></tr></thead>
+              <thead><tr><th>Feature</th><th>Privilege</th><th>State</th><th /></tr></thead>
               <tbody>
                 <tr v-for="p in privileges.data.value" :key="p.key">
+                  <td><RouterLink :to="`/features/${p.featureKey}`">{{ p.featureDescription }}</RouterLink></td>
                   <td><Tooltip :text="p.key" mono>{{ p.description }}</Tooltip></td>
                   <td>
                     <span v-if="!held(p)" class="tag">Not held</span>
@@ -243,7 +244,7 @@ function revoke(p: UserPrivilege) {
                 </tr>
               </tbody>
             </table>
-            <div v-else class="faint">No privileges defined</div>
+            <div v-else class="faint">No features defined</div>
           </details>
           <details class="section" :open="open.has('orgs')" @toggle="onToggle('orgs', $event)">
             <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Orgs</span> <span class="count">{{ detail.data.value.memberships.length }}</span></summary>

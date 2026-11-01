@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Privileges (docs/adminapp.md "Privileges"): the keys from the migrations with their holders and their feature's
-// data; assigning happens per user (Users, section Privileges). The export packs a key's rows and images as ZIP.
+// Features (docs/adminapp.md "Features"): the features from the migrations with their privileges, holders and data;
+// assigning privileges happens per user (Users, section Privileges). The export packs a feature's rows and images as ZIP.
 import { computed } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import DetailPanel from "../components/DetailPanel.vue";
@@ -9,18 +9,20 @@ import Tooltip from "../components/Tooltip.vue";
 import { useFetch } from "../api";
 import { dateTime } from "../format";
 import { thumbPath } from "../../../src/thumbs";
-import type { PrivilegeDetail, PrivilegeEntry, PrivilegeRow } from "../../../src/adminapp/api-types";
+import type { FeatureDetail, FeatureEntryRow, FeatureRow } from "../../../src/adminapp/api-types";
 
 const route = useRoute();
 const router = useRouter();
-const list = useFetch<PrivilegeRow[]>(() => "/privileges", false);
+const list = useFetch<FeatureRow[]>(() => "/features", false);
 const selected = computed(() => (route.params.key as string | undefined) || null);
-const detail = useFetch<PrivilegeDetail>(() => (selected.value ? `/privileges/${selected.value}` : null));
+const detail = useFetch<FeatureDetail>(() => (selected.value ? `/features/${selected.value}` : null));
+// A holder's privilege by its description
+const privilegeName = (key: string) => detail.data.value?.privileges.find((p) => p.key === key)?.description ?? key;
 
-const blobUrl = (e: PrivilegeEntry) => `/api/privileges/${selected.value}/blob/${e.id}?v=${encodeURIComponent(e.updatedAt)}`;
+const blobUrl = (e: FeatureEntryRow) => `/api/features/${selected.value}/blob/${e.id}?v=${encodeURIComponent(e.updatedAt)}`;
 // thumb-review: the thumbnail as it is now; marked on another hash = re-rendered since
-const marked = (e: PrivilegeEntry) => (typeof e.payload.hash === "string" ? e.payload.hash : null);
-const stale = (e: PrivilegeEntry) => marked(e) !== null && e.thumb !== null && marked(e) !== e.thumb;
+const marked = (e: FeatureEntryRow) => (typeof e.payload.hash === "string" ? e.payload.hash : null);
+const stale = (e: FeatureEntryRow) => marked(e) !== null && e.thumb !== null && marked(e) !== e.thumb;
 </script>
 
 <template>
@@ -28,17 +30,18 @@ const stale = (e: PrivilegeEntry) => marked(e) !== null && e.thumb !== null && m
     <section class="panel list-panel">
       <div class="head">
         <Icon name="lock" :size="16" />
-        <span class="head-title no-grow">Privileges</span>
+        <span class="head-title no-grow">Features</span>
         <span class="head-count">{{ list.data.value?.length ?? 0 }}</span>
       </div>
       <div v-if="list.error.value" class="empty-line">{{ list.error.value }}</div>
       <div v-else-if="!list.data.value" class="empty-line">Loading…</div>
-      <div v-else-if="!list.data.value.length" class="empty-line">No privileges</div>
+      <div v-else-if="!list.data.value.length" class="empty-line">No features</div>
       <table v-else class="mini">
-        <thead><tr><th>Privilege</th><th class="num">Holders</th><th class="num">Entries</th><th>Since</th><th /></tr></thead>
+        <thead><tr><th>Feature</th><th class="num">Privileges</th><th class="num">Holders</th><th class="num">Entries</th><th>Since</th><th /></tr></thead>
         <tbody>
-          <tr v-for="p in list.data.value" :key="p.key" class="link" :class="{ selected: p.key === selected }" @click="router.push(`/privileges/${p.key}`)">
+          <tr v-for="p in list.data.value" :key="p.key" class="link" :class="{ selected: p.key === selected }" @click="router.push(`/features/${p.key}`)">
             <td><Tooltip :text="p.key" mono>{{ p.description }}</Tooltip></td>
+            <td class="num mono" :class="{ faint: !p.privileges.length }">{{ p.privileges.length }}</td>
             <td class="num mono" :class="{ faint: !p.holderCount }">{{ p.holderCount }}</td>
             <td class="num mono" :class="{ faint: !p.entryCount }">{{ p.entryCount }}</td>
             <td class="nowrap">{{ dateTime(p.createdAt) }}</td>
@@ -55,16 +58,32 @@ const stale = (e: PrivilegeEntry) => marked(e) !== null && e.thumb !== null && m
       :technical="selected"
       :loading="detail.loading.value && !detail.data.value"
       :error="detail.error.value"
-      @close="router.push('/privileges')"
+      @close="router.push('/features')"
     >
       <template v-if="detail.data.value">
         <section>
+          <span class="panel-title">Privileges</span>
+          <table v-if="detail.data.value.privileges.length" class="mini">
+            <thead><tr><th>Privilege</th><th class="num">Holders</th><th /></tr></thead>
+            <tbody>
+              <tr v-for="p in detail.data.value.privileges" :key="p.key">
+                <td><Tooltip :text="p.key" mono>{{ p.description }}</Tooltip></td>
+                <td class="num mono" :class="{ faint: !p.holderCount }">{{ p.holderCount }}</td>
+                <td><span v-if="p.retired" class="tag err">Retired</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="faint">None</div>
+        </section>
+
+        <section>
           <span class="panel-title">Holders</span>
           <table v-if="detail.data.value.holders.length" class="mini">
-            <thead><tr><th>User</th><th>Since</th></tr></thead>
+            <thead><tr><th>User</th><th>Privilege</th><th>Since</th></tr></thead>
             <tbody>
-              <tr v-for="h in detail.data.value.holders" :key="h.userId" class="link" @click="router.push(`/users/${h.userId}`)">
+              <tr v-for="h in detail.data.value.holders" :key="`${h.userId}:${h.privilegeKey}`" class="link" @click="router.push(`/users/${h.userId}`)">
                 <td><Tooltip :text="h.userId" mono>{{ h.name ?? h.userId }}</Tooltip></td>
+                <td class="dim">{{ privilegeName(h.privilegeKey) }}</td>
                 <td class="nowrap">{{ dateTime(h.grantedAt) }}</td>
               </tr>
             </tbody>
@@ -75,7 +94,7 @@ const stale = (e: PrivilegeEntry) => marked(e) !== null && e.thumb !== null && m
         <section>
           <div class="entries-head">
             <span class="panel-title">Entries</span>
-            <a class="btn outline small" :href="`/api/privileges/${selected}/export`" :class="{ disabled: !detail.data.value.entries.length }">
+            <a class="btn outline small" :href="`/api/features/${selected}/export`" :class="{ disabled: !detail.data.value.entries.length }">
               <Icon name="file" :size="14" /> Export ZIP
             </a>
           </div>

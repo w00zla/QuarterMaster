@@ -82,14 +82,14 @@ removing imported text sources), the bot's status texts and assigning privileges
   tabs: Roster, Shared stock (grouped like a user's), Bot (presence, language, logs channel and level with
   the logs state from `/api/status`, board channel/message/style/title/subtitle), Activity (newest 20 rows
   with this `guild_id`, link to Activity).
-- **Privileges** (`/privileges/:key?`, `src/adminapp/privileges.ts`, tested in `test/webapp-features.db.test.ts`;
-  the system: `docs/webapp.md` "Privileges"): the keys (from the migrations) with their description, holders in
-  force and entries. The detail: holders (since when) and the feature's rows (a UUID subject
+- **Features** (`/features/:key?`, `FeaturesView.vue`, `src/adminapp/features.ts`, tested in `test/webapp-features.db.test.ts`;
+  the system: `docs/webapp.md` "Features and privileges"): the features (from the migrations) with their
+  description, number of privileges, holders (users with any of its privileges) and entries. The detail: its privileges with their holders, the holders (user, privilege, since when) and the feature's rows (a UUID subject
   with the catalog's name, the author, the current thumbnail next to the reference image, "Re-rendered" when the
-  mark's hash differs). "Export ZIP" (`GET /api/privileges/:key/export`, `zip.ts`, uncompressed): `entries.json`
+  mark's hash differs). "Export ZIP" (`GET /api/features/:key/export`, `zip.ts`, uncompressed): `entries.json`
   (key, description, one object per row with subject, name, class, type, author, payload, current thumbnail
   hash, `stale`, image path) and `images/<subject>_<userId>.<ext>`: unpacked into `local/` it is what Claude reads
-  to fix the renders. Assigning lives in **Users**, section Privileges: every key not retired with its state
+  to fix the renders. Assigning lives in **Users**, section Privileges: every privilege not retired with its feature and state
   (Held / Not held), assign (`PUT /api/users/:id/privileges/:key`, body `{}`) and take back (`DELETE`, confirmed; the user's rows stay).
 
 ## Stock

@@ -4,7 +4,7 @@ import StatusView from "./views/StatusView.vue";
 import ActivityView from "./views/ActivityView.vue";
 import OrgsView from "./views/OrgsView.vue";
 import UsersView from "./views/UsersView.vue";
-import PrivilegesView from "./views/PrivilegesView.vue";
+import FeaturesView from "./views/FeaturesView.vue";
 import StockView from "./views/StockView.vue";
 import RefineryView from "./views/RefineryView.vue";
 import BlueprintsView from "./views/BlueprintsView.vue";
@@ -33,7 +33,7 @@ export const router = createRouter({
     { path: "/activity", name: "activity", component: ActivityView, meta: { title: "Activity" } },
     { path: "/orgs/:guildId?", name: "orgs", component: OrgsView, meta: { title: "Orgs" } },
     { path: "/users/:userId?", name: "users", component: UsersView, meta: { title: "Users" } },
-    { path: "/privileges/:key?", name: "privileges", component: PrivilegesView, meta: { title: "Privileges" } },
+    { path: "/features/:key?", name: "features", component: FeaturesView, meta: { title: "Features" } },
     { path: "/stock", name: "stock", component: StockView, meta: { title: "Stock" } },
     { path: "/refinery", name: "refinery", component: RefineryView, meta: { title: "Refinery" } },
     { path: "/blueprints/:uuid?", name: "blueprints", component: BlueprintsView, meta: { title: "Blueprints" } },

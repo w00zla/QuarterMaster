@@ -804,25 +804,35 @@ export interface RefineryJob {
   scu: string;
 }
 
-// --- privileges (GET /api/privileges[/:key], /api/privileges/:key/blob/:id, /api/privileges/:key/export;
+// --- features (GET /api/features[/:key], /api/features/:key/blob/:id, /api/features/:key/export;
 // GET/PUT/DELETE /api/users/:userId/privileges[/:key]) ---
-export interface PrivilegeRow {
+export interface FeaturePrivilege {
+  key: string;
+  description: string;
+  retired: boolean;
+  holderCount: number;
+}
+
+export interface FeatureRow {
   key: string;
   description: string;
   createdAt: string;
   retiredAt: string | null;
+  privileges: FeaturePrivilege[];
+  // Users holding any of its privileges
   holderCount: number;
   entryCount: number;
 }
 
-export interface PrivilegeHolder {
+export interface FeatureHolder {
   userId: string;
   name: string | null;
+  privilegeKey: string;
   grantedAt: string;
 }
 
-// One row of the key's feature data; a UUID subject with the catalog's name, class and type
-export interface PrivilegeEntry {
+// One row of the feature's data; a UUID subject with the catalog's name, class and type
+export interface FeatureEntryRow {
   id: number;
   userId: string;
   userName: string | null;
@@ -839,15 +849,18 @@ export interface PrivilegeEntry {
   updatedAt: string;
 }
 
-export interface PrivilegeDetail extends PrivilegeRow {
-  holders: PrivilegeHolder[];
-  entries: PrivilegeEntry[];
+export interface FeatureDetail extends FeatureRow {
+  // One row per user and privilege
+  holders: FeatureHolder[];
+  entries: FeatureEntryRow[];
 }
 
-// A user's assignment per key (grantedAt null = not held)
+// A user's assignment per privilege (grantedAt null = not held); retired = the privilege or its feature
 export interface UserPrivilege {
   key: string;
   description: string;
+  featureKey: string;
+  featureDescription: string;
   retired: boolean;
   grantedAt: string | null;
 }

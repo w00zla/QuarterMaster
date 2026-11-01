@@ -20,7 +20,8 @@ export interface MeResponse {
   rsiHandle: string | null;
   // The web app's language override (the bot keeps its own); null = follow the browser
   langOverride: Lang | null;
-  // Privilege keys in force (docs/webapp.md "Privileges"): the features beyond the roles this user may use
+  // Privilege keys in force (`<feature>.<right>`, docs/webapp.md "Features and privileges"): what this user may
+  // do in the features beyond the roles
   privileges: string[];
 }
 
@@ -725,8 +726,9 @@ export interface HistoryResponse {
   more: boolean;
 }
 
-// --- privileges' features (GET/PUT/DELETE /api/features/:key/entries[/:subject[/blob]], GET /api/features/:key/blob/:id) ---
-// Every holder of the key sees every row; only the own row (`own`) can be changed. 403 noPrivilege without the key.
+// --- features (GET/PUT/DELETE /api/features/:key/entries[/:subject[/blob]], GET /api/features/:key/blob/:id; key = the feature) ---
+// Whoever holds the feature's reading privilege sees every row; only the own row (`own`) can be changed, with its
+// writing privilege. 403 noPrivilege without.
 export interface FeatureEntry {
   id: number;
   userId: string;
@@ -789,7 +791,7 @@ export type ServerMessage =
   // A new history entry concerning you (yours, someone acted on your data, or stock shared in one of
   // your orgs): GET /api/history?after
   | { type: 'history'; id: number; source: HistorySource; actor: string }
-  // A privilege's feature data changed (to every holder of the key): GET /api/features/:key/entries
+  // A feature's data changed (to whoever holds its reading privilege; key = the feature): GET /api/features/:key/entries
   | { type: 'feature'; key: string }
   // Changes may have been missed (the server lost its DB listener): reload everything
   | { type: 'resync' }

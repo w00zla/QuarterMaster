@@ -25,9 +25,9 @@ const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [
   { to: "/mining", label: "nav.mining", icon: "pickaxe" },
   { to: "/trade", label: "nav.trade", icon: "trade" },
 ];
-// Features behind a privilege (docs/webapp.md "Privileges"): a button left of Companion, only for its holders
+// Features (docs/webapp.md "Features and privileges"): a button left of Companion for whoever holds the privilege
 const privilegeTabs: Array<{ to: string; label: Key; icon: IconName; key: string }> = [
-  { to: "/review/thumbs", label: "nav.thumbReview", icon: "eye", key: "thumb-review" },
+  { to: "/review/thumbs", label: "nav.thumbReview", icon: "eye", key: "thumb-review.mark" },
 ];
 const supportTabs = computed(() => privilegeTabs.filter((tab) => me.value?.privileges.includes(tab.key)));
 
