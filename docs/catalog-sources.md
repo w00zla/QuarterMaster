@@ -408,13 +408,14 @@ pictures with gaps), so the icons are rendered from the models:
    that render silently white), so the root is a short hash and the CLI fails an export whose longest path is
    longer ("Pfad zu lang": move `--work` to a shorter folder). The export is deleted after a successful render
    (~2 MB each), failed ones stay for inspection. The
-   **our fork starbreaker-qm** (`local/starbreaker-qm/`, MIT, built from the repo `../starbreaker-qm`, version
+   **our fork starbreaker-qm** (`local/starbreaker-qm/`, MIT, built from the repo `../starbreaker-qm`, public at
+   github.com/w00zla/starbreaker-qm as a GitHub fork of diogotr7/StarBreaker, version
    `0.3.2-qm.n`, commit in `COMMIT`; the catalog extract uses it too) is required. History: the 0.3.2 release
    misplaced weapon magazines and its addon did not stack LayerBlend layers, so the icons were rendered with the
    fleetyards fork (github.com/fleetyards/StarBreaker) until 2026-11-01. Upstream main (diogotr7) had fixed the magazines
    by then, but rendered armour as its loot crate (worn model only via `--geometry-tag Male`, with T-posed arms and
    white palettes), lost paint variants and drew visors flat. starbreaker-qm is the fleetyards fork with upstream
-   merged in (merge commit 70560578): fleetyards' item, material and addon work, upstream's rest (skinning,
+   merged in (merge commit 9aa7ce15): fleetyards' item, material and addon work, upstream's rest (skinning,
    characters, `--geometry-tag`, quick_xml, fixes such as the Sion compensator's texture); the Blender addon is
    fleetyards' unchanged (both rebuilt the decal system, a mix did not run). Remotes `fleetyards` and `upstream` in
    that repo; a sync is a merge there, checked by rendering a sample against the current icons. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable
