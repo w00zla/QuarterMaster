@@ -27,7 +27,7 @@ const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [
 ];
 // Features (docs/webapp.md "Features and privileges"): a button left of Companion for whoever holds the privilege
 const privilegeTabs: Array<{ to: string; label: Key; icon: IconName; key: string }> = [
-  { to: "/review/thumbs", label: "nav.thumbReview", icon: "eye", key: "thumb-review.mark" },
+  { to: "/feature/thumb-review", label: "nav.thumbReview", icon: "eye", key: "thumb-review.mark" },
 ];
 const supportTabs = computed(() => privilegeTabs.filter((tab) => me.value?.privileges.includes(tab.key)));
 

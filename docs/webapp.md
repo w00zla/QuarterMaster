@@ -311,7 +311,7 @@ blocks".
   names from the catalog, components by their `label`; the pick kept for the session), UEX's averages dimmed at
   the bar's end, below it the trading dialog's `TradeTables` for the pick (`GET /api/trade/:uuid`).
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
-- **Thumbnail-Prüfung** (route `/review/thumbs`, `ThumbReviewView.vue`, privilege `thumb-review.mark`; without it the
+- **Thumbnail-Prüfung** (route `/feature/thumb-review`, as every feature `/feature/<key>`, `ThumbReviewView.vue`, privilege `thumb-review.mark`; without it the
   view says so and no button shows): every thumbnail (the L file at 132 CSS px) in a grid per item class and sub type,
   resources apart, sorted by name; above it a panel "Worum geht's?": one line that wrongly rendered thumbnails get marked to be fixed later, one
   on how it works, one on the yellow border; it folds by a click on its title row or the chevron at its top right, remembered per browser; search over name and class name, a chip "Nur markierte". A click on a thumbnail

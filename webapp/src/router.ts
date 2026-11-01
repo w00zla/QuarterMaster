@@ -22,8 +22,8 @@ export const router = createRouter({
     { path: "/mining", component: MiningView },
     { path: "/trade", component: TradeView },
     { path: "/history", component: HistoryView },
-    // Privilege thumb-review (the view says so without it; the server checks every call)
-    { path: "/review/thumbs", component: ThumbReviewView },
+    // Features: /feature/<key>; thumb-review needs thumb-review.mark (the view says so without it; the server checks every call)
+    { path: "/feature/thumb-review", component: ThumbReviewView },
     { path: "/:rest(.*)*", redirect: "/" },
   ],
 });
