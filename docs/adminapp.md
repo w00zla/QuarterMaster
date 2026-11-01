@@ -52,10 +52,8 @@ removing imported text sources), the bot's status texts and assigning privileges
   rows the channel would post that the bot has not worked off yet, from `logRows` against
   `bot.guild.logs_after` — the bot keeps no heartbeat —, warning after 2 minutes, error after 10, "No mark"
   while it has not set its mark), the user data checks (`GET /api/checks`, every check listed also without
-  hits: stock of retired materials, stock at retired locations, registered retired blueprints, refinery jobs
-  ready for over 7 days (`OVERDUE_DAYS`), jobs outside the UEX refineries) and the catalog (counts, texts
-  missing per language, blueprints without a known source and those registered anyway, without output,
-  materials in no recipe; `GET /api/overview`) and the item thumbnails (`GET /api/thumbs`, `src/adminapp/thumbs.ts`:
+  hits: stock of retired materials, stock at retired locations, registered retired blueprints, jobs outside the UEX refineries) and the catalog (counts, texts
+  missing per language, blueprints without a known source and those registered anyway, without output; `GET /api/overview`) and the item thumbnails (`GET /api/thumbs`, `src/adminapp/thumbs.ts`:
   how many of the renderer's targets — gear items by the stock service's rule, materials with a thumbnail entity
   — have one, when `thumbs.json` was written, the targets without one by name, linked; after a game patch's
   import the new items show up there until the next render). The catalog's detail panels (items, materials,
@@ -104,7 +102,7 @@ removing imported text sources), the bot's status texts and assigning privileges
   exceed the list's stored total), lot, orgs, stats by name formatted like the crafting check.
 - **Refinery** (`/refinery`, `GET /api/refinery`): every job with owner, station (`atRefinery` by
   `refineryLocations`; without UEX data every location counts), materials, total SCU, end and state (`open` =
-  no end, `ready`, `overdue` = ready for more than `OVERDUE_DAYS`, `running`); state chips, a station filter
+  no end, `ready` however long ago, `running`); state chips, a station filter
   with the job counts.
 
 ## Catalog

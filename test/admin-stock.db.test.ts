@@ -121,13 +121,13 @@ describe('admin: stock and refinery (database)', { skip: url ? false : 'TEST_DAT
     assert.deepEqual(jobs[1]!.materials, [{ name: 'Test Metal', quantity: '1.5', quality: 900 }, { name: 'Test Metal', quantity: '2', quality: 100 }]);
     assert.deepEqual(jobs[0]!.location, { uuid: U.station, name: 'Test Station' });
 
-    // Ready since a day, ready for longer than the overdue limit
+    // Ready since a day, and still just ready after 8 days (no overdue state)
     await db.execute(sql`UPDATE app.stock_batch SET refine_started_at = now() - interval '2 days', refine_ends_at = now() - interval '1 day'
       WHERE refine_job = ${jobs[0]!.jobId}`);
     assert.equal((await getRefineryJobs(db, 'en'))[0]!.state, 'ready');
     await db.execute(sql`UPDATE app.stock_batch SET refine_started_at = now() - interval '9 days', refine_ends_at = now() - interval '8 days'
       WHERE refine_job = ${jobs[0]!.jobId}`);
-    assert.equal((await getRefineryJobs(db, 'en'))[0]!.state, 'overdue');
+    assert.equal((await getRefineryJobs(db, 'en'))[0]!.state, 'ready');
 
     // UEX data without this station: both jobs sit outside every refinery
     await storeSnapshot(db, 'uex', 'refineries_yields', [

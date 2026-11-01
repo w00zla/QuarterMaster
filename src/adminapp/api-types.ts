@@ -112,9 +112,6 @@ export interface Overview {
     // misses a source. Most users first
     registeredNoSource: { uuid: string; name: string; users: number }[];
     noOutputBlueprints: number;
-    // Resources no active recipe uses, and how many of them are ores
-    unusedResources: number;
-    unusedOres: number;
   };
 }
 
@@ -591,7 +588,7 @@ export interface UserDetail extends UserRow {
 
 // --- data checks: user data the catalog or the refinery data no longer backs ---
 
-export type DataCheckKey = 'retiredMaterial' | 'retiredLocation' | 'retiredBlueprint' | 'overdueJob' | 'jobNotAtRefinery';
+export type DataCheckKey = 'retiredMaterial' | 'retiredLocation' | 'retiredBlueprint' | 'jobNotAtRefinery';
 
 export interface DataCheckHit extends UserRef {
   subject: string;
@@ -789,8 +786,8 @@ export interface StockSubject {
   holders: StockHolder[];
 }
 
-// open = no end time; overdue = ready for more than OVERDUE_DAYS (users.ts)
-export type RefineryJobState = 'running' | 'ready' | 'overdue' | 'open';
+// open = no end time; ready = the end has passed, however long ago (collected whenever the user likes)
+export type RefineryJobState = 'running' | 'ready' | 'open';
 
 /** A refinery job: the batches sharing one `refine_job`. */
 export interface RefineryJob {

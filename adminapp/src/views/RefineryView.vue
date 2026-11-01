@@ -16,7 +16,6 @@ const list = useFetch<RefineryJob[]>(() => "/refinery");
 const STATES: { value: RefineryJobState; label: string; tag: string }[] = [
   { value: "running", label: "Running", tag: "accent" },
   { value: "ready", label: "Ready", tag: "ok" },
-  { value: "overdue", label: "Overdue", tag: "warn" },
   { value: "open", label: "No end", tag: "" },
 ];
 const stateOf = (s: RefineryJobState) => STATES.find((x) => x.value === s)!;

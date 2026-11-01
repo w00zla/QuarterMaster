@@ -234,9 +234,6 @@ async function historyRows(
 
 // --- data checks --------------------------------------------------------------------------
 
-// A finished refinery job nobody completed for this long counts as forgotten
-export const OVERDUE_DAYS = 7;
-
 /** User data the catalog or the refinery data no longer backs; every check is listed, also without hits. */
 export async function getDataChecks(db: Db, lang: string): Promise<DataCheck[]> {
   const names = await userNames(db);
@@ -285,7 +282,6 @@ export async function getDataChecks(db: Db, lang: string): Promise<DataCheck[]> 
         WHERE bp.retired_at IS NOT NULL
         ORDER BY ub.user_id, subject`)),
     },
-    { key: 'overdueJob', hits: hits(await jobs(sql`b.refine_ends_at < now() - ${`${OVERDUE_DAYS} days`}::interval`)) },
     { key: 'jobNotAtRefinery', hits: hits(await jobs(outside)) },
   ];
 }

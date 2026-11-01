@@ -10,7 +10,7 @@ import { formatAmount } from '../stock/amount.ts';
 import { statValueText } from '../stock/component-stats.ts';
 import { locationCatalog } from '../stock/lookup.ts';
 import { componentStats } from '../stock/service.ts';
-import { OVERDUE_DAYS, userNames } from './users.ts';
+import { userNames } from './users.ts';
 import type { RefineryJob, StockHolder, StockRow, StockSubject } from './api-types.ts';
 
 /** Timestamp as ISO 8601 string (the driver would return Postgres' text format here). */
@@ -122,8 +122,7 @@ export async function getRefineryJobs(db: Db, lang: string): Promise<RefineryJob
   const found = await rows<Row>(db, sql`
     SELECT b.refine_job AS "jobId", b.owner_user_id AS "userId", l.uuid AS "locationUuid", ${placeName(lang)} AS location,
       ${iso(sql`min(b.refine_started_at)`)} AS "startedAt", ${iso(sql`max(b.refine_ends_at)`)} AS "endsAt",
-      CASE WHEN max(b.refine_ends_at) IS NULL THEN 'open' WHEN max(b.refine_ends_at) > now() THEN 'running'
-        WHEN max(b.refine_ends_at) < now() - ${`${OVERDUE_DAYS} days`}::interval THEN 'overdue' ELSE 'ready' END AS state,
+      CASE WHEN max(b.refine_ends_at) IS NULL THEN 'open' WHEN max(b.refine_ends_at) > now() THEN 'running' ELSE 'ready' END AS state,
       json_agg(json_build_object('name', ${materialName(lang)}, 'quantity', b.quantity::text, 'quality', b.quality)
         ORDER BY ${materialName(lang)}, b.quality DESC) AS materials,
       sum(b.quantity)::text AS scu

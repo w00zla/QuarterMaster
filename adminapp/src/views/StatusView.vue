@@ -32,7 +32,6 @@ const CHECKS: Record<DataCheckKey, string> = {
   retiredMaterial: "Resources of retired materials",
   retiredLocation: "Resources at retired locations",
   retiredBlueprint: "Registered retired blueprints",
-  overdueJob: "Refinery jobs ready for over a week",
   jobNotAtRefinery: "Refinery jobs outside the UEX refineries",
 };
 
@@ -136,14 +135,13 @@ const TEXT_ENTITIES: Record<string, string> = {
               <span class="mono" :class="c.hits.length ? 'tag warn' : 'faint'">{{ c.hits.length }}</span>
             </div>
             <table v-if="c.hits.length" class="mini">
-              <thead><tr><th>User</th><th>Subject</th><th>Location</th><th class="num">Amount</th><th v-if="c.key === 'overdueJob'">Ready</th></tr></thead>
+              <thead><tr><th>User</th><th>Subject</th><th>Location</th><th class="num">Amount</th></tr></thead>
               <tbody>
                 <tr v-for="(h, i) in c.hits" :key="i" class="link" @click="router.push(`/users/${h.userId}`)">
                   <td><span v-if="h.name">{{ h.name }}</span><span v-else class="mono faint">{{ h.userId }}</span></td>
                   <td>{{ h.subject }}</td>
                   <td class="dim">{{ h.location ?? "" }}</td>
                   <td class="num mono">{{ h.amount ? `${h.amount} ${h.unit}` : "" }}</td>
-                  <td v-if="c.key === 'overdueJob'">{{ dateTime(h.endsAt) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -203,8 +201,6 @@ const TEXT_ENTITIES: Record<string, string> = {
               </dd>
               <dt>Without output</dt>
               <dd :class="{ faint: !overview.data.value.gaps.noOutputBlueprints }">{{ overview.data.value.gaps.noOutputBlueprints }}</dd>
-              <dt>Materials in no recipe <HelpTip :text="HELP.unusedResources" /></dt>
-              <dd>{{ overview.data.value.gaps.unusedResources }} <span class="faint">({{ overview.data.value.gaps.unusedOres }} ores)</span></dd>
             </dl>
           </div>
         </template>

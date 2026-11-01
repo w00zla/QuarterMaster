@@ -135,7 +135,6 @@ const CHECK_TEXT: Record<DataCheckKey, string> = {
   retiredMaterial: 'Stock of retired materials',
   retiredLocation: 'Stock at retired locations',
   retiredBlueprint: 'Registered retired blueprints',
-  overdueJob: 'Refinery jobs ready for over a week',
   jobNotAtRefinery: 'Refinery jobs outside the UEX refineries',
 };
 

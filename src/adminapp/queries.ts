@@ -122,12 +122,7 @@ export async function getOverview(db: Db, lang: string): Promise<Overview> {
     SELECT
       (SELECT count(*) FROM catalog.blueprint b JOIN catalog.raw_record r ON r.uuid = b.uuid
         WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path NOT IN ${REWARD_POOL_PATHS})::int AS "noSourceBlueprints",
-      (SELECT count(*) FROM catalog.blueprint WHERE retired_at IS NULL AND output_item_uuid IS NULL)::int AS "noOutputBlueprints",
-      count(*) FILTER (WHERE NOT used)::int AS "unusedResources",
-      count(*) FILTER (WHERE NOT used AND is_ore)::int AS "unusedOres"
-    FROM (SELECT r.is_ore, EXISTS (SELECT 1 FROM catalog.blueprint_input bi
-      JOIN catalog.blueprint b ON b.uuid = bi.blueprint_uuid AND b.retired_at IS NULL WHERE bi.resource_uuid = r.uuid) AS used
-      FROM catalog.resource r WHERE r.retired_at IS NULL) x`);
+      (SELECT count(*) FROM catalog.blueprint WHERE retired_at IS NULL AND output_item_uuid IS NULL)::int AS "noOutputBlueprints"`);
 
   const last = await one<{ id: number; counts: { added?: number; changed?: number; retired?: number; revived?: number } | null }>(db, sql`
     SELECT id, summary->'entities'->'blueprint' AS counts FROM catalog.import ORDER BY id DESC LIMIT 1`);
@@ -160,8 +155,6 @@ export async function getOverview(db: Db, lang: string): Promise<Overview> {
       noSourceBlueprints: usage?.noSourceBlueprints ?? 0,
       registeredNoSource,
       noOutputBlueprints: usage?.noOutputBlueprints ?? 0,
-      unusedResources: usage?.unusedResources ?? 0,
-      unusedOres: usage?.unusedOres ?? 0,
     },
   };
 }

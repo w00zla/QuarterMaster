@@ -76,7 +76,7 @@ describe('admin: dashboard and activity (database)', { skip: url ? false : 'TEST
     await addBlueprint(db, OLGA, U.blueprint2, 'companion');
     // A give in Alpha: one gem to Mia
     await move(db, actor(OLGA, 'webapp', G), { batchId: gem.batch!.id, amount: '1', toOwnerUserId: MIA });
-    // Solo: one job running, one ready (for over a week: a data check hit)
+    // Solo: one job running, one ready for over a week (no data check: collected whenever the user likes)
     await refineStart(db, actor(SOLO, 'webapp'), { locationUuid: U.station, durationSeconds: 3600, rows: [{ resourceUuid: U.metal, quality: 400, amount: '8' }] });
     const ready = await refineStart(db, actor(SOLO, 'webapp'), { locationUuid: U.station, durationSeconds: 60, rows: [{ resourceUuid: U.metal, quality: 100, amount: '2' }] });
     await db.execute(sql`UPDATE app.stock_batch SET refine_started_at = now() - interval '9 days', refine_ends_at = now() - interval '8 days'
@@ -130,9 +130,9 @@ describe('admin: dashboard and activity (database)', { skip: url ? false : 'TEST
     const total = await historyCount();
     const d = await getDashboard(db, 'en', 7);
 
-    // No UEX data yet, Solo's job ready for over a week; the catalog is imported, no logs channel
+    // No UEX data yet; the catalog is imported, no logs channel; Solo's long-ready job is no hit
     assert.deepEqual(d.attention.map((a) => [a.severity, a.text, a.to]), [
-      ['warn', 'UEX pull: no data yet', '/status'], ['warn', 'Refinery jobs ready for over a week: 1', '/status'],
+      ['warn', 'UEX pull: no data yet', '/status'],
     ]);
 
     const k = d.kpis;
