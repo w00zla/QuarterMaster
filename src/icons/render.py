@@ -46,9 +46,25 @@ def load(path):
     return bpy.context.scene
 
 
+def hide_screens(scene):
+    # UI-Bildschirme (Material-Template screen_hud, z.B. die Anzeige des mobiGlas) bleiben ohne UI-Inhalt
+    # unsichtbar, spannten aber die Box auf: das Armband wurde zum Punkt. Ausblenden und nicht einpassen,
+    # außer das Item besteht nur daraus.
+    def screen_only(o):
+        used = {p.material_index for p in o.data.polygons}
+        mats = [o.material_slots[i].material for i in used if i < len(o.material_slots)]
+        return bool(mats) and all(m is not None and m.get('starbreaker_template_key') == 'screen_hud' for m in mats)
+    meshes = [o for o in scene.objects if o.type == 'MESH' and o.data.polygons and not o.hide_render]
+    screens = [o for o in meshes if screen_only(o)]
+    if screens and len(screens) < len(meshes):
+        for o in screens:
+            o.hide_render = True
+            o['icon_screen'] = True
+
+
 def mesh_corners(objects):
     for o in objects:
-        if o.type != 'MESH' or not o.data.vertices:
+        if o.type != 'MESH' or not o.data.vertices or o.get('icon_screen'):
             continue
         for c in o.bound_box:
             yield o.matrix_world @ Vector(c)
@@ -58,6 +74,7 @@ def render(job, a):
     src, out = job['src'], job['out']
     pose, rig, size = job.get('pose'), job.get('rig'), job.get('size', a.size)
     scene = load(src)
+    hide_screens(scene)
 
     if pose:
         # Pose des Spiels: alles unter ein Empty mit Euler XYZ hängen, Kamera auf -Z, Bild-oben = -Y
