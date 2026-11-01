@@ -12,7 +12,7 @@
 // sideways, so only the visit as a whole tells). An order is acted on only once two reads in a row
 // showed it the same (OCR misreads do not book anything).
 import { addName, emptyNames, findMaterial, norm, type MaterialNames } from "../../src/stock/material-names.ts";
-import type { CatalogResponse, StockBatch } from "../../src/webapp/api-types.ts";
+import type { CompanionCatalogResponse, StockBatch } from "../../src/webapp/api-types.ts";
 import { buildComponentCatalog, statNameKeys, type ComponentCatalog } from "./components.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------
@@ -78,7 +78,7 @@ export interface SyncCatalog {
 }
 
 /** The loc keys whose texts the player's language pack may change (materials, refinery stations, stat names). */
-export function gameNameKeys(responses: CatalogResponse[]): string[] {
+export function gameNameKeys(responses: CompanionCatalogResponse[]): string[] {
   const keys = new Set<string>(statNameKeys(responses));
   for (const r of responses) {
     for (const m of r.materials) if (m.nameKey) keys.add(m.nameKey);
@@ -88,7 +88,7 @@ export function gameNameKeys(responses: CatalogResponse[]): string[] {
 }
 
 /** The lookups from the web app's catalog (each language) and the player's own texts (`gameNames`: loc key -> text). */
-export function buildCatalog(responses: CatalogResponse[], gameNames: Record<string, string>): SyncCatalog {
+export function buildCatalog(responses: CompanionCatalogResponse[], gameNames: Record<string, string>): SyncCatalog {
   const cat: SyncCatalog = {
     materials: emptyNames(), allMaterials: emptyNames(), units: new Map(), stations: new Map(), stationNames: new Map(), materialNames: new Map(), locations: [],
     components: buildComponentCatalog(responses, gameNames),
@@ -98,7 +98,8 @@ export function buildCatalog(responses: CatalogResponse[], gameNames: Record<str
       const own = m.nameKey ? gameNames[m.nameKey] : undefined;
       addName(cat.allMaterials, m.name, m.uuid);
       if (own) addName(cat.allMaterials, own, m.uuid);
-      cat.units.set(m.uuid, m.unit);
+      // SCU for resources, pieces for items (as the web app's catalog says it)
+      cat.units.set(m.uuid, m.kind === "resource" ? "SCU" : "pcs");
       if (!cat.materialNames.has(m.uuid)) cat.materialNames.set(m.uuid, m.name);
       if (m.kind !== "resource") continue;
       addName(cat.materials, m.name, m.uuid);

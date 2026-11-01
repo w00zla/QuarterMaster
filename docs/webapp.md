@@ -19,9 +19,9 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   via `app.request`.
 - Middleware order: `secureHeaders` (strict CSP, no HSTS: Caddy sets it), own same-origin check for every
   non-GET (`Sec-Fetch-Site`, else `Origin` = `WEBAPP_ORIGIN`; Hono's `csrf()` only covers form content
-  types), `no-store` on `/auth/*` and `/api/*` unless the route sets its own (only `/api/catalog`: `private,
-  no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~1 MB per language
-  spared; the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
+  types), `no-store` on `/auth/*` and `/api/*` unless the route sets its own (only `/api/catalog` and `/api/companion/catalog`: `private,
+  no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~3 MB per language
+  spared (Caddy compresses nothing; the app gzips only `/api/companion/catalog`, below); the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
   per session), then for `/api/*` the session check (401 for every route, unknown ones too), JSON-only
   writes (415, `DELETE` included) and a 16 KB body limit (a feature's image upload: its own, see
   "Features and privileges").
@@ -61,6 +61,16 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   mining data answers for it: a mined resource, a refined one from its ores, or a gem item); blueprints (`unlockable`: a
   row in `catalog.blueprint_source`; magazines included); each material and location with its loc `nameKey` (the companion looks it up in
   the player's language pack). From the shared in-memory catalogs; no ores, no refining methods.
+- `GET /api/companion/catalog?lang` (2026-11-01): the companion app's catalog, the same rows (same order) with
+  only the fields it reads (`CompanionCatalogResponse`, `Pick`s of the types above): materials without unit
+  (follows from `kind`), class and `minable`; locations without yields; blueprints with uuid, label, name,
+  size, grade letter, `isDefault`, `retired`, `outputUuid`, `thumb`. Cached like `/api/catalog` (`private,
+  no-cache`, ETag). Session or API token like every route; companion builds before it keep `/api/catalog`.
+  Size per language (dev DB, 2026-11-01): ~2.45 MB instead of ~2.95 MB raw, gzip ~340 instead of ~360 KB
+  (the components with their stats are most of it and the companion needs them). Gzipped by the server when the
+  client sends `Accept-Encoding: gzip` (so the proxy needs no `encode`): `Content-Encoding: gzip`,
+  `Vary: Accept-Encoding`, the gzipped body kept per language until the catalog's text changes; the ETag is
+  the gzipped body's (taken after the compression), so a 304 compresses nothing anew.
 - Stock: `/api/stock` personal = everything you own incl. shared, org = what its active members shared (with
   an owner filter), or `all` = both; writes `add`/`remove`/`adjust`/`move` (+ split, merge, share).
 - Refinery: `/api/refinery/start|duration|done|remove`, always personal, always a work order: one station
@@ -75,10 +85,7 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   `PriceSummary` of every bookable material with a price: sell/buy min, max, UEX average, terminals, latest
   date), `GET /api/trade/items?lang=` (the item finder: every non-retired catalog material, resource or item incl.
   shop items, with an offer: name, type label (FPS gear with its sub type), size, grade, `bookable`, lowest buy and
-  highest sell price; cached per language until the trade snapshot or catalog changes), `GET /api/trade/places`
-  (every place with an offer, by system then location, with its distinct shops and materials),
-  `GET /api/trade/place?system=&location=` (its materials, one row per material and shop with buy/sell price and the
-  later report date, no names; 404 for an unknown place, `system` absent = offers without a system),
+  highest sell price; cached per language until the trade snapshot or catalog changes),
   `GET /api/trade/:uuid` (every terminal per side, best first; 404 without a price). `MaterialInfo.prices`
   and `value` in the summary (personal and per org: the same stored batches as the other figures, at the best
   sell price, whole aUEC, Ressourcen and Ausrüstung apart; unpriced batches left out; null without UEX data).
@@ -226,7 +233,7 @@ blocks".
   and org stock with an owner column ("Pers." / "Org (holder)"). Adding has a share switch per org (an org
   scope starts with that org on; the batch is always personal, the switches share it). Row actions Sharing (a
   switch per org, whole batch) · Split (unshared) or Merge back (a split-off part) · Move (place, recipient) ·
-  Remove · Adjust; on batches you cannot change (org scope, "All") the same buttons, disabled. UEC columns (mono, 12 px, dimmed; amount × UEX price, BigInt micro units; batch rows their value, the group row
+  Remove · Adjust; on batches you cannot change (org scope, "All") the same buttons, disabled. UEC columns (titled "UEC Verkauf" etc.: the heads are upper case, "aUEC" would read "AUEC"; the table's face, dimmed, no unit after the values: it is in the title; amount × UEX price, BigInt micro units; batch rows their value, the group row
   the material's total; "—" without a price): "UEC Verkauf" (best sell) shown, "UEC Kauf" (best buy) and both
   averages hidden by default; Ausrüstung has "UEC Verkauf" and "UEC Kauf" only (items have no averages).
   The panel title adds the list's worth at the best sell prices, set apart (mono, 12 px, dimmer): "Ressourcen · Persönlich (123.000
@@ -234,7 +241,7 @@ blocks".
   Ressourcen and Ausrüstung: a last fixed column with the "Handel" button
   (`ChipButton`) on each material's row, disabled without a UEX price; it opens `TradeDialog.vue`: tabs
   "Verkaufen · n" / "Kaufen · n" (only sides with prices), each a `DataTable` of every terminal grouped by system (`groupOf`: a head row per system, by name, the rows' first cell indented; Terminal as
-  "place – shop", e.g. "ARC-L1 Wide Forest Station – Admin", its tooltip adds the report's date "· Stand …"; Preis,
+  "place – shop", e.g. "ARC-L1 Wide Forest Station – Admin", its tooltip adds the report's date "· Stand …"; Preis (with a quiet "aUEC" after it),
   Nachfrage / Bestand as a bar against the side's largest amount with a tick at the terminal's average, the figures
   on hover; items without that column; no System or Stand column since 2026-11-01), Kaufen by terminal name,
   Verkaufen best price first, a system filter ("Alle Systeme", right of the tabs; a system the next pick lacks
@@ -300,7 +307,7 @@ blocks".
   steps of 50, not written back to the card), the card dims the values below it, shows those reaching it in green and
   adds per system "≥ 600" (the chance a part reaches it, "nie" when never).
 - **Bergbau** ("Mining", route `/mining`, the tab right of Crafting): `MiningView`, one section per mining
-  feature; the first, "Fundorte" ("Where to mine", locate icon), holds a picker over the mined resources (ores,
+  feature; the first, "Fundorte" ("Where to mine", locate icon), holds a picker (416 px, like Kaufen/Verkaufen's; Crafting's search 390 px) over the mined resources (ores,
   raw materials, gems; what an ore refines into searched too) and the `MiningTable` (layout A of the concept
   https://claude.ai/artifact/ERWoBH6j1SZi5oD5g5zj1x, the same in the dialog): a system and a
   method filter (`Dropdown` chips like the stock's, "Alle Systeme"/"Alle Methoden"; shared with the dialog for the
@@ -316,18 +323,15 @@ blocks".
   `webapp/src/mining.ts`.
 - **Kaufen/Verkaufen** ("Buy/Sell", tab and title since 2026-11-01, before "Handel"/"Trading"; route `/trade`, the tab right of Bergbau, icon `trade`;
   the stock rows' button and dialog keep "Handel"): `TradeView`, the item finder. A section "Preise"
-  with a picker over everything UEX has a price for (`GET /api/trade/items`, per visit and language: resources,
+  with a picker (416 px) over everything UEX has a price for (`GET /api/trade/items`, per visit and language: resources,
   gear and the catalog-only shop items; bookable components by their catalog `label`, the rest by name, the type
   as the hint; the pick kept for the session), UEX's averages dimmed at
   the bar's end, below it the pick's info tile (`InfoTile.vue`, see "Info tiles"; no prices: the tables have them) and the
   trading dialog's `TradeTables` for the pick (`GET /api/trade/:uuid`) with `split`: both sides as two columns
   (Kaufen left, Verkaufen right, one below the other under 1100 px; an empty side "Keine Terminals"; own column
   widths `qm.webapp.columns.trade-view-{buy,sell}`); the system filter right of the picker, kept for the session; tile and tables appear together once both are loaded. The
-  trading dialog keeps its tabs. Below, a section "Nach Ort" (locate icon): a picker over the places with offers
-  (`GET /api/trade/places`; the location, its system as the hint; narrowed by the same system filter, which sits
-  right of it too; a place the filter hides is unpicked), then a `DataTable` of everything its shops trade
-  (`GET /api/trade/place`), grouped by shop: Item (type icon, the info card on hover), Typ, Kaufen, Verkaufen
-  (the best price there, "—" without), by name; widths `qm.webapp.columns.trade-place`.
+  trading dialog keeps its tabs. (A section "Nach Ort", what a place's shops trade, was built and taken out
+  again on 2026-11-01.)
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
 - **Thumbnail-Prüfung** (route `/feature/thumb-review`, as every feature `/feature/<key>`, `ThumbReviewView.vue`, privilege `thumb-review.mark`; without it the
   view says so and no button shows): every thumbnail (the L file at 132 CSS px) in a grid per item class and sub type,
@@ -343,21 +347,23 @@ blocks".
 - Info cards: hovering a blueprint name or a material shows game data from `GET /api/info/...`
   (`InfoTip.vue`: loaded on first hover, cached per language, teleported overlay; never the raw records; the
   card's content and its loader `loadInfo` are `InfoCard.vue`). No maker anywhere (card, tile; decided
-  2026-11-01: it only takes room). The meta line after a bullet (the tile's facts line too; the values below it set apart by the mono face). The game's text in two parts (`descriptionParts`): its remaining head lines
-  ("Batteriekapazität: 80 Schuss", in the meta line's colour and the mono face, the blank lines between them gone), then the prose
-  (the quietest colour); head
-  lines the card shows anyway (type, size, grade, class, German and English) go where the card has that value,
-  the maker's always. The server keeps of a line the German pack states in both languages ("Typ (En): …" /
+  2026-11-01: it only takes room). The meta line after a bullet (the tile's facts line too). The game's text as
+  one piece (`descriptionText`; not split into values and prose: it is all the game's text), in the quietest
+  colour: head lines the card shows anyway (type, size, grade/"Güte", class, German and English) go where the
+  card has that value, the maker's always; spaces at line ends and doubled ones go, at most one blank line in a
+  row; cut after eight lines. The server keeps of a line the German pack states in both languages ("Typ (En): …" /
   "Typ (De): …", "Fokus") only the one in the asked language, without the tag (`descriptionInLang` in
   `src/catalog/labels.ts`). An item's card shows "Bauplan" for the blueprints that craft it
-  (`MaterialInfo.craftedBy`): per blueprint Standard and the craft time (its name only when it differs from the
-  item's or there are several), then the unlock lines as on a blueprint's card.
+  (`MaterialInfo.craftedBy`): per blueprint Standard (its name only when it differs from the item's or there are
+  several), then the unlock lines as on a blueprint's card; none: "Kein Bauplan". "Preise" always: a side without
+  a price "—", none at all "Keine Preise". No craft time in the cards (the Crafting card has it).
 - Info tiles (`InfoTile.vue`, layout "Kopfband" of https://claude.ai/artifact/7E3fP8B5PczRWeWbexVDAG, 2026-11-01):
   the same data as a header band, for Kaufen/Verkaufen's pick and as the head of each Crafting card (the crafted
   item, `outputUuid`): the M thumbnail at 96 px (72 px on phones), name with its tags (slot; Crafting:
   Standard/Ausgemustert), one line of plain facts (Crafting: the blueprint category first; item: type ·
-  S1 · Grade C · class; resource: group, Raffiniert zu, Aus Erz, Verwendet in), the text's head values in one
-  line and, a little apart, its prose (one line with an ellipsis; all of each on hover); no boxes and no prices (nothing in the band looks like an input). At the right
+  S1 · Grade C · class; resource: group, Raffiniert zu, Aus Erz, Verwendet in), a little apart the game's text
+  (as in the card, three lines at most with an ellipsis; only when cut the whole text as a tooltip and the help
+  cursor, like the names with an info card; measured again on width changes); no boxes and no prices (nothing in the band looks like an input). At the right
   the caller's `actions` at the top (Crafting: count, remove) and its `corner` at the bottom (Crafting:
   Freischaltung). While the card loads the band stands (thumbnail, name, the lines' height): nothing moves.
   A blueprint's card ends with "Freischaltung" (`BlueprintInfo.unlocks`): one line per kind ("126 Missionen",

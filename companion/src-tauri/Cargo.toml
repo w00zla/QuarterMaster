@@ -1,6 +1,6 @@
 [package]
 name = "quartermaster-companion"
-version = "2.0.0"
+version = "2.0.1"
 description = "Quartermaster Companion: reads Star Citizen's Game.log for the Quartermaster web app"
 authors = ["w00zla"]
 edition = "2021"
@@ -26,8 +26,9 @@ tauri-plugin-opener = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# The web app API; rustls like BindSight, no native-tls
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+# The web app API; rustls like BindSight, no native-tls; gzip: the server gzips the companion's catalog
+# (reqwest asks for it and unpacks it)
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "gzip"] }
 # Finding the blueprint lines in GBs of old logs
 memchr = "2"
 # OCR of the refinery terminal: ONNX Runtime (prebuilt, linked statically) for the PP-OCRv5 models,

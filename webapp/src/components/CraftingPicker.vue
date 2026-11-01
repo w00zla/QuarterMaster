@@ -182,8 +182,10 @@ const listError = computed(() => (mode.value === "result" ? blueprints.error.val
   gap: 8px;
 }
 
+/* The view's main input: ~30 % wider (300 -> 390 px), like the other views' pickers */
 .search.wide {
-  width: 300px;
+  width: 390px;
+  max-width: 100%;
 }
 
 .menu {

@@ -18,9 +18,9 @@ use reqwest::{Client, Method, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The HTTP client, shared by all commands. No total timeout: on a thin line the catalog (~1 MB per
-/// language) takes longer than any fixed limit; the connection must come up within 10 s and the answer
-/// may stall for 30 s at most.
+/// The HTTP client, shared by all commands; it asks for gzip and unpacks it (the server gzips the catalog:
+/// ~340 KB instead of ~2.5 MB per language). No total timeout: on a thin line the catalog takes longer than
+/// any fixed limit; the connection must come up within 10 s and the answer may stall for 30 s at most.
 pub fn client() -> Client {
     Client::builder()
         .connect_timeout(Duration::from_secs(10))
@@ -117,7 +117,7 @@ pub fn kept_etag(dir: &Path, path: &str) -> (PathBuf, Option<String>) {
     (file, etag)
 }
 
-/// A GET whose answer is kept in `dir` with its ETag (the catalog: ~1 MB per language): sent with
+/// A GET whose answer is kept in `dir` with its ETag (the catalog: ~2.5 MB per language, ~340 KB gzipped on the line): sent with
 /// `If-None-Match`, a 304 answers the kept body as 200. The ETag hashes the content, so another server or
 /// user can never get a wrong kept answer. A broken or unwritable file only costs the transfer.
 pub async fn cached_api(client: &Client, origin: &str, token: &str, path: &str, dir: &Path) -> Result<ApiResponse, String> {

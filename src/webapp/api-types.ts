@@ -133,6 +133,22 @@ export interface CatalogResponse {
   blueprints: CatalogBlueprint[];
 }
 
+// --- the companion app's catalog (GET /api/companion/catalog?lang=de|en) ---------------------------
+// The rows of GET /api/catalog with only the fields the companion reads (the unit follows from `kind`);
+// cached the same way (ETag, revalidated).
+
+export type CompanionCatalogMaterial = Pick<CatalogMaterial,
+  'uuid' | 'kind' | 'name' | 'nameKey' | 'type' | 'typeLabel' | 'component' | 'label' | 'size' | 'gradeLetter' | 'stats' | 'thumb'>;
+export type CompanionCatalogLocation = Pick<CatalogLocation, 'uuid' | 'key' | 'label' | 'short' | 'nameKey' | 'refinery'>;
+export type CompanionCatalogBlueprint = Pick<CatalogBlueprint,
+  'uuid' | 'label' | 'name' | 'size' | 'gradeLetter' | 'isDefault' | 'retired' | 'outputUuid' | 'thumb'>;
+
+export interface CompanionCatalogResponse {
+  materials: CompanionCatalogMaterial[];
+  locations: CompanionCatalogLocation[];
+  blueprints: CompanionCatalogBlueprint[];
+}
+
 // --- stock -------------------------------------------------------------------------------------
 // All take &lang=de|en for material and location names and answer StockListResponse.
 // GET /api/stock?scope=personal                       your personal stock (incl. refinery jobs: state 'refining', not stock yet)
@@ -396,7 +412,6 @@ export interface BlueprintInfo {
   category: string | null;
   isDefault: boolean;
   retired: boolean;
-  craftSeconds: number | null;
   // First tier: requiredSlots of the slots are filled, each with one of its inputs
   requiredSlots: number;
   slots: Array<{ name: string | null; inputs: Array<{ name: string; kind: 'resource' | 'item'; quantity: string; minQuality: number }> }>;
@@ -477,7 +492,7 @@ export interface UnlocksResponse {
 export interface MaterialInfo {
   kind: 'resource' | 'item';
   // Items: the blueprints (not retired) that craft it, with their unlocks as in BlueprintInfo; resources: none
-  craftedBy: Array<{ uuid: string; name: string; isDefault: boolean; craftSeconds: number | null; unlocks: UnlockSummary[] }>;
+  craftedBy: Array<{ uuid: string; name: string; isDefault: boolean; unlocks: UnlockSummary[] }>;
   name: string;
   // Items: the item type (icon)
   type: string | null;
@@ -573,8 +588,6 @@ export interface MiningResponse {
 // --- trading (UEX community prices in aUEC per SCU or piece) --------------------------------------
 // GET /api/trade/prices    TradePricesResponse: the summary of every bookable material with a price
 // GET /api/trade/items?lang=       TradeItemsResponse: every material with an offer, best buy/sell price
-// GET /api/trade/places            TradePlacesResponse: every place with an offer
-// GET /api/trade/place?system=&location=  TradePlaceResponse: its materials per shop (404 for an unknown place)
 // GET /api/trade/:uuid     TradeResponse: every terminal (404 without any price)
 
 export interface PriceRange {
@@ -637,32 +650,6 @@ export interface TradeItem {
 
 export interface TradeItemsResponse {
   items: TradeItem[];
-}
-
-export interface TradePlace {
-  system: string | null;
-  location: string;
-  // Distinct shops/terminals there and distinct materials traded
-  shops: number;
-  items: number;
-}
-
-export interface TradePlacesResponse {
-  places: TradePlace[];
-}
-
-// One material in one shop of a place (names: GET /api/trade/items)
-export interface TradePlaceOffer {
-  uuid: string;
-  shop: string;
-  buy: number | null;
-  sell: number | null;
-  // The latest report of the two (ISO)
-  date: string;
-}
-
-export interface TradePlaceResponse {
-  offers: TradePlaceOffer[];
 }
 
 // --- profile (POST /api/profile) ------------------------------------------------------------------

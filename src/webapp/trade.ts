@@ -12,8 +12,7 @@ import { valueMicros, wholeOfMicros, formatAmount } from '../stock/amount.ts';
 import { materialCatalog } from '../stock/lookup.ts';
 import { componentItemSql } from '../stock/service.ts';
 import type {
-  PriceSummary, StockValue, TradeItem, TradeItemsResponse, TradeOffer, TradePlace, TradePlaceOffer, TradePlaceResponse,
-  TradePlacesResponse, TradePricesResponse, TradeResponse,
+  PriceSummary, StockValue, TradeItem, TradeItemsResponse, TradeOffer, TradePricesResponse, TradeResponse,
 } from './api-types.ts';
 import { HttpError, type Env } from './routes.ts';
 
@@ -27,47 +26,6 @@ export function bestPrices(m: Pick<MaterialTrade, 'sell' | 'buy'>): { buy: numbe
     buy: m.buy.length ? Math.min(...m.buy.map((o) => o.price)) : null,
     sell: m.sell.length ? Math.max(...m.sell.map((o) => o.price)) : null,
   };
-}
-
-const placeKey = (system: string | null, location: string) => `${system ?? ''}\u0000${location}`;
-
-/** Pure: every place with an offer (any side) with its distinct shops and materials, by system then location. */
-export function tradePlaces(data: ReadonlyMap<string, MaterialTrade>): TradePlace[] {
-  const found = new Map<string, { system: string | null; location: string; shops: Set<string>; items: Set<string> }>();
-  for (const [uuid, m] of data) {
-    for (const o of [...m.sell, ...m.buy]) {
-      const key = placeKey(o.system, o.location);
-      let p = found.get(key);
-      if (!p) found.set(key, (p = { system: o.system, location: o.location, shops: new Set(), items: new Set() }));
-      p.shops.add(o.terminal);
-      p.items.add(uuid);
-    }
-  }
-  return [...found.values()]
-    .map((p) => ({ system: p.system, location: p.location, shops: p.shops.size, items: p.items.size }))
-    .sort((a, b) => (a.system ?? '').localeCompare(b.system ?? '') || a.location.localeCompare(b.location));
-}
-
-/** Pure: one place's materials, one row per material and shop (buy/sell price, the later report); null without any offer. */
-export function placeOffers(data: ReadonlyMap<string, MaterialTrade>, system: string | null, location: string): TradePlaceOffer[] | null {
-  const rowsByKey = new Map<string, { uuid: string; shop: string; buy: number | null; sell: number | null; date: number }>();
-  for (const [uuid, m] of data) {
-    for (const [side, offers] of [['buy', m.buy], ['sell', m.sell]] as const) {
-      for (const o of offers) {
-        if (o.location !== location || o.system !== system) continue;
-        const key = `${uuid}\u0000${o.terminal}`;
-        let r = rowsByKey.get(key);
-        if (!r) rowsByKey.set(key, (r = { uuid, shop: o.terminal, buy: null, sell: null, date: 0 }));
-        // Several terminals of one shop name at a place: the better price counts (buy lowest, sell highest)
-        r[side] = r[side] === null ? o.price : side === 'buy' ? Math.min(r.buy!, o.price) : Math.max(r.sell!, o.price);
-        r.date = Math.max(r.date, o.date);
-      }
-    }
-  }
-  if (!rowsByKey.size) return null;
-  return [...rowsByKey.values()]
-    .sort((a, b) => a.shop.localeCompare(b.shop) || a.uuid.localeCompare(b.uuid))
-    .map((r) => ({ ...r, date: new Date(r.date * 1000).toISOString() }));
 }
 
 /** The catalog side of the item finder (not retired materials, per language), reloaded with the catalog. */
@@ -120,16 +78,6 @@ export function registerTradeRoutes(api: Hono<Env>, db: Db) {
     let cached = itemsCache.get(lang);
     if (!cached || cached.data !== data || cached.meta !== meta) itemsCache.set(lang, (cached = { data, meta, items: tradeItems(data, meta) }));
     return c.json({ items: cached.items } satisfies TradeItemsResponse);
-  });
-
-  api.get('/trade/places', async (c) => c.json({ places: tradePlaces(await tradeData(db)) } satisfies TradePlacesResponse));
-
-  api.get('/trade/place', async (c) => {
-    const location = c.req.query('location');
-    if (!location) throw new HttpError(400, 'invalid');
-    const offers = placeOffers(await tradeData(db), c.req.query('system') || null, location);
-    if (!offers) throw new HttpError(404, 'notFound');
-    return c.json({ offers } satisfies TradePlaceResponse);
   });
 
   // Only what can be booked (the stock lists' materials)

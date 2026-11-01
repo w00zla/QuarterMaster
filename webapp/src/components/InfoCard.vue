@@ -27,30 +27,21 @@ const SHOWN_LINES: Array<[RegExp, (i: MaterialInfo) => unknown]> = [
   [/^(Manufacturer|Hersteller):/i, () => true],
   [/^(Item Type|Type|Typ):/i, (i) => i.typeLabel],
   [/^(Size|Größe):/i, (i) => i.size],
-  [/^(Grade|Gütegrad):/i, (i) => i.gradeLetter],
+  [/^(Grade|Gütegrad|Güte):/i, (i) => i.gradeLetter],
   [/^(Class|Klasse):/i, (i) => i.itemClass],
 ];
 
-// A head line of the game's text: "Schadensreduktion: 20%", "Fokus: Jäger (leicht)"
-const HEAD_LINE = /^[^:\n]{1,40}:\s/;
-
 /**
- * The game's text in two parts: its head lines ("Schadensreduktion: 20%", "Batteriekapazität: 80 Schuss"; the
- * blank lines between their blocks gone) and the prose after them. Head lines the card already shows
- * ("Typ: Kühler", "Größe: S1", "Gütegrad: C", "Klasse: Civilian (Zivil)") and the maker are left out.
+ * The game's text as one piece (no split into values and prose: it is all the game's text), without the head
+ * lines the card already shows ("Typ: Kühler", "Größe: S1", "Gütegrad: C", "Klasse: Civilian (Zivil)") and the
+ * maker; tidied: spaces at the line ends and doubled ones gone, at most one blank line in a row, none at the
+ * start or end.
  */
-export function descriptionParts(i: MaterialInfo): { head: string[]; prose: string | null } {
+export function descriptionText(i: MaterialInfo): string | null {
   const shown = SHOWN_LINES.filter(([, value]) => value(i) != null && value(i) !== "").map(([re]) => re);
-  const lines = (i.description ?? "").split("\n").filter((l) => !shown.some((re) => re.test(l.trim())));
-  const head: string[] = [];
-  let n = 0;
-  for (; n < lines.length; n++) {
-    const line = lines[n]!.trim();
-    if (!line) continue;
-    if (!HEAD_LINE.test(line)) break;
-    head.push(line);
-  }
-  return { head, prose: lines.slice(n).join("\n").replace(/\n{3,}/g, "\n\n").trim() || null };
+  return (i.description ?? "").split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim())
+    .filter((l) => !shown.some((re) => re.test(l)))
+    .join("\n").replace(/\n{3,}/g, "\n\n").trim() || null;
 }
 </script>
 
@@ -76,7 +67,7 @@ const thumbSrc = computed(() => (thumb.value.hash ? thumbPath("l", thumb.value.u
 
 const bp = computed(() => (props.kind === "blueprint" ? (props.info as BlueprintInfo) : null));
 const mat = computed(() => (props.kind === "material" ? (props.info as MaterialInfo) : null));
-const desc = computed(() => (mat.value ? descriptionParts(mat.value) : { head: [], prose: null }));
+const description = computed(() => (mat.value ? descriptionText(mat.value) : null));
 
 // No maker anywhere: it only takes room
 const itemLine = (i: { typeLabel: string | null; subTypeLabel: string | null; size: number | null; gradeLetter: string | null; itemClass: string | null }) =>
@@ -138,11 +129,8 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
           <span v-if="mat.isOre" class="tag warn">{{ t("info.ore") }}</span>
         </div>
         <div v-if="mat.kind === 'resource' ? mat.group : itemLine(mat)" class="meta dot">{{ mat.kind === "resource" ? mat.group : itemLine(mat) }}</div>
-        <!-- Die Werte aus dem Kopf des Spieltexts (Mono statt Punkt), darunter der Fließtext -->
-        <div v-if="desc.head.length" class="head-lines">
-          <div v-for="(h, n) in desc.head" :key="n">{{ h }}</div>
-        </div>
-        <p v-if="desc.prose" class="description">{{ desc.prose }}</p>
+        <!-- Der Spieltext am Stück, nur aufgeräumt (descriptionText) -->
+        <p v-if="description" class="description">{{ description }}</p>
         <dl class="kv">
           <template v-if="mat.refined"><dt>{{ t("info.refinedTo") }}</dt><dd>{{ mat.refined }}</dd></template>
           <template v-if="mat.ores.length"><dt>{{ t("info.fromOre") }}</dt><dd>{{ mat.ores.join(", ") }}</dd></template>
@@ -227,14 +215,7 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
   color: var(--text-2);
 }
 
-/* The values from the head of the game's text, one per line */
-.head-lines {
-  font-family: var(--font-mono);
-  line-height: 1.45;
-  color: var(--text-2);
-}
-
-/* The meta line after a bullet (the values below set apart by the mono face instead) */
+/* The meta line after a bullet */
 .dot::before {
   content: "•";
   margin-right: 7px;

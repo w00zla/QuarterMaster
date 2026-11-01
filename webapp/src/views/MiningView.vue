@@ -85,8 +85,9 @@ watch([miningPick, lang], async () => {
   border-bottom: 1px solid var(--border-dim);
 }
 
+/* The view's main input: ~30 % wider than before (320 -> 416 px), like Kaufen/Verkaufen's and Crafting's */
 .section-picker {
-  width: 320px;
+  width: 416px;
   max-width: 100%;
 }
 

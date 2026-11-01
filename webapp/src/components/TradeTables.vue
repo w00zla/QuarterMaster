@@ -57,7 +57,8 @@ watch(options, (o) => { if (system.value && !o.some((x) => x.value === system.va
 // Two columns: narrower defaults, so both fit next to each other (own widths, apart from the dialog's)
 const columns = (s: Side): ColumnSpec[] => [
   { key: "terminal", label: t("trade.col.terminal"), width: props.split ? 260 : 340 },
-  { key: "price", label: t("trade.col.price"), width: 90 },
+  // Wide enough for "172.800 aUEC"
+  { key: "price", label: t("trade.col.price"), width: 120 },
   ...(hasScu(s) ? [{ key: "scu", label: t(s === "sell" ? "trade.col.demand" : "trade.col.stock"), width: props.split ? 110 : 140 }] : []),
 ];
 
@@ -110,7 +111,7 @@ function valueOf(r: TradeOffer, key: string): string | number {
         :group-of="(r: TradeOffer) => r.system ?? '—'"
       >
         <template #cell-terminal="{ row }"><span :title="terminalTitle(row)">{{ terminalText(row) }}</span></template>
-        <template #cell-price="{ row }">{{ uec(row.price) }}</template>
+        <template #cell-price="{ row }">{{ uec(row.price) }}&nbsp;<span class="unit">aUEC</span></template>
         <!-- A bar against the side's largest amount, a tick at the terminal's average; the figures on hover -->
         <template #cell-scu="{ row }">
           <span v-if="row.scu === null" class="dim">—</span>
@@ -171,6 +172,14 @@ function valueOf(r: TradeOffer, key: string): string | number {
 .trade-body :deep(.data-row) {
   cursor: default;
   user-select: text;
+}
+
+/* The price's unit after it: small and faint, the figure stays the eye-catcher */
+.unit {
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.75;
 }
 
 /* Demand / stock as a bar: the track the full cell, the fill this terminal, a tick its average */

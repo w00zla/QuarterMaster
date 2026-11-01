@@ -86,7 +86,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   the scan's tag, icon turning; the tooltip names what: catalog per language, stock, blueprints, connection,
   saving; `loadingTexts` in `state.ts`). While connected without the catalog, the location picker and Scan
   are disabled ("Catalog is loading…") and the unlocks list shows that state instead of
-  "Not in catalog". The HTTP client has no total timeout (the catalog is ~1 MB per language): 10 s to
+  "Not in catalog". The HTTP client has no total timeout (the catalog is ~2.5 MB per language): 10 s to
   connect, 30 s without data at most (`server::client`); the update download keeps its 30 min. A 426 makes the app show only the update panel (`UpdatePanel.vue`:
   installed and required version, the download for its platform): Rust `download_update` fetches it with
   the token (only URLs below the configured origin's `/downloads/`, `<dest>.part` renamed when complete,
@@ -217,9 +217,15 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 - The worker reads the newest frame when it falls behind. The `Ocr` is loaded by the first read
   (well under a second) and dropped within 5 s of the stop (memory back; the memory arena stays on:
   off made reads 30 % slower). "Preparing…" while the sync loads the catalog and the player's language
-  pack (`refinerySync.ts` `loadCatalog`: the companion's only `/api/catalog` fetch, de and en, once
-  connected, again when the game folder changes; kept in memory and on disk
-  (ETag), the unlocks panel uses its responses). `StarCitizen.exe` running comes from `capture.rs` (`game-seen` / `get_game_seen`).
+  pack (`refinerySync.ts` `loadCatalog`: the companion's only catalog fetch, `/api/companion/catalog` de and
+  en (since 2026-11-01; before: the web app's `/api/catalog`), once connected, again when the game folder
+  changes; kept in memory and on disk (ETag), the unlocks panel uses its responses). It has only what the
+  companion reads (`CompanionCatalogResponse`, `docs/webapp.md`): materials uuid, kind (the unit follows
+  from it), name, nameKey, type, typeLabel, component, label, size, gradeLetter, stats (every
+  `CatalogStat` field), thumb; locations uuid, key, label, short, nameKey, refinery; blueprints uuid,
+  label, name, size, gradeLetter, isDefault, retired, outputUuid, thumb. Per language ~2.45 MB instead of
+  ~2.95 MB raw, on the line ~340 KB: the server gzips it, reqwest asks for gzip and unpacks it (feature
+  `gzip`; the disk cache keeps the unpacked text). The ~3760 components with their stats are most of it. `StarCitizen.exe` running comes from `capture.rs` (`game-seen` / `get_game_seen`).
   `QM_OCR_FRAMES=<dir>` feeds every image in a folder once (tests without capture; the scan must still
   be switched on in the UI).
 - Warehouse and inventory reads go out as `inventory-read` (`grid` for the warehouse, `components` for the
@@ -503,7 +509,7 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
     `pack-missing`). The app's side is Rust `debug_info` (re-read on
     `config-changed` and when the catalog was loaded again); connection, user and catalog come from the main window
     (`debugReport.ts`: `general-report` on every change, `general-report-request` on open; `catalogLoad` in
-    `refinerySync.ts`). No catalog version: `/api/catalog` has none (decided 2026-10-31: no server change for it).
+    `refinerySync.ts`). The kept copy is `/api/companion/catalog`'s (Rust `debug_info`). No catalog version: `/api/catalog` has none (decided 2026-10-31: no server change for it).
   - **OCR scan** (`DebugScan.vue`), two views and "Record data" in its row. "Last read": first the frame (a
     JPEG data URL, 1280 px wide, CSP `img-src data:`, in a box of the frame's aspect that stays while what
     follows changes; its height can be dragged, the image then fits in centred) with SVG overlays (OCR boxes, read cells, tiles, hovered tile, tooltip, or the

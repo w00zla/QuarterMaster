@@ -469,11 +469,9 @@ function open(batch: StockBatch, action: BatchAction) {
   font-size: 15px;
 }
 
-/* UEX values: secondary figures, in the mono face and quieter than the amounts; the material's total a
-   little brighter */
+/* UEX values: secondary figures, quieter than the amounts, the material's total a little brighter; the face
+   as in the trading tables' price column (the unit stands in the column's title) */
 .uec {
-  font-family: var(--font-mono);
-  font-size: 12px;
   color: var(--text-3);
 }
 

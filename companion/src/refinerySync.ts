@@ -7,7 +7,7 @@
 // reads the terminal at all; the scan itself is in scan.ts.
 import { listen } from "@tauri-apps/api/event";
 import { computed, ref, shallowRef, watch } from "vue";
-import type { CatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
+import type { CompanionCatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
 import { gameNames } from "./backend";
 import { detected } from "./detections";
 import { t } from "./i18n";
@@ -46,7 +46,7 @@ const finishedRows = new Map<string, number>();
 export const proposals = ref<Proposal[]>([]);
 export const syncCatalog = shallowRef<SyncCatalog | null>(null);
 // The catalog as the web app answered it, per language (the unlocks panel's blueprints): fetched once with syncCatalog
-export const catalogResponses = shallowRef<Record<"de" | "en", CatalogResponse> | null>(null);
+export const catalogResponses = shallowRef<Record<"de" | "en", CompanionCatalogResponse> | null>(null);
 // The catalog and the player's language pack are being loaded (the state row shows it)
 export const preparing = ref(false);
 // When the catalog was loaded last, how many of the texts asked from the language pack it had and the keys it lacked (the debug window)
@@ -69,9 +69,10 @@ const publish = () => (proposals.value = [...sync.proposals]);
 async function loadCatalog() {
   preparing.value = true;
   try {
-    // Kept on disk and revalidated by its ETag: an unchanged catalog costs no transfer
-    const de = await api<CatalogResponse>("GET", "/catalog?lang=de", undefined, true);
-    const en = await api<CatalogResponse>("GET", "/catalog?lang=en", undefined, true);
+    // The companion's own catalog (only the fields it reads); kept on disk and revalidated by its ETag: an
+    // unchanged catalog costs no transfer
+    const de = await api<CompanionCatalogResponse>("GET", "/companion/catalog?lang=de", undefined, true);
+    const en = await api<CompanionCatalogResponse>("GET", "/companion/catalog?lang=en", undefined, true);
     const responses = [de, en];
     catalogResponses.value = { de, en };
     let own: Record<string, string> = {};

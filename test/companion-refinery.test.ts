@@ -2,7 +2,7 @@
 // them (rows as in the user's screenshots of 2026-10-08 at CRU-L1) against the user's running jobs.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CatalogResponse, StockBatch } from '../src/webapp/api-types.ts';
+import type { CompanionCatalogResponse, StockBatch } from '../src/webapp/api-types.ts';
 import {
   buildCatalog, cscuToScu, doneRequest, findStation, finishedRequests, gameNameKeys, jobsOf, RefinerySync, removeRequest, resolveOrder, startRequest,
   type Job, type OverviewEvent, type OverviewOrder, type Proposal,
@@ -15,12 +15,12 @@ const CRU = '00000000-0000-4000-8000-0000000000c1';
 const ARC = '00000000-0000-4000-8000-0000000000c2';
 
 const material = (uuid: string, name: string, nameKey: string) =>
-  ({ uuid, kind: 'resource' as const, name, nameKey, unit: 'SCU' as const, type: null, typeLabel: null,
-    component: false, label: name, size: null, gradeLetter: null, itemClass: null, stats: [], minable: false, thumb: null });
+  ({ uuid, kind: 'resource' as const, name, nameKey, type: null, typeLabel: null,
+    component: false, label: name, size: null, gradeLetter: null, stats: [], thumb: null });
 const location = (uuid: string, label: string, nameKey: string, refinery = true) =>
-  ({ uuid, key: nameKey.toUpperCase(), label, short: label.split(' · ')[0]!, nameKey, refinery, yields: {} });
+  ({ uuid, key: nameKey.toUpperCase(), label, short: label.split(' · ')[0]!, nameKey, refinery });
 
-const catalog = (names: [string, string, string]): CatalogResponse => ({
+const catalog = (names: [string, string, string]): CompanionCatalogResponse => ({
   materials: [
     material(HEPH, names[0], 'items_commodities_hephaestanite'),
     material(SILICON, names[1], 'items_commodities_silicon'),
@@ -71,6 +71,13 @@ describe('companion refinery sync', () => {
     assert.equal(findStation(own, 'AMBITIONIERTER TRAUM'), CRU);
     assert.equal(findStation(CAT, 'CRU-L1 AMBITIOUS DREAM STATION'), CRU);
     assert.equal(findStation(CAT, 'SOMEWHERE ELSE'), null);
+  });
+
+  it('units follow the material kind (the companion catalog has no unit)', () => {
+    const base = catalog(['Hephaestanite', 'Silicon', 'Titanium']);
+    const gem = { ...base.materials[0]!, uuid: '00000000-0000-4000-8000-0000000000e1', name: 'Hadanite', kind: 'item' as const };
+    const cat = buildCatalog([{ ...base, materials: [...base.materials, gem] }], {});
+    assert.deepEqual([cat.units.get(HEPH), cat.units.get(gem.uuid)], ['SCU', 'pcs']);
   });
 
   it('resolving merges a material\'s rows of one quality and drops what cannot be read', () => {

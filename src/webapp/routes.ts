@@ -2,6 +2,7 @@
 // Rights: every org-scoped call needs an active membership (roster), the stock service decides who
 // may book what (Actor).
 // Personal stock and blueprints work without any org.
+import { gzipSync } from 'node:zlib';
 import { sql } from 'drizzle-orm';
 import type { Context, Hono } from 'hono';
 import { etag } from 'hono/etag';
@@ -31,7 +32,7 @@ import { minableUuids } from './mining-query.ts';
 import { unlockableBlueprints } from './unlock-query.ts';
 import { refineryMatch } from '../ext/refineries.ts';
 import type {
-  BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
+  BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CompanionCatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
   OrgBlueprintsResponse,
   OrgMember, StockBatch,
   StockListResponse, SummaryResponse,
@@ -202,7 +203,7 @@ function listResponse(found: PickableBatch[], viewer: string, viewerOrgs: Set<st
 
 export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap<string, string> = () => new Map()) {
   // --- catalog ------------------------------------------------------------------------------
-  // The same for everyone until the next import or UEX change, ~1 MB per language: the ETag (a hash of the
+  // The same for everyone until the next import or UEX change, ~3 MB per language: the ETag (a hash of the
   // body) answers an unchanged catalog with 304; the browser and the companion keep it and revalidate.
   // The header is set outside etag(): its 304 drops the route's headers.
   api.use('/catalog', async (c, next) => {
@@ -236,6 +237,50 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     } satisfies CatalogResponse);
+  });
+
+  // The companion app's: the same rows with only the fields it reads (docs/webapp.md: the sizes), cached
+  // alike. Old companion builds keep using /catalog. Gzipped by the server when the client accepts it
+  // (~2.5 MB -> ~340 KB per language; the proxy compresses nothing); the gzipped body is kept per language
+  // until the catalog's text changes, and the ETag is the gzipped body's (a 304 needs no new compression).
+  const gzipped = new Map<string, { text: string; body: Uint8Array }>();
+  api.use('/companion/catalog', async (c, next) => {
+    await next();
+    c.header('Cache-Control', 'private, no-cache');
+    c.header('Vary', 'Accept-Encoding');
+  }, etag(), async (c, next) => {
+    await next();
+    if (c.res.status !== 200 || !/\bgzip\b/i.test(c.req.header('Accept-Encoding') ?? '')) return;
+    const text = await c.res.text();
+    const lang = langOf(c);
+    let found = gzipped.get(lang);
+    if (found?.text !== text) gzipped.set(lang, (found = { text, body: gzipSync(text) }));
+    const headers = new Headers(c.res.headers);
+    headers.set('Content-Encoding', 'gzip');
+    headers.delete('Content-Length');
+    c.res = new Response(found.body, { status: 200, headers });
+  });
+  api.get('/companion/catalog', async (c) => {
+    const lang = langOf(c);
+    const [materials, locations, blueprints, types] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang), await itemTypes(db, lang)];
+    const refineries = await refineryMatch(db);
+    const thumb = thumbs();
+    return c.json({
+      materials: [...materials.values()].map((m) => ({
+        uuid: m.uuid, kind: m.kind, name: m.name, nameKey: m.nameKey, ...(m.kind === 'item' ? types.get(m.uuid) ?? noType : noType),
+        component: m.component, label: m.label, size: m.size, gradeLetter: m.gradeLetter, stats: m.stats, thumb: thumb.get(m.uuid) ?? null,
+      }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      locations: [...locations.values()].map((l) => ({
+        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
+      }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+      blueprints: blueprints.entries.map((e) => ({
+        uuid: e.uuid, label: e.label, name: e.name, size: e.size, gradeLetter: e.gradeLetter, isDefault: e.isDefault, retired: e.retired,
+        outputUuid: e.outputUuid, thumb: (e.outputUuid && thumb.get(e.outputUuid)) ?? null,
+      }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    } satisfies CompanionCatalogResponse);
   });
 
   // --- stock ----------------------------------------------------------------------------------
@@ -441,7 +486,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
       name: bp.name, type: o?.type ?? null, typeLabel: o?.typeLabel ?? null, subTypeLabel: o?.subTypeLabel ?? null, size: o?.size ?? null,
       gradeLetter: o?.gradeLetter ?? null, itemClass: o?.itemClass ?? null, manufacturer: o?.manufacturer ?? null,
       category: bp.categoryLabel, isDefault: bp.isDefault, retired: bp.retiredAt !== null,
-      craftSeconds: tier?.craftSeconds ?? null, requiredSlots: tier?.requiredSlots ?? 0,
+      requiredSlots: tier?.requiredSlots ?? 0,
       // A slot without any input (broken game data) tells nothing
       slots: (tier?.slots ?? []).filter((s) => s.inputs.length).map((s) => ({
         name: s.name,
@@ -473,8 +518,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
       const bp = await getBlueprint(db, ref.uuid, lang);
       if (!bp) continue;
       craftedBy.push({
-        uuid: ref.uuid, name: bp.name, isDefault: bp.isDefault, craftSeconds: bp.tiers[0]?.craftSeconds ?? null,
-        unlocks: unlockSummary(await loadUnlocks(db, ref.uuid, lang)),
+        uuid: ref.uuid, name: bp.name, isDefault: bp.isDefault, unlocks: unlockSummary(await loadUnlocks(db, ref.uuid, lang)),
       });
     }
     return c.json({

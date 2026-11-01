@@ -1,8 +1,8 @@
-// The item finder's pure parts: best prices, places and a place's offers.
+// The item finder's pure parts: best prices and the items.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { buildTrade } from '../src/ext/trade.ts';
-import { bestPrices, placeOffers, tradeItems, tradePlaces } from '../src/webapp/trade.ts';
+import { bestPrices, tradeItems } from '../src/webapp/trade.ts';
 
 const METAL = '10000000-0000-0000-0000-0000000000a1';
 const GEM = '10000000-0000-0000-0000-0000000000a3';
@@ -44,25 +44,5 @@ describe('trade item finder', () => {
     assert.deepEqual(tradeItems(data, meta).map((i) => [i.uuid, i.name, i.buy, i.sell, i.bookable]), [[GEM, 'Alpha Gem', 15, 5, false], [METAL, 'Zeta Metal', 125, 100, true]]);
     // Unknown (retired) materials are left out
     assert.deepEqual(tradeItems(data, new Map([[GEM, meta.get(GEM)!]])).map((i) => i.uuid), [GEM]);
-  });
-
-  it('places: any side, distinct shops and materials, by system then location', () => {
-    assert.deepEqual(tradePlaces(data), [
-      { system: null, location: 'Nowhere', shops: 1, items: 1 },
-      { system: 'Pyro', location: 'Beta', shops: 1, items: 1 },
-      { system: 'Stanton', location: 'Alpha', shops: 2, items: 2 },
-    ]);
-  });
-
-  it('a place: one row per material and shop, the later report, null for an unknown place', () => {
-    assert.deepEqual(placeOffers(data, 'Stanton', 'Alpha'), [
-      { uuid: METAL, shop: 'Admin', buy: null, sell: 100, date: new Date(T1 * 1000).toISOString() },
-      { uuid: GEM, shop: 'Admin', buy: 15, sell: null, date: new Date(T1 * 1000).toISOString() },
-      { uuid: METAL, shop: 'Shop', buy: 130, sell: null, date: new Date(T1 * 1000).toISOString() },
-    ]);
-    assert.deepEqual(placeOffers(data, 'Pyro', 'Beta'), [{ uuid: METAL, shop: 'Admin', buy: 125, sell: 80, date: new Date(T2 * 1000).toISOString() }]);
-    assert.deepEqual(placeOffers(data, null, 'Nowhere')?.map((o) => [o.uuid, o.sell]), [[GEM, 5]]);
-    assert.equal(placeOffers(data, 'Pyro', 'Alpha'), null);
-    assert.equal(placeOffers(data, null, 'Alpha'), null);
   });
 });

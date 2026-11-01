@@ -17,7 +17,7 @@
 // in a row agree (an OCR glitch in one read books nothing).
 import { FPS_TYPES } from "../../src/catalog/components.ts";
 import { norm } from "../../src/stock/material-names.ts";
-import type { CatalogResponse, CatalogStat, StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
+import type { CatalogStat, CompanionCatalogResponse, StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------
 
@@ -71,14 +71,14 @@ export interface ComponentCatalog {
 }
 
 /** The loc keys of the stat names (for the player's language pack). */
-export function statNameKeys(responses: CatalogResponse[]): string[] {
+export function statNameKeys(responses: CompanionCatalogResponse[]): string[] {
   const keys = new Set<string>();
   for (const r of responses) for (const m of r.materials) for (const s of m.stats) if (s.nameKey) keys.add(s.nameKey);
   return [...keys];
 }
 
 /** The components and stat names from the web app's catalog (each language) and the player's own texts. */
-export function buildComponentCatalog(responses: CatalogResponse[], gameNames: Record<string, string>): ComponentCatalog {
+export function buildComponentCatalog(responses: CompanionCatalogResponse[], gameNames: Record<string, string>): ComponentCatalog {
   const byUuid = new Map<string, ComponentDef>();
   const statNames = new Map<string, Set<string>>();
   for (const r of responses) {

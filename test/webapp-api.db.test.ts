@@ -3,6 +3,7 @@
 // blueprints, org members, profile — rights, memberships and users without any org.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { gunzipSync } from 'node:zlib';
 import { sql } from 'drizzle-orm';
 import type { Db } from '../src/db/client.ts';
 import { connectAs, prepareDb } from './roles.ts';
@@ -11,7 +12,7 @@ import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, markGuildLeft, updateGuildSettings, type GuildSettings } from '../src/bot/settings.ts';
 import type {
-  BlueprintInfo, CatalogResponse, HistoryResponse, MaterialInfo, MeResponse, OrgMember, StockBatch, StockListResponse, SummaryResponse,
+  BlueprintInfo, CatalogResponse, CompanionCatalogResponse, HistoryResponse, MaterialInfo, MeResponse, OrgMember, StockBatch, StockListResponse, SummaryResponse,
 } from '../src/webapp/api-types.ts';
 import { getOverview } from '../src/adminapp/queries.ts';
 import { findStock } from '../src/stock/lookup.ts';
@@ -101,6 +102,50 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     // Another language is another body
     assert.notEqual((await app.request('/api/catalog?lang=de', { headers: headers(SOLO) })).headers.get('etag'), tag);
     assert.equal((await app.request('/api/me', { headers: headers(SOLO) })).headers.get('cache-control'), 'no-store');
+  });
+
+  it('companion catalog: the same rows with only the companion\'s fields, by API token, with an ETag', async () => {
+    const token = ((await (await app.request('/api/token', { method: 'POST', body: '{}', headers: { ...headers(SOLO), 'content-type': 'application/json' } })).json()) as { token: string }).token;
+    const auth = { authorization: `Bearer ${token}` };
+    const res = await app.request('/api/companion/catalog?lang=en', { headers: auth });
+    assert.equal(res.status, 200);
+    const tag = res.headers.get('etag');
+    assert.ok(tag);
+    assert.equal(res.headers.get('cache-control'), 'private, no-cache');
+    const body = (await res.json()) as CompanionCatalogResponse;
+    const full = (await get<CatalogResponse>(SOLO, '/catalog?lang=en')).body;
+    // The same rows in the same order (bookable materials only: never ores)
+    assert.deepEqual(body.materials.map((m) => m.uuid), full.materials.map((m) => m.uuid));
+    assert.deepEqual(body.locations.map((l) => l.uuid), full.locations.map((l) => l.uuid));
+    assert.deepEqual(body.blueprints.map((b) => b.uuid), full.blueprints.map((b) => b.uuid));
+    assert.ok(!body.materials.some((m) => m.uuid === U.ore));
+    // Only these fields, each as in the full catalog
+    const pick = <T extends object>(o: T, keys: string[]) => Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k]]));
+    const fields = {
+      materials: ['uuid', 'kind', 'name', 'nameKey', 'type', 'typeLabel', 'component', 'label', 'size', 'gradeLetter', 'stats', 'thumb'],
+      locations: ['uuid', 'key', 'label', 'short', 'nameKey', 'refinery'],
+      blueprints: ['uuid', 'label', 'name', 'size', 'gradeLetter', 'isDefault', 'retired', 'outputUuid', 'thumb'],
+    };
+    for (const part of ['materials', 'locations', 'blueprints'] as const) {
+      assert.ok(body[part].length);
+      for (const row of body[part]) assert.deepEqual(Object.keys(row).sort(), [...fields[part]].sort());
+      assert.deepEqual(body[part], full[part].map((r) => pick(r, fields[part])));
+    }
+    // Revalidated like /catalog; without a valid token nothing
+    const again = await app.request('/api/companion/catalog?lang=en', { headers: { ...auth, 'if-none-match': tag } });
+    assert.equal(again.status, 304);
+    assert.equal(again.headers.get('cache-control'), 'private, no-cache');
+    assert.equal((await app.request('/api/companion/catalog?lang=en', { headers: { authorization: `Bearer qmt_${'x'.repeat(43)}` } })).status, 401);
+    // Gzipped by the server when accepted: the same body, its own ETag, revalidated alike
+    const zipped = await app.request('/api/companion/catalog?lang=en', { headers: { ...auth, 'accept-encoding': 'gzip, deflate' } });
+    assert.equal(zipped.status, 200);
+    assert.equal(zipped.headers.get('content-encoding'), 'gzip');
+    assert.equal(zipped.headers.get('vary'), 'Accept-Encoding');
+    assert.deepEqual(JSON.parse(gunzipSync(Buffer.from(await zipped.arrayBuffer())).toString('utf8')), body);
+    const zippedTag = zipped.headers.get('etag');
+    assert.ok(zippedTag && zippedTag !== tag);
+    const zippedAgain = await app.request('/api/companion/catalog?lang=en', { headers: { ...auth, 'accept-encoding': 'gzip', 'if-none-match': zippedTag } });
+    assert.equal(zippedAgain.status, 304);
   });
 
   it('a user without any org: personal stock, refinery, blueprints, profile', async () => {

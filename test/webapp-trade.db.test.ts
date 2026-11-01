@@ -10,7 +10,7 @@ import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { storeSnapshot } from '../src/ext/store.ts';
-import type { MaterialInfo, SummaryResponse, TradeItemsResponse, TradePlaceResponse, TradePlacesResponse, TradePricesResponse, TradeResponse } from '../src/webapp/api-types.ts';
+import type { MaterialInfo, SummaryResponse, TradeItemsResponse, TradePricesResponse, TradeResponse } from '../src/webapp/api-types.ts';
 import { createApp } from '../src/webapp/app.ts';
 import type { DiscordLogin } from '../src/webapp/discord.ts';
 import { createSession } from '../src/webapp/session.ts';
@@ -118,7 +118,7 @@ describe('web app trading (database)', { skip: url ? false : 'TEST_DATABASE_URL 
     await storeSnapshot(db, 'uex', 'commodities_prices_all', commodityPrices, true);
   });
 
-  it('item finder: items with best prices, places, a place\'s offers', async () => {
+  it('item finder: items with best prices', async () => {
     const items = (await get<TradeItemsResponse>(SOLO, '/trade/items?lang=en')).body.items;
     assert.deepEqual(items.map((i) => i.uuid).sort(), [U.metal, U.gem, U.output].sort());
     const metal = items.find((i) => i.uuid === U.metal)!;
@@ -127,19 +127,6 @@ describe('web app trading (database)', { skip: url ? false : 'TEST_DATABASE_URL 
     assert.deepEqual([output.kind, output.buy, output.sell, output.bookable], ['item', 2000, 1000, true]);
     assert.deepEqual(items.map((i) => i.name), [...items.map((i) => i.name)].sort((a, b) => a.localeCompare(b)));
     assert.equal((await get<TradeItemsResponse>(SOLO, '/trade/items?lang=de')).body.items.length, items.length);
-
-    const places = (await get<TradePlacesResponse>(SOLO, '/trade/places')).body.places;
-    assert.deepEqual(places, [
-      { system: 'Pyro', location: 'Beta', shops: 1, items: 2 },
-      { system: 'Stanton', location: 'Alpha', shops: 1, items: 2 },
-    ]);
-    const place = (await get<TradePlaceResponse>(SOLO, `/trade/place?system=Stanton&location=Alpha`)).body.offers;
-    assert.deepEqual(place.map((o) => [o.uuid, o.shop, o.buy, o.sell, o.date]).sort(), [
-      [U.metal, 'Admin', null, 100, new Date(T1 * 1000).toISOString()],
-      [U.gem, 'Admin', 15, null, new Date(T1 * 1000).toISOString()],
-    ].sort());
-    assert.equal((await get(SOLO, '/trade/place?system=Stanton&location=Nope')).status, 404);
-    assert.equal((await get(SOLO, '/trade/place?system=Stanton')).status, 400);
   });
 
   it('total value at the best sell price: personal and per org, unpriced batches left out', async () => {

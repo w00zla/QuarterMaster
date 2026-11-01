@@ -567,7 +567,7 @@ fn file_info(path: &std::path::Path) -> FileInfo {
     }
 }
 
-/// The catalog of one language as kept on disk (`server::cached_api`).
+/// The catalog of one language as kept on disk (`server::cached_api`; `/api/companion/catalog`).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct KeptCatalog {
@@ -601,7 +601,7 @@ fn debug_info(app: AppHandle) -> DebugInfo {
     let catalog = ["de", "en"]
         .into_iter()
         .filter_map(|lang| {
-            let (file, etag) = server::kept_etag(&cache.as_ref()?.join("api"), &format!("/api/catalog?lang={lang}"));
+            let (file, etag) = server::kept_etag(&cache.as_ref()?.join("api"), &format!("/api/companion/catalog?lang={lang}"));
             Some(KeptCatalog { lang, file: file_info(&file), etag })
         })
         .collect();
