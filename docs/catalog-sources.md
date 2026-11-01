@@ -437,7 +437,7 @@ pictures with gaps), so the icons are rendered from the models:
    white palettes), lost paint variants and drew visors flat. starbreaker-qm is the fleetyards fork with upstream
    merged in (merge commit 9aa7ce15): fleetyards' item, material and addon work, upstream's rest (skinning,
    characters, `--geometry-tag`, quick_xml, fixes such as the Sion compensator's texture); the Blender addon is
-   fleetyards' unchanged (both rebuilt the decal system, a mix did not run). Remotes `fleetyards` and `upstream` in
+   fleetyards' (both rebuilt the decal system, a mix did not run) plus our fixes from qm.2. Remotes `fleetyards` and `upstream` in
    that repo; a sync is a merge there, checked by rendering a sample against the current icons. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable
    detail texture as base colour, and the vertex colours are blend masks.
 2. **Render:** `src/icons/render.py` in a portable Blender (`local/blender/<version>/`, config under its
