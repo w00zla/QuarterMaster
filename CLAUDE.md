@@ -51,7 +51,9 @@ pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k"                  # -> local
 pnpm catalog:import <snapshot.json.gz> --label 4.10.2 [--dry-run] [--force] [--allow-downgrade] [--json]
 pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry-run] [--force]
 pnpm loc:import --remove --source <name> --lang <code>
-pnpm icons:render [--sample n] [--filter <s>] [--force] [--dry-run]   # icons for the app's gear items and the ore chunks: StarBreaker, our fork (local/starbreaker-qm) -> Blender + addon (local/blender) -> local/icons/<uuid>.png; needs $SC_DATA_P4K and the DB
+pnpm icons:render [--sample n] [--filter <s>] [--force] [--dry-run]   # icons for gear, shop items (the item finder) and ore chunks: per block of 50 one `starbreaker entity export-batch` (our fork, local/starbreaker-qm) -> Blender + addon (local/blender) -> local/icons/<uuid>.png; needs $SC_DATA_P4K and the DB
+# The full run goes on the render PC via the bundle. Fork changes (exporter or Blender addon in ../starbreaker-qm): `cargo build --release -p starbreaker`, copy the exe to local/starbreaker-qm/ and update its COMMIT, rebuild the bundle;
+#   the addon in local/blender is a junction to the fork repo (live at once). Addon tests: local/blender/<ver>/5.2/python/bin/python.exe -m unittest discover -s tests -q in ../starbreaker-qm/blender_addon (no system Python)
 pnpm icons:render --write-targets <f> | --targets <f>                  # the target list from the DB / run without the DB (the bundle)
 scripts/icons-bundle.ps1            # packs node, Blender, StarBreaker, the CLI and targets.json into local/icons-bundle/ for another Windows PC (run.cmd there; docs/catalog-sources.md "Icons")
 pnpm icons:pack [--in <dir>] [--out <dir>] [--force]                  # the PNGs -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)

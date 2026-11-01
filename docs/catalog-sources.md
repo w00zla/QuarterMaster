@@ -425,7 +425,10 @@ pictures with gaps), so the icons are rendered from the models:
    one geometry used to overwrite each other ("keine Meshes in der Szene", 27 armour pieces in the first full
    run). A record's material comes from `SGeometryResourceParams.Geometry.Geometry.Material`, else from its
    `Material` node (`SMaterialNodeParams`, variants by tags): 70 items (54 backpacks, paint editions of weapons)
-   name it only there and rendered white or in the base look before. Paths inside an export reach ~160
+   name it only there and rendered white or in the base look before. A worn (or paint-variant) export takes the
+   chosen SubGeometry's mesh and its node table (182d229f): before, the node table came from the default geometry
+   (the storage crate, the clothing box), the model's parts landed on the crate's helpers by index (Geist arms'
+   shoulder pads floating, core plates, the 987 shirt as its cardboard box; 615 records). Paths inside an export reach ~160
    characters; Blender on Windows reads none over 259 (missing textures render silently white), so the CLI
    reports a block with a longer path ("Pfade über 259 Zeichen": move `--work` to a shorter folder). The block's
    export is deleted after its render, one with failures stays for inspection. The
@@ -455,6 +458,10 @@ pictures with gaps), so the icons are rendered from the models:
    2026-11-01: a submaterial name with a trailing space (`"ore_hephaestanite "`, 5 ores) never matched its slot and
    rendered white; the emission strength of materials without their own emission input is `Glow` (× `EmissiveOpacity`),
    not the mean of the `Emissive` colour (the Hill Horror helmet's visor, `Emissive` 1,1,1 with `Glow` 0.01, glowed white).
+   The Illum path keeps its own rule (mean of `Emissive`): with `Glow` as the strength the Hill Horror LEDs came out
+   darker than in game. `render.py` hides meshes that carry only UI screen materials (template `screen_hud`, e.g. the
+   mobiGlas display, invisible without UI content) and leaves them out of the fit, unless they are all the item has:
+   the mobiGlas' 25 × 41 cm screen plane shrank the bracelet to a dot.
 3. **Pose and light from the game:** `PlayerChoice_PITConfig.inventoryParams` (`dcb query`) gives
    `defaultOrientation` (90, 0, 0) plus an offset per item type/sub type (45 entries) and a light group per
    category (39 entries, default `inventorylightgroup_other`); the groups are entities under
@@ -474,11 +481,12 @@ pictures with gaps), so the icons are rendered from the models:
    a UUID has two files). A run without `--force` renames existing icons to this pattern. Renders are reused unless `--force`; `--filter` re-renders
    single entities. Per block one export-batch and one Blender process; the next block exports while the previous
    one renders. Measured 2026-11-01 (dev PC, 89 entities): 0.17 s export and 0.55 s render per entity, so the
-   render sets the pace (full set estimated ~35 min; the first full run, single exports, took 4 h on the render
-   PC). Log: `render.log` (the console plus full error messages) and
+   render sets the pace; the full run of the 3793 gear targets took 52 min on the render PC (the first one, single
+   exports, 4 h). Log: `render.log` (the console plus full error messages) and
    `blender.log` (Blender's output, tracebacks of `render.py`) in the work directory, appended per run. Known
-   failures of the first full run (2026-10-26) besides the armour: ~20 entities whose files are missing from
-   `Data.p4k` or that have no geometry (docking tubes, ship-built missile racks, `RADR_S02_Fake`, …), not fixable here. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
+   failures (23 in the 2026-11-01 run): entities whose files are missing from `Data.p4k` or that have no geometry
+   (docking tubes, ship-built missile racks, `RADR_S02_Fake`, …), not fixable here; 8 ship components fail with
+   `file not found in P4k: Data\m` (Javelin cooler, 890J parts, …), not looked into. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
    packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
    Windows PC (`run.cmd`, needs only `Data.p4k`).
 5. **Pack:** `pnpm icons:pack [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
