@@ -310,9 +310,10 @@ blocks".
 - **History** (route `/history`, `HistoryView.vue`): see `docs/stock.md` "History".
 - **Thumbnail-Prüfung** (route `/review/thumbs`, `ThumbReviewView.vue`, privilege `thumb-review`; without it the
   view says so and no button shows): every thumbnail (the L file at 132 CSS px) in a grid per item class and sub type,
-  resources apart, sorted by name; search over name and class name, a chip "Nur markierte". A click on a thumbnail
+  resources apart, sorted by name; above it a panel "Worum geht's?": one line that wrongly rendered thumbnails get marked to be fixed later, one
+  on how it works, one on the yellow border; it folds by a click on its title row or the chevron at its top right, remembered per browser; search over name and class name, a chip "Nur markierte". A click on a thumbnail
   marks it as wrong (own row) or takes the mark back (with a reference: confirmed in a dialog). A marked tile has a
-  camera button: "Quelle wählen" picks a screen, window or tab once (`getDisplayMedia`, the stream stays open, a
+  camera button: "Screenshot-Quelle wählen" picks a screen, window or tab once (`getDisplayMedia`, the stream stays open, a
   tag shows its state), each capture takes its current frame into a dialog where the mouse draws the region (none =
   the whole frame); saved as WebP (scaled down until under 512 KB). Tiles: red border = marked by you, yellow =
   only by others, a count tag with several reviewers, their names in the tooltip, the reference inset (yours, else

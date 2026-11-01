@@ -21,6 +21,23 @@ const KEY = "thumb-review";
 const MAX_IMAGE_BYTES = 512 * 1024;
 
 const allowed = computed(() => me.value?.privileges.includes(KEY) ?? false);
+
+// The explanation panel folds; remembered per browser
+const INTRO_KEY = "qm.review.introOpen";
+const introOpen = ref(true);
+try {
+  introOpen.value = localStorage.getItem(INTRO_KEY) !== "0";
+} catch {
+  // Not readable: open
+}
+function toggleIntro() {
+  introOpen.value = !introOpen.value;
+  try {
+    localStorage.setItem(INTRO_KEY, introOpen.value ? "1" : "0");
+  } catch {
+    // Not remembered
+  }
+}
 const subjects = ref<ThumbReviewSubject[] | null>(null);
 const entries = ref<FeatureEntry[]>([]);
 const search = ref("");
@@ -255,6 +272,22 @@ async function saveCrop(value: string) {
 
 <template>
   <div class="page">
+    <section v-if="allowed" class="panel intro">
+      <div class="head intro-head" @click="toggleIntro">
+        <Icon name="info" :size="16" />
+        <span class="head-title no-grow">{{ t("review.introTitle") }}</span>
+        <div class="spacer" />
+        <button type="button" class="icon-btn" :title="t(introOpen ? 'review.introHide' : 'review.introShow')" @click.stop="toggleIntro">
+          <Icon :name="introOpen ? 'chevron-up' : 'chevron-down'" :size="16" />
+        </button>
+      </div>
+      <div v-if="introOpen" class="intro-body">
+        <p>{{ t("review.introWhat") }}</p>
+        <p>{{ t("review.introHow") }}</p>
+        <p>{{ t("review.introYellow") }}</p>
+      </div>
+    </section>
+
     <section class="panel unclipped">
       <div class="head">
         <Icon name="eye" :size="16" />
@@ -330,6 +363,27 @@ async function saveCrop(value: string) {
 </template>
 
 <style scoped>
+/* The whole title row folds the explanation, the chevron too */
+.intro-head {
+  cursor: pointer;
+  user-select: none;
+}
+
+.intro-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  max-width: 90ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.intro-body p {
+  margin: 0;
+}
+
 .groups {
   display: flex;
   flex-direction: column;
