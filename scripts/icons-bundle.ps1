@@ -64,7 +64,7 @@ Icon-Render-Bundle (sc-quartermaster)
 
 1. Data.p4k des Spiels neben run.cmd legen (oder beim Aufruf --p4k "<Pfad>\Data.p4k" angeben).
 2. run.cmd ausführen. Erst ein Test: run.cmd --sample 20
-   Voller Lauf: run.cmd            (ca. 4-5 Stunden; abbrechen und neu starten ist ok, Fertiges wird übersprungen)
+   Voller Lauf: run.cmd            (ca. 35-60 Minuten; abbrechen und neu starten ist ok, Fertiges wird übersprungen)
    Weitere Optionen: run.cmd --help
 3. Ergebnis: icons\<Name> (<Klasse>) <uuid>.png (ein Bild je Katalog-UUID; im Explorer mit großen Symbolen
    auf Sicht prüfen, Nachrendern mit run.cmd --force --filter <Klasse>). Den Ordner icons\ zurück auf den
