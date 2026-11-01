@@ -428,7 +428,10 @@ pictures with gaps), so the icons are rendered from the models:
    name it only there and rendered white or in the base look before. A worn (or paint-variant) export takes the
    chosen SubGeometry's mesh and its node table (182d229f): before, the node table came from the default geometry
    (the storage crate, the clothing box), the model's parts landed on the crate's helpers by index (Geist arms'
-   shoulder pads floating, core plates, the 987 shirt as its cardboard box; 615 records). Paths inside an export reach ~160
+   shoulder pads floating, core plates, the 987 shirt as its cardboard box; 615 records). An entity without a
+   palette of its own falls back to its material's `DefaultPalette`, then to the game's `TintPalettes/default`
+   (primary white, secondary sRGB 112, tertiary 21; fork commit 559cb793): before, palette-tinted layers
+   stayed white, the Hill Horror Reborn's face red where the game shows it black. Paths inside an export reach ~160
    characters; Blender on Windows reads none over 259 (missing textures render silently white), so the CLI
    reports a block with a longer path ("Pfade über 259 Zeichen": move `--work` to a shorter folder). The block's
    export is deleted after its render, one with failures stays for inspection. The
@@ -450,7 +453,12 @@ pictures with gaps), so the icons are rendered from the models:
    `blender_addon/starbreaker_addon`, so addon and exporter always match; the bundle copies its content). The addon
    builds every package's materials when `scene.blend` opens; in background mode (`blender -b`) at once and in
    full, as `starbreaker.refresh_materials` does (its UI path waits for a timer that background mode never runs).
-   Eevee, 16 samples, Standard view transform, transparent film, 256 px. Ray tracing on for the scene; the addon
+   Eevee, 16 samples, view transform Khronos PBR Neutral (keeps base colours, compresses only the highlights;
+   Standard clipped light albedos hard, the Geist Snow Camo shell rendered as a flat white area), transparent
+   film, 256 px. Glossy rays see the grey world at half strength (Light Path mix): at full strength glossy black
+   materials (Geist ASD, the Goliath quantum drive) reflected it as a grey veil, while the game's surroundings are
+   dark; diffuse light and so the shadows stay unchanged. Compared against the game's inventory tiles in the
+   companion's debug recordings (30 items: armour, weapons, ship components, minerals). Ray tracing on for the scene; the addon
    gives the `GlassPBR` materials raytraced refraction (dithered): they are pure transmission, without it Eevee
    only refracts the grey world and visors render as flat grey. The minerals use the `Organic` shader, whose colour
    is the first layer's `TintColor` (the crystal; layer 2 is grey sand): the addon multiplies the grey diffuse by

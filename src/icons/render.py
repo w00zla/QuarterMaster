@@ -191,8 +191,22 @@ def render(job, a):
     bg = world.node_tree.nodes['Background']
     bg.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1)
     bg.inputs['Strength'].default_value = ambient
+    # Glanz-Strahlen sehen die Welt nur halb: die gleichmäßig graue Welt spiegelte sich in glänzend schwarzen
+    # Flächen (Geist ASD, Goliath) als graue Suppe, im Spiel ist die Umgebung dunkel. Das diffuse Licht und
+    # damit die Schatten bleiben wie sie sind.
+    nt = world.node_tree
+    glossy_bg = nt.nodes.new('ShaderNodeBackground')
+    glossy_bg.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1)
+    glossy_bg.inputs['Strength'].default_value = ambient * 0.5
+    light_path = nt.nodes.new('ShaderNodeLightPath')
+    mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(light_path.outputs['Is Glossy Ray'], mix.inputs['Fac'])
+    nt.links.new(bg.outputs['Background'], mix.inputs[1])
+    nt.links.new(glossy_bg.outputs['Background'], mix.inputs[2])
+    nt.links.new(mix.outputs['Shader'], nt.nodes['World Output'].inputs['Surface'])
 
-    # Render: Eevee, transparenter Film, Standard-Farbkurve (AgX würde entsättigen)
+    # Render: Eevee, transparenter Film, Farbkurve Khronos PBR Neutral: Grundfarben bleiben, nur Spitzen werden
+    # gestaucht (Standard schnitt helles Weiß hart ab, Snow Camo wurde eine Fläche; AgX würde entsättigen)
     scene.render.engine = 'BLENDER_EEVEE'
     scene.eevee.taa_render_samples = a.samples
     # Glas (Visiere): das Addon schaltet die Raytracing-Refraktion je Material ein, die Szene muss mitmachen;
@@ -201,7 +215,7 @@ def render(job, a):
     scene.render.film_transparent = True
     scene.render.image_settings.file_format = 'PNG'
     scene.render.image_settings.color_mode = 'RGBA'
-    scene.view_settings.view_transform = 'Standard'
+    scene.view_settings.view_transform = 'Khronos PBR Neutral'
     scene.view_settings.look = 'None'
     scene.render.filepath = out
     bpy.ops.render.render(write_still=True)
