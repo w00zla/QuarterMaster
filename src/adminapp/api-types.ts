@@ -811,7 +811,6 @@ export interface PrivilegeRow {
   description: string;
   createdAt: string;
   retiredAt: string | null;
-  // Assignments in force (not expired)
   holderCount: number;
   entryCount: number;
 }
@@ -820,9 +819,6 @@ export interface PrivilegeHolder {
   userId: string;
   name: string | null;
   grantedAt: string;
-  expiresAt: string | null;
-  // Not expired
-  active: boolean;
 }
 
 // One row of the key's feature data; a UUID subject with the catalog's name, class and type
@@ -854,5 +850,4 @@ export interface UserPrivilege {
   description: string;
   retired: boolean;
   grantedAt: string | null;
-  expiresAt: string | null;
 }

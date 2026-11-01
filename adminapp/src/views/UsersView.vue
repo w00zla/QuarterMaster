@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Every known user (app_user, web logins, companion tokens) with a rough look at their data; read-only except
-// their privileges (section Privileges: assign, take back, expiry).
+// their privileges (section Privileges: assign, take back).
 import { computed, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import DataTable from "../components/DataTable.vue";
@@ -88,17 +88,11 @@ function onToggle(section: Section, ev: Event) {
   }
 }
 
-// Privileges: assigned (an expired one still counts as assigned until taken back), expiry as a date (end of that day, local)
+// Privileges: assigned until taken back
 const privileges = useFetch<UserPrivilege[]>(() => (selected.value ? `/users/${selected.value}/privileges` : null), false);
 const held = (p: UserPrivilege) => p.grantedAt !== null;
-const expired = (p: UserPrivilege) => p.expiresAt !== null && new Date(p.expiresAt).getTime() <= Date.now();
 const privilegeBusy = ref(false);
 const privilegeError = ref("");
-const dateValue = (iso: string | null) => {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
 async function changePrivilege(action: () => Promise<unknown>) {
   privilegeBusy.value = true;
   privilegeError.value = "";
@@ -111,8 +105,7 @@ async function changePrivilege(action: () => Promise<unknown>) {
     privileges.reload();
   }
 }
-const grant = (p: UserPrivilege, date: string) => changePrivilege(() =>
-  send("PUT", `/users/${selected.value}/privileges/${p.key}`, { expiresAt: date ? new Date(`${date}T23:59:59`).toISOString() : null }));
+const grant = (p: UserPrivilege) => changePrivilege(() => send("PUT", `/users/${selected.value}/privileges/${p.key}`, {}));
 function revoke(p: UserPrivilege) {
   if (!confirm(`Take back "${p.key}"? Their data stays.`)) return;
   void changePrivilege(() => send("DELETE", `/users/${selected.value}/privileges/${p.key}`));
@@ -291,26 +284,18 @@ function revoke(p: UserPrivilege) {
           <div v-if="privilegeError" class="err">{{ privilegeError }}</div>
           <div v-if="privileges.error.value" class="faint">{{ privileges.error.value }}</div>
           <table v-else-if="privileges.data.value?.length" class="mini">
-            <thead><tr><th>Privilege</th><th>State</th><th>Expires</th><th /></tr></thead>
+            <thead><tr><th>Privilege</th><th>State</th><th /></tr></thead>
             <tbody>
               <tr v-for="p in privileges.data.value" :key="p.key">
                 <td><Tooltip :text="p.key" mono>{{ p.description }}</Tooltip></td>
                 <td>
                   <span v-if="!held(p)" class="tag">Not held</span>
-                  <span v-else-if="expired(p)" class="tag warn">Expired</span>
                   <span v-else class="tag ok">Held</span>
                   <span v-if="p.retired" class="tag err">Retired</span>
                 </td>
-                <td>
-                  <input
-                    type="date" class="date" :value="dateValue(p.expiresAt)" :disabled="!held(p) || privilegeBusy"
-                    title="Expires at the end of this day; empty = never"
-                    @change="grant(p, ($event.target as HTMLInputElement).value)"
-                  />
-                </td>
                 <td class="actions">
                   <button v-if="held(p)" type="button" class="icon-btn" title="Take back" :disabled="privilegeBusy" @click="revoke(p)"><Icon name="trash" :size="16" /></button>
-                  <button v-else type="button" class="icon-btn" title="Assign" :disabled="privilegeBusy || p.retired" @click="grant(p, '')"><Icon name="plus" :size="16" /></button>
+                  <button v-else type="button" class="icon-btn" title="Assign" :disabled="privilegeBusy || p.retired" @click="grant(p)"><Icon name="plus" :size="16" /></button>
                 </td>
               </tr>
             </tbody>
@@ -418,21 +403,6 @@ function revoke(p: UserPrivilege) {
 
 .section[open] > summary {
   margin-bottom: 10px;
-}
-
-.date {
-  height: var(--h-chip-sm);
-  padding: 0 8px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: var(--bg-surface-2);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
-}
-
-.date:disabled {
-  opacity: 0.4;
 }
 
 .err {

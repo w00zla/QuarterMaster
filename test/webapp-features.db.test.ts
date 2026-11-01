@@ -66,8 +66,10 @@ describe('privileges and feature data (database)', { skip: url ? false : 'TEST_D
     thumbsDir = mkdtempSync(join(tmpdir(), 'qm-thumbs-'));
     writeFileSync(join(thumbsDir, 'thumbs.json'), JSON.stringify({ [U.gem]: HASH }));
     app = createApp(webDb, noLogin, { origin: ORIGIN, trustProxy: false, distDir: null, thumbsDir });
-    assert.ok(await grantPrivilege(db, ANNA, KEY, null));
-    assert.ok(await grantPrivilege(db, BEN, KEY, null));
+    assert.ok(await grantPrivilege(db, ANNA, KEY));
+    assert.ok(await grantPrivilege(db, BEN, KEY));
+    // Again: nothing changes
+    assert.ok(await grantPrivilege(db, BEN, KEY));
   });
   after(async () => {
     await closeDb?.();
@@ -75,13 +77,11 @@ describe('privileges and feature data (database)', { skip: url ? false : 'TEST_D
     if (thumbsDir) rmSync(thumbsDir, { recursive: true, force: true });
   });
 
-  it('/api/me lists the privileges in force; an expired one is not', async () => {
+  it('/api/me lists the privileges; the admin sees every key with the assignment', async () => {
     assert.deepEqual((await call<MeResponse>(ANNA, 'GET', '/me')).body.privileges, [KEY]);
     assert.deepEqual((await call<MeResponse>(EVE, 'GET', '/me')).body.privileges, []);
-    assert.ok(await grantPrivilege(db, EVE, KEY, new Date(Date.now() - 60_000)));
-    assert.deepEqual((await call<MeResponse>(EVE, 'GET', '/me')).body.privileges, []);
-    const eve = (await getUserPrivileges(db, EVE)).find((p) => p.key === KEY);
-    assert.ok(eve?.grantedAt && eve.expiresAt);
+    assert.deepEqual((await getUserPrivileges(db, EVE)).map((p) => [p.key, p.grantedAt]), [[KEY, null]]);
+    assert.ok((await getUserPrivileges(db, ANNA)).find((p) => p.key === KEY)?.grantedAt);
   });
 
   it('without the key: 403; an unknown key: 404; a retired or unknown key cannot be granted', async () => {
@@ -89,7 +89,7 @@ describe('privileges and feature data (database)', { skip: url ? false : 'TEST_D
     assert.equal((await mark(EVE)).status, 403);
     assert.equal((await call(EVE, 'GET', `/features/${KEY}/subjects`)).status, 403);
     assert.equal((await call(ANNA, 'GET', '/features/nope/entries')).status, 404);
-    assert.equal(await grantPrivilege(db, EVE, 'nope', null), false);
+    assert.equal(await grantPrivilege(db, EVE, 'nope'), false);
   });
 
   it('marks: the payload and subject are checked, one own row per subject (replaced, not doubled)', async () => {
@@ -143,7 +143,7 @@ describe('privileges and feature data (database)', { skip: url ? false : 'TEST_D
   it('admin: holders, entries with the catalog name, the ZIP export; taking back keeps the data', async () => {
     const detail = await getPrivilege(db, KEY, 'en', new Map([[U.gem, HASH]]));
     assert.ok(detail);
-    assert.deepEqual(detail.holders.map((h) => [h.userId, h.active]).sort(), [[ANNA, true], [BEN, true], [EVE, false]]);
+    assert.deepEqual(detail.holders.map((h) => h.userId).sort(), [ANNA, BEN]);
     assert.equal(detail.entries.length, 1);
     assert.equal(detail.entries[0]!.thumb, HASH);
     assert.ok(detail.entries[0]!.subjectName);

@@ -216,15 +216,13 @@ export const privilege = app.table('privilege', {
 }, (t) => [check('privilege_key_format', sql`${t.key} ~ '^[a-z][a-z0-9-]{1,40}$'`)]);
 
 /**
- * Who holds which privilege, assigned in the admin UI. No FK to app.app_user: the roster cleanup deletes users
+ * Who holds which privilege, assigned in the admin UI until taken back. No FK to app.app_user: the roster cleanup deletes users
  * without data and does not know this table.
  */
 export const userPrivilege = app.table('user_privilege', {
   userId: text('user_id').notNull(),
   key: text('key').notNull().references(() => privilege.key),
   grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
-  // NULL = until taken back
-  expiresAt: timestamp('expires_at', { withTimezone: true }),
 }, (t) => [
   primaryKey({ columns: [t.userId, t.key] }),
   check('user_privilege_user_id_format', snowflake(t.userId)),

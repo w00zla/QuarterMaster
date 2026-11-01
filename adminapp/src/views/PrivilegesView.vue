@@ -61,15 +61,11 @@ const stale = (e: PrivilegeEntry) => marked(e) !== null && e.thumb !== null && m
         <section>
           <span class="panel-title">Holders</span>
           <table v-if="detail.data.value.holders.length" class="mini">
-            <thead><tr><th>User</th><th>Since</th><th>Expires</th></tr></thead>
+            <thead><tr><th>User</th><th>Since</th></tr></thead>
             <tbody>
               <tr v-for="h in detail.data.value.holders" :key="h.userId" class="link" @click="router.push(`/users/${h.userId}`)">
                 <td><Tooltip :text="h.userId" mono>{{ h.name ?? h.userId }}</Tooltip></td>
                 <td class="nowrap">{{ dateTime(h.grantedAt) }}</td>
-                <td class="nowrap">
-                  <span v-if="!h.active" class="tag warn">Expired</span>
-                  <span v-else :class="{ faint: !h.expiresAt }">{{ h.expiresAt ? dateTime(h.expiresAt) : "never" }}</span>
-                </td>
               </tr>
             </tbody>
           </table>

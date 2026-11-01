@@ -111,8 +111,8 @@ cookie) and skips the same-origin check (a cross-site page cannot set the header
 
 Features beyond the roles for single users, e.g. supporter tools. A privilege is a key (`^[a-z][a-z0-9-]{1,40}$`)
 with a description; each key comes with the migration of the feature that checks it (never deleted, retired
-instead). The admin assigns keys to users, optionally until a date (`docs/adminapp.md` "Privileges"). In force =
-assigned, not expired, the key not retired; read on every request (`privilegesOf`), `/api/me` lists them
+instead). The admin assigns keys to users until taken back (`docs/adminapp.md` "Privileges"). In force =
+assigned, the key not retired; read on every request (`privilegesOf`), `/api/me` lists them
 (`privileges`, the companion gets the same through its token).
 
 A feature keeps its data in `app.feature_entry`: one row per key, user and subject (e.g. a thumbnail's UUID)

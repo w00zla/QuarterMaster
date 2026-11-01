@@ -40,11 +40,11 @@ export const FEATURES: Record<string, FeatureDef> = {
   'thumb-review': { subject: UUID, payload: z.object({ hash: z.string().regex(/^[0-9a-f]{8}$/) }).strict(), images: IMAGE_TYPES },
 };
 
-/** The user's privileges in force: assigned, not expired, the key not retired. */
+/** The user's privileges in force: assigned, the key not retired. */
 export async function privilegesOf(db: Db, userId: string): Promise<string[]> {
   const found = await rows<{ key: string }>(db, sql`
     SELECT up.key FROM app.user_privilege up JOIN app.privilege p ON p.key = up.key
-    WHERE up.user_id = ${userId} AND p.retired_at IS NULL AND (up.expires_at IS NULL OR up.expires_at > now())
+    WHERE up.user_id = ${userId} AND p.retired_at IS NULL
     ORDER BY up.key`);
   return found.map((r) => r.key);
 }
@@ -53,7 +53,7 @@ export async function privilegesOf(db: Db, userId: string): Promise<string[]> {
 export async function holdersOf(db: Db, key: string): Promise<Set<string>> {
   const found = await rows<{ userId: string }>(db, sql`
     SELECT up.user_id AS "userId" FROM app.user_privilege up JOIN app.privilege p ON p.key = up.key
-    WHERE up.key = ${key} AND p.retired_at IS NULL AND (up.expires_at IS NULL OR up.expires_at > now())`);
+    WHERE up.key = ${key} AND p.retired_at IS NULL`);
   return new Set(found.map((r) => r.userId));
 }
 

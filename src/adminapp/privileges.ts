@@ -10,12 +10,11 @@ import { zip } from './zip.ts';
 
 const iso = (column: string) => sql.raw(`to_json(${column}) #>> '{}'`);
 const UUID_TEXT = sql.raw(`'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'`);
-const IN_FORCE = sql`(up.expires_at IS NULL OR up.expires_at > now())`;
 
 export async function getPrivileges(db: Db): Promise<PrivilegeRow[]> {
   return rows<PrivilegeRow>(db, sql`
     SELECT p.key, p.description, ${iso('p.created_at')} AS "createdAt", ${iso('p.retired_at')} AS "retiredAt",
-      (SELECT count(*) FROM app.user_privilege up WHERE up.key = p.key AND ${IN_FORCE})::int AS "holderCount",
+      (SELECT count(*) FROM app.user_privilege up WHERE up.key = p.key)::int AS "holderCount",
       (SELECT count(*) FROM app.feature_entry e WHERE e.key = p.key)::int AS "entryCount"
     FROM app.privilege p ORDER BY p.retired_at IS NOT NULL, p.key`);
 }
@@ -44,7 +43,7 @@ export async function getPrivilege(db: Db, key: string, lang: string, thumbs: Re
   if (!row) return null;
   const names = await userNames(db);
   const holders = await rows<Omit<PrivilegeDetail['holders'][number], 'name'>>(db, sql`
-    SELECT up.user_id AS "userId", ${iso('up.granted_at')} AS "grantedAt", ${iso('up.expires_at')} AS "expiresAt", ${IN_FORCE} AS active
+    SELECT up.user_id AS "userId", ${iso('up.granted_at')} AS "grantedAt"
     FROM app.user_privilege up WHERE up.key = ${key} ORDER BY up.granted_at`);
   return {
     ...row,
@@ -89,18 +88,17 @@ export async function exportFeature(db: Db, key: string, thumbs: ReadonlyMap<str
 export async function getUserPrivileges(db: Db, userId: string): Promise<UserPrivilege[]> {
   return rows<UserPrivilege>(db, sql`
     SELECT p.key, p.description, p.retired_at IS NOT NULL AS retired,
-      ${iso('up.granted_at')} AS "grantedAt", ${iso('up.expires_at')} AS "expiresAt"
+      ${iso('up.granted_at')} AS "grantedAt"
     FROM app.privilege p LEFT JOIN app.user_privilege up ON up.key = p.key AND up.user_id = ${userId}
     WHERE p.retired_at IS NULL OR up.user_id IS NOT NULL ORDER BY p.key`);
 }
 
-/** Assigns a key (again: only the expiry changes); false = no such key or it is retired. */
-export async function grantPrivilege(db: Db, userId: string, key: string, expiresAt: Date | null): Promise<boolean> {
-  const done = await rows<{ key: string }>(db, sql`
-    INSERT INTO app.user_privilege (user_id, key, expires_at)
-    SELECT ${userId}::text, p.key, ${expiresAt?.toISOString() ?? null}::timestamptz FROM app.privilege p WHERE p.key = ${key} AND p.retired_at IS NULL
-    ON CONFLICT (user_id, key) DO UPDATE SET expires_at = excluded.expires_at RETURNING key`);
-  return done.length > 0;
+/** Assigns a key (again: nothing changes); false = no such key or it is retired. */
+export async function grantPrivilege(db: Db, userId: string, key: string): Promise<boolean> {
+  const [found] = await rows<{ key: string }>(db, sql`SELECT key FROM app.privilege WHERE key = ${key} AND retired_at IS NULL`);
+  if (!found) return false;
+  await db.execute(sql`INSERT INTO app.user_privilege (user_id, key) VALUES (${userId}, ${key}) ON CONFLICT (user_id, key) DO NOTHING`);
+  return true;
 }
 
 /** Takes a key back; the user's feature data stays. */

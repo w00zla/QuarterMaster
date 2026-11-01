@@ -85,14 +85,13 @@ removing imported text sources), the bot's status texts and assigning privileges
   with this `guild_id`, link to Activity).
 - **Privileges** (`/privileges/:key?`, `src/adminapp/privileges.ts`, tested in `test/webapp-features.db.test.ts`;
   the system: `docs/webapp.md` "Privileges"): the keys (from the migrations) with their description, holders in
-  force and entries. The detail: holders (since, expiry, expired ones marked) and the feature's rows (a UUID subject
+  force and entries. The detail: holders (since when) and the feature's rows (a UUID subject
   with the catalog's name, the author, the current thumbnail next to the reference image, "Re-rendered" when the
   mark's hash differs). "Export ZIP" (`GET /api/privileges/:key/export`, `zip.ts`, uncompressed): `entries.json`
   (key, description, one object per row with subject, name, class, type, author, payload, current thumbnail
   hash, `stale`, image path) and `images/<subject>_<userId>.<ext>`: unpacked into `local/` it is what Claude reads
   to fix the renders. Assigning lives in **Users**, section Privileges: every key not retired with its state
-  (Held / Expired / Not held), assign (`PUT /api/users/:id/privileges/:key` `{ expiresAt }`), an expiry date (end
-  of that local day, empty = never) and take back (`DELETE`, confirmed; the user's rows stay).
+  (Held / Not held), assign (`PUT /api/users/:id/privileges/:key`, body `{}`) and take back (`DELETE`, confirmed; the user's rows stay).
 
 ## Stock
 

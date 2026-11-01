@@ -27,7 +27,6 @@ CREATE TABLE "app"."user_privilege" (
 	"user_id" text NOT NULL,
 	"key" text NOT NULL,
 	"granted_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"expires_at" timestamp with time zone,
 	CONSTRAINT "user_privilege_user_id_key_pk" PRIMARY KEY("user_id","key"),
 	CONSTRAINT "user_privilege_user_id_format" CHECK ("app"."user_privilege"."user_id" ~ '^[0-9]{17,20}$')
 );

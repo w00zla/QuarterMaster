@@ -260,7 +260,7 @@ api.delete('/status-quotes/:id', requireWriteHeader, async (c) => {
   return id && (await s.deleteStatusQuote(db, id)) ? c.body(null, 204) : c.json({ error: 'not found' }, 404);
 });
 
-// --- privileges (write: assigning them, JSON body { expiresAt: ISO | null }) ----------------
+// --- privileges (write: assigning them and taking them back) --------------------------------
 const PRIVILEGE_KEY = /^[a-z][a-z0-9-]{1,40}$/;
 const privilegeKey = (c: Context) => {
   const key = c.req.param('key') ?? '';
@@ -295,10 +295,7 @@ api.get('/users/:userId/privileges', async (c) => {
 api.put('/users/:userId/privileges/:key', requireWriteHeader, async (c) => {
   const id = snowflake(c, 'userId');
   const key = privilegeKey(c);
-  const raw = ((await c.req.json().catch(() => null)) as { expiresAt?: unknown } | null)?.expiresAt;
-  const expiresAt = typeof raw === 'string' ? new Date(raw) : null;
-  if (raw !== null && (!expiresAt || Number.isNaN(expiresAt.getTime()))) return c.json({ error: 'expiresAt must be an ISO date or null' }, 400);
-  return id && key && (await p.grantPrivilege(db, id, key, expiresAt)) ? c.body(null, 204) : c.json({ error: 'not found' }, 404);
+  return id && key && (await p.grantPrivilege(db, id, key)) ? c.body(null, 204) : c.json({ error: 'not found' }, 404);
 });
 api.delete('/users/:userId/privileges/:key', requireWriteHeader, async (c) => {
   const id = snowflake(c, 'userId');
