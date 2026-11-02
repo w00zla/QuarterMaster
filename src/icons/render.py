@@ -11,6 +11,7 @@ import json
 import math
 import os
 import sys
+import time
 import traceback
 
 import bpy
@@ -181,7 +182,12 @@ def mesh_corners(objects):
 def render(job, a):
     src, out = job['src'], job['out']
     pose, rig, size = job.get('pose'), job.get('rig'), job.get('size', a.size)
+    # Phasen je Item (Sekunden) für die icon:-Zeile: load = Datei öffnen samt Materialaufbau des Addons,
+    # prep = Materialanpassungen, Pose, Kamera, Licht, Welt, render = Shader-Kompilierung und Render samt EXR,
+    # glass = zweiter Durchgang für Glas, post = write_png
+    t = [time.perf_counter()]
     scene = load(src)
+    t.append(time.perf_counter())
     sharpen_gloss()
     boost_emission()
     hide_screens(scene)
@@ -350,9 +356,11 @@ def render(job, a):
     scene.view_settings.view_transform = 'Standard'  # EXR wird linear geschrieben, die Kurve wirkt hier nicht
     scene.view_settings.look = 'None'
     scene.view_settings.exposure = 0.0
+    t.append(time.perf_counter())
     bpy.ops.render.render(write_still=False)
     exr = out + '.exr'
     bpy.data.images['Render Result'].save_render(exr, scene=scene)
+    t.append(time.perf_counter())
     glow_exr = None
     try:
         if glass_see_through():
@@ -361,12 +369,15 @@ def render(job, a):
             bpy.ops.render.render(write_still=False)
             glow_exr = out + '.glow.exr'
             bpy.data.images['Render Result'].save_render(glow_exr, scene=scene)
+        t.append(time.perf_counter())
         write_png(exr, out, glow_exr)
+        t.append(time.perf_counter())
     finally:
         os.remove(exr)
         if glow_exr and os.path.exists(glow_exr):
             os.remove(glow_exr)
-    return f'bbox {tuple(round(v, 3) for v in (hi - lo))} m, {len(corners) // 8} meshes'
+    timing = ' '.join(f'{k}={b - a:.3f}' for k, a, b in zip(('load', 'prep', 'render', 'glass', 'post'), t, t[1:]))
+    return f'bbox {tuple(round(v, 3) for v in (hi - lo))} m, {len(corners) // 8} meshes, timing {timing}'
 
 
 # Studio-Welt (Leuchtdichte, weiß): Softbox oben von top_from bis top_to (Anteil der Bild-oben-Richtung),
