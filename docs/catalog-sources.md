@@ -456,14 +456,50 @@ pictures with gaps), so the icons are rendered from the models:
    `blender_addon/starbreaker_addon`, so addon and exporter always match; the bundle copies its content). The addon
    builds every package's materials when `scene.blend` opens; in background mode (`blender -b`) at once and in
    full, as `starbreaker.refresh_materials` does (its UI path waits for a timer that background mode never runs).
-   Eevee, 16 samples, view transform Khronos PBR Neutral (keeps base colours, compresses only the highlights;
-   Standard clipped light albedos hard, the Geist Snow Camo shell rendered as a flat white area), transparent
-   film, 256 px. Glossy rays see the grey world at half strength (Light Path mix): at full strength glossy black
-   materials (Geist ASD, the Goliath quantum drive) reflected it as a grey veil, while the game's surroundings are
-   dark; diffuse light and so the shadows stay unchanged. Compared against the game's inventory tiles in the
+   Eevee, 16 samples, transparent film, 256 px. The render is written as linear multi-layer EXR (combined and emission,
+   read with Blender's OpenImageIO); `render.py` turns it into the PNG itself: the emission bloom (below), a contrast
+   below mid-grey (luminance Y < 0.18 → 0.18·(Y/0.18)^1.45, one factor for all channels, so
+   hues stay; black lacquer reflects a few percent under the key light and rendered dark grey without it, Geist ASD,
+   ORC-mkX Singularity; over the whole range it lifted the highlights too and white burnt out again, Snow Camo 5.9 %
+   of its pixels), then the shoulder of Khronos PBR Neutral without its toe (linear up to 0.8, the brightest channel
+   compressed softly towards 1 above, slightly desaturated). Blender's own transforms did not fit (probe of
+   2026-11-01 over 19 items, scene-linear colours checked against the wiki shots and inventory tiles): Standard
+   clipped light albedos hard (Geist Snow Camo a flat white area, 5.5 % of the light items' pixels even at −0.5 EV);
+   PBR Neutral's toe subtracts min(R,G,B) − 6.25·min² from every channel, so dark colours turned black or garish
+   (Geist Whiteout chin B/R 13–27 where scene and game have 1.9, Rogue and Desert chins without blue; no exposure
+   fixes it); AgX and Filmic keep colours and highlights but turn white grey (CQ7 Snowfire P90 0.56 instead of
+   0.84). The world is a studio, not a grey sphere: a softbox above (strength 0.4 from 20 to 80 % of the
+   screen-up direction), 0.05 from the camera side, 0.02 elsewhere (`STUDIO` in `render.py`). Eevee lights diffuse
+   and glossy from the same world probe: the former `Is Glossy Ray` mix (grey world at half strength for glossy rays)
+   never had an effect, the whole scene just saw half of it (checked: ambient 0.45 with the glossy branch at 0.278×
+   gave pixel-identical renders to ambient 0.25 at 0.5×, and with the glossy branch at 0 the ambient did nothing). A uniform grey world laid a veil over black lacquer (Geist ASD, Golden Blossom); no world
+   left chrome reflecting black, with hard black sides (Goliath quantum drive). Compared against the game's inventory tiles in the
    companion's debug recordings (30 items: armour, weapons, ship components, minerals). Ray tracing on for the scene; the addon
    gives the `GlassPBR` materials raytraced refraction (dithered): they are pure transmission, without it Eevee
-   only refracts the grey world and visors render as flat grey. The minerals use the `Organic` shader, whose colour
+   only refracts the world and visors render as flat grey. A glass takes the palette's glass colour only with
+   `%USE_TINT_PALETTE`, otherwise its own `Diffuse` (the ORC-mkX Singularity's near-black visor drew clear under the
+   palette's white glass), and keeps its hue (the GlassPBR template's hue node stood at 0.57 and turned every tint by
+   +25°: the Strata microTech's lime visor drew teal; fork, 2026-11-02). Visors stay darker than in the tiles: the
+   game adds a thin-film sheen (`%THIN_FILM`) the addon does not draw. Screens (`Monitor`, `DisplayScreen`, `UIPlane`)
+   render dithered, not blended, and a `Monitor` glows in its texture times its `Diffuse`: the Fieldsbury Dark Bear's
+   pupils (a white dot, Diffuse purple) sit behind lenses, and Eevee's raytraced refraction does not see blended
+   surfaces, so they drew as grey discs; a glass's `RefractionGloss` 0 counts as clear, not frosted (the Bear's
+   lenses author 0 and look clear in game; 15 of 791 character glasses author 0); a `Monitor` also reflects with its
+   `Specular` as F0 at roughness 0.35 (authored none; the Bear's eyeballs are silver in the tile, emission alone drew
+   them black). A LayerBlend_V2 material's flat glowing layers emit the geometric mean of `Emissive` and that layer's
+   tint (scaled to Emissive's peak): fitted to the Artimex Chairman's Club's eye strip (Emissive R/G 3.0, tint 19.7,
+   tile about 7; sRGB 206/82/33 against the tile's 196/79/39, Emissive alone 207/119/44), no shader source. `render.py`
+   multiplies every emission by 4 (`EMISSION_GAIN`, `boost_emission`): at the data's strength the strip was sRGB
+   126/64/33 and the Bear's pupils barely showed. The game blooms its lights, so `render.py` writes a multi-layer EXR
+   with the emission pass and adds it blurred (`BLOOM` 2, Gaussian sigmas 3/8 px at 512 px weighted 0.6/0.4, picked
+   from ten variants; a 20 px sigma spread the halo wider than the tile shows; the halo outside the item covers by its
+   brightness): the strip glows like in the tile instead of a sharp line. Light behind glass is missing from that
+   pass, so an item with glass renders a second time at 4 samples with every glass see-through in its tint
+   (`glass_see_through`, ~0.1-0.2 s) and the bloom takes that pass's emission (the Bear's pupils, lime behind the
+   Strata visor). Glossy surfaces (metal, glass) render at 0.85× their roughness (`sharpen_gloss`): the Chairman's
+   Club's gold stayed one even tone (brightest pixels max Y 0.66, orange) where the tile has warm-white glints (0.95);
+   0.45× matched the glints but turned black lacquer black, 0.85 is the user's pick between 1.0 and 0.7 (fork and
+   render.py, 2026-11-02). The minerals use the `Organic` shader, whose colour
    is the first layer's `TintColor` (the crystal; layer 2 is grey sand) times that layer material's own `Diffuse`
    (Beradom: tint white, crystal_beradom.mtl Diffuse violet), doubled for the grey diffuse (a detail map), with the
    layer material's coloured `Specular` as specular tint and level; fitted to the game's warehouse tiles. Sadaryx
@@ -506,9 +542,9 @@ pictures with gaps), so the icons are rendered from the models:
    key/rim/fill projector lights. The model is turned by Euler XYZ of default + offset, the cell is then Y-up
    with the camera on −Z and screen-up −Y (not mirrored: rifle muzzle to the right, as in game); the rig sits at
    the cell centre turned by (90, 180, 0), each projector shining along its local +X, Blender spots at 30 W per
-   game intensity unit (100 W burnt white materials out under the Standard view transform), ambient 0.9 (the rigs' fill light is
-   0.1: with 0.15 dark materials drowned in their shadows, 0.5 still left helmets partly dark; 0.9 lightens the
-   helmet's inside behind the visor a little). The item is scaled so its largest extent is 0.7 m (the game fits it into
+   game intensity unit (100 W burnt white materials out under the Standard view transform), the studio world of
+   step 2 as ambient (the rigs' fill light is 0.1, practically off; raising it ×10–20 lit only matt faces, chrome
+   needs something to reflect). The item is scaled so its largest extent is 0.7 m (the game fits it into
    the cell; the rig's lights stand ~1 m out, a 3 m cooler would have them inside). Matching: type + sub type
    exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
@@ -536,6 +572,19 @@ pictures with gaps), so the icons are rendered from the models:
    (Squadron 42 content), the box is its default geometry. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
    packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
    Windows PC (`run.cmd`, needs only `Data.p4k`).
+   **`pnpm icons:tui`** (`tools/icons-tui/`, Rust with ratatui and ratatui-image) runs the same export and render
+   with several processes at once (default 2 `export-batch`, 4 Blender; `[`/`]` and `+`/`-` change them while it
+   runs) in a terminal dashboard: progress and ETA, the workers, renders per minute and CPU, the latest render as an
+   image (Sixel, Kitty or iTerm2, half blocks otherwise; ←/→ pages back), log and errors. What it renders: a filter
+   (terms separated by blanks or commas, any of them in the class, the name or the type) and a scope: missing (no
+   render yet), failed last time (`<work>/render-state.json`, also when an old render exists) or all (overwrites, asks
+   first); `--filter`/`--scope` preset both, `--plain` runs without the TUI. It reads `targets.json`
+   (`--write-targets`, default `<work>/targets.json`) and computes pose and rig itself (a port of the CLI's
+   `loadGameTables`: identical for all 6734 targets and the 53 rigs on 2026-11-01), so it needs neither Node nor the
+   DB. For small reruns the blocks shrink so every Blender gets work. Measured 2026-11-01 (dev PC, 9800X3D and RTX
+   5080, 459 `_arms_` entities): 1 Blender 215 s, 4 Blender 105 s, 6 Blender 95 s; a render takes 0.46 s alone and
+   0.70/0.85 s with 4/6 in parallel, so a shared resource (GPU or shader compilation, not measured yet) caps the gain
+   at ~2.2×.
 5. **Pack:** `pnpm icons:pack [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
    every `<uuid>.png` into three AVIFs (`src/thumbs.ts`: s 40, m 96, l 256 px; quality 45, trimmed to the content
    with a small transparent border) named `<uuid>.<hash>.avif` (hash: SHA-256 of the PNG, 8 hex) plus
@@ -559,8 +608,15 @@ beam, container, shield); the `requiredTag` entries (sidearms get the primary we
 sharing a model are rendered separately. Unproven: the palette-metal slot tint is fitted to wiki shots (the
 calibration scatters by about 2×, no shader source in `Data.p4k`); the Golden Blossom's ochre blossoms stay more
 ochre in game than through the Khronos spec→metal solve; POM decals are not ray-marched (≤ 5 mm, below a pixel at
-256 px, matters for larger renders); the rig's Khronos PBR Neutral view transform oversaturates dark metals a little
-(its toe subtracts up to 0.04 per channel: the Whiteout's chin B/R 1.66 against 1.37 in game). Harmless for pristine
+256 px, matters for larger renders); studio values and contrast were chosen by eye on 19 items (2026-11-02), dark
+coloured surfaces keep their hue but end up very dark (Geist Whiteout chin sRGB ≈ 5). Shader facts from
+`Engine/ShaderCache_D3D11.pak` (`Shaders/CFXIB/D3D11/LayerBlend_V2.cfxb`, decoded 2026-11-02, not built yet): a
+LayerBlend_V2 `Glow` lights base layer 1 by the blend map (`Emissive += Glow × layer-1 albedo × blend R`, `EmissiveMode`
+0; the `.mtl`'s `Emissive` colour is not read), so 416 character materials with `Glow` and a black `Emissive` draw
+unlit, and the flat-layer rule above takes `Emissive` where the shader takes layer 1; TexSlot13 (`HueAoLumMap`,
+"HAL Map") is hue shift / AO / luminance on the albedo, not a glow mask (its red channel is a flat 0.5 with BC1
+noise). The Strata's green band along the visor rim in the tile is not explained by `Glow` (layer 1 has no weight on
+its padding); likely the visor (tinted glass, `%THIN_FILM`). Harmless for pristine
 icons and therefore not read: the extra `IVOCOLORS2` stream of 290 helmet skins (wear/dirt-like) and the main
 colour's alpha (255 − submaterial index).
 

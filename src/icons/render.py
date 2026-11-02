@@ -14,6 +14,7 @@ import sys
 import traceback
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
 
@@ -80,6 +81,95 @@ def unturn_single_mesh(scene):
     o.matrix_world = Matrix.LocRotScale(loc, None, scale)
 
 
+def boost_emission():
+    # Leuchtendes (Augenstreifen, Pupillen, LEDs) mal EMISSION_GAIN: bei der Stärke aus den Daten war der Artimex
+    # Chairman's Club-Augenstreifen sRGB 126/64/33 gegen 196/79/39 in der Inventar-Kachel, die Pupillen des Dark Bear
+    # kaum zu sehen. Jede Emissionsstärke (auch verlinkte, auch in Knotengruppen, je Gruppe einmal).
+    done = set()
+
+    def scale(tree, socket):
+        if socket is None:
+            return
+        if not socket.is_linked:
+            socket.default_value *= EMISSION_GAIN
+            return
+        link = socket.links[0]
+        mul = tree.nodes.new('ShaderNodeMath')
+        mul.operation = 'MULTIPLY'
+        mul.inputs[1].default_value = EMISSION_GAIN
+        tree.links.new(link.from_socket, mul.inputs[0])
+        tree.links.remove(link)
+        tree.links.new(mul.outputs[0], socket)
+
+    def walk(tree):
+        for n in list(tree.nodes):
+            if n.bl_idname == 'ShaderNodeEmission':
+                scale(tree, n.inputs['Strength'])
+            elif n.bl_idname == 'ShaderNodeBsdfPrincipled':
+                scale(tree, n.inputs.get('Emission Strength'))
+            sub = getattr(n, 'node_tree', None)
+            if sub is not None and sub.name not in done:
+                done.add(sub.name)
+                walk(sub)
+
+    for m in bpy.data.materials:
+        if m.node_tree is not None:
+            walk(m.node_tree)
+
+
+def sharpen_gloss():
+    # Rauheit glänzender Oberflächen (Metall, Glas) mal ROUGHNESS: das Gold des Artimex Chairman's Club blieb ein
+    # gleichmäßiger Ton (hellste Pixel max. Y 0.66, orange), die Inventar-Kachel hat warmweiße Glanzspitzen (max. 0.95)
+    done = set()
+
+    def scale(tree, socket):
+        if not socket.is_linked:
+            socket.default_value *= ROUGHNESS
+            return
+        link = socket.links[0]
+        mul = tree.nodes.new('ShaderNodeMath')
+        mul.operation = 'MULTIPLY'
+        mul.inputs[1].default_value = ROUGHNESS
+        tree.links.new(link.from_socket, mul.inputs[0])
+        tree.links.remove(link)
+        tree.links.new(mul.outputs[0], socket)
+
+    def walk(tree):
+        for n in list(tree.nodes):
+            if n.bl_idname == 'ShaderNodeBsdfPrincipled':
+                metal, glass = n.inputs['Metallic'], n.inputs.get('Transmission Weight')
+                if metal.is_linked or metal.default_value > 0 or (glass is not None and (glass.is_linked or glass.default_value > 0)):
+                    scale(tree, n.inputs['Roughness'])
+            sub = getattr(n, 'node_tree', None)
+            if sub is not None and sub.name not in done:
+                done.add(sub.name)
+                walk(sub)
+
+    for m in bpy.data.materials:
+        if m.node_tree is not None:
+            walk(m.node_tree)
+
+
+def glass_see_through():
+    """Für den zweiten Durchgang: alles Glas (Vorlage SB_GlassPBR) durchsichtig in seiner Tönung, statt zu brechen.
+    Leuchten hinter Visieren und Linsen landet so im Emissions-Durchgang und bekommt den Bloom (Strata-Polster
+    limettengrün hinter dem Visier, Dark Bear-Pupillen hinter den Linsen). False ohne Glas."""
+    found = False
+    for g in bpy.data.node_groups:
+        if not g.name.startswith('SB_GlassPBR'):
+            continue
+        out = next((n for n in g.nodes if n.bl_idname == 'NodeGroupOutput'), None)
+        if out is None:
+            continue
+        clear = g.nodes.new('ShaderNodeBsdfTransparent')
+        tint = next((n for n in g.nodes if n.bl_idname == 'ShaderNodeHueSaturation'), None)
+        if tint is not None:
+            g.links.new(tint.outputs[0], clear.inputs['Color'])
+        g.links.new(clear.outputs[0], out.inputs[0])
+        found = True
+    return found
+
+
 def mesh_corners(objects):
     for o in objects:
         if o.type != 'MESH' or not o.data.vertices or o.get('icon_screen'):
@@ -92,6 +182,8 @@ def render(job, a):
     src, out = job['src'], job['out']
     pose, rig, size = job.get('pose'), job.get('rig'), job.get('size', a.size)
     scene = load(src)
+    sharpen_gloss()
+    boost_emission()
     hide_screens(scene)
     unturn_single_mesh(scene)
 
@@ -196,49 +288,177 @@ def render(job, a):
             light_rot = Matrix.Rotation(rz, 3, 'Z') @ Matrix.Rotation(ry, 3, 'Y') @ Matrix.Rotation(rx, 3, 'X')
             beam = rig_rot @ light_rot @ Vector((1.0, 0.0, 0.0))
             o.rotation_euler = beam.to_track_quat('-Z', 'Y').to_euler()
-        # Das Fill-Licht des Rigs ist praktisch aus (0.1): ohne mehr Umgebungslicht saufen Schatten ab
-        # (0.9: Helme ohne abgesoffene Flächen, Weiß brennt bei 30 W kaum aus)
-        ambient = 0.9
     else:
         sun('key', (-0.6, 0.8, 0.7), 3.0)
         sun('fill', (0.8, 0.2, 0.6), 1.2, (0.9, 0.95, 1.0))
         sun('rim', (0.3, 0.6, -0.8), 2.0)
-        ambient = 0.6
     world = bpy.data.worlds.new('icon_world')
     scene.world = world
     world.use_nodes = True
-    bg = world.node_tree.nodes['Background']
-    bg.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1)
-    bg.inputs['Strength'].default_value = ambient
-    # Glanz-Strahlen sehen die Welt nur halb: die gleichmäßig graue Welt spiegelte sich in glänzend schwarzen
-    # Flächen (Geist ASD, Goliath) als graue Suppe, im Spiel ist die Umgebung dunkel. Das diffuse Licht und
-    # damit die Schatten bleiben wie sie sind.
     nt = world.node_tree
-    glossy_bg = nt.nodes.new('ShaderNodeBackground')
-    glossy_bg.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1)
-    glossy_bg.inputs['Strength'].default_value = ambient * 0.5
-    light_path = nt.nodes.new('ShaderNodeLightPath')
-    mix = nt.nodes.new('ShaderNodeMixShader')
-    nt.links.new(light_path.outputs['Is Glossy Ray'], mix.inputs['Fac'])
-    nt.links.new(bg.outputs['Background'], mix.inputs[1])
-    nt.links.new(glossy_bg.outputs['Background'], mix.inputs[2])
-    nt.links.new(mix.outputs['Shader'], nt.nodes['World Output'].inputs['Surface'])
+    bg = nt.nodes['Background']
+    bg.inputs['Color'].default_value = (1, 1, 1, 1)
+    if pose:
+        # Studio-Welt statt grauer Kugel: Eevee beleuchtet mit der Welt diffus und im Glanz gleich (eine Welt-
+        # Probe). Gleichmäßiges Grau legte einen Schleier über schwarzen Lack (Geist ASD, Golden Blossom), ohne
+        # Welt spiegelte Chrom nur Schwarz und hatte harte schwarze Seiten (Goliath). Softbox oben, schwaches
+        # Licht von der Kameraseite, sonst fast schwarz; das Fill-Licht des Rigs ist praktisch aus (0.1).
+        # Richtungen in der Zelle: Bild-oben = -Y, zur Kamera = -Z.
+        tc = nt.nodes.new('ShaderNodeTexCoord')
+        sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+        nt.links.new(tc.outputs['Generated'], sep.inputs[0])
 
-    # Render: Eevee, transparenter Film, Farbkurve Khronos PBR Neutral: Grundfarben bleiben, nur Spitzen werden
-    # gestaucht (Standard schnitt helles Weiß hart ab, Snow Camo wurde eine Fläche; AgX würde entsättigen)
+        def band(axis, lo, hi, strength):
+            # smoothstep über die negative Achse: 0 bei -axis = lo, strength bei -axis = hi
+            m = nt.nodes.new('ShaderNodeMapRange')
+            m.interpolation_type = 'SMOOTHSTEP'
+            m.inputs['From Min'].default_value = -lo
+            m.inputs['From Max'].default_value = -hi
+            m.inputs['To Min'].default_value = 0.0
+            m.inputs['To Max'].default_value = strength
+            nt.links.new(sep.outputs[axis], m.inputs['Value'])
+            return m.outputs['Result']
+
+        top = band('Y', STUDIO['top_from'], STUDIO['top_to'], STUDIO['top'])
+        front = band('Z', 0.0, 0.9, STUDIO['front'])
+        add = nt.nodes.new('ShaderNodeMath')
+        add.operation = 'ADD'
+        nt.links.new(top, add.inputs[0])
+        nt.links.new(front, add.inputs[1])
+        base = nt.nodes.new('ShaderNodeMath')
+        base.operation = 'ADD'
+        nt.links.new(add.outputs[0], base.inputs[0])
+        base.inputs[1].default_value = STUDIO['base']
+        nt.links.new(base.outputs[0], bg.inputs['Strength'])
+    else:
+        bg.inputs['Strength'].default_value = 0.15
+
+    # Render: Eevee, transparenter Film, linear als EXR, die Farbkurve setzt write_png (Schulter von Khronos PBR
+    # Neutral ohne dessen Toe)
     scene.render.engine = 'BLENDER_EEVEE'
     scene.eevee.taa_render_samples = a.samples
     # Glas (Visiere): das Addon schaltet die Raytracing-Refraktion je Material ein, die Szene muss mitmachen;
     # sonst bricht Eevee nur die graue Welt und das Visier wird eine flache graue Fläche
     scene.eevee.use_raytracing = True
     scene.render.film_transparent = True
-    scene.render.image_settings.file_format = 'PNG'
+    # Mehrlagen-EXR mit dem Emissions-Durchgang: write_png legt daraus den Bloom über das Leuchtende
+    bpy.context.view_layer.use_pass_emit = True
+    scene.render.image_settings.media_type = 'MULTI_LAYER_IMAGE'
+    scene.render.image_settings.file_format = 'OPEN_EXR_MULTILAYER'
+    scene.render.image_settings.color_depth = '32'
     scene.render.image_settings.color_mode = 'RGBA'
-    scene.view_settings.view_transform = 'Khronos PBR Neutral'
+    scene.view_settings.view_transform = 'Standard'  # EXR wird linear geschrieben, die Kurve wirkt hier nicht
     scene.view_settings.look = 'None'
-    scene.render.filepath = out
-    bpy.ops.render.render(write_still=True)
+    scene.view_settings.exposure = 0.0
+    bpy.ops.render.render(write_still=False)
+    exr = out + '.exr'
+    bpy.data.images['Render Result'].save_render(exr, scene=scene)
+    glow_exr = None
+    try:
+        if glass_see_through():
+            # zweiter Durchgang nur für den Emissions-Durchgang (Bloom hinter Glas), wenige Samples: ~0.1-0.2 s
+            scene.eevee.taa_render_samples = GLOW_SAMPLES
+            bpy.ops.render.render(write_still=False)
+            glow_exr = out + '.glow.exr'
+            bpy.data.images['Render Result'].save_render(glow_exr, scene=scene)
+        write_png(exr, out, glow_exr)
+    finally:
+        os.remove(exr)
+        if glow_exr and os.path.exists(glow_exr):
+            os.remove(glow_exr)
     return f'bbox {tuple(round(v, 3) for v in (hi - lo))} m, {len(corners) // 8} meshes'
+
+
+# Studio-Welt (Leuchtdichte, weiß): Softbox oben von top_from bis top_to (Anteil der Bild-oben-Richtung),
+# Kameraseite, Grund
+STUDIO = {'top': 0.4, 'top_from': 0.2, 'top_to': 0.8, 'front': 0.05, 'base': 0.02}
+# Faktor auf jede Emissionsstärke (boost_emission)
+EMISSION_GAIN = 4.0
+# Bloom aus dem Emissions-Durchgang: Stärke und Gauß-Radien (Sigma in px bei 512 px Bildgröße) mit ihren Anteilen
+BLOOM = 2.0
+BLOOM_BLURS = ((3.0, 0.6), (8.0, 0.4))
+# Samples des zweiten Durchgangs (nur Emission hinter Glas, der Bloom verwischt sie ohnehin)
+GLOW_SAMPLES = 4
+# Faktor auf die Rauheit glänzender Oberflächen (sharpen_gloss): Mitte zwischen den Proben 1.0 und 0.7, das Licht-Rig
+# ist ohnehin anders als im Spiel (welche Goldflächen dort hell sind, zeigt die Kachel)
+ROUGHNESS = 0.85
+# Kontrast der Helligkeit unterhalb Mittelgrau (Exponent): schwarzer Lack hat unter dem Key-Licht einige Prozent und
+# wurde ohne ihn dunkelgrau (Geist ASD, ORC-mkX Singularity)
+CONTRAST = 1.45
+
+
+def shoulder(rgb):
+    # Khronos PBR Neutral ohne Toe: linear bis 0.8, darüber wird der hellste Kanal weich auf 1 gestaucht und leicht
+    # entsättigt (helles Weiß behält Zeichnung, Snow Camo wird keine Fläche). Der Toe der fertigen Kurve zog
+    # min(R,G,B) - 6.25·min² von allen Kanälen ab und machte dunkle Farben schwarz oder grell (Geist Whiteout-Kinn
+    # B/R 13 statt 1.9, Rogue-Kinn ohne Blau); Standard schnitt Weiß hart ab, AgX und Filmic machen Weiß grau.
+    start, desaturation = 0.8, 0.15
+    peak = rgb.max(axis=-1, keepdims=True)
+    d = 1 - start
+    new_peak = 1 - d * d / (peak + d - start)
+    comp = rgb * (new_peak / np.maximum(peak, 1e-9))
+    g = 1 - 1 / (desaturation * (peak - new_peak) + 1)
+    comp = comp * (1 - g) + new_peak * g
+    return np.where(peak < start, rgb, comp)
+
+
+def contrast(rgb):
+    # Helligkeit Y unter 0.18 -> 0.18·(Y/0.18)^CONTRAST, als gemeinsamer Faktor auf alle Kanäle: Schatten und Schwarz
+    # tiefer, die Farbverhältnisse bleiben (anders als der Toe, der dunkle Farben schwarz machte). Darüber unverändert:
+    # über den ganzen Bereich hob er auch die Lichter, Weiß brannte aus (Snow Camo 5.9 % Pixel, CQ7 Snowfire 6.1 %)
+    y = (0.2126 * rgb[..., 0:1] + 0.7152 * rgb[..., 1:2] + 0.0722 * rgb[..., 2:3])
+    y = np.maximum(y, 1e-9)
+    return rgb * np.where(y < 0.18, (y / 0.18) ** (CONTRAST - 1), 1.0)
+
+
+def gauss_blur(img, sigma):
+    """Separierbarer Gauß über (h, w, c), außerhalb schwarz."""
+    r = max(1, int(3 * sigma))
+    x = np.arange(-r, r + 1)
+    k = np.exp(-x * x / (2 * sigma * sigma))
+    k /= k.sum()
+    pad = np.pad(img, ((r, r), (r, r), (0, 0)))
+    rows = sum(k[i] * pad[i:i + img.shape[0]] for i in range(2 * r + 1))
+    return sum(k[i] * rows[:, i:i + img.shape[1]] for i in range(2 * r + 1))
+
+
+def read_layer(exr, layer):
+    """Ein Durchgang (Combined, Emission) einer Mehrlagen-EXR als (h, w, c), Zeilen von oben."""
+    import OpenImageIO as oiio  # in Blenders Python enthalten
+    buf = oiio.ImageBuf(exr)
+    spec = buf.spec()
+    names = list(spec.channelnames)
+    px = buf.get_pixels(oiio.FLOAT).reshape(spec.height, spec.width, -1).astype(np.float64)
+    return px[..., [names.index(n) for c in 'RGBA' for n in names if n.endswith(f'.{layer}.{c}')]]
+
+
+def write_png(exr, out, glow_exr=None):
+    """Lineare, vormultiplizierte Mehrlagen-EXR -> sRGB-PNG mit geradem Alpha: Bloom aus dem Emissions-Durchgang
+    (Lichthöfe wie im Spiel; der Artimex-Augenstreifen war ohne ihn eine scharfe Linie, wo die Inventar-Kachel ihn
+    glühen lässt), dann contrast() und shoulder(). Mit Glas kommt die Emission aus dem zweiten Durchgang (glow_exr),
+    in dem das Glas durchsichtig ist: sonst fehlt Leuchten hinter Glas."""
+    comb = read_layer(exr, 'Combined')
+    emission = read_layer(glow_exr or exr, 'Emission')
+    spec_width = comb.shape[1]
+    lin, a = comb[..., :3], comb[..., 3:4]
+    if emission.size and emission.max() > 0:
+        scale = spec_width / 512
+        bloom = BLOOM * sum(w * gauss_blur(emission, s * scale) for s, w in BLOOM_BLURS)
+        lin = lin + bloom  # Licht, vormultipliziert addiert
+        # der Lichthof außerhalb des Items deckt nach seiner Helligkeit
+        glow = 0.2126 * bloom[..., 0:1] + 0.7152 * bloom[..., 1:2] + 0.0722 * bloom[..., 2:3]
+        a = np.clip(a + (1 - a) * np.clip(glow * 4, 0, 1), 0, 1)
+    rgb = np.clip(shoulder(contrast(lin / np.maximum(a, 1e-6))), 0, 1)
+    rgb = np.where(rgb <= 0.0031308, rgb * 12.92, 1.055 * rgb ** (1 / 2.4) - 0.055)
+    h, w = rgb.shape[:2]
+    dst = bpy.data.images.new('icon_png', w, h, alpha=True)
+    dst.colorspace_settings.name = 'Non-Color'  # Werte sind schon sRGB-kodiert
+    # EXR-Zeilen von oben, Blender-Pixel von unten
+    dst.pixels.foreach_set(np.concatenate([rgb, a], axis=-1)[::-1].astype(np.float32).ravel())
+    dst.filepath_raw = out
+    dst.file_format = 'PNG'
+    dst.save()
+    bpy.data.images.remove(dst)
 
 
 def main():
