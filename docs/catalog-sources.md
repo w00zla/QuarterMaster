@@ -403,7 +403,7 @@ Throwaway script, not in the repo. Result:
 
 ---
 
-## Icons (`pnpm icons:render`)
+## Icons (`pnpm packshot`)
 
 Inventory-style icons for everything the app books: the gear items (`componentItemSql`, ship components and FPS
 gear, no consumables), the harvestables (items used as recipe inputs, the stock service's bookable rule: 11
@@ -420,7 +420,7 @@ pictures with gaps), so the icons are rendered from the models:
    the loot crate; no usable worn model: the exporter falls back to the default geometry itself);
    `--variant-tags` gives paint variants (`…_tan01`) their own tagged SubGeometry; `--icon-files` leaves out
    animation clips and diagnostics. Each package lands in `Packages/<name>_LOD1_TEX2/scene.blend`, all of a block
-   share one `Data/` tree (`local/work/icons/export/b<n>/`): a mesh file carries its material in the name
+   share one `Data/` tree (`<work>/export/b<n>/`): a mesh file carries its material in the name
    (`ui_ore_raw_1_a_LOD1_ui_ore_gold_1_a.blend`), because its slots are named after the material and variants on
    one geometry used to overwrite each other ("keine Meshes in der Szene", 27 armour pieces in the first full
    run). A record's material comes from `SGeometryResourceParams.Geometry.Geometry.Material`, else from its
@@ -432,7 +432,7 @@ pictures with gaps), so the icons are rendered from the models:
    palette of its own falls back to its material's `DefaultPalette`, then to the game's `TintPalettes/default`
    (primary white, secondary sRGB 112, tertiary 21; fork commit 559cb793): before, palette-tinted layers
    stayed white, the Hill Horror Reborn's face red where the game shows it black. Paths inside an export reach ~160
-   characters; Blender on Windows reads none over 259 (missing textures render silently white), so the CLI
+   characters; Blender on Windows reads none over 259 (missing textures render silently white), so packshot
    reports a block with a longer path ("Pfade über 259 Zeichen": move `--work` to a shorter folder). The block's
    export is deleted after its render, one with failures stays for inspection. The
    **our fork starbreaker-qm** (`local/starbreaker-qm/`, MIT, built from the repo `../starbreaker-qm`, public at
@@ -548,14 +548,28 @@ pictures with gaps), so the icons are rendered from the models:
    the cell; the rig's lights stand ~1 m out, a 3 m cooler would have them inside). Matching: type + sub type
    exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
-4. **Output:** one render per entity (`local/work/icons/render/<class>.png`), copied to
-   `local/icons/<Name> (<class>) <uuid>.png` per catalog UUID (English name, so the renders can be checked by eye
-   in Explorer and re-rendered with `--filter <class>`; `thumbs:build` reads only the UUID at the end and stops when
-   a UUID has two files). A run without `--force` renames existing icons to this pattern. Renders are reused unless `--force`; `--filter` re-renders
-   single entities. Per block one export-batch and one Blender process; the next block exports while the previous
-   one renders. Measured 2026-11-01 (dev PC, 89 entities): 0.17 s export and 0.55 s render per entity, so the
-   render sets the pace; the full run of the 3793 gear targets took 52 min on the render PC (the first one, single
-   exports, 4 h). Log: `render.log` (the console plus full error messages) and
+4. **Output: runs and sets** (`tools/packshot/src/store.rs`). The packshot folder is laid out the same on every box:
+   `packshot.json`, `targets.json`, `runs/`, `sets/`, `manifests/` and `work/` (the cache: exports, renders, DataCore
+   tables, logs); in the repo that is `local/packshot/`, in a bundle the bundle folder itself (`--store`, `--work`). Blender renders one image per entity into the work directory (`<work>/render/<class>.png`); it then
+   moves into the **run**, the folder of that packshot run, `runs/<YYYY-MM-DD_HH-MM>_<name>/` (name from `--name`,
+   else filter terms and scope, e.g. `arms_missing`), as `<Name> (<class>) <uuid>.png` per catalog UUID (English
+   name, so the renders can be checked by eye in Explorer; further UUIDs of the entity are hard links), read-only.
+   The run also holds `run.json` (its set, node, start and end, the origin as in the event log's `run_start`: filter,
+   scope, arguments, hashes of `render.py` and the addon, Blender version, StarBreaker commit, p4k; per entity ok or
+   the error and its files; saved after every block) and `events.jsonl`. A finished run is not changed any more; one
+   without a single result is removed again. A **set** is `sets/<name>/`: every icon as a hard link to a run's image,
+   per entity the latest run of its chain that has an image, plus `set.json` (base, the base's chain at the branch,
+   its own runs, the files and the run each links to). `live` is the main set, `thumbs:build` reads it. A run's
+   images are linked into its target set as they arrive (`--set`, default live; a name that does not exist yet
+   branches off live). An experiment set takes over into live by appending its own runs to live's chain (no new run,
+   the origin stays); a run can be deleted from the middle of a set's chain, the older runs then show through again
+   (the question says how many images fall back and how many disappear). Deleting an experiment set removes its
+   folder and those of its runs no other set uses. Scope "missing" means not in the target set, "failed" the
+   latest attempt in the set's chain failed. At start packshot checks the set folder against its chain and repairs
+   it (missing links, stray PNGs). No store by content hash: renders are not bit-identical, deduplication gains
+   nothing. Measured 2026-11-01 with the former CLI loop (dev PC, 89 entities, one export and one Blender at a time):
+   0.17 s export and 0.55 s render per entity; the full run of the 3793 gear targets took 52 min on the render PC
+   (the first one, single exports, 4 h). Log: `render.log` (the console plus full error messages) and
    `blender.log` (Blender's output, tracebacks of `render.py`) in the work directory, appended per run. Known
    failures (52 of 6734 in the last 2026-11-01 run, not fixable here): 23 `file not found in P4k: Data\m` -- the
    record names no geometry at all (every `path` of its `SGeometryResourceParams` empty; the message is the
@@ -569,20 +583,27 @@ pictures with gaps), so the icons are rendered from the models:
    run (paint variants of the P4-AR, P8-SC, Gemini S71/R97, KSAR Karna/Scalpel, Kel-To Lumin: the part materials
    their CDF appends were missing from the variant's sidecar when the base entity of the batch wrote it first) are
    fixed in the fork (23679ae6). `sc_nvy_medical_corpsman_boots_02` renders its shoe box: `Data.p4k` holds only its textures
-   (Squadron 42 content), the box is its default geometry. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
-   packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
-   Windows PC (`run.cmd`, needs only `Data.p4k`).
-   **`pnpm packshot`** (`tools/packshot/`, Rust with ratatui and ratatui-image) runs the same export and render
+   (Squadron 42 content), the box is its default geometry. `pnpm packshot:targets [--out <file>]`
+   (`src/icons/cli.ts`) writes the target list from the DB (default `local/packshot/targets.json`); until 2026-11-03 that CLI also rendered (one export and
+   one Blender at a time, into `local/icons`, bundled by `scripts/icons-bundle.ps1`), packshot replaced it.
+   **`pnpm packshot`** (`tools/packshot/`, Rust with ratatui and ratatui-image) runs export and render
    with several processes at once (Blender ¾ of the physical cores, `export-batch` ¼ but at least 2; `--workers`,
    `--exporters`, and `+`/`-`, `[`/`]` while it runs) and Blender on Vulkan (`--gpu-backend vulkan`) in a terminal
-   dashboard: progress and ETA, the workers, renders per minute and CPU, the latest render as an
-   image (Sixel, Kitty or iTerm2, half blocks otherwise; ←/→ pages back), log and errors. What it renders: a filter
-   (terms separated by blanks or commas, any of them in the class, the name or the type) and a scope: missing (no
-   render yet), failed last time (`<work>/render-state.json`, also when an old render exists) or all (overwrites, asks
+   UI of three views (Tab or 1–3; log and errors below every view, `e` switches). **1 Run:** progress and ETA, the
+   workers (local and on nodes, `node/B1`), renders per minute and CPU, the latest render as an image (Sixel, Kitty or
+   iTerm2, half blocks otherwise; ←/→ pages back); Enter asks for the run name (default: filter terms and scope).
+   **2 Sets:** the sets with their own runs (date, name, node, filter, images, add-on hash; ⇣ = fetched from another
+   coordinator), on the right the selected run's result and up to 8 of its images, `i` adds hashes, Blender,
+   StarBreaker, p4k and processes; Enter makes a set the target set, `n` creates one from live, `l` adopts an
+   experiment into live, `x` deletes a run or set (both ask). **3 Nodes:** see the cluster below. What it renders: a filter
+   (terms separated by blanks or commas, any of them in the class, the name or the type) and a scope: missing (not in
+   the target set), failed last time (in the set's chain, also when an old image exists) or all (replaces, asks
    first); `--filter`/`--scope` preset both, `--plain` runs without the TUI. It reads `targets.json`
-   (`--write-targets`, default `<work>/targets.json`) and computes pose and rig itself (a port of the CLI's
+   (`pnpm packshot:targets`, default: in the packshot folder) and computes pose and rig itself (a port of the former CLI's
    `loadGameTables`: identical for all 6734 targets and the 53 rigs on 2026-11-01), so it needs neither Node nor the
-   DB. For small reruns the blocks shrink so every Blender gets work. Measured 2026-11-02 with `render.py` of
+   DB. Blocks are cut only when they are exported: rest / (3 × Blender in the cluster), at least 10, at most
+   `--chunk` (50), and for small rests so that every Blender gets work, so they shrink towards the end of a run.
+   Measured 2026-11-02 with `render.py` of
    f44dafa (dev PC, 9800X3D and RTX 5080, 459 `_arms_` entities, warm file cache after a first run): 1 Blender
    209 s, 4 Blender 97 s, 6 Blender 98 s, 8 Blender (3 exports) 94 s; a render takes 0.45 s alone and 0.65/0.82/1.00 s
    with 4/6/8 in parallel. The CPU is the limit: with 8 Blender it sits at 90–100 % for the whole render phase, while
@@ -590,13 +611,13 @@ pictures with gaps), so the icons are rendered from the models:
    did not help (4 Blender 109 s). These runs were on OpenGL; see Vulkan below. `render.py` appends its phases to every `icon:` line (`timing load=… prep=… render=… glass=… post=…`:
    opening incl. the addon's material build, material tweaks/pose/camera/light/world, shader compilation plus render
    and EXR, the glass pass, `write_png`); the TUI shows their means and logs them per item. Every run also writes
-   an event log, `<work>/logs/<date>_<host>.jsonl`, one JSON line per event with `t` (seconds since the start):
-   `run_start` (host, process counts, cores, Blender version and backend, hashes of `render.py` and the addon,
+   an event log, `events.jsonl` in its run folder, one JSON line per event with `t` (seconds since the start):
+   `run_start` (run, set, host, process counts, cores, Blender version and backend, hashes of `render.py` and the addon,
    StarBreaker commit, p4k size), `export_start`/`export_item`/`export_end` (seconds per item, process wall time,
    paths over 259 characters), `render_start` (how long the block waited for a Blender)/`render_item` (wall and
    phases)/`render_end`, `failure`, `sample` every 2 s (CPU, GPU via `nvidia-smi` if present, running exports and
-   Blender, blocks pending and ready) and `run_end`. `pnpm packshot --report [log]` evaluates one (default: the
-   latest): result and items/s, phases with mean/p50/p95, Blender start-up and slot use, export overhead per block,
+   Blender, blocks pending and ready) and `run_end`. `pnpm packshot --report [log|run folder]` evaluates one (default:
+   the latest run): result and items/s, phases with mean/p50/p95, Blender start-up and slot use, export overhead per block,
    how often Blender waited for exports, CPU/GPU, slowest items, failures. Same set, 2026-11-02:
    alone load 0.19, prep 0.01, render 0.12, glass 0.00, post 0.02 s; with 8 Blender load 0.28 and render 0.67 s. So
    it is the render phase that grows under load (5.5×) while the GPU idles: most likely the shader compilation, which
@@ -616,20 +637,44 @@ pictures with gaps), so the icons are rendered from the models:
    now tries every candidate directly and builds the index only when none exists: same 88 items, 8 Blender, warm
    caches: load 0.85 → 0.73 s, 104 → 94 s; images identical (at most 1/255). The rest of the load is the node-tree
    build itself (~0.2 s per item alone).
+   **Cluster** (`tools/packshot/src/net.rs`, `cluster.rs`, `node.rs`; settings in `packshot.json` in the store folder,
+   in a bundle next to the exe: `token`, `listen`, `coordinators` as host names or IPs with an optional port, default
+   47800; every box is known by its host name, which the handshake carries; without a token everything stays local). Coordinators (dev PC, win-3080) have `Data.p4k` and StarBreaker and listen on `listen`
+   (default `0.0.0.0:47800`); pure nodes (`packshot --node`, e.g. the Linux box with the RTX 3090) have only packshot
+   and Blender and connect to the coordinators of their list, retrying every 3 s; a coordinator also connects to the
+   other coordinators of its list. TCP, one frame per message (u32 JSON length, JSON, u64 payload length, payload),
+   files as payload written straight into an inbox folder, paths from the wire checked (no `..`, no drive); every
+   connection opens with a hello (token, role, packshot version, Blender version, add-on hash, Blender count, cores),
+   wrong token = rejected; ping every 10 s, a connection silent for 45 s is dropped. Who is connected at the start of
+   a run takes part. A node with another add-on hash would render another look: at the start the TUI asks (y sends
+   the coordinator's add-on and Blender config, the node joins once it reports the new hash; n starts without it),
+   `s` in view 3 sends it any time; a node never overwrites a link (on the dev PC the add-on is a junction into the
+   fork). Another packshot or Blender version: left out. The coordinator exports, its own Blender take ready blocks
+   first, the rest go to nodes with free slots: the block's export folder, the rigs it needs and `render.py`
+   (1–10 MB for blocks of 1–3 rifles), paths relative to the block; the node renders with its own Blender (one process per block,
+   ¾ of its cores) and sends each PNG with its `icon:` line back, the coordinator files it like a local render (event
+   log worker `node/B1`). A node that drops: its unreported items go back into the queue. Checked: a decomposed export
+   renders bit-identically from a moved folder (`scene.json` holds no absolute paths), so blocks can travel; a local
+   cluster (coordinator with 1 Blender + a node with 2 on the same PC) rendered 11 items, 6 of them on the node.
+   **Between coordinators** only on a key press, never by itself: in view 3, `h` on a coordinator fetches its
+   finished runs for its live that are missing here (folders copied, same id from another node gets `-<node>`) and
+   appends them to the local live in order (shown with ⇣); `m` fetches its live manifest (`<store>/manifests/`), so
+   "missing" on the local live also counts what the other one already has (for win-3080 before a run). Not
+   checked across two machines yet; the Windows firewall asks once whether packshot.exe may accept connections.
    **Builds and bundles:** packshot builds for Windows (`cargo build --release`) and as a static Linux binary
    (`--target x86_64-unknown-linux-musl`, linked by Rust's own `rust-lld` per `tools/packshot/.cargo/config.toml`, no
    C toolchain or WSL needed; static PIE without interpreter or shared libraries). `scripts/packshot-bundle.ps1
    [-Platform all|windows|linux]` writes `local/packshot-bundle/windows` (packshot.exe, StarBreaker with `COMMIT`,
    the portable Blender incl. `portable/` with config and addon, `cli/render.py`, `targets.json` from the DB,
-   `run.cmd`; ~930 MB) and `local/packshot-bundle/linux` (the binary, the official Blender tarball from
+   `run.cmd`, `README.txt`, `packshot.example.json`; ~930 MB) and `local/packshot-bundle/linux` (the binary, the official Blender tarball from
    download.blender.org checked against its `blender-<ver>.sha256` and left packed so symlinks and exec bits survive,
    the same `portable/`, `cli/render.py`, `setup.sh` to unpack and install, `check.sh` that tests the addon and a
-   headless EEVEE render on Vulkan; ~373 MB). The templates live in `tools/packshot/bundle/`. The Linux bundle only
-   prepares and checks a box until packshot has a node mode. Checked 2026-11-03: both bundles on their boxes, and on
+   headless EEVEE render on Vulkan, `run-node.sh`, `README.txt`, `packshot.example.json`; ~373 MB; there `./run-node.sh`). The
+   templates live in `tools/packshot/bundle/`. Checked 2026-11-03: both bundles on their boxes, and on
    an Ubuntu 24.04 server without a desktop (RTX 3090, full NVIDIA driver from `ubuntu-drivers install`; the
    `--gpgpu` variant lacks `libnvidia-gl` and with it Vulkan) `check.sh` passed: the addon loads and EEVEE renders
    headless on Vulkan, no display server needed.
-5. **Pack:** `pnpm thumbs:build [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
+5. **Pack:** `pnpm thumbs:build [--in local/packshot/sets/live] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
    every `<uuid>.png` into three AVIFs (`src/thumbs.ts`: s 40, m 96, l 256 px; quality 45, trimmed to the content
    with a small transparent border) named `<uuid>.<hash>.avif` (hash: SHA-256 of the PNG, 8 hex) plus
    `thumbs.json` `{uuid: hash}`; unchanged ones are skipped, stale files deleted. Full set: ~2 min, ~23 MB (S
@@ -638,7 +683,8 @@ pictures with gaps), so the icons are rendered from the models:
    (`docs/deploy.md` § 8), served by the web app (`docs/webapp.md` "Thumbnails").
 6. **Review:** holders of the privilege `thumb-review.mark` mark wrong thumbnails in the web app and cut a reference out
    of a screenshot (`docs/webapp.md` "Features and privileges"); the admin's ZIP export of those rows (`docs/adminapp.md`
-   "Features") is the input for fixing pose, light or material, then `icons:render --filter <class> --force`.
+   "Features") is the input for fixing pose, light or material, then `pnpm packshot --filter <class> --scope all`
+   (into an experiment set first: `--set <name>`).
    References without the review: the companion's debug recordings (`local/stock_scan_debug/*/read-N.{jpg,json}`)
    hold the game's own inventory and warehouse tiles, found by the tooltip title plus the cursor (character
    inventory) or the hovered tile's rect (warehouse). A hovered warehouse tile is covered by its tooltip: take the

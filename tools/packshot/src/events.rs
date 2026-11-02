@@ -1,7 +1,7 @@
-// Ereignis-Log je Lauf für die Auswertung: <work>/logs/<lauf>.jsonl, eine JSON-Zeile je Ereignis mit "t" (Sekunden
-// seit dem Laufstart) und "ev". Ereignisse: run_start (Herkunft: Kiste, Prozesse, Hashes von render.py und Addon,
-// StarBreaker-Commit, p4k), export_start/export_item/export_end, render_start/render_item/render_end (Phasen aus
-// render.py), failure, sample (alle 2 s: CPU, GPU, Prozesse, Queue), run_end. `packshot --report` wertet ein Log aus.
+// Event log per run for the evaluation: runs/<run>/events.jsonl, one JSON line per event with "t" (seconds
+// since the run start) and "ev". Events: run_start (origin: machine, processes, hashes of render.py and addon,
+// StarBreaker commit, p4k), export_start/export_item/export_end, render_start/render_item/render_end (phases from
+// render.py), failure, sample (every 2 s: CPU, GPU, processes, queue), run_end. `packshot --report` evaluates a log.
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -28,10 +28,8 @@ pub fn round3(x: f64) -> f64 {
 }
 
 impl EventLog {
-    pub fn create(dir: &Path, run_id: &str) -> Result<Self> {
-        fs::create_dir_all(dir)?;
-        let path = dir.join(format!("{run_id}.jsonl"));
-        Ok(Self { out: BufWriter::new(File::create(&path).with_context(|| path.display().to_string())?), t0: Instant::now(), path })
+    pub fn create(path: &Path) -> Result<Self> {
+        Ok(Self { out: BufWriter::new(File::create(path).with_context(|| path.display().to_string())?), t0: Instant::now(), path: path.to_path_buf() })
     }
 
     pub fn emit(&mut self, ev: &str, mut fields: Value) {
@@ -54,12 +52,12 @@ fn fnv(bytes: &[u8], mut h: u64) -> u64 {
     h
 }
 
-/// Kurzer Inhalts-Hash einer Datei (FNV-1a), um Läufe mit verschiedenen render.py-Ständen zu unterscheiden
+/// Short content hash of a file (FNV-1a), to tell runs with different render.py versions apart
 pub fn file_hash(path: &Path) -> Option<String> {
     fs::read(path).ok().map(|b| format!("{:016x}", fnv(&b, FNV0)))
 }
 
-/// Hash über alle .py-Dateien eines Ordners (relativer Pfad und Inhalt, sortiert, ohne __pycache__): der Addon-Stand
+/// Hash over all .py files of a folder (relative path and content, sorted, without __pycache__): the addon version
 pub fn tree_hash(root: &Path) -> Option<String> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -84,7 +82,7 @@ pub fn tree_hash(root: &Path) -> Option<String> {
     Some(format!("{h:016x}"))
 }
 
-/// GPU-Auslastung über `nvidia-smi -l 2` im Hintergrund (Windows und Linux); ohne NVIDIA-Treiber gibt es keinen Wert
+/// GPU load via `nvidia-smi -l 2` in the background (Windows and Linux); without an NVIDIA driver there is no value
 pub struct GpuProbe {
     child: Child,
     util: Arc<AtomicU32>,
@@ -125,13 +123,6 @@ impl Drop for GpuProbe {
     }
 }
 
-/// Das jüngste Log im Ordner (die Namen beginnen mit Datum und Uhrzeit)
-pub fn latest_log(dir: &Path) -> Option<PathBuf> {
-    let mut logs: Vec<PathBuf> = fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl")).collect();
-    logs.sort();
-    logs.pop()
-}
-
 fn mean(v: &[f64]) -> f64 {
     if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
 }
@@ -149,8 +140,8 @@ fn f(v: f64, digits: usize) -> String {
     format!("{v:.digits$}")
 }
 
-/// Auswertung eines Logs als Text: Herkunft, Ergebnis, Phasen (Mittel, p50, p95), Blender-Starts und -Belegung,
-/// Export, Wartezeiten, CPU/GPU, langsamste Items, Fehler
+/// Evaluation of a log as text: origin, result, phases (mean, p50, p95), Blender starts and slot use,
+/// export, wait times, CPU/GPU, slowest items, failures
 pub fn report(path: &Path) -> Result<String> {
     let text = fs::read_to_string(path).with_context(|| path.display().to_string())?;
     let evs: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
@@ -161,7 +152,7 @@ pub fn report(path: &Path) -> Result<String> {
     let num = |v: &Value| v.as_f64().unwrap_or(0.0);
 
     let mut out = Vec::new();
-    out.push(format!("Run {}", start["run"].as_str().unwrap_or("?")));
+    out.push(format!("Run {} · set {}", start["run"].as_str().unwrap_or("?"), start["set"].as_str().unwrap_or("?")));
     out.push(format!(
         "  Node {} ({}) · {} cores · {} Blender, {} export · Blender {} ({})",
         start["host"].as_str().unwrap_or("?"),
@@ -202,7 +193,7 @@ pub fn report(path: &Path) -> Result<String> {
         if aborted { " (aborted)" } else if end.is_none() { " (no run_end: run incomplete)" } else { "" }
     ));
 
-    // Phasen je Render
+    // phases per render
     out.push(String::new());
     out.push(format!("Render per item (s)   {:>8} {:>8} {:>8}", "Mean", "p50", "p95"));
     let walls: Vec<f64> = ok.iter().map(|e| num(&e["wall"])).collect();
@@ -214,7 +205,7 @@ pub fn report(path: &Path) -> Result<String> {
         }
     }
 
-    // Blender: Start (erstes Item eines Blocks minus seine Phasen) und Belegung der Plätze
+    // Blender: start (first item of a block minus its phases) and slot use
     let mut first_by_block: HashMap<i64, &Value> = HashMap::new();
     for e in &items {
         let b = e["block"].as_i64().unwrap_or(-1);
@@ -236,7 +227,7 @@ pub fn report(path: &Path) -> Result<String> {
         f(if wall > 0.0 && slots > 0.0 { render_walls / (wall * slots) * 100.0 } else { 0.0 }, 0)
     ));
 
-    // Export: Sekunden je Item laut StarBreaker, Prozess-Overhead (Laden von p4k/DataCore, Schreiben) je Block
+    // Export: seconds per item according to StarBreaker, process overhead (loading p4k/DataCore, writing) per block
     let ex_items: Vec<f64> = of("export_item").filter(|e| e["ok"] == true).map(|e| num(&e["seconds"])).collect();
     let overhead: Vec<f64> = of("export_end").map(|e| num(&e["wall"]) - num(&e["item_seconds"])).collect();
     let ex_walls: Vec<f64> = of("export_end").map(|e| num(&e["wall"])).collect();
@@ -248,7 +239,7 @@ pub fn report(path: &Path) -> Result<String> {
         f(mean(&overhead), 1)
     ));
 
-    // Wartezeiten: Blöcke auf einen freien Blender, Blender auf den Export
+    // Wait times: blocks for a free Blender, Blender for the export
     let waits: Vec<f64> = of("render_start").map(|e| num(&e["queue_wait"])).collect();
     let starved = samples
         .iter()
@@ -271,7 +262,7 @@ pub fn report(path: &Path) -> Result<String> {
         samples.len()
     ));
 
-    // Langsamste Items
+    // Slowest items
     let mut slow = ok.clone();
     slow.sort_by(|a, b| num(&b["wall"]).total_cmp(&num(&a["wall"])));
     if !slow.is_empty() {

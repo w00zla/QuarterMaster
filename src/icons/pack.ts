@@ -1,9 +1,10 @@
-// Packt die gerenderten Icons (local/icons/[<Name> (<class>) ]<uuid>.png, 256 px; nur die UUID am Ende zählt)
+// Packt die gerenderten Icons (das Set live von packshot, local/packshot/sets/live/[<Name> (<class>) ]<uuid>.png,
+// 256 px; nur die UUID am Ende zählt)
 // zu Thumbnails für die Apps: je UUID drei
 // AVIFs (s/m/l, src/thumbs.ts), auf den Inhalt beschnitten und mit etwas Rand quadratisch aufgefüllt, plus
 // thumbs.json {uuid: hash}. Hash = die ersten 8 Hex-Zeichen von SHA-256 des PNGs: ein neu gerendertes Icon
 // bekommt eine neue URL, unveränderte bleiben im Cache der Clients. Veraltete Dateien im Ziel werden gelöscht.
-// Usage: pnpm thumbs:build [--in local/icons] [--out local/thumbs] [--force]
+// Usage: pnpm thumbs:build [--in local/packshot/sets/live] [--out local/thumbs] [--force]
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
@@ -13,7 +14,7 @@ import sharp from 'sharp';
 import { THUMB_FILE, THUMB_SIZES, thumbFile, type ThumbSize } from '../thumbs.ts';
 
 const HELP = `Usage: pnpm thumbs:build [options]
-  --in <dir>     Die PNGs, …<uuid>.png (default: local/icons; Unterordner werden nicht gelesen)
+  --in <dir>     Die PNGs, …<uuid>.png (default: local/packshot/sets/live; Unterordner werden nicht gelesen)
   --out <dir>    Ziel: s/, m/, l/ und thumbs.json (default: local/thumbs)
   --force        Vorhandene Thumbnails neu erzeugen`;
 
@@ -25,7 +26,7 @@ const SIZES = Object.keys(THUMB_SIZES) as ThumbSize[];
 
 const { values: args } = parseArgs({
   options: {
-    in: { type: 'string', default: 'local/icons' },
+    in: { type: 'string', default: 'local/packshot/sets/live' },
     out: { type: 'string', default: 'local/thumbs' },
     force: { type: 'boolean', default: false },
     help: { type: 'boolean', default: false },

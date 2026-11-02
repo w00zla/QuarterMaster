@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prüft Blender samt StarBreaker-Addon und einen EEVEE-Render auf Vulkan.
+# Checks Blender with the StarBreaker addon and an EEVEE render on Vulkan.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -16,19 +16,19 @@ out=$(./blender/blender -b --python-expr "import addon_utils; print('ADDON', add
 if printf '%s\n' "$out" | grep -E '^ADDON ' | grep -q 'True)\?$'; then
   echo "OK     Addon starbreaker_addon"
 else
-  echo "FEHLER Addon starbreaker_addon"
+  echo "ERROR  Addon starbreaker_addon"
   printf '%s\n' "$out" | tail -n 15
   failed=1
 fi
 
-# 2: EEVEE auf Vulkan, headless
+# 2: EEVEE on Vulkan, headless
 rm -f "$png"
 expr="import bpy; s=bpy.context.scene; s.render.engine='BLENDER_EEVEE'; s.render.resolution_x=64; s.render.resolution_y=64; s.render.filepath=r'$png'; bpy.ops.render.render(write_still=True)"
 out=$(./blender/blender -b --factory-startup --gpu-backend vulkan --python-expr "$expr" 2>&1 || true)
 if [ -s "$png" ]; then
-  echo "OK     EEVEE-Render (Vulkan)"
+  echo "OK     EEVEE render (Vulkan)"
 else
-  echo "FEHLER EEVEE-Render (Vulkan)"
+  echo "ERROR  EEVEE render (Vulkan)"
   printf '%s\n' "$out" | tail -n 15
   failed=1
 fi

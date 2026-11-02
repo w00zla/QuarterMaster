@@ -1,10 +1,17 @@
-// packshot: Leitstand für das Icon-Rendern (Ansicht A), Alternative zur Render-Schleife von `pnpm icons:render`
-// (src/icons/cli.ts): dieselbe Zielliste (targets.json aus `--write-targets`), dieselben Pose-/Licht-Tabellen, derselbe
-// Export (StarBreaker export-batch) und dasselbe Blender-Skript (src/icons/render.py), aber mit mehreren Export- und
-// Blender-Prozessen gleichzeitig, Auswahl per Filter und Umfang (fehlende / gescheiterte / alle neu) und Bildvorschau.
-// Läuft im Repo (Pfade unter local/) und im Bundle (Pfade neben der exe), ohne Node und ohne DB.
+// packshot: control room for rendering the icons. Reads the target list (targets.json from `pnpm packshot:targets`),
+// computes pose and light rig from the game's tables, exports with StarBreaker export-batch and
+// renders with src/icons/render.py, several export and Blender processes at once, selection by filter and scope
+// (missing / failed / all), image preview. Every run is a run folder whose images land in the target set (store.rs;
+// pnpm thumbs:build reads live). With a token in packshot.json the coordinator also hands blocks to nodes
+// (cluster.rs, node.rs). Runs in the repo (paths under local/) and in the bundle (paths next to the exe), without
+// Node.js and without the DB.
+mod cluster;
+mod config;
 mod engine;
 mod events;
+mod net;
+mod node;
+mod store;
 mod tables;
 mod ui;
 
@@ -12,35 +19,50 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 
+use cluster::NodeState;
+use config::NetConfig;
 use engine::{Config, Engine, Scope, Target};
+use net::{Hub, Role};
+use store::Store;
 use tables::Tables;
 
 const HELP: &str = "Usage: pnpm packshot [options]
   --filter <terms>      Only entities where one of the terms (blanks/commas) occurs in the class name, the display
                         name or the type (case-insensitive); change it in the TUI with /
-  --scope <s>           missing (default): no render yet · failed: failed last time · all: re-render all (force)
+  --scope <s>           missing (default): not in the set yet · failed: failed last time in the set · all: re-render
+                        all (force)
   --force               = --scope all
-  --plain               No TUI: starts at once and prints lines like pnpm icons:render
+  --set <name>          Target set (default live); a new name branches off live
+  --name <name>         Run name (default: filter terms and scope)
+  --plain               No TUI: starts at once and prints one line per item
   --dry-run             Only list what would be rendered (with pose and rig), then exit
+  --node                Node mode: connect to the coordinators in packshot.json and render their blocks
+                        (needs only Blender, no Data.p4k, no StarBreaker)
   --workers <n>         Blender processes at once (default ¾ of the physical cores)
   --exporters <n>       StarBreaker exports at once (default ¼ of the physical cores, at least 2)
   --chunk <n>           At most n entities per block (one export and one Blender process, default 50)
   --size <px>           Edge length (default 256)
-  --targets <file>      Target list (default: <work>/targets.json, else targets.json next to the exe/in the folder)
+  --targets <file>      Target list (default: targets.json in the packshot folder)
   --p4k <path>          Data.p4k (default: $SC_DATA_P4K, .env, Data.p4k in the folder)
   --starbreaker <bin>   StarBreaker CLI, our fork (default: local/starbreaker-qm/ or starbreaker/)
   --blender <bin>       Blender (default: local/blender/*/ or blender/)
   --render-script <py>  render.py (default: src/icons/render.py or cli/render.py)
-  --out <dir>           Output, one PNG per UUID (default: local/icons or icons)
-  --work <dir>          Work directory (default: local/work/icons or work)
+  --store <dir>         The packshot folder: packshot.json, targets.json, runs/, sets/, work/ (default: local/packshot
+                        in the repo, else the folder itself, as in a bundle)
+  --work <dir>          Work directory (default: work/ in the packshot folder)
   --refresh-tables      Read the pose and light tables from the DataCore again
-  --report [log]        Evaluate an event log (default: the latest in <work>/logs), then exit
-Every run writes <work>/logs/<date>_<node>.jsonl: processes, phases per item, CPU/GPU every 2 s, failures.
-Target list in the repo: pnpm icons:render --write-targets local/work/icons/targets.json";
+  --report [log]        Evaluate an event log or run folder (default: the latest run), then exit
+Every run is a folder runs/<date>_<time>_<name>/: its images (<Name> (<class>) <uuid>.png), run.json (origin, result
+per entity) and events.jsonl (processes, phases per item, CPU/GPU every 2 s, failures). A set (sets/<name>/) holds
+all icons as hard links to the runs' images, per entity the latest run with an image.
+Cluster: packshot.json in the store folder, e.g. {\"token\": \"<secret>\", \"listen\": \"0.0.0.0:47800\",
+\"coordinators\": [\"win-3080\", \"192.168.1.20:47800\"]} (host name or IP, port optional, default 47800); every box is
+known by its host name; without a token everything stays local.
+Target list in the repo: pnpm packshot:targets (writes local/packshot/targets.json from the DB)";
 
 pub struct Args {
     pub filter: String,
@@ -49,12 +71,13 @@ pub struct Args {
     pub dry_run: bool,
     pub workers: usize,
     pub exporters: usize,
+    pub name: String,
     pub line: String,
 }
 
-/// Prozesszahlen aus den physischen Kernen: der Durchsatz flachte bei ~¾ der Kerne Blender ab (9800X3D, 8 Kerne:
-/// 4 → 5,3, 6 → 6,3, 8 → 6,2, 12 → 6,7 Items/s, 2026-11-02), die Exporte brauchen den Rest. Mindestens 2 Exporte:
-/// auf 4 Kernen (per Affinität nachgestellt) bremste ein einzelner Export 3 Blender aus (101 s statt 80 s für 459 Items)
+/// Process counts from the physical cores: throughput levelled off at ~¾ of the cores as Blender (9800X3D, 8 cores:
+/// 4 → 5.3, 6 → 6.3, 8 → 6.2, 12 → 6.7 items/s, 2026-11-02), the exports need the rest. At least 2 exports: on
+/// 4 cores (emulated by affinity) a single export held back 3 Blender (101 s instead of 80 s for 459 items)
 fn auto_workers() -> (usize, usize, usize) {
     let cores = sysinfo::System::physical_core_count()
         .ok()
@@ -78,7 +101,7 @@ fn find_blender(root: &Path) -> Option<PathBuf> {
     found.into_iter().next()
 }
 
-/// SC_DATA_P4K aus .env, wenn die Umgebung keinen hat (wie node --env-file-if-exists)
+/// SC_DATA_P4K from .env when the environment has none (like node --env-file-if-exists)
 fn env_p4k(root: &Path) -> Option<String> {
     if let Ok(v) = env::var("SC_DATA_P4K") {
         if !v.is_empty() {
@@ -107,10 +130,10 @@ fn real_main() -> Result<()> {
     while let Some(a) = it.next() {
         let Some(key) = a.strip_prefix("--") else { bail!("Unknown argument: {a}\n\n{HELP}") };
         match key {
-            "plain" | "dry-run" | "force" | "refresh-tables" | "help" => {
+            "plain" | "dry-run" | "force" | "refresh-tables" | "node" | "help" => {
                 flags.insert(key.to_string());
             }
-            // --report [log.jsonl]: Datei optional, sonst das jüngste Log
+            // --report [log.jsonl]: the file is optional, else the latest run
             "report" => {
                 flags.insert(key.to_string());
                 if let Some(next) = it.clone().next().filter(|n| !n.starts_with("--")) {
@@ -118,7 +141,7 @@ fn real_main() -> Result<()> {
                     it.next();
                 }
             }
-            "filter" | "scope" | "workers" | "exporters" | "chunk" | "size" | "targets" | "p4k" | "starbreaker" | "blender" | "render-script" | "out" | "work" => {
+            "filter" | "scope" | "set" | "name" | "workers" | "exporters" | "chunk" | "size" | "targets" | "p4k" | "starbreaker" | "blender" | "render-script" | "store" | "work" => {
                 let v = it.next().ok_or_else(|| anyhow!("--{key} needs a value"))?;
                 opt.insert(key.to_string(), v.clone());
             }
@@ -130,22 +153,48 @@ fn real_main() -> Result<()> {
         return Ok(());
     }
 
-    // Repo (local/ vorhanden) oder Bundle (alles neben der exe bzw. im aktuellen Ordner)
+    // The packshot folder, laid out like a bundle (packshot.json, targets.json, runs/, sets/, work/): local/packshot in
+    // the repo, else the current folder (the bundle, next to the exe)
     let root = env::current_dir()?;
     let repo = root.join("local").is_dir() && root.join("src/icons").is_dir();
     let path = |key: &str| opt.get(key).map(|p| root.join(p));
-    let work = path("work").unwrap_or_else(|| root.join(if repo { "local/work/icons" } else { "work" }));
+    let store_dir = path("store").unwrap_or_else(|| if repo { root.join("local/packshot") } else { root.clone() });
+    let work = path("work").unwrap_or_else(|| store_dir.join("work"));
+    let num = |key: &str, default: usize| -> Result<usize> { opt.get(key).map(|v| v.parse::<usize>().with_context(|| format!("--{key} {v}"))).unwrap_or(Ok(default)) };
+    let auto = auto_workers();
+    let blender = || {
+        path("blender")
+            .or_else(|| find_blender(&root))
+            .or_else(|| first_existing(&[root.join("blender").join(exe("blender"))]))
+            .ok_or_else(|| anyhow!("Blender not found (local/blender/*/ or --blender)"))
+    };
+    let net_cfg = NetConfig::load(&store_dir.join("packshot.json"))?;
+
+    if flags.contains("node") {
+        let blender = blender()?;
+        let slots = num("workers", auto.0)?.max(1);
+        fs::create_dir_all(&work)?;
+        let me = cluster::own_hello(&net_cfg.name, Role::Node, &blender, slots, auto.2, None);
+        let hub = Hub::new(net_cfg, me, work.join("node"), false);
+        return node::run(hub, node::NodeArgs { blender, work, slots });
+    }
+
+    let mut store = Store::open(&store_dir)?;
     if flags.contains("report") {
         let log = path("report")
-            .or_else(|| events::latest_log(&work.join("logs")))
-            .ok_or_else(|| anyhow!("No event log in {}", work.join("logs").display()))?;
+            .map(|p| if p.is_dir() { p.join("events.jsonl") } else { p })
+            .or_else(|| store.latest_events())
+            .ok_or_else(|| anyhow!("No run with an event log in {}", store_dir.join("runs").display()))?;
         println!("{}", events::report(&log)?);
         return Ok(());
     }
-    let out = path("out").unwrap_or_else(|| root.join(if repo { "local/icons" } else { "icons" }));
+    let set_name = opt.get("set").cloned().unwrap_or_else(|| store::LIVE.to_string());
     let targets_file = path("targets")
-        .or_else(|| first_existing(&[work.join("targets.json"), root.join("targets.json")]))
-        .ok_or_else(|| anyhow!("No target list: {} is missing.\nIn the repo: pnpm icons:render --write-targets local/work/icons/targets.json", work.join("targets.json").display()))?;
+        .or_else(|| first_existing(&[store_dir.join("targets.json")]))
+        .ok_or_else(|| {
+            let hint = if repo { "In the repo: pnpm packshot:targets" } else { "A pure node starts with --node (run-node.sh / run.cmd --node)" };
+            anyhow!("No target list: {} is missing.\n{hint}", store_dir.join("targets.json").display())
+        })?;
     let p4k = path("p4k")
         .or_else(|| env_p4k(&root).map(PathBuf::from))
         .or_else(|| first_existing(&[root.join("Data.p4k")]))
@@ -156,16 +205,11 @@ fn real_main() -> Result<()> {
     let starbreaker = path("starbreaker")
         .or_else(|| first_existing(&[root.join("local/starbreaker-qm").join(exe("starbreaker")), root.join("starbreaker").join(exe("starbreaker"))]))
         .ok_or_else(|| anyhow!("StarBreaker not found (local/starbreaker-qm/ or --starbreaker)"))?;
-    let blender = path("blender")
-        .or_else(|| find_blender(&root))
-        .or_else(|| first_existing(&[root.join("blender").join(exe("blender"))]))
-        .ok_or_else(|| anyhow!("Blender not found (local/blender/*/ or --blender)"))?;
+    let blender = blender()?;
     let render_script = path("render-script")
         .or_else(|| first_existing(&[root.join("src/icons/render.py"), root.join("cli/render.py")]))
         .ok_or_else(|| anyhow!("render.py not found (--render-script)"))?;
-    let num = |key: &str, default: usize| -> Result<usize> { opt.get(key).map(|v| v.parse::<usize>().with_context(|| format!("--{key} {v}"))).unwrap_or(Ok(default)) };
 
-    let auto = auto_workers();
     let scope = match opt.get("scope") {
         Some(s) => Scope::parse(s).ok_or_else(|| anyhow!("--scope {s}: missing, failed or all"))?,
         None if flags.contains("force") => Scope::All,
@@ -178,6 +222,7 @@ fn real_main() -> Result<()> {
         dry_run: flags.contains("dry-run"),
         workers: num("workers", auto.0)?.max(1),
         exporters: num("exporters", auto.1)?.max(1),
+        name: opt.get("name").cloned().unwrap_or_default(),
         line: raw.join(" "),
     };
 
@@ -185,8 +230,26 @@ fn real_main() -> Result<()> {
     let targets: Vec<Target> = serde_json::from_slice(&fs::read(&targets_file).with_context(|| targets_file.display().to_string())?).context("targets.json")?;
     println!("Target list: {} ({} entities)", targets_file.display(), targets.len());
     let tables = Tables::load(&starbreaker, &p4k, &work, flags.contains("refresh-tables"), |s| println!("{s}"))?;
-    let cfg = Config { p4k, starbreaker, blender, render_script, out, work, size: num("size", 256)? as u32, chunk: num("chunk", 50)?.max(1) };
-    let mut engine = Engine::new(cfg, targets, tables)?;
+    let me = cluster::own_hello(&net_cfg.name, Role::Coordinator, &blender, args.workers, auto.2, Some(&p4k));
+    let cfg = Config { p4k, starbreaker, blender, render_script, work: work.clone(), size: num("size", 256)? as u32, chunk: num("chunk", 50)?.max(1) };
+    let set = if store.sets()?.contains(&set_name) {
+        store.load_set(&set_name)?
+    } else if args.dry_run {
+        bail!("Set {set_name} does not exist (a run would create it from live)");
+    } else {
+        println!("New set {set_name}, branched off live");
+        store.create_set(&set_name, store::LIVE)?
+    };
+    println!("Set: {} ({} runs) in {}", set.name, set.chain().count(), store.set_dir(&set.name).display());
+    // Network only with a token and not for a dry run
+    let hub = (net_cfg.enabled() && !args.dry_run).then(|| Hub::new(net_cfg.clone(), me.clone(), work.join("inbox"), true));
+    if let Some(h) = hub.as_ref() {
+        match &h.listen_error {
+            Some(e) => println!("Cluster: {e}"),
+            None => println!("Cluster: {} listening on {}", h.me.name, h.cfg.listen),
+        }
+    }
+    let mut engine = Engine::new(cfg, targets, tables, store, set, hub, me)?;
     engine.max_renderers = args.workers;
     engine.max_exporters = args.exporters;
     engine.cores = auto.2;
@@ -210,13 +273,30 @@ fn real_main() -> Result<()> {
     ui::run(engine, args)
 }
 
-/// Konsolenmodus: sofort starten, Zeilen ausgeben, mit Exit-Code 1 bei Fehlern
+/// Console mode: start at once, print lines, exit code 1 on failures. With a cluster it first waits 5 s for nodes
+/// and takes those with the same versions (no add-on is sent here)
 fn plain(engine: &mut Engine, args: &Args) -> Result<()> {
     let sel = engine.select(&args.filter, args.scope);
     println!("{} matches, {} to render ({}), {} existing will be overwritten", sel.matched, sel.todo.len(), args.scope.label(), sel.overwrite);
+    if sel.todo.is_empty() {
+        return Ok(());
+    }
     engine.echo = Some(Vec::new());
-    engine.place_missing_icons(&args.filter);
-    engine.start(&sel, &args.line, &args.filter, args.scope)?;
+    let mut nodes = Vec::new();
+    if engine.hub.is_some() {
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(5) {
+            engine.tick();
+            thread::sleep(Duration::from_millis(100));
+        }
+        for (_, h) in engine.connected_nodes() {
+            match engine.node_state(&h) {
+                NodeState::Ready => nodes.push(h.name.clone()),
+                s => println!("Node {} left out: {s:?}", h.name),
+            }
+        }
+    }
+    engine.start(&sel, &args.line, &args.filter, args.scope, &args.name, nodes)?;
     while engine.running() {
         engine.tick();
         for l in engine.echo.as_mut().map(std::mem::take).unwrap_or_default() {

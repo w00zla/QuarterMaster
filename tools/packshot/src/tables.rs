@@ -1,6 +1,6 @@
-// Pose- und Licht-Tabellen des Inventars aus dem DataCore (`PlayerChoice_PITConfig.inventoryParams`,
-// `inventorylightgroup_*`), gecacht im Arbeitsverzeichnis wie bei `pnpm icons:render` (src/icons/cli.ts,
-// loadGameTables: dieselben Regeln, dieselben Dateien unter <work>/dcb).
+// Pose and light tables of the inventory from the DataCore (`PlayerChoice_PITConfig.inventoryParams`,
+// `inventorylightgroup_*`), cached in the working directory under <work>/dcb (port of loadGameTables from the
+// former src/icons/cli.ts, checked identical for all targets and rigs).
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 const DEFAULT_RIG: &str = "inventorylightgroup_other";
 const LIGHT_GROUPS_PATH: &str = "libs/foundry/records/entities/lights/scene/inventory";
 
+#[cfg_attr(test, derive(Default))]
 pub struct Tables {
     base: [f64; 3],
     offsets: Vec<(Vec<Category>, [f64; 3])>,
@@ -40,7 +41,7 @@ fn vec3(v: &Value) -> [f64; 3] {
     [f("x"), f("y"), f("z")]
 }
 
-/// Wahrheitswert wie in JS: requiredTag ist null, "" oder ein Verweis
+/// Truthiness as in JS: requiredTag is null, "" or a reference
 fn truthy(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) => false,
@@ -66,8 +67,8 @@ fn categories(v: &Value) -> Vec<Category> {
         .unwrap_or_default()
 }
 
-/// Bester Eintrag für Typ/SubTyp: exakt vor Typ+UNDEFINED; Einträge mit Tag-Bedingung zählen nicht,
-/// bei Gleichstand gewinnt der erste.
+/// Best entry for type/subtype: exact before type+UNDEFINED; entries with a tag condition do not count,
+/// on a tie the first wins.
 fn best<'a, T>(entries: &'a [(Vec<Category>, T)], kind: &str, sub_type: &str) -> Option<&'a T> {
     let mut found = None;
     let mut score = 0;
@@ -91,7 +92,7 @@ fn group_name(reference: &str) -> String {
     name.strip_suffix(".json").unwrap_or(name).to_lowercase()
 }
 
-/// Ein Licht-Record als kompaktes Rig-JSON für render.py
+/// A light record as compact rig JSON for render.py
 fn rig_json(record: &Value) -> Value {
     let comp = record
         .pointer("/_RecordValue_/Components")

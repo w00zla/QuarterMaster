@@ -1,5 +1,5 @@
 # Rendert Items als Icon: Bounding-Box-Fit, Pose und Licht-Rig des Spiels, transparenter Hintergrund.
-# Läuft nur in Blenders eigenem Python (kein System-Python), gestartet von src/icons/cli.ts:
+# Läuft nur in Blenders eigenem Python (kein System-Python), gestartet von tools/packshot:
 #   blender -b --python src/icons/render.py -- --jobs <jobs.json>          (Batch, ein Blender-Prozess)
 #   blender -b --python src/icons/render.py -- <in.glb|scene.blend> <out.png> [--pose 90,125,5] [--rig rig.json]
 # Eingabe: ein GLB (StarBreaker bundled) oder die scene.blend eines decomposed-Exports (das StarBreaker-Addon

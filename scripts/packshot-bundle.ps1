@@ -1,8 +1,10 @@
-﻿# Packt alles, was das Rust-Tool packshot (tools/packshot) auf einem anderen Rechner braucht, in Ordner je Plattform:
-#   <Out>/windows: packshot.exe, StarBreaker (eigener Fork), portables Blender mit Addon, render.py, targets.json, run.cmd
-#   <Out>/linux:   packshot (statisches musl-Binary), das offizielle Blender-Tarball (SHA256 geprüft), portable/ (Config +
-#                  Addon), render.py, setup.sh und check.sh (entpacken und prüfen auf dem Linux-Rechner)
-# Aufruf aus dem Repo-Root (pwsh oder Windows PowerShell 5.1):
+﻿# Packs everything the Rust tool packshot (tools/packshot) needs on another machine, one folder per platform:
+#   <Out>/windows: packshot.exe, StarBreaker (our fork), portable Blender with the add-on, render.py, targets.json,
+#                  run.cmd, README.txt, packshot.example.json
+#   <Out>/linux:   packshot (static musl binary), the official Blender tarball (SHA256 checked), portable/ (config +
+#                  add-on), render.py, setup.sh and check.sh (unpack and check on the Linux box), run-node.sh,
+#                  README.txt, packshot.example.json
+# Run from the repo root (pwsh or Windows PowerShell 5.1):
 #   scripts/packshot-bundle.ps1 [-Out local/packshot-bundle] [-BlenderVersion 5.2.3] [-Platform all|windows|linux]
 param(
   [string]$Out = 'local/packshot-bundle',
@@ -19,38 +21,38 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $doWin = $Platform -in 'all', 'windows'
 $doLin = $Platform -in 'all', 'linux'
 
-# Native Programme setzen $LASTEXITCODE, werfen aber nicht
+# Native programs set $LASTEXITCODE but do not throw
 function Assert-Ok([string]$what) {
-  if ($LASTEXITCODE -ne 0) { throw "$what fehlgeschlagen ($LASTEXITCODE)" }
+  if ($LASTEXITCODE -ne 0) { throw "$what failed ($LASTEXITCODE)" }
 }
 
-# Ordner spiegeln: robocopy-Exit-Codes < 8 sind Erfolg (1 = kopiert, 0 = unverändert)
+# Mirror a folder: robocopy exit codes < 8 are success (1 = copied, 0 = unchanged)
 function Mirror([string]$src, [string]$dst) {
   robocopy $src $dst /MIR /XD __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null
-  if ($LASTEXITCODE -ge 8) { throw "robocopy $src fehlgeschlagen ($LASTEXITCODE)" }
+  if ($LASTEXITCODE -ge 8) { throw "robocopy $src failed ($LASTEXITCODE)" }
 }
 
-# Vorlage mit LF-Zeilenenden kopieren (die .sh brauchen LF, auch wenn die Vorlage anders ausgecheckt wurde)
+# Copy a template with LF line endings (the .sh need LF, however the template was checked out)
 function Copy-Template([string]$src, [string]$dst) {
   $text = [IO.File]::ReadAllText($src).Replace("`r`n", "`n")
   $enc = if ($dst -like '*.txt') { New-Object Text.UTF8Encoding $true } else { New-Object Text.UTF8Encoding $false }
   [IO.File]::WriteAllText($dst, $text, $enc)
 }
 
-# Blender-Ordner des lokalen Windows-Blenders (mit blender.exe)
+# Folder of the local Windows Blender (with blender.exe)
 $blenderSrc = Get-ChildItem local/blender -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'blender.exe') } | Select-Object -First 1
-if (-not $blenderSrc) { throw 'Kein Blender unter local/blender/*/blender.exe' }
+if (-not $blenderSrc) { throw 'No Blender under local/blender/*/blender.exe' }
 
-# 1. Bauen
+# 1. Build
 Push-Location $crate
 try {
   if ($doWin) {
-    Write-Host 'packshot bauen (Windows) ...'
+    Write-Host 'Building packshot (Windows) ...'
     cargo build --release
     Assert-Ok 'cargo build (Windows)'
   }
   if ($doLin) {
-    Write-Host 'packshot bauen (Linux, musl) ...'
+    Write-Host 'Building packshot (Linux, musl) ...'
     cargo build --release --target x86_64-unknown-linux-musl
     Assert-Ok 'cargo build (Linux)'
   }
@@ -58,7 +60,7 @@ try {
   Pop-Location
 }
 
-# 2. Windows-Bundle
+# 2. Windows bundle
 if ($doWin) {
   $win = Join-Path $Out 'windows'
   New-Item -ItemType Directory -Force -Path $win | Out-Null
@@ -67,36 +69,32 @@ if ($doWin) {
   New-Item -ItemType Directory -Force -Path (Join-Path $win 'starbreaker') | Out-Null
   Copy-Item local/starbreaker-qm/starbreaker.exe, local/starbreaker-qm/COMMIT (Join-Path $win 'starbreaker') -Force
 
-  Write-Host "Blender kopieren ($($blenderSrc.Name)) ..."
+  Write-Host "Copying Blender ($($blenderSrc.Name)) ..."
   Mirror $blenderSrc.FullName (Join-Path $win 'blender')
 
   New-Item -ItemType Directory -Force -Path (Join-Path $win 'cli') | Out-Null
   Copy-Item src/icons/render.py (Join-Path $win 'cli') -Force
 
-  # Zielliste aus der DB (braucht DATABASE_URL aus .env). SC_DATA_P4K-Platzhalter nur für diesen Aufruf: siehe icons-bundle.ps1
-  Write-Host 'Zielliste aus der DB ...'
-  $savedP4k = $env:SC_DATA_P4K
-  try {
-    if (-not $env:SC_DATA_P4K) { $env:SC_DATA_P4K = Join-Path $root 'package.json' }  # nur der Existenz-Check
-    pnpm icons:render --write-targets (Join-Path $win 'targets.json')
-    Assert-Ok 'targets.json schreiben'
-  } finally {
-    $env:SC_DATA_P4K = $savedP4k
-  }
+  # Target list from the DB (needs DATABASE_URL from .env)
+  Write-Host 'Target list from the DB ...'
+  pnpm packshot:targets --out (Join-Path $win 'targets.json')
+  Assert-Ok 'writing targets.json'
 
-  # Starter: alle Argumente gehen an packshot
+  # Launcher: all arguments go to packshot
   "@echo off`r`ncd /d `"%~dp0`"`r`n`"%~dp0packshot.exe`" %*`r`n" | Set-Content -Path (Join-Path $win 'run.cmd') -Encoding ASCII -NoNewline
-  Copy-Template (Join-Path $tpl 'windows/LIESMICH.txt') (Join-Path $win 'LIESMICH.txt')
+  Copy-Template (Join-Path $tpl 'windows/README.txt') (Join-Path $win 'README.txt')
+  Copy-Template (Join-Path $tpl 'packshot.example.json') (Join-Path $win 'packshot.example.json')
+  Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $win 'LIESMICH.txt')
 }
 
-# 3. Linux-Bundle
+# 3. Linux bundle
 if ($doLin) {
   $lin = Join-Path $Out 'linux'
   New-Item -ItemType Directory -Force -Path $lin | Out-Null
   Copy-Item (Join-Path $crate 'target/x86_64-unknown-linux-musl/release/packshot') $lin -Force
 
-  # Blender-Tarball: einmal nach cache/ laden, gegen die veröffentlichte SHA256 prüfen, unentpackt ins Bundle
-  # (Entpacken unter Windows würde Symlinks und Ausführrechte verlieren: das macht setup.sh auf dem Linux-Rechner)
+  # Blender tarball: downloaded once into cache/, checked against the published SHA256, put into the bundle packed
+  # (unpacking on Windows would lose symlinks and exec bits: setup.sh does that on the Linux box)
   $minor = ($BlenderVersion -split '\.')[0..1] -join '.'
   $base = "https://download.blender.org/release/Blender$minor"
   $tarName = "blender-$BlenderVersion-linux-x64.tar.xz"
@@ -104,37 +102,39 @@ if ($doLin) {
   New-Item -ItemType Directory -Force -Path $cache | Out-Null
   $tar = Join-Path $cache $tarName
   if (-not (Test-Path $tar)) {
-    Write-Host "Blender $BlenderVersion (Linux) laden ..."
-    $ProgressPreference = 'SilentlyContinue'  # sonst ist Invoke-WebRequest in 5.1 extrem langsam
+    Write-Host "Downloading Blender $BlenderVersion (Linux) ..."
+    $ProgressPreference = 'SilentlyContinue'  # else Invoke-WebRequest is extremely slow in 5.1
     Invoke-WebRequest -Uri "$base/$tarName" -OutFile "$tar.part"
     Move-Item "$tar.part" $tar -Force
   }
   $sums = (Invoke-WebRequest -Uri "$base/blender-$BlenderVersion.sha256" -UseBasicParsing).Content
   $expected = ($sums -split "`n" | Where-Object { $_ -match [regex]::Escape($tarName) } | Select-Object -First 1) -replace '\s.*$', ''
-  if (-not $expected) { throw "Keine SHA256 für $tarName in $base/blender-$BlenderVersion.sha256" }
+  if (-not $expected) { throw "No SHA256 for $tarName in $base/blender-$BlenderVersion.sha256" }
   $actual = (Get-FileHash $tar -Algorithm SHA256).Hash
   if ($actual -ne $expected.Trim().ToUpperInvariant()) {
     Remove-Item -Force $tar
-    throw "SHA256 stimmt nicht ($actual, erwartet $expected): Download gelöscht"
+    throw "SHA256 mismatch ($actual, expected $expected): download deleted"
   }
   Write-Host "SHA256 ok ($tarName)"
   Copy-Item $tar $lin -Force
 
-  # portable/: Config und Addon des lokalen Blenders (das Addon ist eine Junction: robocopy folgt ihr mit echten Dateien)
+  # portable/: config and add-on of the local Blender (the add-on is a junction: robocopy follows it with real files)
   Mirror (Join-Path $blenderSrc.FullName 'portable') (Join-Path $lin 'portable')
   if (-not (Get-ChildItem (Join-Path $lin 'portable/scripts/addons/starbreaker_addon') -Filter *.py -ErrorAction SilentlyContinue)) {
-    throw 'portable/scripts/addons/starbreaker_addon enthält keine .py-Dateien'
+    throw 'portable/scripts/addons/starbreaker_addon holds no .py files'
   }
 
   New-Item -ItemType Directory -Force -Path (Join-Path $lin 'cli') | Out-Null
   Copy-Item src/icons/render.py (Join-Path $lin 'cli') -Force
-  foreach ($f in 'setup.sh', 'check.sh', 'LIESMICH.txt') { Copy-Template (Join-Path $tpl "linux/$f") (Join-Path $lin $f) }
+  foreach ($f in 'setup.sh', 'check.sh', 'run-node.sh', 'README.txt') { Copy-Template (Join-Path $tpl "linux/$f") (Join-Path $lin $f) }
+  Copy-Template (Join-Path $tpl 'packshot.example.json') (Join-Path $lin 'packshot.example.json')
+  Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $lin 'LIESMICH.txt')
 }
 
-# 4. Zusammenfassung
+# 4. Summary
 foreach ($p in @(if ($doWin) { 'windows' }) + @(if ($doLin) { 'linux' })) {
   $files = Get-ChildItem (Join-Path $Out $p) -Recurse -File
   $mb = [math]::Round(($files | Measure-Object Length -Sum).Sum / 1MB)
-  Write-Host "Bundle $p`: $(Join-Path $Out $p) ($mb MB, $($files.Count) Dateien)"
+  Write-Host "Bundle $p`: $(Join-Path $Out $p) ($mb MB, $($files.Count) files)"
 }
-exit 0  # robocopys Exit-Code 1 (kopiert) soll nicht als Fehler zählen
+exit 0  # robocopy's exit code 1 (copied) must not count as a failure
