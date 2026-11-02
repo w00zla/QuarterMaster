@@ -211,7 +211,7 @@ async function loadTargets(): Promise<Target[]> {
 }
 
 /** Dateiname eines Icons: Klarname, Klassenname, UUID ("P4-AR Rifle (behr_rifle_ballistic_01) <uuid>.png"),
- * damit man die Renders im Explorer auf Sicht prüfen und gezielt nachrendern kann; icons:pack liest nur die UUID. */
+ * damit man die Renders im Explorer auf Sicht prüfen und gezielt nachrendern kann; thumbs:build liest nur die UUID. */
 function iconFile(t: Target, k: number): string {
   const name = (t.names?.[k] ?? '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 80);
   return `${name ? `${name} ` : ''}(${t.entity}) ${t.uuids[k]}.png`;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copies the item thumbnails from local/thumbs/ (pnpm icons:pack) into the VM's checkout: the image files
+# Copies the item thumbnails from local/thumbs/ (pnpm thumbs:build) into the VM's checkout: the image files
 # first (one tar stream over ssh, into the existing directory: the container's bind mount stays valid), then
 # the manifest under a temporary name and renamed (the web app never reads a half-written one), then the
 # files the manifest no longer names are deleted. The file names carry a content hash: clients keep
@@ -22,7 +22,7 @@ dir=local/thumbs
 manifest=$dir/thumbs.json
 
 if [[ ! -f $manifest ]]; then
-  echo "No $manifest (pnpm icons:pack)" >&2
+  echo "No $manifest (pnpm thumbs:build)" >&2
   exit 1
 fi
 for size in s m l; do

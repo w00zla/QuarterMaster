@@ -550,7 +550,7 @@ pictures with gaps), so the icons are rendered from the models:
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
 4. **Output:** one render per entity (`local/work/icons/render/<class>.png`), copied to
    `local/icons/<Name> (<class>) <uuid>.png` per catalog UUID (English name, so the renders can be checked by eye
-   in Explorer and re-rendered with `--filter <class>`; `icons:pack` reads only the UUID at the end and stops when
+   in Explorer and re-rendered with `--filter <class>`; `thumbs:build` reads only the UUID at the end and stops when
    a UUID has two files). A run without `--force` renames existing icons to this pattern. Renders are reused unless `--force`; `--filter` re-renders
    single entities. Per block one export-batch and one Blender process; the next block exports while the previous
    one renders. Measured 2026-11-01 (dev PC, 89 entities): 0.17 s export and 0.55 s render per entity, so the
@@ -572,20 +572,64 @@ pictures with gaps), so the icons are rendered from the models:
    (Squadron 42 content), the box is its default geometry. `--write-targets`/`--targets` decouple the CLI from the DB; `scripts/icons-bundle.ps1`
    packs portable Node, Blender, StarBreaker, the CLI and the target list into `local/icons-bundle/` for another
    Windows PC (`run.cmd`, needs only `Data.p4k`).
-   **`pnpm icons:tui`** (`tools/icons-tui/`, Rust with ratatui and ratatui-image) runs the same export and render
-   with several processes at once (default 2 `export-batch`, 4 Blender; `[`/`]` and `+`/`-` change them while it
-   runs) in a terminal dashboard: progress and ETA, the workers, renders per minute and CPU, the latest render as an
+   **`pnpm packshot`** (`tools/packshot/`, Rust with ratatui and ratatui-image) runs the same export and render
+   with several processes at once (Blender ¾ of the physical cores, `export-batch` ¼ but at least 2; `--workers`,
+   `--exporters`, and `+`/`-`, `[`/`]` while it runs) and Blender on Vulkan (`--gpu-backend vulkan`) in a terminal
+   dashboard: progress and ETA, the workers, renders per minute and CPU, the latest render as an
    image (Sixel, Kitty or iTerm2, half blocks otherwise; ←/→ pages back), log and errors. What it renders: a filter
    (terms separated by blanks or commas, any of them in the class, the name or the type) and a scope: missing (no
    render yet), failed last time (`<work>/render-state.json`, also when an old render exists) or all (overwrites, asks
    first); `--filter`/`--scope` preset both, `--plain` runs without the TUI. It reads `targets.json`
    (`--write-targets`, default `<work>/targets.json`) and computes pose and rig itself (a port of the CLI's
    `loadGameTables`: identical for all 6734 targets and the 53 rigs on 2026-11-01), so it needs neither Node nor the
-   DB. For small reruns the blocks shrink so every Blender gets work. Measured 2026-11-01 (dev PC, 9800X3D and RTX
-   5080, 459 `_arms_` entities): 1 Blender 215 s, 4 Blender 105 s, 6 Blender 95 s; a render takes 0.46 s alone and
-   0.70/0.85 s with 4/6 in parallel, so a shared resource (GPU or shader compilation, not measured yet) caps the gain
-   at ~2.2×.
-5. **Pack:** `pnpm icons:pack [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
+   DB. For small reruns the blocks shrink so every Blender gets work. Measured 2026-11-02 with `render.py` of
+   f44dafa (dev PC, 9800X3D and RTX 5080, 459 `_arms_` entities, warm file cache after a first run): 1 Blender
+   209 s, 4 Blender 97 s, 6 Blender 98 s, 8 Blender (3 exports) 94 s; a render takes 0.45 s alone and 0.65/0.82/1.00 s
+   with 4/6/8 in parallel. The CPU is the limit: with 8 Blender it sits at 90–100 % for the whole render phase, while
+   the GPU averages ~15 % and the disk ~2 %; more processes only stretch each render. Smaller blocks (~3 per Blender)
+   did not help (4 Blender 109 s). These runs were on OpenGL; see Vulkan below. `render.py` appends its phases to every `icon:` line (`timing load=… prep=… render=… glass=… post=…`:
+   opening incl. the addon's material build, material tweaks/pose/camera/light/world, shader compilation plus render
+   and EXR, the glass pass, `write_png`); the TUI shows their means and logs them per item. Every run also writes
+   an event log, `<work>/logs/<date>_<host>.jsonl`, one JSON line per event with `t` (seconds since the start):
+   `run_start` (host, process counts, cores, Blender version and backend, hashes of `render.py` and the addon,
+   StarBreaker commit, p4k size), `export_start`/`export_item`/`export_end` (seconds per item, process wall time,
+   paths over 259 characters), `render_start` (how long the block waited for a Blender)/`render_item` (wall and
+   phases)/`render_end`, `failure`, `sample` every 2 s (CPU, GPU via `nvidia-smi` if present, running exports and
+   Blender, blocks pending and ready) and `run_end`. `pnpm packshot --report [log]` evaluates one (default: the
+   latest): result and items/s, phases with mean/p50/p95, Blender start-up and slot use, export overhead per block,
+   how often Blender waited for exports, CPU/GPU, slowest items, failures. Same set, 2026-11-02:
+   alone load 0.19, prep 0.01, render 0.12, glass 0.00, post 0.02 s; with 8 Blender load 0.28 and render 0.67 s. So
+   it is the render phase that grows under load (5.5×) while the GPU idles: most likely the shader compilation, which
+   runs on the CPU. **Vulkan** removed most of that (2026-11-02, fixed set of 88 armour pieces, Blender directly):
+   with 8 Blender the render phase takes 0.30 s on Vulkan against 0.86 s on OpenGL (Blender 5.2's default here),
+   114 s against 160 s for 704 renders; alone Vulkan is slightly slower (0.29 against 0.21 s). The images match
+   (mean deviation 0.04/255, at most 0.08 % of the pixels off by more than 16: edge sampling). Not helpful: a second
+   open of the same items in one process (no shader reuse across files, render 0.14 against 0.15 s) and OpenGL with
+   `shader_compilation_method = 'SUBPROCESS'` (211 s). Vulkan scaling (items/s): 1 → 1.3, 4 → 5.3, 6 → 6.3, 8 → 6.2,
+   12 → 6.7, hence ¾ of the physical cores. Whole pipeline, 459 `_arms_`: 6 Blender and 2 exports 78 s (OpenGL with 4
+   Blender: 97 s). Restricted to 4 cores by CPU affinity (as on the render PC, i7-4790K): 3 Blender with 1 export 101
+   s, with 4 Blender the same (the single export is the limit), 3 Blender with 2 exports 80 s, hence at least 2
+   exports. Under Vulkan the load phase (the addon's material build in Python) is the larger share (0.25 against
+   render 0.23 s with 6 Blender). A cProfile over 30 items put ~0.11 s of each load into the addon's
+   `PackageBundle.resolve_path`: it built its case-insensitive path index (an `rglob` over the whole block's export
+   root, ~37 000 `stat` calls) before every lookup, although the path exists as written almost always. The fork
+   now tries every candidate directly and builds the index only when none exists: same 88 items, 8 Blender, warm
+   caches: load 0.85 → 0.73 s, 104 → 94 s; images identical (at most 1/255). The rest of the load is the node-tree
+   build itself (~0.2 s per item alone).
+   **Builds and bundles:** packshot builds for Windows (`cargo build --release`) and as a static Linux binary
+   (`--target x86_64-unknown-linux-musl`, linked by Rust's own `rust-lld` per `tools/packshot/.cargo/config.toml`, no
+   C toolchain or WSL needed; static PIE without interpreter or shared libraries). `scripts/packshot-bundle.ps1
+   [-Platform all|windows|linux]` writes `local/packshot-bundle/windows` (packshot.exe, StarBreaker with `COMMIT`,
+   the portable Blender incl. `portable/` with config and addon, `cli/render.py`, `targets.json` from the DB,
+   `run.cmd`; ~930 MB) and `local/packshot-bundle/linux` (the binary, the official Blender tarball from
+   download.blender.org checked against its `blender-<ver>.sha256` and left packed so symlinks and exec bits survive,
+   the same `portable/`, `cli/render.py`, `setup.sh` to unpack and install, `check.sh` that tests the addon and a
+   headless EEVEE render on Vulkan; ~373 MB). The templates live in `tools/packshot/bundle/`. The Linux bundle only
+   prepares and checks a box until packshot has a node mode. Checked 2026-11-03: both bundles on their boxes, and on
+   an Ubuntu 24.04 server without a desktop (RTX 3090, full NVIDIA driver from `ubuntu-drivers install`; the
+   `--gpgpu` variant lacks `libnvidia-gl` and with it Vulkan) `check.sh` passed: the addon loads and EEVEE renders
+   headless on Vulkan, no display server needed.
+5. **Pack:** `pnpm thumbs:build [--in local/icons] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
    every `<uuid>.png` into three AVIFs (`src/thumbs.ts`: s 40, m 96, l 256 px; quality 45, trimmed to the content
    with a small transparent border) named `<uuid>.<hash>.avif` (hash: SHA-256 of the PNG, 8 hex) plus
    `thumbs.json` `{uuid: hash}`; unchanged ones are skipped, stale files deleted. Full set: ~2 min, ~23 MB (S

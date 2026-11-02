@@ -39,7 +39,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // Discord IDs (the schema's format check)
 const SNOWFLAKE = /^[0-9]{17,20}$/;
 const DIST = fileURLToPath(new URL('../../adminapp/dist', import.meta.url));
-// The item thumbnails (s/, m/, l/ + thumbs.json from pnpm icons:pack), the web app's directory
+// The item thumbnails (s/, m/, l/ + thumbs.json from pnpm thumbs:build), the web app's directory
 const THUMBS_DIR = process.env.THUMBS_DIR || fileURLToPath(new URL('../../local/thumbs', import.meta.url));
 const thumbs = thumbIndex(THUMBS_DIR);
 

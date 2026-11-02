@@ -193,7 +193,7 @@ scp local/companion/companion.json w00zla@<vm>:/opt/sc-quartermaster/local/compa
 
 ### Item thumbnails
 
-After `pnpm icons:pack` (`local/thumbs/`: `s/`, `m/`, `l/`, `thumbs.json`), from the local checkout:
+After `pnpm thumbs:build` (`local/thumbs/`: `s/`, `m/`, `l/`, `thumbs.json`), from the local checkout:
 
 ```sh
 scripts/push-thumbs.sh w00zla@<vm>

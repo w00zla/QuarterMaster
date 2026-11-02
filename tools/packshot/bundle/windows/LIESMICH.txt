@@ -1,0 +1,13 @@
+Packshot-Bundle (sc-quartermaster), Windows
+
+Inhalt: packshot.exe, starbreaker\ (StarBreaker-CLI, eigener Fork), blender\ (portabel, mit StarBreaker-Addon),
+cli\render.py (Blender-Skript), targets.json (Zielliste aus der Entwicklungs-DB), run.cmd.
+
+1. Data.p4k des Spiels neben run.cmd legen (oder beim Aufruf --p4k "<Pfad>\Data.p4k" angeben).
+2. run.cmd             startet mit der TUI
+   run.cmd --plain     läuft ohne TUI
+   run.cmd --report    wertet den letzten Lauf aus
+   run.cmd --help      alle Optionen
+3. Ergebnis: Bilder in icons\, Logs in work\logs\. work\ ist sonst nur Cache und kann danach weg.
+
+Der Rechner braucht nichts installiert: Blender und StarBreaker liegen im Bundle. Kein Internet nötig.

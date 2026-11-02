@@ -3,7 +3,7 @@
 // AVIFs (s/m/l, src/thumbs.ts), auf den Inhalt beschnitten und mit etwas Rand quadratisch aufgefüllt, plus
 // thumbs.json {uuid: hash}. Hash = die ersten 8 Hex-Zeichen von SHA-256 des PNGs: ein neu gerendertes Icon
 // bekommt eine neue URL, unveränderte bleiben im Cache der Clients. Veraltete Dateien im Ziel werden gelöscht.
-// Usage: pnpm icons:pack [--in local/icons] [--out local/thumbs] [--force]
+// Usage: pnpm thumbs:build [--in local/icons] [--out local/thumbs] [--force]
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
@@ -12,7 +12,7 @@ import { parseArgs } from 'node:util';
 import sharp from 'sharp';
 import { THUMB_FILE, THUMB_SIZES, thumbFile, type ThumbSize } from '../thumbs.ts';
 
-const HELP = `Usage: pnpm icons:pack [options]
+const HELP = `Usage: pnpm thumbs:build [options]
   --in <dir>     Die PNGs, …<uuid>.png (default: local/icons; Unterordner werden nicht gelesen)
   --out <dir>    Ziel: s/, m/, l/ und thumbs.json (default: local/thumbs)
   --force        Vorhandene Thumbnails neu erzeugen`;

@@ -167,7 +167,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
 
 ### Thumbnails (`thumbs.ts`, `src/thumbs.ts`)
 
-`THUMBS_DIR` (default `local/thumbs`) holds the item thumbnails from `pnpm icons:pack`
+`THUMBS_DIR` (default `local/thumbs`) holds the item thumbnails from `pnpm thumbs:build`
 (`docs/catalog-sources.md` "Icons"): `s/`, `m/`, `l/` (40, 96, 256 px AVIF, shown at 20, 48, 128 CSS px) with
 `<uuid>.<hash>.avif` each and `thumbs.json` `{uuid: hash}` (re-read when it changes; a broken one keeps the
 previous). The hash is the first 8 hex of the source PNG's SHA-256: a URL never changes its content.

@@ -1,0 +1,10 @@
+Packshot-Bundle (sc-quartermaster), Linux
+
+Inhalt: packshot (statisches Binary), das offizielle Blender-Tarball, portable\ (Blender-Config und StarBreaker-Addon),
+cli\render.py, setup.sh, check.sh.
+
+1. Den ganzen Ordner auf den Linux-Rechner kopieren, z. B. scp -r linux/ user@host:packshot
+2. Dort: bash setup.sh    (entpackt Blender nach ./blender und legt portable/ hinein)
+3. Dann: bash check.sh    (Addon geladen? EEVEE-Render auf Vulkan möglich?)
+
+Den Node-Modus von packshot gibt es noch nicht: das Bundle bereitet den Rechner vorerst nur vor und prüft ihn.

@@ -56,8 +56,12 @@ pnpm icons:render [--sample n] [--filter <s>] [--force] [--dry-run]   # icons fo
 #   the addon in local/blender is a junction to the fork repo (live at once). Addon tests: local/blender/<ver>/5.2/python/bin/python.exe -m unittest discover -s tests -q in ../starbreaker-qm/blender_addon (no system Python);
 #   exporter tests with real game data: SC_DATA_P4K=<Data.p4k> cargo test -p starbreaker-3d in ../starbreaker-qm. Render references: the game's tiles in the companion's debug recordings (docs/catalog-sources.md "Review")
 pnpm icons:render --write-targets <f> | --targets <f>                  # the target list from the DB / run without the DB (the bundle)
+pnpm packshot [--filter <terms>] [--scope missing|failed|all] [--plain] [--workers n] [--exporters n]   # the same pipeline in parallel with a terminal dashboard and render preview (tools/packshot, Rust; cargo builds it on first use); reads <work>/targets.json (pnpm icons:render --write-targets local/work/icons/targets.json)
+pnpm packshot --report [log]          # evaluates a run's event log (<work>/logs/<date>_<host>.jsonl, default the latest): items/s, phases p50/p95, Blender start-up and slot use, export overhead, CPU/GPU, slowest items
+cargo build --release --target x86_64-unknown-linux-musl   # in tools/packshot: the static Linux binary, linked by rust-lld (tools/packshot/.cargo/config.toml; target once via rustup target add x86_64-unknown-linux-musl)
+scripts/packshot-bundle.ps1 [-Platform all|windows|linux]  # local/packshot-bundle/windows (packshot.exe, StarBreaker, Blender, render.py, targets.json, run.cmd) and linux (static binary, the official Blender tarball checked by SHA256, portable/ with the addon, setup.sh, check.sh)
 scripts/icons-bundle.ps1            # packs node, Blender, StarBreaker, the CLI and targets.json into local/icons-bundle/ for another Windows PC (run.cmd there; docs/catalog-sources.md "Icons")
-pnpm icons:pack [--in <dir>] [--out <dir>] [--force]                  # the PNGs -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)
+pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]                # the PNGs -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)
 
 pnpm adminapp            # admin API + built UI on 127.0.0.1:3000 (basic auth from .env)
 pnpm adminapp:watch      # the same, restarting on source changes
