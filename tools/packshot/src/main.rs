@@ -23,7 +23,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use cluster::NodeState;
 use config::NetConfig;
 use engine::{Config, Engine, Scope, Target};
 use net::{Hub, Role};
@@ -41,7 +40,7 @@ const HELP: &str = "Usage: pnpm packshot [options]
   --plain               No TUI: starts at once and prints one line per item
   --dry-run             Only list what would be rendered (with pose and rig), then exit
   --node                Node mode: connect to the coordinators in packshot.json and render their blocks
-                        (needs only Blender, no Data.p4k, no StarBreaker)
+                        (needs only Blender, no Data.p4k, no StarBreaker); the TUI shows them, --plain prints lines
   --workers <n>         Blender processes at once (default ¾ of the physical cores)
   --exporters <n>       StarBreaker exports at once (default ¼ of the physical cores, at least 2)
   --chunk <n>           At most n entities per block (one export and one Blender process, default 50)
@@ -171,12 +170,28 @@ fn real_main() -> Result<()> {
     let net_cfg = NetConfig::load(&store_dir.join("packshot.json"))?;
 
     if flags.contains("node") {
+        node::check(&net_cfg)?;
         let blender = blender()?;
         let slots = num("workers", auto.0)?.max(1);
+        // blocks of an earlier session are stale
+        let _ = fs::remove_dir_all(work.join("node"));
         fs::create_dir_all(&work)?;
-        let me = cluster::own_hello(&net_cfg.name, Role::Node, &blender, slots, auto.2, None);
-        let hub = Hub::new(net_cfg, me, work.join("node"), false);
-        return node::run(hub, node::NodeArgs { blender, work, slots });
+        let me = cluster::own_hello(&net_cfg.name, Role::Node, &blender, slots, 0, auto.2, None);
+        let hub = Hub::new(net_cfg, me.clone(), work.join("node"), false);
+        if flags.contains("plain") {
+            return node::run(hub, node::NodeArgs { blender, slots });
+        }
+        // the same TUI, reduced: an engine without targets and runs of its own, rendering what the coordinators send
+        let store = Store::open(&work.join("store"))?;
+        let set = store.load_set(store::LIVE)?;
+        let cfg = Config { p4k: PathBuf::new(), starbreaker: PathBuf::new(), blender: blender.clone(), render_script: PathBuf::new(), work, size: 256, chunk: 50 };
+        let mut engine = Engine::new(cfg, Vec::new(), Tables::default(), store, set, Some(hub), me)?;
+        engine.serve = Some(node::Renderer::new(blender, slots));
+        engine.max_renderers = slots;
+        engine.max_exporters = 0;
+        engine.cores = auto.2;
+        let args = Args { filter: String::new(), scope: Scope::Missing, plain: false, dry_run: false, workers: slots, exporters: 0, name: String::new(), line: String::new() };
+        return ui::run(engine, args);
     }
 
     let mut store = Store::open(&store_dir)?;
@@ -201,6 +216,13 @@ fn real_main() -> Result<()> {
         .ok_or_else(|| anyhow!("No Data.p4k (--p4k, $SC_DATA_P4K or .env)"))?;
     if !p4k.exists() {
         bail!("Data.p4k not found: {}", p4k.display());
+    }
+    // the game version comes from build_manifest.id next to Data.p4k: shown everywhere, so it must be there
+    if cluster::p4k_version(&p4k).is_none() {
+        bail!(
+            "build_manifest.id missing or unreadable next to {}\nCopy it from the game folder (...\\StarCitizen\\LIVE\\) next to Data.p4k, or point --p4k into the game folder.",
+            p4k.display()
+        );
     }
     let starbreaker = path("starbreaker")
         .or_else(|| first_existing(&[root.join("local/starbreaker-qm").join(exe("starbreaker")), root.join("starbreaker").join(exe("starbreaker"))]))
@@ -230,7 +252,7 @@ fn real_main() -> Result<()> {
     let targets: Vec<Target> = serde_json::from_slice(&fs::read(&targets_file).with_context(|| targets_file.display().to_string())?).context("targets.json")?;
     println!("Target list: {} ({} entities)", targets_file.display(), targets.len());
     let tables = Tables::load(&starbreaker, &p4k, &work, flags.contains("refresh-tables"), |s| println!("{s}"))?;
-    let me = cluster::own_hello(&net_cfg.name, Role::Coordinator, &blender, args.workers, auto.2, Some(&p4k));
+    let me = cluster::own_hello(&net_cfg.name, Role::Coordinator, &blender, args.workers, args.exporters, auto.2, Some((&p4k, &starbreaker)));
     let cfg = Config { p4k, starbreaker, blender, render_script, work: work.clone(), size: num("size", 256)? as u32, chunk: num("chunk", 50)?.max(1) };
     let set = if store.sets()?.contains(&set_name) {
         store.load_set(&set_name)?
@@ -249,7 +271,14 @@ fn real_main() -> Result<()> {
             None => println!("Cluster: {} listening on {}", h.me.name, h.cfg.listen),
         }
     }
+    // renders (packages: exports first) what the other coordinators send
+    let serve = hub.is_some().then(|| {
+        let mut r = node::Renderer::new(cfg.blender.clone(), args.workers);
+        r.tools = Some(node::ExportTools { starbreaker: cfg.starbreaker.clone(), p4k: cfg.p4k.clone(), rigs: work.join("dcb").join("rigs") });
+        r
+    });
     let mut engine = Engine::new(cfg, targets, tables, store, set, hub, me)?;
+    engine.serve = serve;
     engine.max_renderers = args.workers;
     engine.max_exporters = args.exporters;
     engine.cores = auto.2;
@@ -273,8 +302,8 @@ fn real_main() -> Result<()> {
     ui::run(engine, args)
 }
 
-/// Console mode: start at once, print lines, exit code 1 on failures. With a cluster it first waits 5 s for nodes
-/// and takes those with the same versions (no add-on is sent here)
+/// Console mode: start at once, print lines, exit code 1 on failures. With a cluster it first waits 5 s for the
+/// other boxes; all of them must have the same state
 fn plain(engine: &mut Engine, args: &Args) -> Result<()> {
     let sel = engine.select(&args.filter, args.scope);
     println!("{} matches, {} to render ({}), {} existing will be overwritten", sel.matched, sel.todo.len(), args.scope.label(), sel.overwrite);
@@ -289,12 +318,17 @@ fn plain(engine: &mut Engine, args: &Args) -> Result<()> {
             engine.tick();
             thread::sleep(Duration::from_millis(100));
         }
-        for (_, h) in engine.connected_nodes() {
-            match engine.node_state(&h) {
-                NodeState::Ready => nodes.push(h.name.clone()),
-                s => println!("Node {} left out: {s:?}", h.name),
-            }
+        nodes = engine.connected_nodes().into_iter().map(|(_, h)| h.name).collect();
+    }
+    if let Some(other) = engine.running_elsewhere() {
+        bail!("{other} has a run going: the boxes work on one run at a time");
+    }
+    let problems = engine.state_problems();
+    if !problems.is_empty() {
+        for (name, diff) in &problems {
+            println!("{name} has another state: {}", diff.join(", "));
         }
+        bail!("No run: all boxes need the same packshot, Blender, add-on (coordinators also Data.p4k and StarBreaker)");
     }
     engine.start(&sel, &args.line, &args.filter, args.scope, &args.name, nodes)?;
     while engine.running() {

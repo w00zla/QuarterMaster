@@ -1,5 +1,5 @@
 // Network in the cluster: TCP, one frame per message made of u32 JSON length, JSON, u64 payload length and payload (LE).
-// Files (export blocks, addon, runs) go one after another as the payload, their paths and sizes are in the JSON;
+// Files (export blocks, packages' render.py, runs) go one after another as the payload, their paths and sizes are in the JSON;
 // the reader thread writes them straight into an inbox folder, the main thread only gets the folder. Every
 // connection starts with Hello (token, role, versions); the accepting side checks the token and answers with Welcome.
 // Afterwards both sides can send requests. The hub holds the connections of a process: listen
@@ -37,12 +37,35 @@ pub struct Hello {
     pub blender: String,
     /// Hash of the StarBreaker addon (events::tree_hash)
     pub addon: Option<String>,
-    /// Blender processes the node runs at the same time
+    /// Blender processes the box runs at the same time
     pub slots: usize,
+    /// export-batch processes at the same time (coordinators; 0 on a node)
+    #[serde(default)]
+    pub exporters: usize,
     pub cores: usize,
+    /// a coordinator with a run going: the boxes work on one run at a time
+    #[serde(default)]
+    pub running: bool,
     /// Size of Data.p4k (coordinators only)
     #[serde(default)]
     pub p4k_bytes: Option<u64>,
+    /// fingerprint of Data.p4k (size + first and last 4 MB, cluster::p4k_id): what the state check compares
+    #[serde(default)]
+    pub p4k_id: Option<String>,
+    /// game version from build_manifest.id next to Data.p4k ("4.10.2 (4.10.197.2878)"), shown only
+    #[serde(default)]
+    pub p4k_version: Option<String>,
+    /// StarBreaker commit (coordinators only): part of the state the boxes must share
+    #[serde(default)]
+    pub starbreaker: Option<String>,
+    /// CPU name and total RAM (bytes), shown in the details only
+    #[serde(default)]
+    pub cpu: Option<String>,
+    #[serde(default)]
+    pub ram: Option<u64>,
+    /// GPU name and memory from nvidia-smi ("RTX 5080 VRAM 16 GB"), several joined with +
+    #[serde(default)]
+    pub gpu: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -56,6 +79,17 @@ pub struct FileEntry {
 pub struct RemoteJob {
     pub item: usize,
     pub src: String,
+    pub pose: [f64; 3],
+    pub rig: String,
+    pub size: u32,
+}
+
+/// An entity for a coordinator to export and render itself; the rig is a file name of its own DataCore tables
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ItemJob {
+    pub item: usize,
+    pub entity: String,
+    pub worn: bool,
     pub pose: [f64; 3],
     pub rig: String,
     pub size: u32,
@@ -81,9 +115,9 @@ pub enum Msg {
     Ping,
     /// Coordinator -> node: export folder, rigs and render.py as files, plus the jobs
     Block { id: u64, jobs: Vec<RemoteJob>, files: Vec<FileEntry> },
+    /// Coordinator -> coordinator: entities to export and render there (files: render.py)
+    Items { id: u64, jobs: Vec<ItemJob>, files: Vec<FileEntry> },
     Cancel { id: u64 },
-    /// Coordinator -> node: addon (addon/…) and Blender config (config/…)
-    Addon { files: Vec<FileEntry> },
     /// Node -> coordinator: an item done (payload: the PNG) or failed
     Item { block: u64, item: usize, ok: bool, info: String },
     BlockDone { id: u64, exit: Option<i32>, error: String },
@@ -121,6 +155,19 @@ enum NetEv {
     Msg { conn: u64, msg: Msg, data: Vec<u8>, dir: Option<PathBuf> },
     Down { conn: u64, error: String },
     DialFailed { addr: String, error: String },
+}
+
+/// This box's IP address: the local address of the interface with the default route (a connected UDP socket sends
+/// nothing)
+pub fn own_ip() -> Option<String> {
+    // looked up once (the TUI asks every frame)
+    static IP: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    IP.get_or_init(|| {
+        let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+        s.connect("192.0.2.1:9").ok()?;
+        Some(s.local_addr().ok()?.ip().to_string())
+    })
+    .clone()
 }
 
 /// Relative path from the network: normal components only, no drive, no ..
@@ -182,7 +229,7 @@ fn read_frame(r: &mut impl Read, inbox: &Path, seq: &mut u64) -> Result<(Msg, Ve
     r.read_exact(&mut b8)?;
     let total = u64::from_le_bytes(b8);
     let files = match &msg {
-        Msg::Block { files, .. } | Msg::Addon { files } | Msg::RunFiles { files, .. } => Some(files.clone()),
+        Msg::Block { files, .. } | Msg::Items { files, .. } | Msg::RunFiles { files, .. } => Some(files.clone()),
         _ => None,
     };
     let Some(files) = files else {
@@ -242,6 +289,8 @@ pub struct PeerConn {
     pub hello: Hello,
     pub outbound: bool,
     pub addr: String,
+    /// the peer's IP address on this connection
+    pub ip: String,
     tx: Sender<Out>,
     stream: TcpStream,
 }
@@ -486,7 +535,8 @@ impl Hub {
                             continue;
                         }
                     }
-                    self.peers.push(PeerConn { conn, hello, outbound, addr, tx, stream });
+                    let ip = stream.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+                    self.peers.push(PeerConn { conn, hello, outbound, addr, ip, tx, stream });
                     out.push(HubEv::Up { conn });
                 }
                 NetEv::Down { conn, error } => {

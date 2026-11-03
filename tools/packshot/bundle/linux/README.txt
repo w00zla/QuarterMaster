@@ -9,7 +9,9 @@ cli/render.py, setup.sh, check.sh, run-node.sh, packshot.example.json (cluster s
 4. cp packshot.example.json packshot.json, set the shared token and the coordinators (host names or IPs, port
    optional, default 47800); every box is known by its host name
 5. ./run-node.sh          renders the blocks the coordinators send (Blender processes: ¾ of the physical cores,
-                           ./run-node.sh --workers n to change); runs until Ctrl+C and reconnects on its own
+                           ./run-node.sh --workers n to change, + / - while it runs); the same TUI as on the
+                           coordinators, reduced to the blocks it renders and the boxes; q quits, --plain prints
+                           lines instead (e.g. as a service); reconnects on its own
 
-A node needs neither Data.p4k nor StarBreaker. It only writes into its work/ folder and, when a coordinator sends
-them, into blender/portable/scripts/addons/starbreaker_addon and blender/portable/config.
+A node needs neither Data.p4k nor StarBreaker and writes only into its work/ folder. All boxes need the same state
+(packshot build, Blender, add-on), else no run starts: copy a new bundle to every box after an update.

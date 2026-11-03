@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 const DEFAULT_RIG: &str = "inventorylightgroup_other";
 const LIGHT_GROUPS_PATH: &str = "libs/foundry/records/entities/lights/scene/inventory";
 
-#[cfg_attr(test, derive(Default))]
+#[derive(Default)]
 pub struct Tables {
     base: [f64; 3],
     offsets: Vec<(Vec<Category>, [f64; 3])>,

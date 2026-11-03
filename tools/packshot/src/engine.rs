@@ -140,6 +140,10 @@ pub struct Worker {
     child: Option<Child>,
     /// node, connection and block number there (cluster.rs)
     pub node: Option<String>,
+    /// host name of the box doing the work (this one or the node)
+    pub host: String,
+    /// an item package on another coordinator: it exports and renders there
+    pub package: bool,
     pub conn: u64,
     pub remote: u64,
     /// jobs in the order the process works through them
@@ -156,11 +160,7 @@ pub struct Worker {
 
 impl Worker {
     pub fn label(&self) -> String {
-        let local = format!("{}{}", if self.kind == Kind::Export { 'E' } else { 'B' }, self.slot);
-        match &self.node {
-            Some(n) => format!("{n}/{local}"),
-            None => local,
-        }
+        format!("{}/{}{}", self.host, if self.kind == Kind::Export { 'E' } else { 'B' }, self.slot)
     }
     /// the item the process is currently working on (both tools work through their list in order)
     pub fn current(&self) -> Option<usize> {
@@ -175,6 +175,8 @@ pub(crate) struct Block {
     failed: bool,
     /// exported, waiting for a Blender
     pub(crate) ready_at: Option<Instant>,
+    /// an item package for another coordinator, which exports it itself
+    pub(crate) package: bool,
 }
 
 pub struct Run {
@@ -275,6 +277,8 @@ pub struct Engine {
     pub(crate) next_remote: u64,
     /// bytes sent to nodes in this session
     pub transferred: u64,
+    /// renders the blocks of other coordinators while there is no run here (node.rs)
+    pub serve: Option<crate::node::Renderer>,
 }
 
 /// State of a foreign set (another coordinator's live) for the scope "missing"
@@ -373,6 +377,7 @@ impl Engine {
             fetching: HashSet::new(),
             next_remote: 1,
             transferred: 0,
+            serve: None,
             record: None,
             run: None,
             workers: Vec::new(),
@@ -431,6 +436,8 @@ impl Engine {
             "starbreaker": commit,
             "p4k": self.cfg.p4k,
             "p4k_bytes": p4k.as_ref().map(|m| m.len()),
+            "p4k_id": self.me.p4k_id,
+            "p4k_version": self.me.p4k_version,
             "p4k_mtime": p4k.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()),
             "size": self.cfg.size,
         })
@@ -749,12 +756,15 @@ impl Engine {
         let used: HashSet<usize> = self.workers.iter().filter(|w| w.kind == kind && w.node == node).map(|w| w.slot).collect();
         let slot = (1..).find(|s| !used.contains(s)).unwrap_or(1);
         let now = Instant::now();
+        let host = node.clone().unwrap_or_else(|| self.me.name.clone());
         self.workers.push(Worker {
             id,
             kind,
             slot,
             block,
             child,
+            host,
+            package: false,
             node,
             conn,
             remote,
@@ -878,7 +888,7 @@ impl Engine {
             run.failed += 1;
             run.done_at.push(Instant::now());
             let e = error.unwrap_or_default();
-            self.note(Level::Error, format!("[{i:>w$}/{total}] {what:<6} {entity}  FAILED {e}"));
+            self.note(Level::Error, format!("[{i:>w$}/{total}] {what:<6} {entity}  FAILED {e}{detail}"));
             self.emit("failure", json!({ "entity": entity, "stage": what, "error": e }));
             self.errors.push((t, e));
             if let Some(b) = self.run.as_mut().and_then(|r| r.blocks.iter_mut().find(|b| b.items.contains(&t))) {
@@ -962,10 +972,10 @@ impl Engine {
         }));
         if ok {
             if let Err(e) = self.place_icons(t) {
-                self.record(t, false, Some(format!("image not stored: {e:#}")), seconds, "render", "");
+                self.record(t, false, Some(format!("image not stored: {e:#}")), seconds, "render", &format!("  {worker}"));
                 return;
             }
-            let mut detail = String::new();
+            let mut detail = format!("  {worker}");
             if let Some(ph) = timing {
                 if let Some(run) = self.run.as_mut() {
                     run.phase_n += 1;
@@ -974,11 +984,11 @@ impl Engine {
                     }
                 }
                 let parts: Vec<String> = PHASES.iter().zip(ph).map(|(k, v)| format!("{k} {v:.2}")).collect();
-                detail = format!("  ({})", parts.join(" · "));
+                detail = format!("  {worker}  ({})", parts.join(" · "));
             }
             self.record(t, true, None, seconds, "render", &detail);
         } else {
-            self.record(t, false, Some(if info.is_empty() { "render failed".into() } else { info }), seconds, "render", "");
+            self.record(t, false, Some(if info.is_empty() { "render failed".into() } else { info }), seconds, "render", &format!("  {worker}"));
         }
     }
 
@@ -1132,8 +1142,31 @@ impl Engine {
                 let items: Vec<usize> = (0..size).filter_map(|_| run.pending.pop_front()).collect();
                 let b = run.blocks.len();
                 let root = self.cfg.work.join("export").join(format!("b{b}"));
-                run.blocks.push(Block { items, root, packages: HashMap::new(), failed: false, ready_at: None });
+                run.blocks.push(Block { items, root, packages: HashMap::new(), failed: false, ready_at: None, package: false });
                 self.start_export(b);
+            }
+            // the other coordinators (same state: same Data.p4k and StarBreaker) export and render packages of their own
+            loop {
+                if self.run.as_ref().unwrap().pending.is_empty() {
+                    break;
+                }
+                let Some(conn) = self.free_exporter() else { break };
+                let size = self.block_size();
+                let run = self.run.as_mut().unwrap();
+                let items: Vec<usize> = (0..size).filter_map(|_| run.pending.pop_front()).collect();
+                let b = run.blocks.len();
+                let root = self.cfg.work.join("export").join(format!("p{b}"));
+                run.blocks.push(Block { items, root, packages: HashMap::new(), failed: false, ready_at: None, package: true });
+                self.start_package(b, conn);
+            }
+            // exported blocks go to free boxes first, so this box keeps its CPU for exporting; the rest renders here
+            loop {
+                if self.run.as_ref().unwrap().ready.is_empty() {
+                    break;
+                }
+                let Some(conn) = self.free_node() else { break };
+                let b = self.run.as_mut().unwrap().ready.pop_front().unwrap();
+                self.start_remote(b, conn);
             }
             loop {
                 let rendering = self.workers.iter().filter(|w| w.kind == Kind::Render && w.node.is_none()).count();
@@ -1142,15 +1175,6 @@ impl Engine {
                 }
                 let Some(b) = self.run.as_mut().unwrap().ready.pop_front() else { break };
                 self.start_render(b);
-            }
-            // what finds no slot locally goes to free nodes
-            loop {
-                if self.run.as_ref().unwrap().ready.is_empty() {
-                    break;
-                }
-                let Some(conn) = self.free_node() else { break };
-                let b = self.run.as_mut().unwrap().ready.pop_front().unwrap();
-                self.start_remote(b, conn);
             }
         }
         let run = self.run.as_ref().unwrap();

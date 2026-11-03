@@ -4,7 +4,8 @@ Contents: packshot.exe, starbreaker\ (StarBreaker CLI, our fork), blender\ (port
 cli\render.py (Blender script), targets.json (target list from the development DB), run.cmd,
 packshot.example.json (cluster settings).
 
-1. Put the game's Data.p4k next to run.cmd (or pass --p4k "<path>\Data.p4k").
+1. Put the game's Data.p4k and its build_manifest.id (both from ...\StarCitizen\LIVE\) next to run.cmd, or pass
+   --p4k "<game folder>\Data.p4k"; without build_manifest.id next to Data.p4k packshot does not start.
 2. run.cmd             starts the TUI (views: 1 Run, 2 Sets, 3 Nodes; Tab switches)
    run.cmd --plain     runs without the TUI
    run.cmd --report    evaluates the latest run

@@ -1,8 +1,9 @@
 // The TUI: three views behind a tab bar. 1 Run: header (selection or progress), the to-render list or the workers
 // (local and on nodes) with throughput, the image preview (Sixel/Kitty/iTerm2, else half blocks). 2 Sets: the sets
-// with their runs, the selected run's result and images on the right, details on i. 3 Nodes: this box, connected
-// nodes and coordinators, fetching runs and the live manifest, sending the add-on. Log and errors at the bottom,
-// keys in the last line.
+// with their runs, the selected run's result and images on the right, details on i. 3 Nodes: this one, connected
+// nodes and coordinators with their details, fetching runs and the live manifest. Log and errors at the bottom,
+// keys in the last line. In node mode (`packshot --node`) the same TUI, reduced: 1 Blocks (what this box renders for
+// the coordinators) and 3 Nodes.
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
@@ -20,7 +21,6 @@ use ratatui_image::{Resize, StatefulImage};
 use sysinfo::System;
 
 use crate::Args;
-use crate::cluster::NodeState;
 use crate::engine::{Engine, Kind, Level, PHASES, Scope, Selection, default_run_name};
 use crate::net::Role;
 use crate::store::LIVE;
@@ -49,8 +49,6 @@ enum Input {
 /// A question in the header line: Enter (or y) confirms, anything else goes back
 enum Confirm {
     Overwrite,
-    /// outdated nodes before the start: y sends the add-on, n starts without them
-    Outdated(Vec<u64>),
     Quit,
     DeleteRun { id: String, text: String },
     DeleteSet(String),
@@ -131,6 +129,9 @@ pub fn run(engine: Engine, args: Args) -> Result<()> {
     app.refresh_sets();
     let result = main_loop(&mut terminal, &mut app);
     app.engine.abort();
+    if let Some(s) = app.engine.serve.as_mut() {
+        s.stop();
+    }
     if let Some(h) = app.engine.hub.as_mut() {
         h.close_all();
     }
@@ -162,6 +163,11 @@ fn main_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
 }
 
 impl App {
+    /// node mode: no runs, sets or targets of its own
+    fn node(&self) -> bool {
+        self.engine.me.role == Some(Role::Node)
+    }
+
     fn refresh(&mut self) {
         self.sel = self.engine.select(&self.filter, self.scope);
         self.selected = self.selected.min(self.sel.todo.len().saturating_sub(1));
@@ -225,9 +231,22 @@ impl App {
         Some((conn, role))
     }
 
-    /// Start: name (asked unless --name), overwrite question, outdated nodes, then go
+    /// Start: only when all connected boxes have the same state and no other one has a run going; then name (asked
+    /// unless --name), overwrite question, go
     fn start_flow(&mut self, step: u8) -> Result<()> {
         if self.sel.todo.is_empty() {
+            return Ok(());
+        }
+        if let Some(other) = self.engine.running_elsewhere() {
+            self.engine.note(Level::Error, format!("{other} has a run going: the boxes work on one run at a time, this one renders along"));
+            return Ok(());
+        }
+        let problems = self.engine.state_problems();
+        if !problems.is_empty() {
+            for (name, diff) in problems {
+                self.engine.note(Level::Error, format!("No run: {name} has another state: {}", diff.join(", ")));
+            }
+            self.engine.note(Level::Error, "All boxes need the same packshot, Blender, add-on (coordinators also Data.p4k and StarBreaker): update the bundles");
             return Ok(());
         }
         if step == 0 {
@@ -239,29 +258,12 @@ impl App {
             self.confirm = Some(Confirm::Overwrite);
             return Ok(());
         }
-        if step <= 2 {
-            let outdated: Vec<u64> = self.engine.connected_nodes().into_iter().filter(|(_, h)| self.engine.node_state(h) == NodeState::Outdated).map(|(c, _)| c).collect();
-            if !outdated.is_empty() {
-                self.confirm = Some(Confirm::Outdated(outdated));
-                return Ok(());
-            }
-        }
-        self.go(false)
+        self.go()
     }
 
-    /// Start the run; `with_outdated`: the outdated nodes got the add-on and join once they report it
-    fn go(&mut self, with_outdated: bool) -> Result<()> {
-        let nodes: Vec<String> = self
-            .engine
-            .connected_nodes()
-            .into_iter()
-            .filter(|(_, h)| match self.engine.node_state(h) {
-                NodeState::Ready => true,
-                NodeState::Outdated => with_outdated,
-                NodeState::Incompatible => false,
-            })
-            .map(|(_, h)| h.name)
-            .collect();
+    /// Start the run with every connected box
+    fn go(&mut self) -> Result<()> {
+        let nodes: Vec<String> = self.engine.connected_nodes().into_iter().map(|(_, h)| h.name).collect();
         let line = format!("{} --filter \"{}\" --scope {}", self.line, self.filter, self.scope.key());
         let name = self.name.clone();
         self.engine.start(&self.sel, line.trim(), &self.filter, self.scope, &name, nodes)?;
@@ -282,17 +284,6 @@ impl App {
             let yes = matches!(code, KeyCode::Enter | KeyCode::Char('y'));
             match c {
                 Confirm::Overwrite if yes => self.start_flow(2)?,
-                Confirm::Outdated(conns) => match code {
-                    KeyCode::Char('y') | KeyCode::Enter => {
-                        for c in conns {
-                            let r = self.engine.send_addon(c);
-                            self.report("Add-on not sent", r);
-                        }
-                        self.go(true)?;
-                    }
-                    KeyCode::Char('n') => self.go(false)?,
-                    _ => {}
-                },
                 Confirm::Quit if yes || code == KeyCode::Char('q') => self.quit = true,
                 Confirm::DeleteRun { id, .. } if yes => {
                     let r = self.engine.store.delete_run(&id).map(|_| ());
@@ -376,13 +367,14 @@ impl App {
         // keys of every view
         match code {
             KeyCode::Char('1') => self.view = View::Run,
-            KeyCode::Char('2') => {
+            KeyCode::Char('2') if !self.node() => {
                 self.view = View::Sets;
                 self.refresh_sets();
             }
             KeyCode::Char('3') => self.view = View::Nodes,
             KeyCode::Tab => {
                 self.view = match self.view {
+                    View::Run if self.node() => View::Nodes,
                     View::Run => View::Sets,
                     View::Sets => View::Nodes,
                     View::Nodes => View::Run,
@@ -404,12 +396,21 @@ impl App {
     }
 
     fn key_run(&mut self, code: KeyCode, running: bool) -> Result<()> {
+        let node = self.node();
         let e = &mut self.engine;
+        if node {
+            match code {
+                KeyCode::Char('+') => e.max_renderers = (e.max_renderers + 1).min(32),
+                KeyCode::Char('-') => e.max_renderers = e.max_renderers.saturating_sub(1).max(1),
+                _ => {}
+            }
+            return Ok(());
+        }
         match code {
             KeyCode::Char('+') => e.max_renderers = (e.max_renderers + 1).min(16),
             KeyCode::Char('-') => e.max_renderers = e.max_renderers.saturating_sub(1).max(1),
-            KeyCode::Char(']') => e.max_exporters = (e.max_exporters + 1).min(8),
-            KeyCode::Char('[') => e.max_exporters = e.max_exporters.saturating_sub(1).max(1),
+            KeyCode::Char(']' | '>') => e.max_exporters = (e.max_exporters + 1).min(8),
+            KeyCode::Char('[' | '<') => e.max_exporters = e.max_exporters.saturating_sub(1).max(1),
             KeyCode::Left => {
                 let n = e.history.len();
                 if n > 0 {
@@ -488,9 +489,11 @@ impl App {
 
     fn key_nodes(&mut self, code: KeyCode, running: bool) {
         let n = self.node_rows().len();
+        let node = self.node();
         match code {
             KeyCode::Up => self.node_sel = self.node_sel.saturating_sub(1),
             KeyCode::Down => self.node_sel = (self.node_sel + 1).min(n.saturating_sub(1)),
+            _ if node => {}
             _ => {
                 let Some((conn, role)) = self.selected_conn() else { return };
                 match (code, role) {
@@ -501,10 +504,6 @@ impl App {
                     }
                     (KeyCode::Char('m'), Role::Coordinator) => self.engine.fetch_manifest(conn),
                     (KeyCode::Char('r'), Role::Coordinator) => self.engine.refresh_runs(conn),
-                    (KeyCode::Char('s'), Role::Node) => {
-                        let r = self.engine.send_addon(conn);
-                        self.report("Add-on not sent", r);
-                    }
                     _ => {}
                 }
             }
@@ -569,14 +568,27 @@ fn boxed(title: impl Into<String>) -> Block<'static> {
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
-    let [tabs, rest, log, keys] = Layout::vertical([Constraint::Length(1), Constraint::Min(14), Constraint::Length(8), Constraint::Length(1)]).areas(f.area());
+    let [tabs, rest, log, keys] = Layout::vertical([Constraint::Length(1), Constraint::Fill(2), Constraint::Fill(1), Constraint::Length(1)]).areas(f.area());
     draw_tabs(f, app, tabs);
     match app.view {
+        View::Run if app.node() => {
+            let [head, middle] = Layout::vertical([Constraint::Length(5), Constraint::Min(9)]).areas(rest);
+            draw_node_head(f, app, head);
+            draw_serve(f, app, middle);
+        }
         View::Run => {
             let [head, middle] = Layout::vertical([Constraint::Length(5), Constraint::Min(9)]).areas(rest);
             let [left, right] = Layout::horizontal([Constraint::Min(50), Constraint::Length(48)]).areas(middle);
             draw_head(f, app, head);
-            if app.engine.running() { draw_workers(f, app, left) } else { draw_list(f, app, left) }
+            // no run here: while this box renders for another coordinator, its blocks take the place of the list
+            let serving = app.engine.serve.as_ref().is_some_and(|s| !s.blocks().is_empty());
+            if app.engine.running() {
+                draw_workers(f, app, left)
+            } else if serving {
+                draw_serve(f, app, left)
+            } else {
+                draw_list(f, app, left)
+            }
             draw_preview(f, app, right);
         }
         View::Sets => draw_sets(f, app, rest),
@@ -590,26 +602,31 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
     let tab = |on: bool, s: &str| if on { Span::styled(format!(" {s} "), Style::new().fg(Color::Black).bg(ACCENT).bold()) } else { Span::styled(format!(" {s} "), Style::new().fg(DIM)) };
     let e = &app.engine;
     let nodes = e.connected_nodes();
-    let ready = nodes.iter().filter(|(_, h)| e.node_state(h) == NodeState::Ready).count();
     let net = match e.hub.as_ref() {
         None => "local".to_string(),
         Some(h) => match &h.listen_error {
-            Some(_) => format!("{} · not listening · nodes {ready}/{}", e.me.name, nodes.len()),
-            None => format!("{} · nodes {ready}/{}", e.me.name, nodes.len()),
+            Some(_) => format!("{} · not listening · {} other boxes", e.me.name, nodes.len()),
+            None => format!("{} · {} other boxes", e.me.name, nodes.len()),
         },
     };
-    let right = format!("target set {} · {net} ", e.set.name);
-    let left = vec![tab(app.view == View::Run, "1 Run"), " ".into(), tab(app.view == View::Sets, "2 Sets"), " ".into(), tab(app.view == View::Nodes, "3 Nodes")];
-    let [l, r] = Layout::horizontal([Constraint::Min(30), Constraint::Length(right.chars().count() as u16)]).areas(area);
+    // a box with another state blocks every run: said up here in every view
+    let problem = if e.state_problems().is_empty() { String::new() } else { " · not the same state: no run ".to_string() };
+    let right = if app.node() { format!("node {} · {} coordinators connected ", e.me.name, nodes.len()) } else { format!("target set {} · {net} ", e.set.name) };
+    let left = if app.node() {
+        vec![tab(app.view == View::Run, "1 Blocks"), " ".into(), tab(app.view == View::Nodes, "3 Nodes")]
+    } else {
+        vec![tab(app.view == View::Run, "1 Run"), " ".into(), tab(app.view == View::Sets, "2 Sets"), " ".into(), tab(app.view == View::Nodes, "3 Nodes")]
+    };
+    let width = (right.chars().count() + problem.chars().count()) as u16;
+    let [l, r] = Layout::horizontal([Constraint::Min(30), Constraint::Length(width)]).areas(area);
     f.render_widget(Paragraph::new(Line::from(left)), l);
-    f.render_widget(Paragraph::new(right).fg(DIM), r);
+    f.render_widget(Paragraph::new(Line::from(vec![Span::styled(right, Style::new().fg(DIM)), Span::styled(problem, Style::new().fg(Color::Black).bg(BAD).bold())])), r);
 }
 
 fn confirm_line(app: &App) -> Option<Line<'static>> {
     let warn = |s: String| Line::from(Span::styled(s, Style::new().fg(Color::Black).bg(WARN).bold()));
     match app.confirm.as_ref()? {
         Confirm::Overwrite => Some(warn(format!(" {} images in the set will be replaced.  Enter: go  ·  any other key: back ", num(app.sel.overwrite)))),
-        Confirm::Outdated(c) => Some(warn(format!(" {} node(s) with another add-on.  y: send add-on and start  ·  n: start without them  ·  Esc: back ", c.len()))),
         Confirm::Quit => Some(warn(" A run is in progress.  Enter/q: abort and quit  ·  any other key: back ".into())),
         Confirm::DeleteRun { text, .. } => Some(warn(format!(" {text}  Enter: delete  ·  Esc: back "))),
         Confirm::DeleteSet(n) => Some(warn(format!(" Delete set {n} and its runs that no other set uses?  Enter: delete  ·  Esc: back "))),
@@ -711,6 +728,79 @@ fn draw_head(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(vec![l1, Line::from(l2), l3]), inner);
 }
 
+/// Node mode: who this box is and which coordinators it renders for
+fn draw_node_head(f: &mut Frame, app: &App, area: Rect) {
+    let e = &app.engine;
+    let me = &e.me;
+    let l1 = Line::from(vec![
+        Span::styled(me.name.clone(), Style::new().fg(ACCENT).bold()),
+        format!("  ·  {}  ·  Blender {}  ·  add-on {}  ·  packshot {}", me.gpu.as_deref().unwrap_or("GPU ?"), me.blender, me.addon.as_deref().unwrap_or("?"), me.version).fg(DIM),
+    ]);
+    let l2 = Line::from(vec![Span::styled(format!("{} Blender", e.max_renderers), Style::new().fg(ACCENT)), format!(" (+/-)  ·  {} cores  ·  {}  ·  CPU {} %", e.cores, me.os, app.cpu.back().copied().unwrap_or(0)).fg(DIM)]);
+    let mut spans = vec!["Coordinators: ".fg(DIM)];
+    if let Some(h) = e.hub.as_ref() {
+        for addr in &h.cfg.coordinators {
+            let name = h.addr_names.get(addr).cloned();
+            let up = name.as_ref().is_some_and(|n| h.peers.iter().any(|p| p.hello.name == *n));
+            let label = name.unwrap_or_else(|| addr.clone());
+            if up {
+                spans.push(Span::styled(format!("{label} connected"), Style::new().fg(OK)));
+            } else {
+                let err = h.dial_errors.get(addr).cloned().unwrap_or_else(|| "connecting …".into());
+                spans.push(Span::styled(format!("{label}: {err}"), Style::new().fg(BAD)));
+            }
+            spans.push("   ".into());
+        }
+    }
+    let block = boxed(format!("Node · {}", me.name));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    f.render_widget(Paragraph::new(vec![l1, l2, Line::from(spans)]), inner);
+}
+
+/// The blocks this box renders for other boxes (node mode, or a coordinator helping another one), CPU below
+fn draw_serve(f: &mut Frame, app: &App, area: Rect) {
+    let e = &app.engine;
+    let blocks = e.serve.as_ref().map(|s| s.blocks()).unwrap_or_default();
+    let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(area);
+    let block = boxed(format!("Rendering for others · {} blocks", blocks.len()));
+    let inner = block.inner(top);
+    f.render_widget(block, top);
+    let mut lines = vec![Line::from(format!("{:<20}{:>8}  {:<10}{:>10}{:>10}", "From", "Block", "Stage", "Items", "Time")).fg(DIM)];
+    for b in &blocks {
+        let from = e.hub.as_ref().and_then(|h| h.peer(b.conn)).map(|p| p.hello.name.clone()).unwrap_or_else(|| "?".into());
+        let color = match b.stage {
+            "waiting" => DIM,
+            "export" => WARN,
+            _ => ACCENT,
+        };
+        lines.push(Line::from(vec![
+            Span::raw(format!("{from:<20.19}")),
+            Span::raw(format!("{:>8}  ", b.id)),
+            Span::styled(format!("{:<10}", b.stage), Style::new().fg(color)),
+            Span::raw(format!("{:>10}", format!("{}/{}", b.done, b.total))),
+            Span::raw(if b.stage == "waiting" { format!("{:>10}", "") } else { format!("{:>9.1}s", b.secs) }),
+        ]));
+    }
+    if blocks.is_empty() {
+        lines.push(Line::from("no block in work").fg(DIM));
+    }
+    let h = inner.height as usize;
+    if lines.len() > h {
+        let more = lines.len() - h + 1;
+        lines.truncate(h.saturating_sub(1));
+        lines.push(Line::from(format!("… {more} more")).fg(DIM));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+    let block = boxed("CPU");
+    let inner = block.inner(bottom);
+    f.render_widget(block, bottom);
+    let [t, s] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
+    f.render_widget(Paragraph::new(format!("CPU here: {} %", app.cpu.back().copied().unwrap_or(0))).fg(DIM), t);
+    let v: Vec<u64> = app.cpu.iter().copied().skip(app.cpu.len().saturating_sub(s.width as usize)).collect();
+    f.render_widget(Sparkline::default().data(&v).max(100).style(Style::new().fg(OK)), s);
+}
+
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let block = boxed(format!("To render · {}", num(app.sel.todo.len())));
     let inner = block.inner(area);
@@ -758,19 +848,22 @@ fn draw_workers(f: &mut Frame, app: &App, area: Rect) {
         .as_ref()
         .map(|r| r.nodes.iter().filter(|n| !e.connected_nodes().iter().any(|(_, h)| &h.name == *n)).cloned().collect())
         .unwrap_or_default();
-    let rows = (e.workers.len() + gone.len()) as u16 + 5;
-    let [top, bottom] = Layout::vertical([Constraint::Length(rows.max(6)), Constraint::Min(5)]).areas(area);
+    // fixed heights: workers and throughput share the space equally, so nothing jumps while workers come and go
+    let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(area);
     let block = boxed("Workers");
     let inner = block.inner(top);
     f.render_widget(block, top);
-    let mut lines = vec![Line::from(format!("{:<16}{:<8}{:<40}{:>8}{:>9}", "Node/id", "Phase", "Entity", "Block", "Time")).fg(DIM)];
+    let [head_area, rows_area, sum_area] = Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(2)]).areas(inner);
+    f.render_widget(Paragraph::new(Line::from(format!("{:<20}{:<8}{:<40}{:>8}{:>9}", "Box/id", "Phase", "Entity", "Block", "Time")).fg(DIM)), head_area);
+    let mut lines = Vec::new();
     let mut ws: Vec<_> = e.workers.iter().collect();
     ws.sort_by_key(|w| (w.node.clone(), w.kind == Kind::Render, w.slot));
     for w in ws {
-        let (phase, color) = if w.kind == Kind::Export { ("export", WARN) } else { ("render", ACCENT) };
+        // a package on another coordinator: it exports and renders there
+        let (phase, color) = if w.kind == Kind::Export { ("export", WARN) } else if w.package { ("exp+ren", WARN) } else { ("render", ACCENT) };
         let current = w.current().map(|t| e.targets[t].entity.as_str()).unwrap_or("…");
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<16.15}", w.label()), Style::new().fg(color).bold()),
+            Span::styled(format!("{:<20.19}", w.label()), Style::new().fg(color).bold()),
             Span::raw(format!("{phase:<8}")),
             Span::raw(format!("{current:<40.40}")),
             Span::styled(format!("{:>8}", format!("{}/{}", w.reported.len(), w.order.len())), Style::new().fg(DIM)),
@@ -778,15 +871,23 @@ fn draw_workers(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
     for n in gone {
-        lines.push(Line::from(vec![Span::styled(format!("{n:<16.15}"), Style::new().fg(DIM)), Span::styled("—       not connected", Style::new().fg(DIM))]));
+        lines.push(Line::from(vec![Span::styled(format!("{n:<20.19}"), Style::new().fg(DIM)), Span::styled("—       not connected", Style::new().fg(DIM))]));
     }
+    let h = rows_area.height as usize;
+    if lines.len() > h {
+        let more = lines.len() - h + 1;
+        lines.truncate(h - 1);
+        lines.push(Line::from(format!("… {more} more")).fg(DIM));
+    }
+    f.render_widget(Paragraph::new(lines), rows_area);
+    let mut lines = Vec::new();
     if let Some(run) = e.run.as_ref() {
         let (queued, ready) = run.waiting();
         let idle = e.workers.iter().filter(|w| w.kind == Kind::Render).count() < e.total_slots() && ready == 0 && queued > 0;
         lines.push(Line::from(vec![
             format!("{} entities waiting for export · {ready} blocks waiting for Blender · {} exported", num(queued), num(run.exported)).fg(DIM),
             if e.transferred > 0 { format!(" · {} to nodes", mb(e.transferred)).fg(DIM) } else { "".into() },
-            if idle { Span::styled("  Blender waits for export: ] for more exports", Style::new().fg(WARN)) } else { "".into() },
+            if idle { Span::styled("  Blender waits for export: > for more exports", Style::new().fg(WARN)) } else { "".into() },
         ]));
         // mean per phase from render.py; the largest highlighted (that is where the CPU time goes)
         let mut spans = vec!["Avg per render: ".fg(DIM)];
@@ -803,7 +904,7 @@ fn draw_workers(f: &mut Frame, app: &App, area: Rect) {
         }
         lines.push(Line::from(spans));
     }
-    f.render_widget(Paragraph::new(lines), inner);
+    f.render_widget(Paragraph::new(lines), sum_area);
 
     let block = boxed("Throughput and CPU");
     let inner = block.inner(bottom);
@@ -972,7 +1073,9 @@ fn draw_run_detail(f: &mut Frame, app: &mut App, area: Rect, id: &str) {
         lines.push(row("Blender", format!("{} · {}", s("blender_version"), s("gpu_backend"))));
         lines.push(row("StarBreaker", s("starbreaker")));
         let p4k_date = o["p4k_mtime"].as_i64().and_then(|t| chrono::DateTime::from_timestamp(t, 0)).map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
-        lines.push(row("p4k", format!("{:.1} GB · {p4k_date}", o["p4k_bytes"].as_f64().unwrap_or(0.0) / 1e9)));
+        let p4k_v = o["p4k_version"].as_str().map(|v| format!("{v} · ")).unwrap_or_default();
+        let p4k_id = o["p4k_id"].as_str().map(|v| format!(" · {}", v.get(..8).unwrap_or(v))).unwrap_or_default();
+        lines.push(row("p4k", format!("{p4k_v}{:.1} GB · {p4k_date}{p4k_id}", o["p4k_bytes"].as_f64().unwrap_or(0.0) / 1e9)));
         lines.push(row("Processes", format!("{} Blender, {} export{}", o["renderers"], o["exporters"], if nodes.is_empty() { String::new() } else { format!(" + {}", nodes.join(", ")) })));
         lines.push(row("Folder", app.engine.store.run_dir(id).display().to_string()).fg(DIM));
     }
@@ -1005,33 +1108,46 @@ fn draw_run_detail(f: &mut Frame, app: &mut App, area: Rect, id: &str) {
 }
 
 fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
-    let [top, bottom] = Layout::vertical([Constraint::Min(6), Constraint::Length(9)]).areas(area);
+    // the details tile needs 8 lines (coordinators: node, hardware, capacity, Blender, app, p4k, fetch, manifest)
+    let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(10)]).areas(area);
     let e = &app.engine;
     let title = match e.hub.as_ref() {
         None => "Nodes · no cluster (no token in packshot.json)".to_string(),
         Some(h) => match &h.listen_error {
             Some(err) => format!("Nodes · {err}"),
+            None if e.me.role == Some(Role::Node) => "Nodes".to_string(),
             None => format!("Nodes · listening on {}", h.cfg.listen),
         },
     };
     let block = boxed(title);
     let inner = block.inner(top);
     f.render_widget(block, top);
-    let cols = |a: &str, b: &str, c: &str, d: &str, g: &str, p: &str, q: &str| format!("{a:<14.13}{b:<14.13}{c:<16.15}{d:<18.17}{g:<9.8}{p:<10.9}{q}");
+    // columns: node, role, connection, processes, add-on, Blender, p4k (version and fingerprint)
+    let cols = |a: &str, b: &str, c: &str, d: &str, g: &str, p: &str, q: &str| format!("{a:<14.13}{b:<14.13}{c:<14.13}{q:<38.37}{d:<18.17}{g:<9.8}{p}");
+    let p4k_cell = |h: &crate::net::Hello| match (&h.p4k_version, &h.p4k_id) {
+        (Some(v), Some(id)) => format!("{v} · {}", id.get(..8).unwrap_or(id)),
+        (None, Some(id)) => id.get(..8).unwrap_or(id).to_string(),
+        _ => "–".to_string(),
+    };
     let mut lines = vec![Line::from(cols("Node", "Role", "Connection", "Add-on", "Blender", "p4k", "Processes")).fg(DIM)];
     let rows = app.node_rows();
     for (i, (conn, name)) in rows.iter().enumerate() {
         let mut line = if i == 0 {
-            Line::from(cols(name, "coordinator", "here", e.me.addon.as_deref().unwrap_or("?"), &e.me.blender, &e.me.p4k_bytes.map(|b| format!("{:.0} GB", b as f64 / 1e9)).unwrap_or_default(), &format!("{} Blender · {} export · {} cores", e.max_renderers, e.max_exporters, e.cores)))
+            // this box: its own role; a node exports nothing
+            let (role, procs) = if e.me.role == Some(Role::Node) {
+                ("node", format!("{} Blender · {} cores · {}", e.max_renderers, e.cores, e.me.os))
+            } else {
+                ("coordinator", format!("{} Blender · {} export · {} cores · {}", e.max_renderers, e.max_exporters, e.cores, e.me.os))
+            };
+            Line::from(cols(name, role, "here", e.me.addon.as_deref().unwrap_or("?"), &e.me.blender, &p4k_cell(&e.me), &procs))
         } else if let Some(p) = e.hub.as_ref().and_then(|h| h.peer(*conn)) {
             let h = &p.hello;
             let role = if h.role == Some(Role::Node) { "node" } else { "coordinator" };
-            let state = e.node_state(h);
-            let addon = format!("{}{}", h.addon.as_deref().unwrap_or("?"), if state == NodeState::Outdated { " old" } else { "" });
             let conn_s = if p.outbound { "connected ↗" } else { "connected ↙" };
-            let mut l = Line::from(cols(name, role, conn_s, &addon, &h.blender, &h.p4k_bytes.map(|b| format!("{:.0} GB", b as f64 / 1e9)).unwrap_or_else(|| "–".into()), &format!("{} Blender · {} cores · {}", h.slots, h.cores, h.os)));
-            if state != NodeState::Ready && h.role == Some(Role::Node) {
-                l = l.fg(if state == NodeState::Outdated { WARN } else { BAD });
+            let mut l = Line::from(cols(name, role, conn_s, h.addon.as_deref().unwrap_or("?"), &h.blender, &p4k_cell(h), &if h.role == Some(Role::Node) { format!("{} Blender · {} cores · {}", h.slots, h.cores, h.os) } else { format!("{} Blender · {} export · {} cores · {}", h.slots, h.exporters, h.cores, h.os) }));
+            // another state: the whole row red, the details tile and the box below say what differs
+            if !e.differences(h).is_empty() {
+                l = l.fg(BAD);
             }
             l
         } else {
@@ -1049,38 +1165,84 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 
     let [l, r] = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(bottom);
-    // Sync with the selected coordinator
+    // details of the selected box: the same lines for this box, coordinators and nodes; coordinators add fetch and
+    // manifest
     let sel = rows.get(app.node_sel).cloned();
     let peer = sel.as_ref().and_then(|(c, _)| e.hub.as_ref().and_then(|h| h.peer(*c)));
-    let title = format!("Sync · {}", sel.as_ref().map(|(_, n)| n.as_str()).unwrap_or(""));
+    let here = app.node_sel == 0;
+    let title = match (here, peer) {
+        (true, _) => format!("Node · {} (here)", e.me.name),
+        (false, Some(p)) => format!("Node · {}", p.hello.name),
+        (false, None) => format!("Node · {}", sel.as_ref().map(|(_, n)| n.as_str()).unwrap_or("")),
+    };
     let block = boxed(title);
     let inner = block.inner(l);
     f.render_widget(block, l);
+    let row = |k: &str, v: String| Line::from(vec![Span::styled(format!("{k:<11}"), Style::new().fg(DIM)), Span::raw(v)]);
+    let there_here = |there: &str, mine: &str| if here || there == mine { there.to_string() } else { format!("{there} (here {mine})") };
     let mut lines = Vec::new();
-    match peer {
-        Some(p) if p.hello.role == Some(Role::Coordinator) => {
-            let runs = e.fetchable(&p.hello.name);
-            let images: usize = runs.iter().map(|r| r.images).sum();
-            let bytes: u64 = runs.iter().map(|r| r.bytes).sum();
-            let known = e.peer_runs.get(&p.hello.name).map(|v| v.len()).unwrap_or(0);
-            lines.push(Line::from(vec!["Fetch:     ".into(), Span::styled(format!("{} runs", runs.len()), Style::new().fg(ACCENT)), format!(" · {} images · {}  (of {known} runs there)", num(images), mb(bytes)).into()]));
-            for r in runs.iter().take(3) {
-                lines.push(Line::from(format!("           {}  {}", run_date(&r.id), r.name)).fg(DIM));
-            }
-            let m = match e.manifest.as_ref() {
-                Some(m) => format!("{} entities from {} ({})", m.entities.values().filter(|v| **v).count(), m.from, m.at.get(..16).unwrap_or(&m.at).replace('T', " ")),
-                None => "none".into(),
+    let h = if here { Some(e.me.clone()) } else { peer.map(|p| p.hello.clone()) };
+    match h {
+        Some(h) => {
+            let role = if h.role == Some(Role::Node) { "node" } else { "coordinator" };
+            let conn = if here { String::new() } else if peer.is_some_and(|p| p.outbound) { " · connected ↗".into() } else { " · connected ↙".into() };
+            let ip = if here { crate::net::own_ip().unwrap_or_else(|| "?".into()) } else { peer.map(|p| p.ip.clone()).unwrap_or_default() };
+            lines.push(row("Node", format!("{role} · {} · {ip}{conn}", h.os)));
+            let ram = h.ram.map(|b| format!(" · RAM {:.0} GB", b as f64 / (1u64 << 30) as f64)).unwrap_or_default();
+            let gpu = h.gpu.as_ref().map(|g| format!(" · GPU {g}")).unwrap_or_else(|| " · GPU ?".into());
+            lines.push(row("Hardware", format!("CPU {} ({} cores){ram}{gpu}", h.cpu.as_deref().unwrap_or("?"), h.cores)));
+            // capacity only; another state in red, a run going there in yellow ("Before the next run" says why)
+            let capacity = if here && !app.node() {
+                format!("{} export · {} Blender", e.max_exporters, e.max_renderers)
+            } else if here {
+                format!("{} Blender", e.max_renderers)
+            } else if e.can_export(&h) {
+                format!("{} export · {} Blender", h.exporters, h.slots)
+            } else {
+                format!("{} Blender", h.slots)
             };
-            lines.push(Line::from(format!("Manifest:  {m}")));
-            lines.push(Line::from(format!("Add-on:    {} has {}, here {}", p.hello.name, p.hello.addon.as_deref().unwrap_or("?"), e.me.addon.as_deref().unwrap_or("?"))));
+            let color = if !here && !e.differences(&h).is_empty() {
+                BAD
+            } else if !here && h.running {
+                WARN
+            } else {
+                Color::Reset
+            };
+            lines.push(Line::from(vec![Span::styled(format!("{:<11}", "Capacity"), Style::new().fg(DIM)), Span::styled(capacity, Style::new().fg(color))]));
+            lines.push(row("Blender", format!("{} · add-on {}", there_here(&h.blender, &e.me.blender), there_here(h.addon.as_deref().unwrap_or("?"), e.me.addon.as_deref().unwrap_or("?")))));
+            let sb = match h.starbreaker.as_deref() {
+                Some(s) => there_here(s, e.me.starbreaker.as_deref().unwrap_or("?")),
+                None => "–".into(),
+            };
+            lines.push(row("App", format!("packshot {} · StarBreaker {sb}", there_here(&h.version, &e.me.version))));
+            let p4k = match h.p4k_bytes {
+                Some(b) => format!(
+                    "{}{} · {:.0} GB",
+                    h.p4k_version.as_ref().map(|v| format!("{v} · ")).unwrap_or_default(),
+                    there_here(h.p4k_id.as_deref().unwrap_or("?").get(..8).unwrap_or("?"), e.me.p4k_id.as_deref().unwrap_or("?").get(..8).unwrap_or("?")),
+                    b as f64 / 1e9
+                ),
+                None => "– (renders only)".into(),
+            };
+            lines.push(row("p4k", p4k));
+            if h.role == Some(Role::Coordinator) && !here && !app.node() {
+                let runs = e.fetchable(&h.name);
+                let images: usize = runs.iter().map(|r| r.images).sum();
+                let bytes: u64 = runs.iter().map(|r| r.bytes).sum();
+                let known = e.peer_runs.get(&h.name).map(|v| v.len()).unwrap_or(0);
+                lines.push(row("Fetch (h)", format!("{} runs · {} images · {} (of {known} runs there)", runs.len(), num(images), mb(bytes))));
+                let m = match e.manifest.as_ref() {
+                    Some(m) => format!("{} entities from {} ({})", m.entities.values().filter(|v| **v).count(), m.from, m.at.get(..16).unwrap_or(&m.at).replace('T', " ")),
+                    None => "none".into(),
+                };
+                lines.push(row("Manifest (m)", m));
+            }
         }
-        Some(p) => {
-            lines.push(Line::from(format!("Node {} · {} Blender · {}", p.hello.name, p.hello.slots, p.hello.os)));
-            lines.push(Line::from(format!("Add-on:    {} there, {} here", p.hello.addon.as_deref().unwrap_or("?"), e.me.addon.as_deref().unwrap_or("?"))));
-            lines.push(Line::from(format!("Blender:   {} there, {} here", p.hello.blender, e.me.blender)));
-            lines.push(Line::from(format!("packshot:  {} there, {} here", p.hello.version, e.me.version)));
+        None => {
+            let addr = sel.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
+            let err = e.hub.as_ref().and_then(|h| h.dial_errors.get(&addr)).cloned().unwrap_or_else(|| "not connected".into());
+            lines.push(row("Node", format!("{addr}: {err}")));
         }
-        None => lines.push(Line::from("this box or not connected").fg(DIM)),
     }
     f.render_widget(Paragraph::new(lines), inner);
 
@@ -1089,16 +1251,34 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(block, r);
     let mut lines = Vec::new();
     for (_, h) in e.connected_nodes() {
-        match e.node_state(&h) {
-            NodeState::Ready => lines.push(Line::from(vec![Span::styled(format!("{:<14}", h.name), Style::new().fg(OK)), format!("joins with {} Blender", h.slots).into()])),
-            NodeState::Outdated => lines.push(Line::from(vec![Span::styled(format!("{:<14}", h.name), Style::new().fg(WARN)), "another add-on: asked at the start (or s)".into()])),
-            NodeState::Incompatible => lines.push(Line::from(vec![Span::styled(format!("{:<14}", h.name), Style::new().fg(BAD)), format!("left out: packshot {} / Blender {}", h.version, h.blender).into()])),
-        }
+        let (text, color) = if app.node() {
+            // a node only needs the coordinators' state to match its own
+            let diff = e.differences(&h);
+            if diff.is_empty() { ("same state".to_string(), OK) } else { (format!("another state: {}", diff.join(", ")), BAD) }
+        } else {
+            part_text(e, &h)
+        };
+        lines.push(Line::from(vec![Span::styled(format!("{:<14}", h.name), Style::new().fg(color)), Span::raw(text)]));
     }
     if lines.is_empty() {
-        lines.push(Line::from("no node connected").fg(DIM));
+        lines.push(Line::from("no other box connected").fg(DIM));
     }
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// What a connected box does in the next run, with its color (the details tile and "Before the next run")
+fn part_text(e: &Engine, h: &crate::net::Hello) -> (String, Color) {
+    let diff = e.differences(h);
+    if !diff.is_empty() {
+        return (format!("another state, no run starts: {}", diff.join(", ")), BAD);
+    }
+    if h.running {
+        ("has a run going: no other run starts, the others render along".into(), WARN)
+    } else if e.can_export(h) {
+        (format!("exports and renders along with {} export, {} Blender", h.exporters, h.slots), OK)
+    } else {
+        (format!("renders along with {} Blender", h.slots), OK)
+    }
 }
 
 fn draw_log(f: &mut Frame, app: &App, area: Rect) {
@@ -1143,11 +1323,13 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
         &[("type", "text"), ("Ctrl+U", "clear"), ("Enter", "ok"), ("Esc", "back")]
     } else {
         match (app.view, running) {
-            (View::Run, true) => &[("p", "pause"), ("+/-", "Blender"), ("[/]", "export"), ("←/→", "preview"), ("e", "log/errors"), ("Tab", "view"), ("q", "abort")],
-            (View::Run, false) => &[("/", "filter"), ("x", "clear filter"), ("u", "scope"), ("↑↓", "list"), ("Enter", "start"), ("+/-", "Blender"), ("[/]", "export"), ("e", "log/errors"), ("Tab", "view"), ("q", "quit")],
+            (View::Run, _) if app.node() => &[("+/-", "Blender"), ("e", "log/errors"), ("Tab", "view"), ("q", "quit")],
+            (View::Nodes, _) if app.node() => &[("↑↓", "box"), ("Tab", "view"), ("q", "quit")],
+            (View::Run, true) => &[("p", "pause"), ("+/-", "Blender"), ("</>", "export"), ("←/→", "preview"), ("e", "log/errors"), ("Tab", "view"), ("q", "abort")],
+            (View::Run, false) => &[("/", "filter"), ("x", "clear filter"), ("u", "scope"), ("↑↓", "list"), ("Enter", "start"), ("+/-", "Blender"), ("</>", "export"), ("e", "log/errors"), ("Tab", "view"), ("q", "quit")],
             (View::Sets, true) => &[("↑↓", "set/run"), ("i", "details"), ("Tab", "view"), ("q", "abort")],
             (View::Sets, false) => &[("↑↓", "set/run"), ("Enter", "target set"), ("n", "new set"), ("l", "to live"), ("x", "delete"), ("i", "details"), ("Tab", "view"), ("q", "quit")],
-            (View::Nodes, _) => &[("↑↓", "node"), ("h", "fetch runs"), ("m", "fetch manifest"), ("r", "refresh"), ("s", "send add-on"), ("Tab", "view"), ("q", if running { "abort" } else { "quit" })],
+            (View::Nodes, _) => &[("↑↓", "node"), ("h", "fetch runs"), ("m", "fetch manifest"), ("r", "refresh"), ("Tab", "view"), ("q", if running { "abort" } else { "quit" })],
         }
     };
     let mut spans = Vec::new();
