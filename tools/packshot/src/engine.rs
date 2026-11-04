@@ -1,5 +1,6 @@
 // The run: selection, blocks, export pool (StarBreaker `entity export-batch`, one process per block) and
 // Blender pool (render.py --jobs, one process per block), the images into the run and the target set (store.rs), log.
+// The node that holds a run is its head node: it runs this engine's scheduling, whichever node started it (cluster.rs).
 // Everything runs in the main thread; the child processes report their lines through a channel (one reader thread per stream).
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
@@ -15,14 +16,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::events::{EventLog, GpuProbe, file_hash, round3};
-use crate::net::{Hello, Hub, RunSummary};
+use crate::net::{Hello, Hub, RemoteJob, RunStatus, RunSummary};
 use crate::store::{EntityResult, Resolved, RunInfo, SetInfo, Store};
 use crate::tables::Tables;
 
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Target {
     pub uuids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub names: Option<Vec<String>>,
     pub entity: String,
     #[serde(rename = "type")]
@@ -140,15 +141,17 @@ pub struct Worker {
     child: Option<Child>,
     /// node, connection and block number there (cluster.rs)
     pub node: Option<String>,
-    /// host name of the box doing the work (this one or the node)
+    /// host name of the node doing the work (this one or the node)
     pub host: String,
-    /// an item package on another coordinator: it exports and renders there
+    /// an item package on another node: it exports (and renders) there
     pub package: bool,
     pub conn: u64,
     pub remote: u64,
     /// jobs in the order the process works through them
     pub order: Vec<usize>,
     pub reported: HashSet<usize>,
+    /// a package: the items the other node has exported so far (it reports each one)
+    pub exported: HashSet<usize>,
     pub since: Instant,
     started: Instant,
     /// sum of the seconds export-batch reports per item (the rest of the process time is loading and writing)
@@ -159,23 +162,56 @@ pub struct Worker {
 }
 
 impl Worker {
+    /// "DRAGONEGG/E1": E an export, R a render (Blender), P an item package on another node (exported and rendered there)
     pub fn label(&self) -> String {
-        format!("{}/{}{}", self.host, if self.kind == Kind::Export { 'E' } else { 'B' }, self.slot)
+        let kind = if self.kind == Kind::Export {
+            'E'
+        } else if self.package {
+            'P'
+        } else {
+            'R'
+        };
+        format!("{}/{kind}{}", self.host, self.slot)
     }
     /// the item the process is currently working on (both tools work through their list in order)
     pub fn current(&self) -> Option<usize> {
         self.order.iter().copied().find(|t| !self.reported.contains(t))
     }
+
+    /// A package still in its export stage on the other node: not every item exported or failed yet
+    pub fn exporting(&self) -> bool {
+        self.package && self.exported.len() + self.reported.iter().filter(|t| !self.exported.contains(t)).count() < self.order.len()
+    }
+
+    /// What the views show: (phase, current item, done, total); a package shows its export, then its render
+    pub fn progress(&self) -> (&'static str, Option<usize>, usize, usize) {
+        let total = self.order.len();
+        if self.kind == Kind::Export {
+            return ("export", self.current(), self.reported.len(), total);
+        }
+        if self.exporting() {
+            // export-batch works through the package in order: the first item neither exported nor failed
+            let current = self.order.iter().copied().find(|t| !self.exported.contains(t) && !self.reported.contains(t));
+            return ("export", current, self.exported.len(), total);
+        }
+        let current = if self.package { self.order.iter().copied().find(|t| self.exported.contains(t) && !self.reported.contains(t)) } else { self.current() };
+        ("render", current, self.reported.len(), total)
+    }
 }
+
+/// At most this many items in an item package: small enough that a slow node does not hold back the end of a run
+pub const PACKAGE_MAX: usize = 20;
 
 pub(crate) struct Block {
     pub(crate) items: Vec<usize>,
     pub(crate) root: PathBuf,
     pub(crate) packages: HashMap<usize, PathBuf>,
+    /// exported on another node (without Blender) and sent here: its render jobs, paths relative to root
+    pub(crate) jobs: Option<Vec<RemoteJob>>,
     failed: bool,
     /// exported, waiting for a Blender
     pub(crate) ready_at: Option<Instant>,
-    /// an item package for another coordinator, which exports it itself
+    /// an item package for another node, which exports it itself
     pub(crate) package: bool,
 }
 
@@ -186,6 +222,12 @@ pub struct Run {
     pub(crate) ready: VecDeque<usize>,
     /// nodes that were connected at the start and take part
     pub nodes: Vec<String>,
+    /// the node that started the run (this one or another), filter and scope: for the status of the others
+    pub starter: String,
+    pub filter: String,
+    pub scope: Scope,
+    /// the final status went out to the other nodes
+    pub(crate) status_sent: bool,
     pub total: usize,
     pub ok: usize,
     pub failed: usize,
@@ -234,9 +276,34 @@ enum Ev {
     Eof { id: u64 },
 }
 
+/// The selection's head node when it is another node: its sets and the state of the chosen set there
+pub struct RemoteSel {
+    pub node: String,
+    pub set: String,
+    pub sets: Vec<String>,
+    /// its sets with their runs and target lists (the Sets view)
+    pub set_list: Vec<crate::store::SetSummary>,
+    /// its latest run's throughput and image size (the estimate)
+    pub stats: Option<crate::store::RunStats>,
+    pub images: HashSet<String>,
+    pub failed: HashSet<String>,
+    /// the state arrived (no start before)
+    pub loaded: bool,
+}
+
+/// A run on another node, as its head node reports it
+pub struct RemoteRun {
+    pub from: String,
+    pub status: RunStatus,
+    pub at: Instant,
+}
+
 pub struct Engine {
     pub cfg: Config,
+    /// this node's target list, then the targets of runs other nodes started here (appended, so indices stay valid)
     pub targets: Vec<Target>,
+    /// how many of `targets` are this node's own list (the selection only looks at those)
+    pub own_len: usize,
     pub(crate) tables: Tables,
     pub store: Store,
     /// the target set and its state per entity
@@ -268,7 +335,7 @@ pub struct Engine {
     gpu: Option<GpuProbe>,
     sys: Option<sysinfo::System>,
     last_sample: Instant,
-    /// cluster (cluster.rs): connections, own versions, runs of the other coordinators, manifest
+    /// cluster (cluster.rs): connections, own versions, runs of the other nodes, manifest
     pub hub: Option<Hub>,
     pub me: Hello,
     pub peer_runs: HashMap<String, Vec<RunSummary>>,
@@ -277,17 +344,47 @@ pub struct Engine {
     pub(crate) next_remote: u64,
     /// bytes sent to nodes in this session
     pub transferred: u64,
-    /// renders the blocks of other coordinators while there is no run here (node.rs)
+    /// renders and exports for the head node of another node's run (node.rs)
     pub serve: Option<crate::node::Renderer>,
+    /// head node for the next start: None = this node, else a connected node's host name
+    pub head: Option<String>,
+    pub remote: Option<RemoteSel>,
+    /// the latest status of a run on another node
+    pub remote_run: Option<RemoteRun>,
+    pub(crate) last_status: Instant,
+    /// folders whose disks the hello reports (packshot folder, work folder), checked every 10 s
+    pub disk_paths: Vec<PathBuf>,
+    pub(crate) last_disk: Instant,
+    /// counts up when the remote head node's state arrives (the TUI recomputes its selection)
+    pub state_seq: u64,
+    /// the file offered for a set's target list (targets.json in the packshot folder)
+    pub targets_file: PathBuf,
+    /// throughput and image size of this node's latest run (the estimate when it is the head node)
+    pub stats: Option<crate::store::RunStats>,
+    /// the DataCore tables (pose, light rigs) are there; with --export they load in the background at the start, the
+    /// node exports nothing until then
+    pub tables_ready: bool,
+    tables_load: Option<TablesLoad>,
 }
 
-/// State of a foreign set (another coordinator's live) for the scope "missing"
+/// The DataCore tables loading in the background: its steps and its result come through the channel
+struct TablesLoad {
+    rx: Receiver<std::result::Result<String, std::result::Result<Tables, String>>>,
+    pub started: Instant,
+}
+
+/// State of a foreign set (another node's live) for the scope "missing"
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Manifest {
     pub from: String,
     pub set: String,
     pub at: String,
     pub entities: std::collections::BTreeMap<String, bool>,
+}
+
+/// What the filter searches in: class name, display names, type/subtype (lower case)
+fn search_text(t: &Target) -> String {
+    format!("{}\n{}\n{}/{}", t.entity, t.names.as_ref().map(|n| n.join("\n")).unwrap_or_default(), t.kind, t.sub_type).to_lowercase()
 }
 
 /// Blender version from `blender --version` ("Blender 5.2.3"), otherwise from the folder name
@@ -357,15 +454,15 @@ impl Engine {
         }
         store.sync(&mut set)?;
         let resolved = store.resolve(&set)?;
-        let haystack = targets
-            .iter()
-            .map(|t| format!("{}\n{}\n{}/{}", t.entity, t.names.as_ref().map(|n| n.join("\n")).unwrap_or_default(), t.kind, t.sub_type).to_lowercase())
-            .collect();
+        let haystack = targets.iter().map(search_text).collect();
         let (tx, rx) = channel();
         let manifest = crate::cluster::load_manifest(&store.root);
+        let stats = store.last_stats();
+        let own_len = targets.len();
         Ok(Self {
             cfg,
             targets,
+            own_len,
             tables,
             store,
             set,
@@ -399,7 +496,92 @@ impl Engine {
             gpu: None,
             sys: sysinfo::System::new().ok(),
             last_sample: Instant::now(),
+            head: None,
+            remote: None,
+            remote_run: None,
+            last_status: Instant::now(),
+            disk_paths: Vec::new(),
+            last_disk: Instant::now(),
+            state_seq: 0,
+            targets_file: PathBuf::new(),
+            stats,
+            tables_ready: true,
+            tables_load: None,
         })
+    }
+
+    /// Load the DataCore tables in the background (the TUI shows the steps); until they are there this node exports
+    /// nothing
+    pub fn load_tables(&mut self, refresh: bool) {
+        let (tx, rx) = channel();
+        let (sb, p4k, work) = (self.cfg.starbreaker.clone(), self.cfg.p4k.clone(), self.cfg.work.clone());
+        thread::spawn(move || {
+            let step = tx.clone();
+            let res = Tables::load(&sb, &p4k, &work, refresh, move |s| {
+                let _ = step.send(Ok(s.to_string()));
+            });
+            let _ = tx.send(Err(res.map_err(|e| format!("{e:#}"))));
+        });
+        self.tables_ready = false;
+        self.tables_load = Some(TablesLoad { rx, started: Instant::now() });
+        self.note(Level::Info, "DataCore tables: loading in the background, exports start once they are there");
+    }
+
+    /// Seconds the tables have been loading, None when they are not loading
+    pub fn tables_loading(&self) -> Option<f64> {
+        self.tables_load.as_ref().map(|l| l.started.elapsed().as_secs_f64())
+    }
+
+    /// The export workers this node offers now: none while its tables are not there
+    pub fn exporters_now(&self) -> usize {
+        if self.tables_ready { self.max_exporters } else { 0 }
+    }
+
+    fn poll_tables(&mut self) {
+        let Some(load) = self.tables_load.as_ref() else { return };
+        let mut msgs = Vec::new();
+        while let Ok(m) = load.rx.try_recv() {
+            msgs.push(m);
+        }
+        let secs = load.started.elapsed().as_secs_f64();
+        for m in msgs {
+            match m {
+                Ok(step) => self.note(Level::Info, step),
+                Err(Ok(tables)) => {
+                    self.tables = tables;
+                    self.tables_ready = true;
+                    self.tables_load = None;
+                    self.note(Level::Ok, format!("DataCore tables ready in {secs:.1} s: exports start"));
+                }
+                Err(Err(e)) => {
+                    self.tables_load = None;
+                    self.note(Level::Error, format!("DataCore tables not loaded, this node does not export: {e}"));
+                }
+            }
+        }
+    }
+
+    /// A new target list for the selection: the target set's (here) or the one the remote head node sent. Only
+    /// while no run is going here (the run's indices point into the list)
+    pub fn use_targets(&mut self, targets: Vec<Target>) {
+        if self.running() {
+            return;
+        }
+        self.haystack = targets.iter().map(search_text).collect();
+        self.own_len = targets.len();
+        self.targets = targets;
+        self.history.clear();
+        self.errors.clear();
+    }
+
+    /// Targets of a run another node started here: appended behind the own list, their indices
+    pub(crate) fn add_targets(&mut self, targets: Vec<Target>) -> Vec<usize> {
+        let first = self.targets.len();
+        for t in targets {
+            self.haystack.push(String::new());
+            self.targets.push(t);
+        }
+        (first..self.targets.len()).collect()
     }
 
     pub(crate) fn emit(&mut self, ev: &str, fields: serde_json::Value) {
@@ -411,12 +593,20 @@ impl Engine {
     /// Origin of the run for run_start: machine, processes, versions of render.py, addon, StarBreaker and p4k
     fn run_meta(&self, run_id: &str, args_line: &str, filter: &str, scope: Scope, total: usize, blocks: usize, size: usize) -> serde_json::Value {
         let version = self.me.blender.clone();
-        let commit = self.cfg.starbreaker.parent().and_then(|d| fs::read_to_string(d.join("COMMIT")).ok()).map(|s| s.split_whitespace().next().unwrap_or("").to_string());
-        let p4k = fs::metadata(&self.cfg.p4k).ok();
+        // the game version comes from the exporting nodes (their Data.p4k are in sync): this one, else the first
+        // exporting node that takes part
+        let exporter = if self.me.export {
+            Some(self.me.clone())
+        } else {
+            let nodes = self.run.as_ref().map(|r| r.nodes.clone()).unwrap_or_default();
+            self.connected_nodes().into_iter().map(|(_, h)| h).find(|h| h.export && nodes.contains(&h.name))
+        };
+        let p4k = self.me.export.then(|| fs::metadata(&self.cfg.p4k).ok()).flatten();
         json!({
             "run": run_id,
             "set": self.set.name,
             "host": self.me.name,
+            "starter": self.run.as_ref().map(|r| r.starter.clone()).unwrap_or_default(),
             "nodes": self.run.as_ref().map(|r| r.nodes.clone()).unwrap_or_default(),
             "os": std::env::consts::OS,
             "args": args_line,
@@ -433,11 +623,12 @@ impl Engine {
             "gpu_backend": "vulkan",
             "render_py": file_hash(&self.cfg.render_script),
             "addon": self.me.addon,
-            "starbreaker": commit,
-            "p4k": self.cfg.p4k,
-            "p4k_bytes": p4k.as_ref().map(|m| m.len()),
-            "p4k_id": self.me.p4k_id,
-            "p4k_version": self.me.p4k_version,
+            "starbreaker": self.me.starbreaker,
+            "p4k": self.me.export.then(|| self.cfg.p4k.clone()),
+            "p4k_from": exporter.as_ref().map(|h| h.name.clone()),
+            "p4k_bytes": exporter.as_ref().and_then(|h| h.p4k_bytes),
+            "p4k_id": exporter.as_ref().and_then(|h| h.p4k_id.clone()),
+            "p4k_version": exporter.as_ref().and_then(|h| h.p4k_version.clone()),
             "p4k_mtime": p4k.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()),
             "size": self.cfg.size,
         })
@@ -495,14 +686,33 @@ impl Engine {
         self.resolved.image.contains_key(&self.targets[t].entity)
     }
 
-    /// For "missing": in the target set or, if that is live, in the fetched live manifest of another coordinator
-    fn present(&self, t: usize) -> bool {
+    /// The head node's state when it is another node (None: this node is the head node)
+    pub fn remote_sel(&self) -> Option<&RemoteSel> {
+        self.head.as_ref().and(self.remote.as_ref())
+    }
+
+    /// For "missing": in the target set of the head node; here also in the fetched live manifest of another node
+    pub fn present(&self, t: usize) -> bool {
+        if let Some(r) = self.remote_sel() {
+            return r.images.contains(&self.targets[t].entity);
+        }
         self.has_render(t)
             || (self.set.name == crate::store::LIVE && self.manifest.as_ref().is_some_and(|m| m.entities.get(&self.targets[t].entity) == Some(&true)))
     }
 
     pub fn failed_last(&self, t: usize) -> bool {
-        self.resolved.failed.contains(&self.targets[t].entity)
+        match self.remote_sel() {
+            Some(r) => r.failed.contains(&self.targets[t].entity),
+            None => self.resolved.failed.contains(&self.targets[t].entity),
+        }
+    }
+
+    /// Name of the target set for the next start: on the head node
+    pub fn target_set(&self) -> String {
+        match self.remote_sel() {
+            Some(r) => r.set.clone(),
+            None => self.set.name.clone(),
+        }
     }
 
     pub fn run_dir(&self) -> Option<PathBuf> {
@@ -519,7 +729,7 @@ impl Engine {
     pub fn select(&self, filter: &str, scope: Scope) -> Selection {
         let terms: Vec<String> = filter.split([' ', ',']).filter(|s| !s.is_empty()).map(str::to_lowercase).collect();
         let mut s = Selection { matched: 0, existing: 0, missing: 0, failed: 0, todo: Vec::new(), overwrite: 0 };
-        for (i, h) in self.haystack.iter().enumerate() {
+        for (i, h) in self.haystack.iter().enumerate().take(self.own_len) {
             if !terms.is_empty() && !terms.iter().any(|t| h.contains(t.as_str())) {
                 continue;
             }
@@ -559,9 +769,10 @@ impl Engine {
         }
     }
 
-    /// Starts a run over the selection as a new run (`name`, empty = from filter and scope) in the target set;
-    /// `nodes`: the connected nodes that take part (cluster.rs)
-    pub fn start(&mut self, sel: &Selection, args_line: &str, filter: &str, scope: Scope, name: &str, nodes: Vec<String>) -> Result<()> {
+    /// Starts a run over `todo` as a new run (`name`, empty = from filter and scope) in the target set; `nodes`: the
+    /// connected nodes that take part, `starter`: the node that asked for it (cluster.rs)
+    #[allow(clippy::too_many_arguments)]
+    pub fn start(&mut self, todo: &[usize], args_line: &str, filter: &str, scope: Scope, name: &str, nodes: Vec<String>, starter: &str) -> Result<()> {
         let work = &self.cfg.work;
         let mut log_file = OpenOptions::new().create(true).append(true).open(work.join("render.log"))?;
         writeln!(log_file, "=== {} packshot {}", chrono::Local::now().to_rfc3339(), args_line)?;
@@ -571,12 +782,16 @@ impl Engine {
         self.blender_log = Some(blender_log);
         self.errors.clear();
 
-        let n = sel.todo.len();
+        let n = todo.len();
         self.run = Some(Run {
             blocks: Vec::new(),
-            pending: sel.todo.iter().copied().collect(),
+            pending: todo.iter().copied().collect(),
             ready: VecDeque::new(),
             nodes,
+            starter: starter.to_string(),
+            filter: filter.to_string(),
+            scope,
+            status_sent: false,
             total: n,
             ok: 0,
             failed: 0,
@@ -609,14 +824,15 @@ impl Engine {
         self.set.runs.push(run_id.clone());
         self.store.save_set(&self.set)?;
         let nodes = self.run.as_ref().map(|r| r.nodes.join(", ")).unwrap_or_default();
+        let by = if starter == self.me.name { String::new() } else { format!(" (started by {starter})") };
         self.note(
             Level::Info,
             format!(
-                "Run {run_id} on set {}: {n} entities, {} export, {} Blender here{}, {slots} Blender in all",
+                "Run {run_id} on set {}{by}: {n} entities, {} export · {} render here{}, {slots} render in all",
                 self.set.name,
                 self.max_exporters,
                 self.max_renderers,
-                if nodes.is_empty() { String::new() } else { format!(" + nodes {nodes}") }
+                if nodes.is_empty() { String::new() } else { format!(" + {nodes}") }
             ),
         );
         match EventLog::create(&self.store.run_dir(&run_id).join("events.jsonl")) {
@@ -651,7 +867,14 @@ impl Engine {
         let mut set = self.store.load_set(name)?;
         self.store.sync(&mut set)?;
         self.resolved = self.store.resolve(&set)?;
-        self.set = set;
+        // the selection runs over the set's target list while this node is the head node
+        if self.head.is_none() {
+            let targets = self.store.load_targets(&set)?;
+            self.set = set;
+            self.use_targets(targets);
+        } else {
+            self.set = set;
+        }
         Ok(())
     }
 
@@ -724,6 +947,7 @@ impl Engine {
             return;
         }
         self.persist();
+        self.stats = self.store.last_stats();
     }
 
     fn spawn(&mut self, kind: Kind, block: usize, mut cmd: Command, order: Vec<usize>, out_map: HashMap<String, usize>) -> Result<()> {
@@ -770,6 +994,7 @@ impl Engine {
             remote,
             order,
             reported: HashSet::new(),
+            exported: HashSet::new(),
             since: now,
             started: now,
             item_secs: 0.0,
@@ -819,6 +1044,20 @@ impl Engine {
         let mut jobs = Vec::new();
         let mut out_map = HashMap::new();
         let mut problems = Vec::new();
+        // exported on another node: the jobs came with the block, paths relative to its folder
+        if let Some(remote) = block.jobs.as_ref() {
+            for j in remote {
+                let rel = |p: &str| crate::net::safe_rel(p).map(|r| block.root.join(r));
+                let (Some(src), Some(rig)) = (rel(&j.src), rel(&j.rig)) else {
+                    problems.push((j.item, format!("unsafe path {} / {}", j.src, j.rig)));
+                    continue;
+                };
+                let out = self.render_png(j.item);
+                out_map.insert(out.to_string_lossy().to_lowercase(), j.item);
+                jobs.push(json!({ "src": src, "out": out, "pose": j.pose, "rig": rig, "size": j.size }));
+                order.push(j.item);
+            }
+        }
         for &t in &block.items {
             let Some(pkg) = block.packages.get(&t) else { continue };
             match self.pose_rig(t) {
@@ -1117,6 +1356,7 @@ impl Engine {
         while let Some(idx) = self.workers.iter().position(|w| w.eof >= 2) {
             self.on_exit(idx);
         }
+        self.poll_tables();
         self.poll_net();
         self.schedule();
         self.sample();
@@ -1133,7 +1373,7 @@ impl Engine {
                 let run = self.run.as_ref().unwrap();
                 let exporting = self.workers.iter().filter(|w| w.kind == Kind::Export).count();
                 // exports only as far ahead as the Blenders in the cluster can take them (disk space)
-                if exporting >= self.max_exporters || run.pending.is_empty() || exporting + run.ready.len() > slots {
+                if exporting >= self.exporters_now() || run.pending.is_empty() || exporting + run.ready.len() > slots {
                     break;
                 }
                 // cut the block only now: smaller towards the end of the run
@@ -1142,24 +1382,24 @@ impl Engine {
                 let items: Vec<usize> = (0..size).filter_map(|_| run.pending.pop_front()).collect();
                 let b = run.blocks.len();
                 let root = self.cfg.work.join("export").join(format!("b{b}"));
-                run.blocks.push(Block { items, root, packages: HashMap::new(), failed: false, ready_at: None, package: false });
+                run.blocks.push(Block { items, root, packages: HashMap::new(), jobs: None, failed: false, ready_at: None, package: false });
                 self.start_export(b);
             }
-            // the other coordinators (same state: same Data.p4k and StarBreaker) export and render packages of their own
+            // the other exporting nodes (same state: same Data.p4k and StarBreaker) export packages of their own
             loop {
                 if self.run.as_ref().unwrap().pending.is_empty() {
                     break;
                 }
                 let Some(conn) = self.free_exporter() else { break };
-                let size = self.block_size();
+                let size = self.block_size().min(PACKAGE_MAX);
                 let run = self.run.as_mut().unwrap();
                 let items: Vec<usize> = (0..size).filter_map(|_| run.pending.pop_front()).collect();
                 let b = run.blocks.len();
                 let root = self.cfg.work.join("export").join(format!("p{b}"));
-                run.blocks.push(Block { items, root, packages: HashMap::new(), failed: false, ready_at: None, package: true });
+                run.blocks.push(Block { items, root, packages: HashMap::new(), jobs: None, failed: false, ready_at: None, package: true });
                 self.start_package(b, conn);
             }
-            // exported blocks go to free boxes first, so this box keeps its CPU for exporting; the rest renders here
+            // exported blocks go to free rendering nodes first, so this node keeps its CPU for exporting; the rest renders here
             loop {
                 if self.run.as_ref().unwrap().ready.is_empty() {
                     break;

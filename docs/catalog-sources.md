@@ -548,18 +548,24 @@ pictures with gaps), so the icons are rendered from the models:
    the cell; the rig's lights stand ~1 m out, a 3 m cooler would have them inside). Matching: type + sub type
    exact before type + UNDEFINED, entries with a tag condition skipped. Facts from the game data only; the
    renderer of VeeLume/sc-render (no licence) served as the pointer to these records.
-4. **Output: runs and sets** (`tools/packshot/src/store.rs`). The packshot folder is laid out the same on every box:
-   `packshot.json`, `targets.json`, `runs/`, `sets/`, `manifests/` and `work/` (the cache: exports, renders, DataCore
+4. **Output: runs and sets** (`tools/packshot/src/store.rs`). The packshot folder is laid out the same on every node:
+   `packshot.json`, `targets.json` (the file offered as a set's target list), `runs/`, `sets/`, `manifests/` and `work/` (the cache: exports, renders, DataCore
    tables, logs); in the repo that is `local/packshot/`, in a bundle the bundle folder itself (`--store`, `--work`). Blender renders one image per entity into the work directory (`<work>/render/<class>.png`); it then
    moves into the **run**, the folder of that packshot run, `runs/<YYYY-MM-DD_HH-MM>_<name>/` (name from `--name`,
    else filter terms and scope, e.g. `arms_missing`), as `<Name> (<class>) <uuid>.png` per catalog UUID (English
    name, so the renders can be checked by eye in Explorer; further UUIDs of the entity are hard links), read-only.
    The run also holds `run.json` (its set, node, start and end, the origin as in the event log's `run_start`: filter,
-   scope, arguments, hashes of `render.py` and the addon, Blender version, StarBreaker commit, p4k; per entity ok or
+   scope, arguments, the starting node and the nodes taking part, hashes of `render.py` and the addon, Blender
+   version, StarBreaker commit, and the game version, fingerprint and size of the exporting nodes' Data.p4k
+   (`p4k_from` names the node it was taken from; hotfixes change it between runs of one set); per entity ok or
    the error and its files; saved after every block) and `events.jsonl`. A finished run is not changed any more; one
    without a single result is removed again. A **set** is `sets/<name>/`: every icon as a hard link to a run's image,
    per entity the latest run of its chain that has an image, plus `set.json` (base, the base's chain at the branch,
-   its own runs, the files and the run each links to). `live` is the main set, `thumbs:build` reads it. A run's
+   its own runs, the files and the run each links to, where its target list came from) and **`targets.json`, the
+   set's target list**: a new set takes its base's, `t` in view 2 (or `--targets <file>`) replaces it with a file
+   (default: `targets.json` in the packshot folder; asks before replacing); while the target set has none, view 1 says
+   so and Enter opens that dialog instead of starting. The target list changes with the game's updates, so each set keeps the one it was rendered
+   with. `live` is the main set, `thumbs:build` reads it (only the `<uuid>.png`). A run's
    images are linked into its target set as they arrive (`--set`, default live; a name that does not exist yet
    branches off live). An experiment set takes over into live by appending its own runs to live's chain (no new run,
    the origin stays); a run can be deleted from the middle of a set's chain, the older runs then show through again
@@ -587,28 +593,53 @@ pictures with gaps), so the icons are rendered from the models:
    (`src/icons/cli.ts`) writes the target list from the DB (default `local/packshot/targets.json`); until 2026-11-03 that CLI also rendered (one export and
    one Blender at a time, into `local/icons`, bundled by `scripts/icons-bundle.ps1`), packshot replaced it.
    **`pnpm packshot`** (`tools/packshot/`, Rust with ratatui and ratatui-image) runs export and render
-   with several processes at once (Blender ¾ of the physical cores, `export-batch` ¼ but at least 2; `--workers`,
-   `--exporters`, and `+`/`-`, `<`/`>` or `[`/`]` while it runs) and Blender on Vulkan (`--gpu-backend vulkan`) in a terminal
-   UI of three views (Tab or 1–3; log and errors below every view, `e` switches). **1 Run:** progress and ETA, the
-   workers (local and on nodes, `node/B1`), renders per minute and CPU, the latest render as an image (Sixel, Kitty or
-   iTerm2, half blocks otherwise; ←/→ pages back); Enter asks for the run name (default: filter terms and scope).
-   **2 Sets:** the sets with their own runs (date, name, node, filter, images, add-on hash; ⇣ = fetched from another
-   coordinator), on the right the selected run's result and up to 8 of its images, `i` adds hashes, Blender,
-   StarBreaker, p4k and processes; Enter makes a set the target set, `n` creates one from live, `l` adopts an
-   experiment into live, `x` deletes a run or set (both ask). **3 Nodes:** the boxes (this one, the connected ones,
-   configured coordinators not reached: node, role, connection, processes, add-on, Blender, p4k version and
-   fingerprint; a box with another state in red) and below the selected box's details, the same lines for every
-   kind: Node (role, OS, IP, connection), Hardware (CPU, cores, RAM, GPU with VRAM from `nvidia-smi`), Capacity
-   (exports and Blender), Blender with add-on, App (packshot build, StarBreaker commit), p4k (version, fingerprint,
-   size); coordinators also Fetch (`h`) and Manifest (`m`); next to it what each box does in the next run. A node
-   (`--node`) runs the same TUI reduced to **1 Blocks** (the blocks it renders: sender, stage waiting/export/render,
-   items, time; CPU) and 3 Nodes, `+`/`-` sets its Blender count; `--node --plain` prints lines instead. A
-   coordinator that renders for another one shows those blocks in view 1 in place of the to-render list. Lists take
-   half of the middle, throughput/CPU the other half, the log a third of the screen. What it renders: a filter
+   with several processes at once and Blender on Vulkan (`--gpu-backend vulkan`). There are no roles: every node
+   starts with what it can do now, `--render` (Blender, ¾ of the physical cores by default, `--workers`) and/or
+   `--export` (Data.p4k with `build_manifest.id` and StarBreaker; `export-batch` ¼ of the cores but at least 2,
+   `--exporters`); without both it only starts runs, stores them and watches (it says so at the start). The counts
+   change while it runs (`+`/`-`, `<`/`>` or `[`/`]`), the capabilities do not. The terminal UI has three views on
+   every node (Tab or 1–3; log and errors below every view, `e` switches). **1 Run:** without a run the selection with
+   its **head node** (`n` cycles through this node and the connected ones) and target set there (`s`), filter and
+   scope, the to-render list and the selected item's image; Enter asks for the run name in a dialog (default: filter
+   terms and scope) and starts it, here or on the head node; while the target set has no target list, Enter opens
+   the target list dialog instead. During a run on this node: progress and ETA, the workers (local and
+   on other nodes: `E` an export, `R` a render (Blender), `P` an item package exported and rendered on another node,
+   e.g. `servbox/R1`, `DRAGONVR/P2`), renders per minute and CPU, the latest render as an image (Sixel, Kitty or iTerm2,
+   half blocks otherwise; ←/→ pages back; the log says which protocol and cell size the terminal gave,
+   `PACKSHOT_GRAPHICS=sixel|kitty|iterm2|halfblocks` forces one; in Konsole packshot takes Sixel itself, since
+   ratatui-image leaves Sixel out there and falls back to blurry half blocks, while Konsole's Sixel shows the
+   previews fine). During a run on another node: its progress, workers and failures as its
+   head node reports them, and the latest image rendered here. `a` aborts the run going on from any node (asks).
+   **2 Sets:** this node's sets with their own runs (date, name, node, filter, images, add-on hash; ⇣ = fetched from
+   another node), on the right the selected run's result and up to 8 of its images, `i` adds hashes, Blender,
+   StarBreaker, p4k and workers; Enter makes a set the target set, `n` creates one from live, `t` gives it a target
+   list, `l` adopts an experiment into live, `x` deletes a run or set (all ask). With another node chosen as head
+   node the view shows that node's sets and runs (from its state and run list) read only, Enter chooses the target
+   set there; changes only on that node itself. **3 Nodes:** the nodes (this one, the connected ones,
+   addresses not reached: node, connection, workers (`2 export · 6 render`), runs to fetch (`h`), free disk with the
+   share in use, p4k version and fingerprint, add-on, status ready / head node / another state; a node with another
+   state in red) and below the selected node's details: Node (capabilities, OS, IP, connection), Hardware (CPU and
+   cores, RAM, GPU with VRAM from `nvidia-smi`), Disk (free and total of the disk with the packshot folder, and of
+   the work folder's if it is elsewhere), Workers, for other nodes Fetch (`h`: its finished runs for live missing
+   here) and Manifest (`m`: its live manifest, entity → image or only failed, so "missing" on the local live counts
+   what it already has), App (packshot build, StarBreaker commit), p4k (version, fingerprint, size), Blender with
+   add-on. Next to it the **Next run** tile: where it
+   starts (head node, set, items to render with filter and scope) or why it does not (first difference in state, a
+   run going, no target list, nobody to export or render), the export and render workers taking part (counts only),
+   an estimate of the time and of the room the images need on the head node, both from its latest finished run
+   with at least 50 results (items per second, mean PNG size; a remote head node sends them with its state), and the
+   free space there. `--serve` runs without the TUI and without a run of its own (it prints the log).
+   Questions and inputs (run name, new set, a set's target list, confirmations) open as a dialog over the view; the
+   target list dialog offers the lists in the packshot folder with count and date, or another path. The log starts
+   with the start lines (version, node, capabilities, folders, target set and list, tools, cluster). With `--export`
+   the TUI opens at once and reads the DataCore tables in the background (steps in the log, the time in the run
+   header); the node offers no export workers until they are there, and if reading fails it stays without export.
+   Lists take half of the middle, throughput/CPU the other half, the log a third of the screen. What it renders: a filter
    (terms separated by blanks or commas, any of them in the class, the name or the type) and a scope: missing (not in
    the target set), failed last time (in the set's chain, also when an old image exists) or all (replaces, asks
-   first); `--filter`/`--scope` preset both, `--plain` runs without the TUI. It reads `targets.json`
-   (`pnpm packshot:targets`, default: in the packshot folder) and computes pose and rig itself (a port of the former CLI's
+   first); `--filter`/`--scope` preset both, `--plain` starts a run on this node without the TUI. The selection runs
+   over the target set's `targets.json` (written by `pnpm packshot:targets`, taken into a set as above; on another
+   head node its set's list comes with its state) and pose and rig are computed by the exporting node itself (a port of the former CLI's
    `loadGameTables`: identical for all 6734 targets and the 53 rigs on 2026-11-01), so it needs neither Node nor the
    DB. Blocks are cut only when they are exported: rest / (3 × Blender in the cluster), at least 10, at most
    `--chunk` (50), and for small rests so that every Blender gets work, so they shrink towards the end of a run.
@@ -621,8 +652,9 @@ pictures with gaps), so the icons are rendered from the models:
    opening incl. the addon's material build, material tweaks/pose/camera/light/world, shader compilation plus render
    and EXR, the glass pass, `write_png`); the TUI shows their means and logs them per item. Every run also writes
    an event log, `events.jsonl` in its run folder, one JSON line per event with `t` (seconds since the start):
-   `run_start` (run, set, host, process counts, cores, Blender version and backend, hashes of `render.py` and the addon,
-   StarBreaker commit, p4k size), `export_start`/`export_item`/`export_end` (seconds per item, process wall time,
+   `run_start` (run, set, head node, starting node and the nodes taking part, process counts, cores, Blender version
+   and backend, hashes of `render.py` and the addon, StarBreaker commit, game version and size of the exporting
+   nodes' Data.p4k), `export_start`/`export_item`/`export_end` (seconds per item, process wall time,
    paths over 259 characters), `render_start` (how long the block waited for a Blender)/`render_item` (wall and
    phases)/`render_end`, `failure`, `sample` every 2 s (CPU, GPU via `nvidia-smi` if present, running exports and
    Blender, blocks pending and ready) and `run_end`. `pnpm packshot --report [log|run folder]` evaluates one (default:
@@ -647,59 +679,101 @@ pictures with gaps), so the icons are rendered from the models:
    caches: load 0.85 → 0.73 s, 104 → 94 s; images identical (at most 1/255). The rest of the load is the node-tree
    build itself (~0.2 s per item alone).
    **Cluster** (`tools/packshot/src/net.rs`, `cluster.rs`, `node.rs`; settings in `packshot.json` in the packshot
-   folder, in a bundle next to the exe: `token`, `listen`, `coordinators` as DNS names or IPs with an optional port,
-   default 47800; without a token everything stays local). Every box is known by its host name, which the handshake
-   carries; the list holds addresses only (a DNS name may differ from the host name: DRAGONEGG vs. DRAGON9000).
-   Coordinators (dev PC, DRAGONVR) have `Data.p4k` with its `build_manifest.id` (a coordinator does not start
-   without it) and StarBreaker, and listen on `listen` (default `0.0.0.0:47800`; the Windows firewall must let TCP
-   47800 in from the local network, its silent drop shows as "connection timed out"); pure nodes (`packshot --node`,
-   servbox with the RTX 3090) have only packshot and Blender. Every box connects to the coordinators of its list,
-   retrying every 3 s (all resolved addresses in turn: names often resolve to IPv6 first); a box in its own list skips
-   itself. TCP, one frame per message (u32 JSON length, JSON, u64 payload length, payload), files as payload written
-   straight into an inbox folder, paths from the wire checked (no `..`, no drive). The hello carries token, role,
-   packshot build, Blender version, add-on hash, Blender and export counts, cores, CPU, RAM, GPU, whether a run is
-   going there, and for coordinators the Data.p4k fingerprint (FNV over its size and first and last 4 MB, where the
-   archive's directory sits: 9 ms instead of minutes for a full hash), the game version from `build_manifest.id` and
-   the StarBreaker commit; wrong token = rejected; ping every 10 s, a connection silent for 45 s is dropped.
-   **Same state or no run:** all connected boxes need the same packshot build (the version carries a hash of the
-   source, `build.rs`, equal on Windows and Linux), Blender version and add-on, between coordinators also the same
-   p4k fingerprint and StarBreaker commit; else no run starts and the TUI says what differs (in red: the tab bar, the
-   box's row and details, "Before the next run"). packshot syncs nothing itself: update the bundles. **One run at a
-   time:** while a coordinator has a run going, no other one starts; who is connected at the start takes part. Every
-   box with Data.p4k exports, every box renders. The starting coordinator exports with its own StarBreaker; the other
-   coordinators get item packages (entities with pose and rig name, plus `render.py`), export and render them
-   themselves with their own split of cores (exports and Blender as set there, default ¼ and ¾) and send back only the
-   PNGs, so no export travels; each gets as many packages as it has export and Blender slots, so its exports run ahead
-   while it renders. The starter's exported blocks go to free nodes first (so it keeps its CPU for exporting), its own
-   Blender take the rest: the block's export folder, the rigs it needs and `render.py` (1–10 MB for blocks of 1–3
-   rifles), paths relative to the block; the node renders with its own Blender (one process per block) and sends each
-   PNG with its `icon:` line back, the starter files it like a local render. Log lines and workers carry the host name
-   of the box that did the item (`DRAGONVR/B2`). A box that drops: its unreported items go back into the queue
-   (packages to be exported again). A block that fails on a node stays there in `work/` with Blender's last lines.
-   Checked: a decomposed export renders bit-identically from a moved folder (`scene.json` holds no absolute paths);
-   a local cluster (coordinator with 1 Blender + a node with 2 on the same PC) rendered 11 items, 6 on the node; item
-   packages run end to end in two ignored tests (`cargo test --release -- --ignored` with `SC_DATA_P4K`): a
-   coordinator exports and renders a package (an unknown entity fails in the export), and a run whose starter has no
-   export and no Blender of its own is done entirely by a second coordinator. The first run with servbox
+   folder, in a bundle next to the exe: `token`, optional `listen` (default `0.0.0.0:47950`; 47800, the first choice, is taken by Anytype's helper on the dev PC, and all nodes need the same port for the discovery), `peers` (DNS names or
+   IPs with an optional port, for nodes outside the own network segment) and `discovery` (default on); without a
+   token everything stays local). Every node is known by its host name, which the handshake carries (a DNS name may
+   differ from it: DRAGONEGG vs. DRAGON9000). **Discovery:** every node sends a beacon every 2 s by UDP to the
+   broadcast address of each of its IPv4 networks on the same port as TCP (JSON: a hash of the token, never the token,
+   its host name, a random instance id per process, its TCP port); nodes that hear a beacon of the same token dial its
+   sender (the address comes from the packet, not from its content). Every node listens and connects to every other
+   one (heard in the last 15 s or in `peers`), retrying every 3 s; if both dial at once, the connection set up by the
+   smaller name stays. A second process on the same node gets no UDP port and only sends. Firewalls must let TCP and
+   UDP 47950 in from the local network (Windows: allow packshot.exe for private networks; Fedora/Nobara/Ubuntu with
+   firewalld or ufw: open both); the Windows firewall's silent drop shows as "connection timed out". TCP, one frame
+   per message (u32 JSON length, JSON, u64 payload length, payload), files as payload written straight into an inbox
+   folder, paths from the wire checked (no `..`, no drive). The hello carries token, instance, capabilities,
+   packshot build, Blender version, add-on hash and StarBreaker commit (always: every bundle carries Blender and
+   StarBreaker), Blender and export counts, cores, CPU, RAM, GPU, the disks, whether a run is going there, and with
+   `--export` the Data.p4k fingerprint (FNV over its size in bytes and Branch, Version and BuildId from
+   `build_manifest.id` next to it: reads no archive data) and the game version; wrong token = rejected; a node sends it
+   again right after every new connection (the welcome of an accepted connection comes from its hello at the start:
+   a node offers export workers only once its DataCore tables are there) and whenever its counts, its run or its free
+   disk (more than 1 GB, checked every 10 s) change; ping every 10 s, a connection silent for 45 s is dropped.
+   **Same state or no run:** the head node gives the state (the one chosen with `n`, during a run the run's): every
+   connected node needs its packshot build (the version carries a hash of the source, `build.rs`, equal on Windows
+   and Linux), Blender version, add-on and StarBreaker commit, whatever it does; the exporting nodes' Data.p4k must
+   be in sync with each other (the head node needs none); else no run starts and the TUI says what differs (in red:
+   the tab bar, the node's row and status; the Next run tile names the first difference, the log all versions). packshot syncs nothing itself: every
+   bundle carries everything, update the bundles. **Head node:** every node can start a run, on
+   itself or on the node chosen with `n`, which then holds it (run folder, set, images, event log). For another node
+   the starter asks it for its sets and the state and target list of the chosen set (images, last failures),
+   computes the selection over that list and sends the selected targets; the head node appends them to its own
+   list, creates the set from live if it does not exist (with live's target list) and starts. It needs neither Data.p4k nor Blender, only
+   someone connected who exports and someone who renders. **One run at a time:** while a node has a run going, no
+   other one starts; who is connected at the start takes part. The head node exports with its own StarBreaker if
+   it has `--export`; the other exporting nodes get item packages (entities with type and size, plus `render.py`),
+   take pose and rig from their own DataCore tables, export and, with `--render`, render them themselves and send back
+   only the PNGs, so no export travels. A package holds at most 20 items; a node gets as many packages in their
+   export stage as it has export workers, and (if it renders) no new one while as many exported ones as it has
+   Blenders wait for or are in its Blenders, so a slow node never holds much of the run (on 2026-11-04 DRAGONVR, 4
+   cores, got 5 packages of 50 at once, needed ~63 s to export one and then stopped responding altogether). The
+   exporting node reports every exported item, so every view shows a package as "export 23/50", then as "render". A node with `--export` but without `--render` sends the exported package back
+   to the head node as a block (as many ahead as there are Blenders in the cluster). Exported blocks go to free
+   rendering nodes without packages first (so the head node keeps its CPU for exporting), its own Blender take the
+   rest: the block's export folder, the rigs it needs and `render.py` (1–10 MB for blocks of 1–3 rifles), paths
+   relative to the block; the node renders with its own Blender (one process per block) and sends each PNG with its
+   `icon:` line back, the head node files it like a local render. Every second the head node sends every node the
+   run's status (counts, rate, workers, the latest 50 failures, phases; once more at the end); every node may ask it
+   to abort. Log lines and workers carry the host name of the node that did the item (`DRAGONVR/R2`). A node that
+   drops: its unreported items go back into the queue (packages to be exported again); if the head node drops, its
+   run is over for the others. A block that fails on a node stays there in `work/inbox/` with Blender's last lines
+   until the next start. Checked: a decomposed export renders bit-identically from a moved folder (`scene.json`
+   holds no absolute paths), also from Windows to Linux (same `klwe_pistol_energy_01_gold01`, RMSE 0.05 %); tests
+   with fake tools: a start on another node with its status to the end and the selection afterwards (over the target
+   list of its set), an abort from another node, the capacity check, the state against the head node, Data.p4k out
+   of sync, the current hello for a connection accepted after a change, the DataCore tables failing in the
+   background, target lists per set, the run statistics for the estimate, the views drawn incl. dialogs; with real tools (`cargo test --release -- --ignored`, `SC_DATA_P4K`): a node
+   exports and renders a package (an unknown entity fails in the export), a head node without capabilities hands
+   the whole run to a node that exports and renders, and to an exporting node without Blender plus a rendering one
+   (its blocks come back and go on). The discovery was checked on one PC against a script (beacon heard and
+   dialed, own beacons sent); not yet across the nodes. The first run with servbox
    (2026-11-03, 6734 items in 949 s, dev PC 6 Blender and 2 exports, before packages and the nodes-first rule) showed
    the export as the limit: 2 export-batch processes made ~7.3 items/s, no exported block was ever waiting (`ready`
    0 in every sample), the local Blender were 3.7 of 6 busy, and servbox got 6 blocks (161 items, 2.4 %) because a
-   ready block went to a free local Blender first. Not yet run across all three boxes with packages.
-   **Between coordinators** only on a key press, never by itself: in view 3, `h` on a coordinator fetches its
-   finished runs for its live that are missing here (folders copied, same id from another node gets `-<node>`) and
-   appends them to the local live in order (shown with ⇣); `m` fetches its live manifest (`<store>/manifests/`), so
-   "missing" on the local live also counts what the other one already has.
+   ready block went to a free local Blender first. Not yet run across all three nodes with packages.
+   **Between nodes** only on a key press, never by itself: in view 3, `h` on another node fetches its finished runs
+   for its live that are missing here (folders copied, same id from another node gets `-<node>`) and appends them to
+   the local live in order (shown with ⇣); `m` fetches its live manifest (`<store>/manifests/`), so "missing" on the
+   local live also counts what the other one already has (view 1 says "manifest of <node>"; the selection is
+   recomputed when it arrives); `m` on this node's own row drops it again, its file too.
    **Builds and bundles:** packshot builds for Windows (`cargo build --release`) and as a static Linux binary
    (`--target x86_64-unknown-linux-musl`, linked by Rust's own `rust-lld` per `tools/packshot/.cargo/config.toml`, no
-   C toolchain or WSL needed; static PIE without interpreter or shared libraries). `scripts/packshot-bundle.ps1
-   [-Platform all|windows|linux]` writes `local/packshot-bundle/windows` (packshot.exe, StarBreaker with `COMMIT`,
-   the portable Blender incl. `portable/` with config and addon, `cli/render.py`, `targets.json` from the DB,
-   `run.cmd`, `README.txt`, `packshot.example.json`; ~930 MB) and `local/packshot-bundle/linux` (the binary, the official Blender tarball from
+   C toolchain needed; static PIE without interpreter or shared libraries). StarBreaker comes from
+   `scripts/starbreaker-build.{sh,ps1} [--platform all|windows|linux]`: the fork's committed HEAD (`git archive`, so
+   the working tree does not matter) into `local/starbreaker-qm/` with one `COMMIT`; Windows natively or from Linux
+   with mingw, Linux with cargo-zigbuild against glibc 2.31 (the binary needs glibc 2.30: Ubuntu 20.04 and later; a
+   build on Nobara needed 2.43, more than Ubuntu 24.04's 2.39). Same export time as a native glibc build (20 armour
+   pieces 2.70 s each, identical output); a musl build would run anywhere but exported 58 % slower (4.3 against 2.7
+   s, musl's allocator), and the export is the limit. On Linux the repo's Blender is
+   `local/blender/blender-5.2.3-linux-x64` (the official tarball) with `portable/config` from the Windows one and the
+   add-on as a relative symlink into the fork (ntfs3 cannot follow the Windows junction). Windows exes also build on
+   Linux with mingw (`--target x86_64-pc-windows-gnu`, `mingw64-gcc` as linker; they need only Windows' own DLLs).
+   `scripts/packshot-bundle.sh` (Linux) writes both bundles (`--platform all|windows|linux`):
+   `local/packshot-bundle/windows` (packshot.exe from mingw, StarBreaker with `COMMIT`, the official Blender zip
+   checked against the same `blender-<ver>.sha256` and left packed, `portable/` with config and the add-on copied
+   from the fork, `cli/render.py`, `targets.json` from the DB, `setup.cmd` that unpacks the zip into `blender\` with
+   Windows' own `tar` and puts `portable/` into it, `run.cmd` that refuses `--render` without it, `README.txt`,
+   `packshot.example.json`, the texts with CRLF; ~425 MB, unpacked ~920 MB) and `local/packshot-bundle/linux` (the
+   static binary, the Linux StarBreaker with `COMMIT`, printing the glibc it needs, the official Blender tarball from
    download.blender.org checked against its `blender-<ver>.sha256` and left packed so symlinks and exec bits survive,
-   the same `portable/`, `cli/render.py`, `setup.sh` to unpack and install, `check.sh` that tests the addon and a
-   headless EEVEE render on Vulkan, `run-node.sh`, `README.txt`, `packshot.example.json`; ~373 MB; there `./run-node.sh`). The
-   templates live in `tools/packshot/bundle/`. Checked 2026-11-03: both bundles on their boxes, and on
-   an Ubuntu 24.04 server without a desktop (RTX 3090, full NVIDIA driver from `ubuntu-drivers install`; the
+   the same `portable/` with the add-on as real files, `cli/render.py`, `targets.json`, `setup.sh` to unpack and
+   install, `check.sh` that tests the addon and a headless EEVEE render on Vulkan, `run.sh` that passes the
+   capabilities on (`./run.sh --render --export`), `README.txt`, `packshot.example.json`). The templates live in
+   `tools/packshot/bundle/`; `scripts/packshot-bundle.ps1 [-Platform all|windows|linux]` builds the same two bundles on
+   Windows (the Linux StarBreaker in `local/starbreaker-qm/` comes from a build on Linux). Not yet checked on a node: the
+   Windows bundle with its zip and `setup.cmd` (built and its unpack steps simulated with bsdtar on Linux only), the
+   ps1 scripts (no pwsh on Linux), the zigbuild StarBreaker on servbox. Checked 2026-11-03 with the bundles of then (node-only Linux bundle,
+   unpacked Windows Blender): both on their nodes, and on an Ubuntu 24.04 server without a desktop (RTX 3090, full NVIDIA driver from `ubuntu-drivers install`; the
    `--gpgpu` variant lacks `libnvidia-gl` and with it Vulkan) `check.sh` passed: the addon loads and EEVEE renders
    headless on Vulkan, no display server needed.
 5. **Pack:** `pnpm thumbs:build [--in local/packshot/sets/live] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns

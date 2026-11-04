@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unpacks Blender, puts portable/ into it and makes packshot executable. Idempotent.
+# Unpacks Blender, puts portable/ into it and makes packshot, StarBreaker and the scripts executable. Idempotent.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -23,6 +23,6 @@ trap - EXIT
 
 rm -rf ./blender/portable
 cp -r ./portable ./blender/portable
-chmod +x packshot run-node.sh
+chmod +x packshot run.sh check.sh starbreaker/starbreaker
 
-echo "Done. Next: bash check.sh, then packshot.json and ./run-node.sh"
+echo "Done. Next: bash check.sh, then packshot.json and ./run.sh --render --export (what this node can do)"

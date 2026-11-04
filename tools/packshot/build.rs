@@ -1,5 +1,5 @@
 // Build id for the cluster handshake: a hash over the source files (paths with /, line endings ignored), so the same
-// source gives the same id on Windows and Linux and boxes with different builds are told apart
+// source gives the same id on Windows and Linux and nodes with different builds are told apart
 use std::fs;
 use std::path::Path;
 

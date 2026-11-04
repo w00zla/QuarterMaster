@@ -1,10 +1,12 @@
-// packshot: control room for rendering the icons. Reads the target list (targets.json from `pnpm packshot:targets`),
+// packshot: control room for rendering the icons. Every set carries its target list (targets.json from
+// `pnpm packshot:targets`, taken into a set with key t or --targets),
 // computes pose and light rig from the game's tables, exports with StarBreaker export-batch and
 // renders with src/icons/render.py, several export and Blender processes at once, selection by filter and scope
 // (missing / failed / all), image preview. Every run is a run folder whose images land in the target set (store.rs;
-// pnpm thumbs:build reads live). With a token in packshot.json the coordinator also hands blocks to nodes
-// (cluster.rs, node.rs). Runs in the repo (paths under local/) and in the bundle (paths next to the exe), without
-// Node.js and without the DB.
+// pnpm thumbs:build reads live). Every node starts with what it can do now (--render, --export); with a token in
+// packshot.json the nodes find each other and every node can start a run, on itself or on another node as its main
+// node (cluster.rs, node.rs). Runs in the repo (paths under local/) and in the bundle (paths next to the exe),
+// without Node.js and without the DB.
 mod cluster;
 mod config;
 mod engine;
@@ -23,29 +25,35 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 
+use cluster::Caps;
 use config::NetConfig;
 use engine::{Config, Engine, Scope, Target};
-use net::{Hub, Role};
+use net::Hub;
 use store::Store;
 use tables::Tables;
 
-const HELP: &str = "Usage: pnpm packshot [options]
+const HELP: &str = "Usage: pnpm packshot [--render] [--export] [options]
+  --render              This node renders (Blender); the count of Blender processes changes with + / -
+  --export              This node exports (Data.p4k, build_manifest.id next to it, StarBreaker); the count changes
+                        with < / >
+                        Without both the node only starts runs, stores them and watches
   --filter <terms>      Only entities where one of the terms (blanks/commas) occurs in the class name, the display
                         name or the type (case-insensitive); change it in the TUI with /
   --scope <s>           missing (default): not in the set yet · failed: failed last time in the set · all: re-render
                         all (force)
   --force               = --scope all
-  --set <name>          Target set (default live); a new name branches off live
+  --set <name>          Target set here (default live); a new name branches off live
   --name <name>         Run name (default: filter terms and scope)
-  --plain               No TUI: starts at once and prints one line per item
+  --plain               No TUI: starts a run on this node at once and prints one line per item
+  --serve               No TUI and no run of its own: works for the other nodes' runs and prints lines (as a service)
   --dry-run             Only list what would be rendered (with pose and rig), then exit
-  --node                Node mode: connect to the coordinators in packshot.json and render their blocks
-                        (needs only Blender, no Data.p4k, no StarBreaker); the TUI shows them, --plain prints lines
   --workers <n>         Blender processes at once (default ¾ of the physical cores)
   --exporters <n>       StarBreaker exports at once (default ¼ of the physical cores, at least 2)
   --chunk <n>           At most n entities per block (one export and one Blender process, default 50)
   --size <px>           Edge length (default 256)
-  --targets <file>      Target list (default: targets.json in the packshot folder)
+  --targets <file>      Give the target set this target list (replaces its own); every set carries one, a new set
+                        takes its base's; starting a run in the TUI asks for one while the set has none
+                        (offering the target lists in the packshot folder)
   --p4k <path>          Data.p4k (default: $SC_DATA_P4K, .env, Data.p4k in the folder)
   --starbreaker <bin>   StarBreaker CLI, our fork (default: local/starbreaker-qm/ or starbreaker/)
   --blender <bin>       Blender (default: local/blender/*/ or blender/)
@@ -55,18 +63,21 @@ const HELP: &str = "Usage: pnpm packshot [options]
   --work <dir>          Work directory (default: work/ in the packshot folder)
   --refresh-tables      Read the pose and light tables from the DataCore again
   --report [log]        Evaluate an event log or run folder (default: the latest run), then exit
-Every run is a folder runs/<date>_<time>_<name>/: its images (<Name> (<class>) <uuid>.png), run.json (origin, result
-per entity) and events.jsonl (processes, phases per item, CPU/GPU every 2 s, failures). A set (sets/<name>/) holds
-all icons as hard links to the runs' images, per entity the latest run with an image.
-Cluster: packshot.json in the store folder, e.g. {\"token\": \"<secret>\", \"listen\": \"0.0.0.0:47800\",
-\"coordinators\": [\"win-3080\", \"192.168.1.20:47800\"]} (host name or IP, port optional, default 47800); every box is
-known by its host name; without a token everything stays local.
-Target list in the repo: pnpm packshot:targets (writes local/packshot/targets.json from the DB)";
+Every run is a folder runs/<date>_<time>_<name>/ on its head node: its images (<Name> (<class>) <uuid>.png),
+run.json (origin, result per entity) and events.jsonl (processes, phases per item, CPU/GPU every 2 s, failures). A
+set (sets/<name>/) holds all icons as hard links to the runs' images, per entity the latest run with an image.
+Cluster: packshot.json in the store folder, e.g. {\"token\": \"<secret>\"}; the nodes with the same token find each
+other by UDP broadcast on port 47950 (TCP the same); optional: \"listen\": \"0.0.0.0:47950\", \"peers\": [\"host\",
+\"192.168.1.20:47950\"] for nodes the broadcast does not reach, \"discovery\": false; every node is known by its host
+name; without a token everything stays local.
+Target list in the repo: pnpm packshot:targets (writes local/packshot/targets.json from the DB), then key t in
+view 2 or --targets";
 
 pub struct Args {
     pub filter: String,
     pub scope: Scope,
     pub plain: bool,
+    pub serve: bool,
     pub dry_run: bool,
     pub workers: usize,
     pub exporters: usize,
@@ -129,9 +140,10 @@ fn real_main() -> Result<()> {
     while let Some(a) = it.next() {
         let Some(key) = a.strip_prefix("--") else { bail!("Unknown argument: {a}\n\n{HELP}") };
         match key {
-            "plain" | "dry-run" | "force" | "refresh-tables" | "node" | "help" => {
+            "plain" | "serve" | "dry-run" | "force" | "refresh-tables" | "render" | "export" | "help" => {
                 flags.insert(key.to_string());
             }
+            "node" => bail!("--node is gone: every node starts with what it can do, e.g. --render (and --export)\n\n{HELP}"),
             // --report [log.jsonl]: the file is optional, else the latest run
             "report" => {
                 flags.insert(key.to_string());
@@ -161,38 +173,6 @@ fn real_main() -> Result<()> {
     let work = path("work").unwrap_or_else(|| store_dir.join("work"));
     let num = |key: &str, default: usize| -> Result<usize> { opt.get(key).map(|v| v.parse::<usize>().with_context(|| format!("--{key} {v}"))).unwrap_or(Ok(default)) };
     let auto = auto_workers();
-    let blender = || {
-        path("blender")
-            .or_else(|| find_blender(&root))
-            .or_else(|| first_existing(&[root.join("blender").join(exe("blender"))]))
-            .ok_or_else(|| anyhow!("Blender not found (local/blender/*/ or --blender)"))
-    };
-    let net_cfg = NetConfig::load(&store_dir.join("packshot.json"))?;
-
-    if flags.contains("node") {
-        node::check(&net_cfg)?;
-        let blender = blender()?;
-        let slots = num("workers", auto.0)?.max(1);
-        // blocks of an earlier session are stale
-        let _ = fs::remove_dir_all(work.join("node"));
-        fs::create_dir_all(&work)?;
-        let me = cluster::own_hello(&net_cfg.name, Role::Node, &blender, slots, 0, auto.2, None);
-        let hub = Hub::new(net_cfg, me.clone(), work.join("node"), false);
-        if flags.contains("plain") {
-            return node::run(hub, node::NodeArgs { blender, slots });
-        }
-        // the same TUI, reduced: an engine without targets and runs of its own, rendering what the coordinators send
-        let store = Store::open(&work.join("store"))?;
-        let set = store.load_set(store::LIVE)?;
-        let cfg = Config { p4k: PathBuf::new(), starbreaker: PathBuf::new(), blender: blender.clone(), render_script: PathBuf::new(), work, size: 256, chunk: 50 };
-        let mut engine = Engine::new(cfg, Vec::new(), Tables::default(), store, set, Some(hub), me)?;
-        engine.serve = Some(node::Renderer::new(blender, slots));
-        engine.max_renderers = slots;
-        engine.max_exporters = 0;
-        engine.cores = auto.2;
-        let args = Args { filter: String::new(), scope: Scope::Missing, plain: false, dry_run: false, workers: slots, exporters: 0, name: String::new(), line: String::new() };
-        return ui::run(engine, args);
-    }
 
     let mut store = Store::open(&store_dir)?;
     if flags.contains("report") {
@@ -203,31 +183,43 @@ fn real_main() -> Result<()> {
         println!("{}", events::report(&log)?);
         return Ok(());
     }
-    let set_name = opt.get("set").cloned().unwrap_or_else(|| store::LIVE.to_string());
-    let targets_file = path("targets")
-        .or_else(|| first_existing(&[store_dir.join("targets.json")]))
-        .ok_or_else(|| {
-            let hint = if repo { "In the repo: pnpm packshot:targets" } else { "A pure node starts with --node (run-node.sh / run.cmd --node)" };
-            anyhow!("No target list: {} is missing.\n{hint}", store_dir.join("targets.json").display())
-        })?;
-    let p4k = path("p4k")
-        .or_else(|| env_p4k(&root).map(PathBuf::from))
-        .or_else(|| first_existing(&[root.join("Data.p4k")]))
-        .ok_or_else(|| anyhow!("No Data.p4k (--p4k, $SC_DATA_P4K or .env)"))?;
-    if !p4k.exists() {
-        bail!("Data.p4k not found: {}", p4k.display());
+    let (render, export) = (flags.contains("render"), flags.contains("export"));
+    let net_cfg = NetConfig::load(&store_dir.join("packshot.json"))?;
+    let serve = flags.contains("serve");
+    if serve && !net_cfg.enabled() {
+        bail!("--serve works for the other nodes: it needs a token in {}", store_dir.join("packshot.json").display());
     }
-    // the game version comes from build_manifest.id next to Data.p4k: shown everywhere, so it must be there
-    if cluster::p4k_version(&p4k).is_none() {
-        bail!(
-            "build_manifest.id missing or unreadable next to {}\nCopy it from the game folder (...\\StarCitizen\\LIVE\\) next to Data.p4k, or point --p4k into the game folder.",
-            p4k.display()
-        );
+
+    // Blender and StarBreaker: every bundle carries both and every node reports their versions (the head node's
+    // state is the one all match); needed to work only with --render and --export
+    let blender = path("blender").or_else(|| find_blender(&root)).or_else(|| first_existing(&[root.join("blender").join(exe("blender"))]));
+    if render && blender.is_none() {
+        bail!("--render: Blender not found (local/blender/*/ or --blender)");
     }
-    let starbreaker = path("starbreaker")
-        .or_else(|| first_existing(&[root.join("local/starbreaker-qm").join(exe("starbreaker")), root.join("starbreaker").join(exe("starbreaker"))]))
-        .ok_or_else(|| anyhow!("StarBreaker not found (local/starbreaker-qm/ or --starbreaker)"))?;
-    let blender = blender()?;
+    let starbreaker = path("starbreaker").or_else(|| first_existing(&[root.join("local/starbreaker-qm").join(exe("starbreaker")), root.join("starbreaker").join(exe("starbreaker"))]));
+    if export && starbreaker.is_none() {
+        bail!("--export: StarBreaker not found (local/starbreaker-qm/ or --starbreaker)");
+    }
+    // export: Data.p4k with build_manifest.id next to it
+    let p4k = if export {
+        let p4k = path("p4k")
+            .or_else(|| env_p4k(&root).map(PathBuf::from))
+            .or_else(|| first_existing(&[root.join("Data.p4k")]))
+            .ok_or_else(|| anyhow!("--export: no Data.p4k (--p4k, $SC_DATA_P4K or .env)"))?;
+        if !p4k.exists() {
+            bail!("--export: Data.p4k not found: {}", p4k.display());
+        }
+        // the game version comes from build_manifest.id next to Data.p4k: shown everywhere and part of the state
+        if cluster::p4k_version(&p4k).is_none() {
+            bail!(
+                "--export: build_manifest.id missing or unreadable next to {}\nCopy it from the game folder (.../StarCitizen/LIVE/) next to Data.p4k, or point --p4k into the game folder.",
+                p4k.display()
+            );
+        }
+        p4k
+    } else {
+        PathBuf::new()
+    };
     let render_script = path("render-script")
         .or_else(|| first_existing(&[root.join("src/icons/render.py"), root.join("cli/render.py")]))
         .ok_or_else(|| anyhow!("render.py not found (--render-script)"))?;
@@ -241,20 +233,17 @@ fn real_main() -> Result<()> {
         filter: opt.get("filter").cloned().unwrap_or_default(),
         scope,
         plain: flags.contains("plain"),
+        serve,
         dry_run: flags.contains("dry-run"),
-        workers: num("workers", auto.0)?.max(1),
-        exporters: num("exporters", auto.1)?.max(1),
+        workers: if render { num("workers", auto.0)?.max(1) } else { 0 },
+        exporters: if export { num("exporters", auto.1)?.max(1) } else { 0 },
         name: opt.get("name").cloned().unwrap_or_default(),
         line: raw.join(" "),
     };
 
     fs::create_dir_all(&work)?;
-    let targets: Vec<Target> = serde_json::from_slice(&fs::read(&targets_file).with_context(|| targets_file.display().to_string())?).context("targets.json")?;
-    println!("Target list: {} ({} entities)", targets_file.display(), targets.len());
-    let tables = Tables::load(&starbreaker, &p4k, &work, flags.contains("refresh-tables"), |s| println!("{s}"))?;
-    let me = cluster::own_hello(&net_cfg.name, Role::Coordinator, &blender, args.workers, args.exporters, auto.2, Some((&p4k, &starbreaker)));
-    let cfg = Config { p4k, starbreaker, blender, render_script, work: work.clone(), size: num("size", 256)? as u32, chunk: num("chunk", 50)?.max(1) };
-    let set = if store.sets()?.contains(&set_name) {
+    let set_name = opt.get("set").cloned().unwrap_or_else(|| store::LIVE.to_string());
+    let mut set = if store.sets()?.contains(&set_name) {
         store.load_set(&set_name)?
     } else if args.dry_run {
         bail!("Set {set_name} does not exist (a run would create it from live)");
@@ -263,38 +252,84 @@ fn real_main() -> Result<()> {
         store.create_set(&set_name, store::LIVE)?
     };
     println!("Set: {} ({} runs) in {}", set.name, set.chain().count(), store.set_dir(&set.name).display());
-    // Network only with a token and not for a dry run
-    let hub = (net_cfg.enabled() && !args.dry_run).then(|| Hub::new(net_cfg.clone(), me.clone(), work.join("inbox"), true));
+    // the set's target list: --targets gives it a new one
+    if let Some(f) = path("targets") {
+        let n = store.set_targets(&mut set, &f)?;
+        println!("Target list of {}: {n} targets from {}", set.name, f.display());
+    }
+    let targets: Vec<Target> = store.load_targets(&set)?;
+    match &set.targets {
+        Some(t) => println!("Target list of {}: {} targets (from {})", set.name, targets.len(), t.source),
+        None => println!("Set {} has no target list: runs start once it has one (key t in view 2, or --targets <file>)", set.name),
+    }
+    if (args.plain || args.dry_run) && targets.is_empty() {
+        bail!("--plain and --dry-run need a target list in set {} (--targets <file>)", set.name);
+    }
+    // the DataCore tables: in the TUI they load in the background (it shows the steps), the console modes wait
+    let tables_later = export && !(args.plain || args.dry_run || args.serve);
+    let tables = if export && !tables_later { Tables::load(starbreaker.as_deref().unwrap_or(Path::new("")), &p4k, &work, flags.contains("refresh-tables"), |s| println!("{s}"))? } else { Tables::default() };
+    let disk_paths = if work.starts_with(&store_dir) { vec![store_dir.clone()] } else { vec![store_dir.clone(), work.clone()] };
+    let caps = Caps { render, export, blender: blender.as_deref(), starbreaker: starbreaker.as_deref(), p4k: export.then_some(p4k.as_path()) };
+    // no export workers offered before the tables are there
+    let me = cluster::own_hello(&net_cfg.name, caps, args.workers, if tables_later { 0 } else { args.exporters }, auto.2, cluster::disk_info(&disk_paths));
+    let cfg = Config { p4k, starbreaker: starbreaker.unwrap_or_default(), blender: blender.unwrap_or_default(), render_script, work: work.clone(), size: num("size", 256)? as u32, chunk: num("chunk", 50)?.max(1) };
+    // Network only with a token and not for a dry run; blocks of an earlier session in the inbox are stale
+    if net_cfg.enabled() && !args.dry_run {
+        let _ = fs::remove_dir_all(work.join("inbox"));
+    }
+    let hub = (net_cfg.enabled() && !args.dry_run).then(|| Hub::new(net_cfg.clone(), me.clone(), work.join("inbox")));
     if let Some(h) = hub.as_ref() {
         match &h.listen_error {
             Some(e) => println!("Cluster: {e}"),
             None => println!("Cluster: {} listening on {}", h.me.name, h.cfg.listen),
         }
+        if let Some(e) = &h.discovery_error {
+            println!("Cluster: {e}");
+        }
     }
-    // renders (packages: exports first) what the other coordinators send
-    let serve = hub.is_some().then(|| {
-        let mut r = node::Renderer::new(cfg.blender.clone(), args.workers);
-        r.tools = Some(node::ExportTools { starbreaker: cfg.starbreaker.clone(), p4k: cfg.p4k.clone(), rigs: work.join("dcb").join("rigs") });
+    // works for the head node of another node's run (packages: exports first)
+    let renderer = hub.is_some().then(|| {
+        let mut r = node::Renderer::new(cfg.blender.clone(), args.workers, work.join("preview.png"));
+        r.export_slots = args.exporters;
+        if export {
+            r.tools = Some(node::ExportTools { starbreaker: cfg.starbreaker.clone(), p4k: cfg.p4k.clone(), rigs: work.join("dcb").join("rigs") });
+        }
         r
     });
     let mut engine = Engine::new(cfg, targets, tables, store, set, hub, me)?;
-    engine.serve = serve;
+    // the file the TUI offers for a set's target list
+    engine.targets_file = store_dir.join("targets.json");
+    engine.serve = renderer;
     engine.max_renderers = args.workers;
     engine.max_exporters = args.exporters;
     engine.cores = auto.2;
-    println!("{} physical cores: {} Blender (Vulkan), {} export", auto.2, args.workers, args.exporters);
+    engine.disk_paths = disk_paths;
+    let caps_line = match (render, export) {
+        (false, false) => "no --render/--export: this node only starts runs, stores them and watches".to_string(),
+        _ => format!("{} export · {} render (Blender on Vulkan) · {} physical cores", args.exporters, args.workers, auto.2),
+    };
+    println!("{caps_line}");
+    // what printed before the TUI took the screen: into its log as well
+    startup_notes(&mut engine, &caps_line, &store_dir, &work);
+    if tables_later {
+        engine.load_tables(flags.contains("refresh-tables"));
+    }
 
     if args.dry_run {
         let sel = engine.select(&args.filter, args.scope);
         for &t in &sel.todo {
             let tg = &engine.targets[t];
-            let (pose, rig) = engine.pose_rig(t)?;
-            let rig = rig.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-            let pose: Vec<String> = pose.iter().map(|v| format!("{v}")).collect();
-            println!("{}  {}/{}  pose {}  {rig}{}  -> {} uuid(s)", tg.entity, tg.kind, tg.sub_type, pose.join(","), if tg.worn { "  worn" } else { "" }, tg.uuids.len());
+            let (pose, rig) = match engine.pose_rig(t) {
+                Ok((pose, rig)) => (pose.iter().map(|v| format!("{v}")).collect::<Vec<_>>().join(","), rig.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()),
+                Err(_) => ("–".into(), "– (pose and rig with --export)".into()),
+            };
+            println!("{}  {}/{}  pose {pose}  {rig}{}  -> {} uuid(s)", tg.entity, tg.kind, tg.sub_type, if tg.worn { "  worn" } else { "" }, tg.uuids.len());
         }
         println!("{} matches, {} to render ({}), {} would be overwritten", sel.matched, sel.todo.len(), args.scope.label(), sel.overwrite);
         return Ok(());
+    }
+    if args.serve {
+        return serve_plain(&mut engine);
     }
     if args.plain {
         return plain(&mut engine, &args);
@@ -302,8 +337,58 @@ fn real_main() -> Result<()> {
     ui::run(engine, args)
 }
 
-/// Console mode: start at once, print lines, exit code 1 on failures. With a cluster it first waits 5 s for the
-/// other boxes; all of them must have the same state
+/// The start in the log: version and node, capabilities, folders, target set and list, tools, cluster
+fn startup_notes(engine: &mut Engine, caps_line: &str, store_dir: &Path, work: &Path) {
+    use engine::Level::{Error, Info};
+    let me = engine.me.clone();
+    let mut notes = vec![
+        (Info, format!("packshot {} on {} ({}) · {caps_line}", me.version, me.name, me.os)),
+        (Info, format!("Packshot folder {} · work {}", store_dir.display(), work.display())),
+    ];
+    let set = &engine.set;
+    notes.push(match &set.targets {
+        Some(t) => (Info, format!("Target set {}: {} runs, {} images, {} targets from {}", set.name, set.chain().count(), set.files.len(), t.count, t.source)),
+        None => (Error, format!("Target set {}: {} runs, {} images, no target list (t in view 2)", set.name, set.chain().count(), set.files.len())),
+    });
+    let tool = |name: &str, version: Option<&str>, path: &Path| match version {
+        Some(v) if !v.is_empty() => (Info, format!("{name} {v} ({})", path.display())),
+        _ => (Info, format!("{name}: not found")),
+    };
+    notes.push(tool("Blender", Some(me.blender.as_str()).filter(|_| !engine.cfg.blender.as_os_str().is_empty()), &engine.cfg.blender));
+    notes.push(tool("StarBreaker", me.starbreaker.as_deref(), &engine.cfg.starbreaker));
+    if me.export {
+        let gb = me.p4k_bytes.map(|b| format!(" · {:.0} GB", b as f64 / 1e9)).unwrap_or_default();
+        notes.push((Info, format!("Data.p4k {}{gb} ({})", me.p4k_version.as_deref().unwrap_or("?"), engine.cfg.p4k.display())));
+    }
+    match engine.hub.as_ref() {
+        None => notes.push((Info, "Cluster: off (no token in packshot.json)".into())),
+        Some(h) => {
+            let peers = if h.cfg.peers.is_empty() { String::new() } else { format!(" · peers {}", h.cfg.peers.join(", ")) };
+            notes.push((Info, format!("Cluster: {} on {} · discovery {}{peers}", if h.listen_error.is_some() { "not listening" } else { "listening" }, h.cfg.listen, if h.cfg.discovery { "on" } else { "off" })));
+            for e in h.listen_error.iter().chain(h.discovery_error.iter()) {
+                notes.push((Error, format!("Cluster: {e}")));
+            }
+        }
+    }
+    for (level, text) in notes {
+        engine.note(level, text);
+    }
+}
+
+/// --serve: no TUI, no run of its own; works for the other nodes' runs and prints the log until Ctrl+C
+fn serve_plain(engine: &mut Engine) -> Result<()> {
+    engine.echo = Some(Vec::new());
+    loop {
+        engine.tick();
+        for l in engine.echo.as_mut().map(std::mem::take).unwrap_or_default() {
+            println!("{} {l}", chrono::Local::now().format("%H:%M:%S"));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Console mode: start a run on this node at once, print lines, exit code 1 on failures. With a cluster it first
+/// waits 5 s for the other nodes; all of them must have the same state
 fn plain(engine: &mut Engine, args: &Args) -> Result<()> {
     let sel = engine.select(&args.filter, args.scope);
     println!("{} matches, {} to render ({}), {} existing will be overwritten", sel.matched, sel.todo.len(), args.scope.label(), sel.overwrite);
@@ -311,26 +396,18 @@ fn plain(engine: &mut Engine, args: &Args) -> Result<()> {
         return Ok(());
     }
     engine.echo = Some(Vec::new());
-    let mut nodes = Vec::new();
     if engine.hub.is_some() {
         let t0 = Instant::now();
         while t0.elapsed() < Duration::from_secs(5) {
             engine.tick();
             thread::sleep(Duration::from_millis(100));
         }
-        nodes = engine.connected_nodes().into_iter().map(|(_, h)| h.name).collect();
     }
-    if let Some(other) = engine.running_elsewhere() {
-        bail!("{other} has a run going: the boxes work on one run at a time");
+    for (name, diff) in engine.state_problems() {
+        println!("{name} has another state: {}", diff.join(", "));
     }
-    let problems = engine.state_problems();
-    if !problems.is_empty() {
-        for (name, diff) in &problems {
-            println!("{name} has another state: {}", diff.join(", "));
-        }
-        bail!("No run: all boxes need the same packshot, Blender, add-on (coordinators also Data.p4k and StarBreaker)");
-    }
-    engine.start(&sel, &args.line, &args.filter, args.scope, &args.name, nodes)?;
+    let starter = engine.me.name.clone();
+    engine.start_local(&sel.todo, &args.line, &args.filter, args.scope, &args.name, &starter)?;
     while engine.running() {
         engine.tick();
         for l in engine.echo.as_mut().map(std::mem::take).unwrap_or_default() {

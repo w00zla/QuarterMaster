@@ -1,29 +1,42 @@
 // Cluster configuration: <store>/packshot.json (in the bundle next to the exe). Without a token there is no network:
-// packshot then renders locally only. A coordinator (TUI) listens on `listen` and connects to the other coordinators
-// in the list; a node (`packshot --node`) connects to all coordinators in the list and renders what they send it.
-// Every box is known by its host name, which comes with the handshake; the list holds addresses only.
+// packshot then works locally only. With a token every node listens on `listen`, announces itself by UDP broadcast on
+// the same port (discovery) and connects to every node of the same token it hears; `peers` adds nodes outside the
+// own network segment by address. Every node is known by its host name, which comes with the handshake.
 use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-pub const DEFAULT_PORT: u16 = 47800;
+pub const DEFAULT_PORT: u16 = 47950;
 
-#[derive(Deserialize, Clone, Default)]
+#[derive(Deserialize, Clone)]
 pub struct NetConfig {
-    /// this box's host name (not from the file)
+    /// this node's host name (not from the file)
     #[serde(skip)]
     pub name: String,
     /// shared secret of all machines; empty = no network
     #[serde(default)]
     pub token: String,
-    /// what a coordinator listens on (default 0.0.0.0:47800)
+    /// what this node listens on, TCP for the connections and UDP for the discovery (default 0.0.0.0:47950)
     #[serde(default)]
     pub listen: String,
-    /// the coordinators this machine connects to, host:port
+    /// nodes to connect to by address (host name or IP, port optional), for nodes the broadcast does not reach
     #[serde(default)]
-    pub coordinators: Vec<String>,
+    pub peers: Vec<String>,
+    /// find the other nodes by UDP broadcast (default on)
+    #[serde(default = "yes")]
+    pub discovery: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for NetConfig {
+    fn default() -> Self {
+        Self { name: String::new(), token: String::new(), listen: String::new(), peers: Vec::new(), discovery: true }
+    }
 }
 
 impl NetConfig {
@@ -41,5 +54,10 @@ impl NetConfig {
 
     pub fn enabled(&self) -> bool {
         !self.token.trim().is_empty()
+    }
+
+    /// The port of `listen` (TCP and the discovery's UDP)
+    pub fn port(&self) -> u16 {
+        self.listen.rsplit_once(':').and_then(|(_, p)| p.parse().ok()).unwrap_or(DEFAULT_PORT)
     }
 }

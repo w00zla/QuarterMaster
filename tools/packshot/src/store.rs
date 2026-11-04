@@ -1,7 +1,9 @@
 // Runs and sets. A run is a folder runs/<YYYY-MM-DD_HH-MM>_<name>/ with the images of this run
 // ("<Name> (<class>) <uuid>.png", read-only), run.json (origin, result per entity) and the event log
 // events.jsonl; immutable after the end. A set is a folder sets/<name>/ with all icons as hardlinks to
-// the images of the runs (per entity the newest run in the chain with an image) and set.json (base, chain, files in the folder).
+// the images of the runs (per entity the newest run in the chain with an image), set.json (base, chain, files in the folder,
+// where its target list came from) and targets.json, the set's target list (taken from the base when branching,
+// replaceable; the game's items change with its updates).
 // `live` is the main set (pnpm thumbs:build reads it); experiments branch off live and are adopted
 // by appending their runs to live's chain. No storage by content hash: renders are not bit-identical.
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -14,6 +16,40 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const LIVE: &str = "live";
+/// The target list in a set's folder
+pub const TARGETS: &str = "targets.json";
+
+/// A set as other nodes see it (the Sets view of a remote head node)
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SetSummary {
+    pub name: String,
+    #[serde(default)]
+    pub base: Option<String>,
+    /// runs of the base at the branch, then the own ones (oldest first)
+    pub base_runs: usize,
+    pub runs: Vec<String>,
+    /// images in the set
+    pub files: usize,
+    #[serde(default)]
+    pub targets: Option<TargetsInfo>,
+}
+
+/// Throughput and image size of the latest finished run with at least 50 results: the estimate for the next one
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct RunStats {
+    pub run: String,
+    pub items_per_s: f64,
+    pub bytes_per_image: u64,
+}
+
+/// Where a set's target list came from
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
+pub struct TargetsInfo {
+    pub count: usize,
+    /// the file it was taken from, or "<set>" when inherited from the base
+    pub source: String,
+    pub at: String,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct EntityResult {
@@ -59,6 +95,9 @@ pub struct SetInfo {
     /// files in the set folder -> run whose image the hardlink points to
     #[serde(default)]
     pub files: BTreeMap<String, String>,
+    /// the set's target list (targets.json in its folder); None = none yet
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub targets: Option<TargetsInfo>,
 }
 
 impl SetInfo {
@@ -206,7 +245,7 @@ impl Store {
         Some(info.node)
     }
 
-    /// All finished runs in runs/, for other coordinators (ListRuns)
+    /// All finished runs in runs/, for the other nodes (ListRuns)
     pub fn summaries(&mut self) -> Vec<crate::net::RunSummary> {
         let Ok(dir) = fs::read_dir(self.root.join("runs")) else { return Vec::new() };
         let mut ids: Vec<String> = dir.flatten().filter(|e| e.path().join("run.json").exists()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
@@ -257,8 +296,67 @@ impl Store {
         let b = self.load_set(base)?;
         let mut set = SetInfo { name: name.into(), base: Some(base.into()), base_runs: b.chain().cloned().collect(), ..Default::default() };
         fs::create_dir_all(self.set_dir(name))?;
+        // the base's target list comes along
+        if b.targets.is_some() {
+            fs::copy(self.set_dir(base).join(TARGETS), self.set_dir(name).join(TARGETS)).with_context(|| format!("{TARGETS} of {base}"))?;
+            set.targets = b.targets.map(|t| TargetsInfo { source: format!("<{base}>"), ..t });
+        }
         self.sync(&mut set)?;
         Ok(set)
+    }
+
+    /// The set's target list; empty without one
+    pub fn load_targets(&self, set: &SetInfo) -> Result<Vec<crate::engine::Target>> {
+        if set.targets.is_none() {
+            return Ok(Vec::new());
+        }
+        let path = self.set_dir(&set.name).join(TARGETS);
+        serde_json::from_slice(&fs::read(&path).with_context(|| path.display().to_string())?).with_context(|| path.display().to_string())
+    }
+
+    /// Every set as a summary (for another node's Sets view)
+    pub fn set_summaries(&self) -> Result<Vec<SetSummary>> {
+        let mut out = Vec::new();
+        for name in self.sets()? {
+            let s = self.load_set(&name)?;
+            out.push(SetSummary { name, base: s.base.clone(), base_runs: s.base_runs.len(), runs: s.runs.clone(), files: s.files.len(), targets: s.targets.clone() });
+        }
+        Ok(out)
+    }
+
+    /// Throughput and image size of the latest finished run with at least 50 results, None without one
+    pub fn last_stats(&mut self) -> Option<RunStats> {
+        let mut ids: Vec<String> = fs::read_dir(self.root.join("runs")).ok()?.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        ids.sort();
+        for id in ids.into_iter().rev() {
+            let Ok(r) = self.run(&id).cloned() else { continue };
+            let (Some(end), Ok(start)) = (r.finished.as_deref().and_then(|f| chrono::DateTime::parse_from_rfc3339(f).ok()), chrono::DateTime::parse_from_rfc3339(&r.started)) else { continue };
+            let secs = (end - start).num_milliseconds() as f64 / 1000.0;
+            if r.entities.len() < 50 || secs <= 0.0 {
+                continue;
+            }
+            let dir = self.run_dir(&id);
+            let sizes: Vec<u64> = r.entities.values().filter_map(|e| e.files.first()).filter_map(|f| fs::metadata(dir.join(f)).ok()).map(|m| m.len()).collect();
+            let bytes_per_image = if sizes.is_empty() { 0 } else { sizes.iter().sum::<u64>() / sizes.len() as u64 };
+            return Some(RunStats { run: id, items_per_s: r.entities.len() as f64 / secs, bytes_per_image });
+        }
+        None
+    }
+
+    /// Give a set the target list from a file (replaces its own); returns the number of targets
+    pub fn set_targets(&self, set: &mut SetInfo, src: &Path) -> Result<usize> {
+        let bytes = fs::read(src).with_context(|| src.display().to_string())?;
+        let list: Vec<crate::engine::Target> = serde_json::from_slice(&bytes).with_context(|| format!("{}: not a target list", src.display()))?;
+        if list.is_empty() {
+            bail!("{}: no targets", src.display());
+        }
+        let path = self.set_dir(&set.name).join(TARGETS);
+        let tmp = path.with_extension("json.part");
+        fs::write(&tmp, &bytes)?;
+        fs::rename(&tmp, &path)?;
+        set.targets = Some(TargetsInfo { count: list.len(), source: src.display().to_string(), at: chrono::Local::now().to_rfc3339() });
+        self.save_set(set)?;
+        Ok(list.len())
     }
 
     pub fn resolve(&mut self, set: &SetInfo) -> Result<Resolved> {
@@ -463,6 +561,62 @@ mod tests {
 
     fn read(store: &Store, set: &str, entity: &str) -> Option<String> {
         fs::read_to_string(store.set_dir(set).join(format!("{entity} 0000.png"))).ok()
+    }
+
+    /// A set's target list: none in a new store, set from a file, inherited when branching, replaced per set, kept
+    /// by the folder repair, gone with the set
+    #[test]
+    fn targets_per_set() {
+        let root = tmp("targets");
+        let store = Store::open(&root).unwrap();
+        let mut live = store.load_set(LIVE).unwrap();
+        assert!(live.targets.is_none() && store.load_targets(&live).unwrap().is_empty());
+        let file = |name: &str, entities: &[&str]| {
+            let list: Vec<serde_json::Value> = entities.iter().map(|e| serde_json::json!({ "uuids": ["0"], "entity": e, "type": "T", "subType": "S" })).collect();
+            let p = root.join(name);
+            fs::write(&p, serde_json::to_vec(&list).unwrap()).unwrap();
+            p
+        };
+        assert_eq!(store.set_targets(&mut live, &file("a.json", &["x", "y"])).unwrap(), 2);
+        assert!(store.set_targets(&mut live, &file("bad.json", &[])).is_err(), "an empty list is refused");
+        let mut store = store;
+        let mut exp = store.create_set("exp", LIVE).unwrap();
+        assert_eq!(store.load_targets(&exp).unwrap().len(), 2, "inherited from live");
+        assert_eq!(exp.targets.as_ref().unwrap().source, "<live>");
+        store.set_targets(&mut exp, &file("b.json", &["x", "y", "z"])).unwrap();
+        assert_eq!(store.load_targets(&store.load_set("exp").unwrap()).unwrap().len(), 3);
+        assert_eq!(store.load_targets(&store.load_set(LIVE).unwrap()).unwrap().len(), 2, "live keeps its own");
+        let mut live = store.load_set(LIVE).unwrap();
+        store.sync(&mut live).unwrap();
+        assert!(store.set_dir(LIVE).join(TARGETS).exists(), "the folder repair keeps it");
+        store.delete_set("exp").unwrap();
+        assert!(!store.set_dir("exp").exists());
+        remove_tree(&root).unwrap();
+    }
+
+    /// The estimate's basis: the latest finished run with at least 50 results, its items per second and image size
+    #[test]
+    fn last_stats() {
+        let root = tmp("stats");
+        let mut store = Store::open(&root).unwrap();
+        assert!(store.last_stats().is_none());
+        let mut info = RunInfo { id: "2026-11-04_10-00_big".into(), name: "big".into(), set: LIVE.into(), node: "a".into(), started: "2026-11-04T10:00:00+01:00".into(), finished: Some("2026-11-04T10:00:20+01:00".into()), ..Default::default() };
+        fs::create_dir_all(store.run_dir(&info.id)).unwrap();
+        for k in 0..100 {
+            let f = format!("e{k} 0000.png");
+            fs::write(store.run_dir(&info.id).join(&f), vec![0u8; 1000]).unwrap();
+            info.entities.insert(format!("e{k}"), EntityResult { ok: true, error: None, files: vec![f] });
+        }
+        store.save_run(&info).unwrap();
+        // a newer, small run does not count
+        let small = RunInfo { id: "2026-11-04_11-00_small".into(), started: "2026-11-04T11:00:00+01:00".into(), finished: Some("2026-11-04T11:00:01+01:00".into()), ..info.clone() };
+        let mut small = small;
+        small.entities = info.entities.iter().take(5).map(|(k, v)| (k.clone(), v.clone())).collect();
+        fs::create_dir_all(store.run_dir(&small.id)).unwrap();
+        store.save_run(&small).unwrap();
+        let st = store.last_stats().unwrap();
+        assert_eq!((st.run.as_str(), st.items_per_s, st.bytes_per_image), ("2026-11-04_10-00_big", 5.0, 1000));
+        remove_tree(&root).unwrap();
     }
 
     #[test]

@@ -1,13 +1,14 @@
 // Network in the cluster: TCP, one frame per message made of u32 JSON length, JSON, u64 payload length and payload (LE).
 // Files (export blocks, packages' render.py, runs) go one after another as the payload, their paths and sizes are in the JSON;
 // the reader thread writes them straight into an inbox folder, the main thread only gets the folder. Every
-// connection starts with Hello (token, role, versions); the accepting side checks the token and answers with Welcome.
-// Afterwards both sides can send requests. The hub holds the connections of a process: listen
-// (coordinator), dial (the coordinators of the config), ping, resolve duplicate connections.
+// connection starts with Hello (token, capabilities, versions); the accepting side checks the token and answers with
+// Welcome. Afterwards both sides can send requests. The hub holds the connections of a process: listen, discovery
+// (a UDP beacon every 2 s on every interface's broadcast address, the same port as TCP), dial (the discovered nodes
+// and the peers of the config), ping, resolve duplicate connections. Every node connects to every other one.
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
@@ -17,45 +18,65 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{DEFAULT_PORT, NetConfig};
+use crate::engine::Target;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Node,
-    Coordinator,
+/// Free and total space of the disk that holds a folder of the node (the packshot folder, the work folder if elsewhere)
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct DiskInfo {
+    /// mount point ("/mnt/DATA", "D:\\")
+    pub mount: String,
+    pub free: u64,
+    pub total: u64,
+}
+
+impl DiskInfo {
+    /// The share in use: "78%"
+    pub fn used_pct(&self) -> String {
+        if self.total == 0 {
+            return "?".into();
+        }
+        format!("{:.0}%", (self.total - self.free.min(self.total)) as f64 * 100.0 / self.total as f64)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Hello {
     #[serde(default)]
     pub token: String,
-    pub role: Option<Role>,
     pub name: String,
+    /// random per process: tells this process from another one (a peer address that leads back to this node)
+    #[serde(default)]
+    pub instance: u64,
     pub version: String,
     pub os: String,
+    /// capabilities from the start (--render, --export); the counts below change at runtime
+    #[serde(default)]
+    pub render: bool,
+    #[serde(default)]
+    pub export: bool,
     /// Blender version (from the folder name), empty without Blender
     pub blender: String,
     /// Hash of the StarBreaker addon (events::tree_hash)
     pub addon: Option<String>,
-    /// Blender processes the box runs at the same time
+    /// Blender processes the node runs at the same time (0 without --render)
     pub slots: usize,
-    /// export-batch processes at the same time (coordinators; 0 on a node)
+    /// export-batch processes at the same time (0 without --export)
     #[serde(default)]
     pub exporters: usize,
     pub cores: usize,
-    /// a coordinator with a run going: the boxes work on one run at a time
+    /// head node of a run going on: the nodes work on one run at a time
     #[serde(default)]
     pub running: bool,
-    /// Size of Data.p4k (coordinators only)
+    /// Size of Data.p4k (nodes with --export)
     #[serde(default)]
     pub p4k_bytes: Option<u64>,
-    /// fingerprint of Data.p4k (size + first and last 4 MB, cluster::p4k_id): what the state check compares
+    /// fingerprint of Data.p4k (size + build_manifest.id, cluster::p4k_id): what the state check compares
     #[serde(default)]
     pub p4k_id: Option<String>,
     /// game version from build_manifest.id next to Data.p4k ("4.10.2 (4.10.197.2878)"), shown only
     #[serde(default)]
     pub p4k_version: Option<String>,
-    /// StarBreaker commit (coordinators only): part of the state the boxes must share
+    /// StarBreaker commit (nodes with --export): part of the state the exporting nodes must share
     #[serde(default)]
     pub starbreaker: Option<String>,
     /// CPU name and total RAM (bytes), shown in the details only
@@ -66,6 +87,40 @@ pub struct Hello {
     /// GPU name and memory from nvidia-smi ("RTX 5080 VRAM 16 GB"), several joined with +
     #[serde(default)]
     pub gpu: Option<String>,
+    /// disks of the packshot and work folder, updated while running
+    #[serde(default)]
+    pub disks: Vec<DiskInfo>,
+}
+
+impl Hello {
+    /// "render + export", "render", "export" or "–" (starts, stores, watches)
+    pub fn caps(&self) -> &'static str {
+        match (self.render, self.export) {
+            (true, true) => "render + export",
+            (true, false) => "render",
+            (false, true) => "export",
+            (false, false) => "–",
+        }
+    }
+
+    /// "/mnt/DATA: 412 / 1863 GB free (78%)" per disk (the share in use), joined with " · "
+    pub fn disk_text(&self) -> String {
+        let gb = |b: u64| b as f64 / 1e9;
+        let parts: Vec<String> = self.disks.iter().map(|d| format!("{}: {:.0} / {:.0} GB free ({})", d.mount, gb(d.free), gb(d.total), d.used_pct())).collect();
+        if parts.is_empty() { "?".into() } else { parts.join(" · ") }
+    }
+
+    /// Workers per type: "2 export · 6 render", "–" for a node that only starts, stores and watches
+    pub fn workers_text(&self) -> String {
+        let mut parts = Vec::new();
+        if self.export {
+            parts.push(format!("{} export", self.exporters));
+        }
+        if self.render {
+            parts.push(format!("{} render", self.slots));
+        }
+        if parts.is_empty() { "–".into() } else { parts.join(" · ") }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -82,17 +137,28 @@ pub struct RemoteJob {
     pub pose: [f64; 3],
     pub rig: String,
     pub size: u32,
+    /// class name, for the preview of the rendering node
+    #[serde(default)]
+    pub entity: String,
 }
 
-/// An entity for a coordinator to export and render itself; the rig is a file name of its own DataCore tables
+/// An entity for an exporting node to export (and render, if it renders); pose and rig come from the exporting node's
+/// own DataCore tables (it fills them in on arrival)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ItemJob {
     pub item: usize,
     pub entity: String,
     pub worn: bool,
-    pub pose: [f64; 3],
-    pub rig: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub sub_type: String,
     pub size: u32,
+    #[serde(default)]
+    pub pose: [f64; 3],
+    /// rig file name in the exporting node's tables
+    #[serde(default)]
+    pub rig: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -106,6 +172,46 @@ pub struct RunSummary {
     pub bytes: u64,
 }
 
+/// A worker of a run, as the head node shows it to the other nodes
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct WorkerStatus {
+    pub label: String,
+    pub phase: String,
+    pub entity: String,
+    pub done: usize,
+    pub total: usize,
+    pub secs: f64,
+}
+
+/// A run as its head node reports it to the other nodes once a second (and once at the end)
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct RunStatus {
+    pub run: String,
+    pub head: String,
+    pub starter: String,
+    pub set: String,
+    pub filter: String,
+    pub scope: String,
+    pub total: usize,
+    pub ok: usize,
+    pub failed: usize,
+    pub exported: usize,
+    pub pending: usize,
+    pub ready: usize,
+    pub elapsed: f64,
+    /// renders per minute over the last 2 minutes
+    pub rate: f64,
+    /// Blenders in the cluster
+    pub slots: usize,
+    pub paused: bool,
+    pub finished: bool,
+    pub aborted: bool,
+    pub workers: Vec<WorkerStatus>,
+    /// the latest failures: (entity, error)
+    pub errors: Vec<(String, String)>,
+    pub phase_avg: Option<[f64; 5]>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Msg {
@@ -113,15 +219,30 @@ pub enum Msg {
     Welcome(Hello),
     Reject { reason: String },
     Ping,
-    /// Coordinator -> node: export folder, rigs and render.py as files, plus the jobs
+    /// head node -> rendering node: export folder, rigs and render.py as files, plus the jobs
     Block { id: u64, jobs: Vec<RemoteJob>, files: Vec<FileEntry> },
-    /// Coordinator -> coordinator: entities to export and render there (files: render.py)
+    /// head node -> exporting node: entities to export (and render there, if it renders) (files: render.py)
     Items { id: u64, jobs: Vec<ItemJob>, files: Vec<FileEntry> },
+    /// exporting node without --render -> head node: the exported package as a block (folder with rigs/), to be
+    /// rendered elsewhere
+    Exported { id: u64, jobs: Vec<RemoteJob>, files: Vec<FileEntry> },
     Cancel { id: u64 },
-    /// Node -> coordinator: an item done (payload: the PNG) or failed
+    /// exporting node -> head node: an item of a package is exported (its render follows, or it goes back in a block)
+    ItemExported { block: u64, item: usize },
+    /// rendering node -> head node: an item done (payload: the PNG) or failed
     Item { block: u64, item: usize, ok: bool, info: String },
     BlockDone { id: u64, exit: Option<i32>, error: String },
-    /// Coordinator <-> coordinator
+    /// starting node -> head node: the sets there and the state and target list of one set (for the selection)
+    GetState { set: String },
+    State { set: String, sets: Vec<crate::store::SetSummary>, images: Vec<String>, failed: Vec<String>, targets: Vec<Target>, stats: Option<crate::store::RunStats> },
+    /// starting node -> head node: start a run over these targets into the set (created from live if missing)
+    StartRun { targets: Vec<Target>, set: String, name: String, filter: String, scope: String, line: String },
+    Started { run: String },
+    /// any node -> head node: abort the run
+    AbortRun,
+    /// head node -> all: the run's progress
+    Status(RunStatus),
+    /// between all nodes: runs and manifests
     ListRuns,
     Runs { runs: Vec<RunSummary> },
     GetRun { id: String },
@@ -141,6 +262,8 @@ pub enum Payload {
 pub struct Out {
     pub msg: Msg,
     pub payload: Payload,
+    /// a folder to delete once the frame is written (files sent from it)
+    pub cleanup: Option<PathBuf>,
 }
 
 /// What the hub reports to the main thread
@@ -155,9 +278,60 @@ enum NetEv {
     Msg { conn: u64, msg: Msg, data: Vec<u8>, dir: Option<PathBuf> },
     Down { conn: u64, error: String },
     DialFailed { addr: String, error: String },
+    /// a beacon of another packshot with the same token: its address (sender IP, its port) and host name
+    Beacon { addr: String, name: String },
 }
 
-/// This box's IP address: the local address of the interface with the default route (a connected UDP socket sends
+/// The discovery beacon (UDP, JSON): which cluster (hash of the token, never the token itself), who and on which port
+#[derive(Serialize, Deserialize)]
+struct Beacon {
+    packshot: String,
+    cluster: String,
+    name: String,
+    instance: u64,
+    port: u16,
+}
+
+/// FNV-1a of the token: tells clusters apart in the beacon without sending the token
+fn cluster_id(token: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in token.trim().as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+/// A random number per process (time and process id mixed), for Hello.instance
+pub fn new_instance() -> u64 {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
+    let mut h = t ^ (u64::from(std::process::id()) << 32) ^ 0x9e37_79b9_7f4a_7c15;
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    h.max(1)
+}
+
+/// Broadcast address of every IPv4 network of the node (without loopback and /32)
+fn broadcast_addrs() -> Vec<Ipv4Addr> {
+    let Ok(nets) = sysinfo::Networks::new_with_refreshed_list() else { return Vec::new() };
+    let mut out: Vec<Ipv4Addr> = nets
+        .values()
+        .flat_map(|n| n.ip_networks().iter())
+        .filter_map(|n| match n.addr {
+            IpAddr::V4(a) if !a.is_loopback() && !a.is_link_local() && n.prefix < 32 => {
+                let mask = u32::MAX.checked_shl(32 - u32::from(n.prefix)).unwrap_or(0);
+                Some(Ipv4Addr::from(u32::from(a) | !mask))
+            }
+            _ => None,
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// This node's IP address: the local address of the interface with the default route (a connected UDP socket sends
 /// nothing)
 pub fn own_ip() -> Option<String> {
     // looked up once (the TUI asks every frame)
@@ -229,7 +403,7 @@ fn read_frame(r: &mut impl Read, inbox: &Path, seq: &mut u64) -> Result<(Msg, Ve
     r.read_exact(&mut b8)?;
     let total = u64::from_le_bytes(b8);
     let files = match &msg {
-        Msg::Block { files, .. } | Msg::Items { files, .. } | Msg::RunFiles { files, .. } => Some(files.clone()),
+        Msg::Block { files, .. } | Msg::Items { files, .. } | Msg::Exported { files, .. } | Msg::RunFiles { files, .. } => Some(files.clone()),
         _ => None,
     };
     let Some(files) = files else {
@@ -297,7 +471,7 @@ pub struct PeerConn {
 
 impl PeerConn {
     pub fn send(&self, msg: Msg, payload: Payload) {
-        let _ = self.tx.send(Out { msg, payload });
+        let _ = self.tx.send(Out { msg, payload, cleanup: None });
     }
     pub fn close(&self) {
         let _ = self.stream.shutdown(Shutdown::Both);
@@ -308,13 +482,16 @@ pub struct Hub {
     pub cfg: NetConfig,
     pub me: Hello,
     pub peers: Vec<PeerConn>,
-    /// Coordinators of the config (by address): last error while dialing
+    /// addresses (peers of the config, discovered nodes): last error while dialing
     pub dial_errors: BTreeMap<String, String>,
-    /// address of the config -> host name of the box that answered there
+    /// address -> host name of the node that answered there
     pub addr_names: BTreeMap<String, String>,
-    /// addresses of the config where this process answered itself
+    /// nodes heard by discovery: address -> (host name, last beacon)
+    pub discovered: BTreeMap<String, (String, Instant)>,
+    /// addresses where this process answered itself
     self_addrs: HashSet<String>,
     pub listen_error: Option<String>,
+    pub discovery_error: Option<String>,
     tx: Sender<NetEv>,
     rx: Receiver<NetEv>,
     inbox: PathBuf,
@@ -333,7 +510,11 @@ fn run_conn(stream: TcpStream, conn: u64, hello: Hello, outbound: bool, addr: St
     thread::spawn(move || {
         let mut w = BufWriter::with_capacity(1 << 20, wstream);
         for out in rx {
-            if write_frame(&mut w, &out.msg, &out.payload).is_err() {
+            let res = write_frame(&mut w, &out.msg, &out.payload);
+            if let Some(d) = out.cleanup.as_ref() {
+                let _ = fs::remove_dir_all(d);
+            }
+            if res.is_err() {
                 let _ = w.get_ref().shutdown(Shutdown::Both);
                 return;
             }
@@ -360,18 +541,23 @@ fn run_conn(stream: TcpStream, conn: u64, hello: Hello, outbound: bool, addr: St
 }
 
 impl Hub {
-    /// `listen`: accept connections as a coordinator
-    pub fn new(cfg: NetConfig, me: Hello, inbox: PathBuf, listen: bool) -> Self {
+    /// Listens and announces itself when the config has a token (and discovery is on)
+    pub fn new(cfg: NetConfig, mut me: Hello, inbox: PathBuf) -> Self {
         let (tx, rx) = channel();
         let _ = fs::create_dir_all(&inbox);
+        if me.instance == 0 {
+            me.instance = new_instance();
+        }
         let mut hub = Self {
             cfg,
             me,
             peers: Vec::new(),
             dial_errors: BTreeMap::new(),
             addr_names: BTreeMap::new(),
+            discovered: BTreeMap::new(),
             self_addrs: HashSet::new(),
             listen_error: None,
+            discovery_error: None,
             tx,
             rx,
             inbox,
@@ -380,10 +566,68 @@ impl Hub {
             last_dial: None,
             last_ping: Instant::now(),
         };
-        if listen && hub.cfg.enabled() {
+        if hub.cfg.enabled() {
             hub.listen();
+            if hub.cfg.discovery {
+                hub.discover();
+            }
         }
         hub
+    }
+
+    /// Discovery: a beacon every 2 s to the broadcast address of every IPv4 network (the list refreshed every 30 s),
+    /// beacons of other processes with the same token become dial candidates
+    fn discover(&mut self) {
+        let port = self.cfg.port();
+        let beacon = Beacon { packshot: "beacon".into(), cluster: cluster_id(&self.cfg.token), name: self.me.name.clone(), instance: self.me.instance, port };
+        let Ok(payload) = serde_json::to_vec(&beacon) else { return };
+        // receiving needs the port; if another process holds it, this one only sends
+        let (sock, receiving) = match UdpSocket::bind(("0.0.0.0", port)) {
+            Ok(s) => (s, true),
+            Err(e) => {
+                self.discovery_error = Some(format!("discovery on UDP {port}: {e} (only sending)"));
+                match UdpSocket::bind(("0.0.0.0", 0)) {
+                    Ok(s) => (s, false),
+                    Err(e) => {
+                        self.discovery_error = Some(format!("discovery: {e}"));
+                        return;
+                    }
+                }
+            }
+        };
+        let _ = sock.set_broadcast(true);
+        let Ok(send) = sock.try_clone() else { return };
+        thread::spawn(move || {
+            let mut targets = Vec::new();
+            let mut listed: Option<Instant> = None;
+            loop {
+                if listed.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) {
+                    targets = broadcast_addrs();
+                    listed = Some(Instant::now());
+                }
+                for ip in &targets {
+                    let _ = send.send_to(&payload, SocketAddr::from((*ip, port)));
+                }
+                thread::sleep(Duration::from_secs(2));
+            }
+        });
+        if !receiving {
+            return;
+        }
+        let (ev, cluster, instance) = (self.tx.clone(), beacon.cluster, beacon.instance);
+        thread::spawn(move || {
+            let mut buf = [0u8; 2048];
+            loop {
+                let Ok((n, from)) = sock.recv_from(&mut buf) else { continue };
+                let Ok(b) = serde_json::from_slice::<Beacon>(&buf[..n]) else { continue };
+                if b.packshot != "beacon" || b.cluster != cluster || b.instance == instance {
+                    continue;
+                }
+                if ev.send(NetEv::Beacon { addr: format!("{}:{}", from.ip(), b.port), name: b.name }).is_err() {
+                    return;
+                }
+            }
+        });
     }
 
     fn listen(&mut self) {
@@ -435,15 +679,27 @@ impl Hub {
         });
     }
 
-    /// Dial the coordinators of the config that are not connected (every 3 s)
+    /// Addresses to connect to: the peers of the config and the nodes heard in the last 15 s
+    fn dial_targets(&self) -> Vec<String> {
+        let mut out = self.cfg.peers.clone();
+        for (addr, (_, seen)) in &self.discovered {
+            if seen.elapsed() < Duration::from_secs(15) && !out.contains(addr) {
+                out.push(addr.clone());
+            }
+        }
+        out
+    }
+
+    /// Dial the nodes that are not connected (every 3 s)
     fn dial(&mut self) {
         if !self.cfg.enabled() || self.last_dial.is_some_and(|t| t.elapsed() < Duration::from_secs(3)) {
             return;
         }
         self.last_dial = Some(Instant::now());
-        for addr in self.cfg.coordinators.clone() {
-            // known box behind the address: this one itself, or already connected (in either direction)
-            let known = self.self_addrs.contains(&addr) || self.addr_names.get(&addr).is_some_and(|n| self.peers.iter().any(|p| p.hello.name == *n));
+        for addr in self.dial_targets() {
+            // known node behind the address: this one itself, or already connected (in either direction)
+            let name = self.addr_names.get(&addr).or_else(|| self.discovered.get(&addr).map(|(n, _)| n));
+            let known = self.self_addrs.contains(&addr) || name.is_some_and(|n| self.peers.iter().any(|p| p.hello.name == *n));
             if known || self.dialing.contains(&addr) || self.peers.iter().any(|p| p.outbound && p.addr == addr) {
                 continue;
             }
@@ -457,8 +713,7 @@ impl Hub {
                 let res = (|| -> Result<(TcpStream, Hello)> {
                     // host name or IP, the port is optional
                     let target = if addr.rsplit_once(':').is_some_and(|(_, p)| p.parse::<u16>().is_ok()) { addr.clone() } else { format!("{addr}:{DEFAULT_PORT}") };
-                    // every resolved address in turn: names often resolve to IPv6 first while the coordinator
-                    // listens on IPv4
+                    // every resolved address in turn: names often resolve to IPv6 first while the node listens on IPv4
                     let mut last = anyhow!("no address for {addr}");
                     let mut connected = None;
                     for sa in target.to_socket_addrs()? {
@@ -512,8 +767,8 @@ impl Hub {
                         self.dial_errors.remove(&addr);
                         self.addr_names.insert(addr.clone(), hello.name.clone());
                     }
-                    // the list may hold this box itself: same host name and role = this process (a node on the coordinator's box is another one)
-                    if hello.name == self.me.name && hello.role == self.me.role {
+                    // an address that leads back to this process (a peer of the config pointing at this node)
+                    if hello.instance == self.me.instance {
                         if outbound {
                             self.self_addrs.insert(addr.clone());
                         }
@@ -522,7 +777,7 @@ impl Hub {
                     }
                     // duplicate connection: if both sides dialed, the one set up by the smaller name stays;
                     // otherwise the new one (the old one is then usually dead)
-                    if let Some(i) = self.peers.iter().position(|p| p.hello.name == hello.name && p.hello.role == hello.role) {
+                    if let Some(i) = self.peers.iter().position(|p| p.hello.name == hello.name) {
                         let initiator = |ob: bool| if ob { self.me.name.clone() } else { hello.name.clone() };
                         let (new_init, old_init) = (initiator(outbound), initiator(self.peers[i].outbound));
                         let keep_new = new_init == old_init || new_init == self.me.name.clone().min(hello.name.clone());
@@ -536,7 +791,11 @@ impl Hub {
                         }
                     }
                     let ip = stream.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
-                    self.peers.push(PeerConn { conn, hello, outbound, addr, ip, tx, stream });
+                    let peer = PeerConn { conn, hello, outbound, addr, ip, tx, stream };
+                    // the welcome of an accepted connection comes from this node's hello at its start: send the
+                    // current one (counts, run, disks) right after, whichever side dialed
+                    peer.send(Msg::Hello(Hello { token: String::new(), ..self.me.clone() }), Payload::None);
+                    self.peers.push(peer);
                     out.push(HubEv::Up { conn });
                 }
                 NetEv::Down { conn, error } => {
@@ -550,9 +809,12 @@ impl Hub {
                     self.dialing.remove(&addr);
                     self.dial_errors.insert(addr, error);
                 }
+                NetEv::Beacon { addr, name } => {
+                    self.discovered.insert(addr, (name, Instant::now()));
+                }
                 NetEv::Msg { msg: Msg::Ping, .. } => {}
                 NetEv::Msg { conn, msg, data, dir } => {
-                    // repeated Hello (node after the addon update): take over the versions
+                    // repeated Hello (counts, running, disks changed): take over the versions
                     if let Msg::Hello(h) = &msg {
                         if let Some(p) = self.peers.iter_mut().find(|p| p.conn == conn) {
                             p.hello = Hello { token: String::new(), ..h.clone() };
@@ -585,6 +847,22 @@ impl Hub {
         }
     }
 
+    /// Send files from a folder and delete the folder once they are written (at once if the node is gone)
+    pub fn send_then_remove(&self, conn: u64, msg: Msg, payload: Payload, dir: PathBuf) {
+        match self.peer(conn) {
+            Some(p) => {
+                if let Err(e) = p.tx.send(Out { msg, payload, cleanup: Some(dir) }) {
+                    if let Some(d) = e.0.cleanup {
+                        let _ = fs::remove_dir_all(d);
+                    }
+                }
+            }
+            None => {
+                let _ = fs::remove_dir_all(dir);
+            }
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -596,8 +874,38 @@ mod tests {
         assert_eq!(safe_rel("a/b.png"), Some(PathBuf::from("a").join("b.png")));
         assert_eq!(safe_rel("../x"), None);
         assert_eq!(safe_rel("/etc/passwd"), None);
-        assert_eq!(safe_rel("C:/x"), None);
+        // a drive only exists on Windows; on Linux "C:" is a plain folder name inside the inbox
+        if cfg!(windows) {
+            assert_eq!(safe_rel("C:/x"), None);
+        }
         assert_eq!(safe_rel(""), None);
+    }
+
+    /// A node that accepts a connection later than its counts changed: the other side sees the current counts, not
+    /// the ones from its start (the export workers come only once the DataCore tables are there)
+    #[test]
+    fn current_hello_on_accept() {
+        let root = std::env::temp_dir().join(format!("packshot-hello-{}", std::process::id()));
+        let port = 48920 + (std::process::id() % 15) as u16;
+        let cfg = |name: &str, listen: String, peers: Vec<String>| NetConfig { name: name.into(), token: "t".into(), listen, peers, discovery: false };
+        let me = |name: &str| Hello { name: name.into(), version: "t".into(), export: true, exporters: 0, ..Default::default() };
+        let mut a = Hub::new(cfg("a", format!("127.0.0.1:{port}"), Vec::new()), me("a"), root.join("a"));
+        // the counts change before anyone is connected (what Engine::announce does)
+        a.me.exporters = 2;
+        let mut b = Hub::new(cfg("b", "127.0.0.1:0".into(), vec![format!("127.0.0.1:{port}")]), me("b"), root.join("b"));
+        let t0 = Instant::now();
+        loop {
+            a.poll();
+            b.poll();
+            if b.peers.first().is_some_and(|p| p.hello.exporters == 2) {
+                break;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "b still sees {:?}", b.peers.first().map(|p| p.hello.exporters));
+            thread::sleep(Duration::from_millis(20));
+        }
+        a.close_all();
+        b.close_all();
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

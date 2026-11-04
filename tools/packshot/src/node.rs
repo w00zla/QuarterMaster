@@ -1,9 +1,9 @@
-// Rendering blocks for other boxes. The Renderer accepts blocks (export folder, rigs, render.py), renders them with
-// its own Blender (one process per block, at most `slots` at a time) and sends back the PNG with the icon: line for
-// each item. A coordinator (same state, so the same Data.p4k and StarBreaker) also accepts item packages: it exports them itself
-// first (export-batch into the package folder), then renders them the same way, so no export travels. It runs in
-// node mode (`packshot --node`: only Blender, neither Data.p4k nor StarBreaker) and inside every coordinator's TUI,
-// which renders for the other coordinators while it has no run of its own. It writes only into its work folder.
+// Working for another node's run (its head node). The Renderer accepts blocks (export folder, rigs, render.py), renders
+// them with its own Blender (one process per block, at most `slots` at a time) and sends back the PNG with the icon:
+// line for each item. A node with --export (same state, so the same Data.p4k and StarBreaker) also accepts item
+// packages: it exports them first (export-batch into the package folder), then renders them the same way, so no
+// export travels; without --render it sends the exported package back to the head node as a block instead. It runs
+// inside every node's engine while that node is not the head node of a run. It writes only into its inbox folder.
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -13,10 +13,10 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::json;
 
-use crate::net::{HubEv, Hub, ItemJob, Msg, Payload, RemoteJob};
+use crate::net::{Hub, ItemJob, Msg, Payload, RemoteJob};
 
 struct Queued {
     conn: u64,
@@ -34,6 +34,8 @@ struct Running {
     child: Child,
     /// PNG path (lower case) -> item
     outs: HashMap<String, usize>,
+    /// item -> class name (preview)
+    names: HashMap<usize, String>,
     reported: usize,
     total: usize,
     eof: u8,
@@ -44,18 +46,7 @@ struct Running {
     packages: HashMap<usize, String>,
 }
 
-/// A block in work, for the TUI
-pub struct BlockView {
-    pub conn: u64,
-    pub id: u64,
-    /// waiting, export (a package) or render
-    pub stage: &'static str,
-    pub done: usize,
-    pub total: usize,
-    pub secs: f64,
-}
-
-/// What a coordinator needs to export item packages itself
+/// What a node with --export needs to export item packages
 pub struct ExportTools {
     pub starbreaker: PathBuf,
     pub p4k: PathBuf,
@@ -68,22 +59,22 @@ enum Line {
     Eof { key: u64 },
 }
 
-fn now() -> String {
-    chrono::Local::now().format("%H:%M:%S").to_string()
-}
-
 pub fn addon_dir(blender: &Path) -> PathBuf {
     blender.parent().unwrap_or(Path::new(".")).join("portable/scripts/addons/starbreaker_addon")
 }
 
-/// Renders the blocks other coordinators send
+/// Exports and renders what the head node of another node's run sends
 pub struct Renderer {
     blender: PathBuf,
+    /// Blender processes at the same time; 0 = this node does not render (exported packages go back)
     pub slots: usize,
     /// export-batch processes at the same time (packages)
     pub export_slots: usize,
-    /// set on coordinators: exports item packages
+    /// set with --export: exports item packages
     pub tools: Option<ExportTools>,
+    /// copy of the latest image rendered here and its class name (the preview of a node that is not the head node)
+    preview: PathBuf,
+    pub last: Option<(PathBuf, String)>,
     queue: VecDeque<Queued>,
     running: HashMap<u64, Running>,
     tx: Sender<Line>,
@@ -92,21 +83,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(blender: PathBuf, slots: usize) -> Self {
+    /// `preview`: where the latest image rendered here is copied
+    pub fn new(blender: PathBuf, slots: usize, preview: PathBuf) -> Self {
         let (tx, rx) = channel();
-        Self { blender, slots, export_slots: 1, tools: None, queue: VecDeque::new(), running: HashMap::new(), tx, rx, next_key: 1 }
-    }
-
-    /// The blocks in work for the TUI: rendering and exporting ones first, then the waiting ones
-    pub fn blocks(&self) -> Vec<BlockView> {
-        let mut out: Vec<BlockView> = self
-            .running
-            .values()
-            .map(|r| BlockView { conn: r.conn, id: r.id, stage: if r.export.is_some() { "export" } else { "render" }, done: r.reported, total: r.total, secs: r.started.elapsed().as_secs_f64() })
-            .collect();
-        out.sort_by_key(|b| (b.conn, b.id));
-        out.extend(self.queue.iter().map(|q| BlockView { conn: q.conn, id: q.id, stage: "waiting", done: 0, total: q.export.as_ref().map(|e| e.len()).unwrap_or(q.jobs.len()), secs: 0.0 }));
-        out
+        Self { blender, slots, export_slots: 1, tools: None, preview, last: None, queue: VecDeque::new(), running: HashMap::new(), tx, rx, next_key: 1 }
     }
 
     /// A connection went away: drop its queued blocks, stop its Blenders
@@ -155,13 +135,13 @@ impl Renderer {
     }
 
     /// One tick: start queued blocks on free slots, forward the Blenders' results, finish blocks. `wait`: how long
-    /// to wait for lines (node mode); 0 inside the TUI
+    /// to wait for lines; the engine passes 0
     pub fn tick(&mut self, hub: &Hub, wait: Duration, log: &mut dyn FnMut(String)) {
         // exports and renders have slots of their own; a package's render is queued first in line
         loop {
             let exporting = self.running.values().filter(|r| r.export.is_some()).count();
             let rendering = self.running.len() - exporting;
-            let next = self.queue.iter().position(|q| if q.export.is_some() { exporting < self.export_slots.max(1) } else { rendering < self.slots.max(1) });
+            let next = self.queue.iter().position(|q| if q.export.is_some() { exporting < self.export_slots.max(1) } else { rendering < self.slots });
             let Some(q) = next.and_then(|i| self.queue.remove(i)) else { break };
             let key = self.next_key;
             self.next_key += 1;
@@ -206,6 +186,8 @@ impl Renderer {
                                     Err(_) => format!("Packages/{}/scene.blend", Path::new(pkg).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
                                 };
                                 r.packages.insert(item, rel);
+                                // the head node shows the export's progress
+                                hub.send(r.conn, Msg::ItemExported { block: r.id, item }, Payload::None);
                             }
                             _ => {
                                 r.reported += 1;
@@ -229,6 +211,9 @@ impl Renderer {
                     r.reported += 1;
                     let data = if ok { fs::read(&path).ok() } else { None };
                     let ok = ok && data.is_some();
+                    if ok && fs::copy(&path, &self.preview).is_ok() {
+                        self.last = Some((self.preview.clone(), r.names.get(&item).cloned().unwrap_or_default()));
+                    }
                     hub.send(r.conn, Msg::Item { block: r.id, item, ok, info }, data.map(Payload::Bytes).unwrap_or(Payload::None));
                 }
                 Line::Eof { key } => {
@@ -292,6 +277,7 @@ impl Renderer {
             dir: q.dir.clone(),
             child,
             outs: HashMap::new(),
+            names: jobs.iter().map(|j| (j.item, j.entity.clone())).collect(),
             reported: 0,
             total: jobs.len(),
             eof: 0,
@@ -313,11 +299,11 @@ impl Renderer {
             let rig_src = self.tools.as_ref().map(|t| t.rigs.join(&j.rig)).unwrap_or_default();
             let copied = fs::create_dir_all(r.dir.join("rigs")).and_then(|_| fs::copy(&rig_src, r.dir.join("rigs").join(&j.rig)).map(|_| ()));
             match copied {
-                Ok(()) => render.push(RemoteJob { item: j.item, src: src.clone(), pose: j.pose, rig: format!("rigs/{}", j.rig), size: j.size }),
+                Ok(()) => render.push(RemoteJob { item: j.item, src: src.clone(), pose: j.pose, rig: format!("rigs/{}", j.rig), size: j.size, entity: j.entity.clone() }),
                 Err(e) => hub.send(r.conn, Msg::Item { block: r.id, item: j.item, ok: false, info: format!("rig {}: {e}", j.rig) }, Payload::None),
             }
         }
-        // no line at all: export-batch ended early; the coordinator files these as failed with BlockDone's error
+        // no line at all: export-batch ended early; the head node files these as failed with BlockDone's error
         let error = if r.reported + r.packages.len() < jobs.len() { format!("export-batch ended early (exit {exit:?}) {tail}") } else { String::new() };
         if render.is_empty() {
             hub.send(r.conn, Msg::BlockDone { id: r.id, exit, error }, Payload::None);
@@ -326,6 +312,25 @@ impl Renderer {
         }
         if !error.is_empty() {
             log(format!("  {error}"));
+        }
+        // no Blender here: the exported package goes back to the head node as a block (without jobs.json and
+        // render.py, it sends its own), the folder is deleted once it is sent
+        if self.slots == 0 {
+            for f in ["jobs.json", "render.py"] {
+                let _ = fs::remove_file(r.dir.join(f));
+            }
+            match crate::net::collect_files(&r.dir, "") {
+                Ok((files, paths)) => {
+                    let mb = files.iter().map(|f| f.size).sum::<u64>() as f64 / 1e6;
+                    log(format!("package {} goes back as a block ({mb:.1} MB)", r.id));
+                    hub.send_then_remove(r.conn, Msg::Exported { id: r.id, jobs: render, files }, Payload::Files(paths), r.dir);
+                }
+                Err(e) => {
+                    hub.send(r.conn, Msg::BlockDone { id: r.id, exit, error: format!("exported package not sent: {e:#}") }, Payload::None);
+                    let _ = fs::remove_dir_all(&r.dir);
+                }
+            }
+            return;
         }
         self.queue.push_front(Queued { conn: r.conn, id: r.id, dir: r.dir, jobs: render, export: None });
     }
@@ -365,6 +370,7 @@ impl Renderer {
         fs::create_dir_all(&out_dir)?;
         let mut jobs = Vec::new();
         let mut outs = HashMap::new();
+        let names = q.jobs.iter().map(|j| (j.item, j.entity.clone())).collect();
         for j in &q.jobs {
             let rel = |p: &str| crate::net::safe_rel(p).map(|r| q.dir.join(r)).with_context(|| format!("unsafe path {p}"));
             let out = out_dir.join(format!("{}.png", j.item));
@@ -394,6 +400,7 @@ impl Renderer {
             dir: q.dir.clone(),
             child,
             outs,
+            names,
             reported: 0,
             total: q.jobs.len(),
             eof: 0,
@@ -405,94 +412,30 @@ impl Renderer {
     }
 }
 
-pub struct NodeArgs {
-    pub blender: PathBuf,
-
-    pub slots: usize,
-}
-
-/// Node mode needs a token and at least one coordinator
-pub fn check(cfg: &crate::config::NetConfig) -> Result<()> {
-    if !cfg.enabled() {
-        bail!("Node mode needs a token and coordinators in packshot.json");
-    }
-    if cfg.coordinators.is_empty() {
-        bail!("No coordinators in packshot.json");
-    }
-    Ok(())
-}
-
-/// Node mode without the TUI (--plain): connect to the coordinators of the config and render their blocks until
-/// Ctrl+C, one line per event
-pub fn run(mut hub: Hub, args: NodeArgs) -> Result<()> {
-    println!(
-        "{} node {} · Blender {} · Addon {} · {} slots · coordinators: {}",
-        now(),
-        hub.me.name,
-        hub.me.blender,
-        hub.me.addon.as_deref().unwrap_or("?"),
-        args.slots,
-        hub.cfg.coordinators.join(", ")
-    );
-    let mut renderer = Renderer::new(args.blender, args.slots);
-    let mut log = |s: String| println!("{} {s}", now());
-    let mut last_errors = String::new();
-    loop {
-        for ev in hub.poll() {
-            match ev {
-                HubEv::Up { conn } => {
-                    if let Some(p) = hub.peer(conn) {
-                        log(format!("connected to {} ({})", p.hello.name, p.addr));
-                    }
-                }
-                HubEv::Down { conn, name, error } => {
-                    log(format!("{name} disconnected: {error}"));
-                    renderer.on_down(conn);
-                }
-                HubEv::Msg { conn, msg, dir, .. } => {
-                    if !renderer.on_msg(&mut hub, conn, &msg, dir, &mut log) {
-                        if let Msg::Error { what } = msg {
-                            log(format!("error from coordinator: {what}"));
-                        }
-                    }
-                }
-            }
-        }
-        renderer.tick(&hub, Duration::from_millis(20), &mut log);
-        let errors: String = hub.dial_errors.iter().map(|(n, e)| format!("{n}: {e}")).collect::<Vec<_>>().join(" · ");
-        if errors != last_errors {
-            if !errors.is_empty() {
-                log(format!("not reachable: {errors}"));
-            }
-            last_errors = errors;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::NetConfig;
-    use crate::net::{Hello, ItemJob, Role};
+    use crate::net::{Hello, HubEv, ItemJob};
 
-    /// A coordinator exports an item package itself and renders it (real StarBreaker, Data.p4k and Blender of the
+    /// A node with --export exports an item package itself and renders it (real StarBreaker, Data.p4k and Blender of the
     /// repo; SC_DATA_P4K must be set): cargo test --release -- --ignored package_export
     #[test]
     #[ignore]
     fn package_export_and_render() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let p4k = PathBuf::from(std::env::var("SC_DATA_P4K").expect("SC_DATA_P4K"));
-        let blender = fs::read_dir(repo.join("local/blender")).unwrap().flatten().map(|e| e.path().join("blender.exe")).find(|p| p.exists()).unwrap();
+        let blender = fs::read_dir(repo.join("local/blender")).unwrap().flatten().map(|e| e.path().join(crate::exe("blender"))).find(|p| p.exists()).unwrap();
         let rigs = repo.join("local/packshot/work/dcb/rigs");
         let root = std::env::temp_dir().join(format!("packshot-pkg-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let port = 47950 + (std::process::id() % 40) as u16;
-        let me = |name: &str| Hello { name: name.into(), role: Some(Role::Coordinator), version: "t".into(), slots: 1, ..Default::default() };
-        // a: the starting coordinator (listens), b: the coordinator that exports and renders
-        let mut a = Hub::new(NetConfig { name: "a".into(), token: "t".into(), listen: format!("127.0.0.1:{port}"), coordinators: Vec::new() }, me("a"), root.join("a"), true);
-        let mut b = Hub::new(NetConfig { name: "b".into(), token: "t".into(), listen: String::new(), coordinators: vec![format!("127.0.0.1:{port}")] }, me("b"), root.join("b"), false);
-        let mut r = Renderer::new(blender, 2);
-        r.tools = Some(ExportTools { starbreaker: repo.join("local/starbreaker-qm/starbreaker.exe"), p4k, rigs });
+        let port = 48950 + (std::process::id() % 40) as u16;
+        let me = |name: &str| Hello { name: name.into(), version: "t".into(), render: true, export: true, slots: 1, ..Default::default() };
+        // a: the head node (listens), b: the node that exports and renders
+        let mut a = Hub::new(NetConfig { name: "a".into(), token: "t".into(), listen: format!("127.0.0.1:{port}"), peers: Vec::new(), discovery: false }, me("a"), root.join("a"));
+        let mut b = Hub::new(NetConfig { name: "b".into(), token: "t".into(), listen: "127.0.0.1:0".into(), peers: vec![format!("127.0.0.1:{port}")], discovery: false }, me("b"), root.join("b"));
+        let mut r = Renderer::new(blender, 2, root.join("preview.png"));
+        r.tools = Some(ExportTools { starbreaker: repo.join("local/starbreaker-qm").join(crate::exe("starbreaker")), p4k, rigs });
         let t0 = Instant::now();
         let conn_a = loop {
             b.poll();
@@ -504,12 +447,13 @@ mod tests {
         };
         let script = repo.join("src/icons/render.py");
         let jobs = vec![
-            ItemJob { item: 7, entity: "thumbnailentity_resource_rock_gold".into(), worn: false, pose: [90.0, 180.0, 0.0], rig: "inventorylightgroup_other.json".into(), size: 128 },
-            ItemJob { item: 8, entity: "no_such_entity_xyz".into(), worn: false, pose: [90.0, 0.0, 0.0], rig: "inventorylightgroup_other.json".into(), size: 128 },
+            ItemJob { item: 7, entity: "thumbnailentity_resource_rock_gold".into(), worn: false, kind: String::new(), sub_type: String::new(), pose: [90.0, 180.0, 0.0], rig: "inventorylightgroup_other.json".into(), size: 128 },
+            ItemJob { item: 8, entity: "no_such_entity_xyz".into(), worn: false, kind: String::new(), sub_type: String::new(), pose: [90.0, 0.0, 0.0], rig: "inventorylightgroup_other.json".into(), size: 128 },
         ];
         let files = vec![crate::net::FileEntry { path: "render.py".into(), size: fs::metadata(&script).unwrap().len() }];
         a.send(conn_a, Msg::Items { id: 1, jobs, files }, Payload::Files(vec![script]));
         let mut items = Vec::new();
+        let mut exported = Vec::new();
         let mut done = false;
         let mut log = |s: String| println!("{s}");
         while !done {
@@ -524,6 +468,7 @@ mod tests {
                 match ev {
                     HubEv::Msg { msg: Msg::Item { item, ok, info, .. }, data, .. } => items.push((item, ok, data.len(), info)),
                     HubEv::Msg { msg: Msg::BlockDone { .. }, .. } => done = true,
+                    HubEv::Msg { msg: Msg::ItemExported { item, .. }, .. } => exported.push(item),
                     _ => {}
                 }
             }
@@ -533,6 +478,7 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items[0].0 == 7 && items[0].1 && items[0].2 > 1000, "rock rendered and sent");
         assert!(items[1].0 == 8 && !items[1].1 && items[1].3.starts_with("export"), "unknown entity fails in the export");
+        assert_eq!(exported, vec![7], "the exported item is reported before its render");
         a.close_all();
         b.close_all();
         let _ = fs::remove_dir_all(&root);

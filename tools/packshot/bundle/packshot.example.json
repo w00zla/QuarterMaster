@@ -1,5 +1,6 @@
 {
-  "token": "same-secret-on-every-box",
-  "listen": "0.0.0.0:47800",
-  "coordinators": ["dev-pc:47800", "192.168.1.20:47800"]
+  "token": "same-secret-on-every-node",
+  "listen": "0.0.0.0:47950",
+  "peers": [],
+  "discovery": true
 }
