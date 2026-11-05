@@ -19,7 +19,7 @@
     "loc:import": "node --env-file-if-exists=.env src/catalog/import/loc-cli.ts",
     "packshot:targets": "node --env-file-if-exists=.env src/icons/cli.ts",
     "packshot": "cargo run --release --quiet --manifest-path tools/packshot/Cargo.toml --",
-    "thumbs:build": "node src/icons/pack.ts",
+    "thumbs:build": "cargo run --release --quiet --manifest-path tools/thumbs/Cargo.toml --",
     "adminapp": "node --env-file-if-exists=.env src/adminapp/main.ts",
     "adminapp:dev": "pnpm --filter sc-quartermaster-adminapp dev",
     "adminapp:build": "pnpm --filter sc-quartermaster-adminapp build",
@@ -50,7 +50,6 @@
     "@types/node": "^22.20.5",
     "@types/ws": "^8.18.2",
     "drizzle-kit": "^0.31.11",
-    "sharp": "~0.34.5",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@12.16.1"

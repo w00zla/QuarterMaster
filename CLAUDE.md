@@ -72,7 +72,7 @@ cargo build --release --target x86_64-unknown-linux-musl   # in tools/packshot: 
 scripts/packshot-bundle.sh [--platform all|windows|linux] [--out <dir>]   # on Linux, both bundles: local/packshot-bundle/windows (packshot.exe cross-built with mingw: rustup target x86_64-pc-windows-gnu + mingw64-gcc; StarBreaker, the official Blender zip checked by SHA256, portable/ with the addon, render.py, targets.json, setup.cmd, run.cmd; Data.p4k + build_manifest.id go next to it)
 #   and linux (static packshot, the Linux StarBreaker (glibc: it prints the version it needs), the official Blender tarball checked by SHA256, portable/ with the addon, render.py, targets.json, setup.sh, check.sh, run.sh); the add-on comes from the fork as real files
 scripts/packshot-bundle.ps1 [-Platform all|windows|linux] [-Out <dir>]   # on Windows, the same two bundles (the Linux StarBreaker must have been built on Linux)
-pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]                # the PNGs of the set live (local/packshot/sets/live) -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)
+pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]                # tools/thumbs (Rust, ravif): the PNGs of the set live (local/packshot/sets/live) -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)
 
 pnpm adminapp            # admin API + built UI on 127.0.0.1:3000 (basic auth from .env)
 pnpm adminapp:watch      # the same, restarting on source changes

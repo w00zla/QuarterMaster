@@ -10,7 +10,7 @@ export interface ProcessConfig {
   trustProxy: boolean;
   // The companion app release (companion.json + files)
   companionDir: string;
-  // The item thumbnails (s/, m/, l/ and thumbs.json, src/icons/pack.ts)
+  // The item thumbnails (s/, m/, l/ and thumbs.json, tools/thumbs)
   thumbsDir: string;
 }
 

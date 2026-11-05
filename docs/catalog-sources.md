@@ -981,11 +981,13 @@ pictures with gaps), so the icons are rendered from the models:
    unpacked Windows Blender): both on their nodes, and on an Ubuntu 24.04 server without a desktop (RTX 3090, full NVIDIA driver from `ubuntu-drivers install`; the
    `--gpgpu` variant lacks `libnvidia-gl` and with it Vulkan) `check.sh` passed: the addon loads and EEVEE renders
    headless on Vulkan, no display server needed.
-5. **Pack:** `pnpm thumbs:build [--in local/packshot/sets/live] [--out local/thumbs] [--force]` (`src/icons/pack.ts`, sharp) turns
-   every `<uuid>.png` into three AVIFs (`src/thumbs.ts`: s 40, m 96, l 256 px; quality 45, trimmed to the content
-   with a small transparent border) named `<uuid>.<hash>.avif` (hash: SHA-256 of the PNG, 8 hex) plus
-   `thumbs.json` `{uuid: hash}`; unchanged ones are skipped, stale files deleted. Full set: ~2 min, ~23 MB (S
-   ~0.9 KB, M ~1.8 KB, L ~3.8 KB each; the PNGs average 50 KB). Measured against PNG, 8-bit PNG and WebP: AVIF is
+5. **Pack:** `pnpm thumbs:build [--in local/packshot/sets/live] [--out local/thumbs] [--force]` (`tools/thumbs`, Rust with ravif/rav1e;
+   cargo builds it on first use) turns
+   every `<uuid>.png` into three AVIFs (`src/thumbs.ts`: s 40, m 96, l 256 px; 8-bit, quality 45, speed 6, trimmed to
+   the content with a small transparent border, resized premultiplied) named `<uuid>.<hash>.avif` (hash: SHA-256 of the
+   PNG, 8 hex) plus `thumbs.json` `{uuid: hash}`; unchanged ones are skipped, stale files deleted. A sample of 304
+   icons: 3 s, the full set (6704): 78 s, ~38 MB (rav1e without its asm, no nasm needed; S ~0.9 KB, M ~1.6 KB, L ~3.5 KB
+   each, the PNGs average 50 KB). Until 2026-11-05 `src/icons/pack.ts` with sharp (aom) did this at about the same sizes. Measured against PNG, 8-bit PNG and WebP: AVIF is
    the smallest from 96 px up and even with WebP at 40 px. Upload: `scripts/push-thumbs.sh`
    (`docs/deploy.md` § 8), served by the web app (`docs/webapp.md` "Thumbnails").
 6. **Review:** holders of the privilege `thumb-review.mark` mark wrong thumbnails in the web app and cut a reference out

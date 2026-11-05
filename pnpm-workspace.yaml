@@ -6,4 +6,3 @@ packages:
 # pnpm blocks dependency build scripts by default; esbuild (via drizzle-kit) needs its own
 allowBuilds:
   esbuild: true
-  sharp: false
