@@ -1,5 +1,5 @@
 // Network in the cluster: TCP, one frame per message made of u32 JSON length, JSON, u64 payload length and payload (LE).
-// Files (export blocks, packages' render.py, runs) go one after another as the payload, their paths and sizes are in the JSON;
+// Files (exported items' files between nodes, render.py, runs) go one after another as the payload, their paths and sizes are in the JSON;
 // the reader thread writes them straight into an inbox folder, the main thread only gets the folder. Every
 // connection starts with Hello (token, capabilities, versions); the accepting side checks the token and answers with
 // Welcome. Afterwards both sides can send requests. The hub holds the connections of a process: listen, discovery
@@ -90,6 +90,30 @@ pub struct Hello {
     /// disks of the packshot and work folder, updated while running
     #[serde(default)]
     pub disks: Vec<DiskInfo>,
+    /// the node's compute assessment (assess.rs): what a run's head node sizes its chunks by
+    #[serde(default)]
+    pub assess: Option<AssessInfo>,
+    /// an assessment is going there: it takes no work
+    #[serde(default)]
+    pub assessing: bool,
+}
+
+/// A node's assessment as the others see it: items/s and process counts it was measured with, whether it is still
+/// valid (same packshot, Blender, GPU, render.py, add-on, StarBreaker) and when
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct AssessInfo {
+    pub render: f64,
+    pub export: f64,
+    pub workers: usize,
+    pub exporters: usize,
+    pub valid: bool,
+    pub date: String,
+    /// the steps it was measured at: (Blender count, items/s) and (export count, items/s), so the head node can take
+    /// the rate at the count the node runs now
+    #[serde(default)]
+    pub steps: Vec<(usize, f64)>,
+    #[serde(default)]
+    pub export_steps: Vec<(usize, f64)>,
 }
 
 impl Hello {
@@ -129,21 +153,8 @@ pub struct FileEntry {
     pub size: u64,
 }
 
-/// A render job in the block, paths relative to the block folder
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RemoteJob {
-    pub item: usize,
-    pub src: String,
-    pub pose: [f64; 3],
-    pub rig: String,
-    pub size: u32,
-    /// class name, for the preview of the rendering node
-    #[serde(default)]
-    pub entity: String,
-}
-
-/// An entity for an exporting node to export (and render, if it renders); pose and rig come from the exporting node's
-/// own DataCore tables (it fills them in on arrival)
+/// An entity for an exporting node to export; pose and rig come from the exporting node's own DataCore tables (it
+/// fills them in on arrival, `rig` then is the path of its rig file there)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ItemJob {
     pub item: usize,
@@ -153,12 +164,30 @@ pub struct ItemJob {
     pub kind: String,
     #[serde(default)]
     pub sub_type: String,
-    pub size: u32,
     #[serde(default)]
     pub pose: [f64; 3],
-    /// rig file name in the exporting node's tables
     #[serde(default)]
     pub rig: String,
+}
+
+/// An exported item for a render chunk: which node holds it, in which of its export chunks
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RenderJob {
+    pub item: usize,
+    pub entity: String,
+    pub holder: String,
+    pub chunk: u64,
+}
+
+/// An exported item as its holder describes it: package folder, pose and rig (paths relative to the export chunk's
+/// folder) and every file it needs there with its hash
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HeldItem {
+    pub item: usize,
+    pub package: String,
+    pub pose: [f64; 3],
+    pub rig: String,
+    pub files: Vec<crate::cas::HashedFile>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -198,6 +227,11 @@ pub struct RunStatus {
     pub exported: usize,
     pub pending: usize,
     pub ready: usize,
+    /// exported items not rendered yet, and per node holding them
+    #[serde(default)]
+    pub held: usize,
+    #[serde(default)]
+    pub holders: Vec<(String, usize)>,
     pub elapsed: f64,
     /// renders per minute over the last 2 minutes
     pub rate: f64,
@@ -215,22 +249,51 @@ pub struct RunStatus {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Msg {
-    Hello(Hello),
-    Welcome(Hello),
+    // boxed: a Hello and a RunStatus are many times the size of every other message
+    Hello(Box<Hello>),
+    Welcome(Box<Hello>),
     Reject { reason: String },
     Ping,
-    /// head node -> rendering node: export folder, rigs and render.py as files, plus the jobs
-    Block { id: u64, jobs: Vec<RemoteJob>, files: Vec<FileEntry> },
-    /// head node -> exporting node: entities to export (and render there, if it renders) (files: render.py)
-    Items { id: u64, jobs: Vec<ItemJob>, files: Vec<FileEntry> },
-    /// exporting node without --render -> head node: the exported package as a block (folder with rigs/), to be
-    /// rendered elsewhere
-    Exported { id: u64, jobs: Vec<RemoteJob>, files: Vec<FileEntry> },
+    /// head node -> exporting node: entities to export (by one export-batch process); the node holds what it exported
+    /// until the head node releases it
+    Export { id: u64, jobs: Vec<ItemJob> },
+    /// exporting node -> head node: an item of an export chunk is exported (or failed)
+    ItemExported { chunk: u64, item: usize, ok: bool, seconds: f64, error: String, worn: Option<bool> },
+    /// exporting node -> head node: the export chunk ended (chunk_done, or its process ended); items without a line failed (`error` says why, with
+    /// its last lines), `failed` are items that failed after their line
+    ExportDone { id: u64, exit: Option<i32>, wall: f64, item_seconds: f64, error: String, long_paths: usize, failed: Vec<(usize, String)> },
+    /// head node -> holder: these export chunks are done (every item rendered or failed), their folders can go
+    Release { chunks: Vec<u64> },
+    /// head node -> rendering node: render these items (by one Blender), fetching what is held elsewhere straight
+    /// from its holder (files: render.py)
+    Render { id: u64, size: u32, jobs: Vec<RenderJob>, files: Vec<FileEntry> },
+    /// rendering node -> head node: the render chunk's files are here (from which holders, bytes fetched and taken
+    /// from the cache, how long it took)
+    Fetched { id: u64, holders: Vec<String>, bytes: u64, cached: u64, files: usize, secs: f64 },
+    /// rendering node -> head node: these items of a render chunk did not get their files: `export` (the holder no
+    /// longer has a file): export them again; else (the holder is not reachable from here) the head node places them
+    /// again, into the pool while it still has their holder. Sent before the chunk's Fetched or BlockDone
+    Unfetched { block: u64, items: Vec<usize>, reason: String, export: bool },
+    /// rendering node -> holder: describe these items of an export chunk of `head`'s run
+    GetItems { head: String, chunk: u64, items: Vec<usize> },
+    /// holder -> rendering node: the items with their files and hashes, and the ones it does not hold (why);
+    /// `gone`: it does not hold the export chunk at all (restarted, or released already): export them again
+    ItemsInfo {
+        head: String,
+        chunk: u64,
+        items: Vec<HeldItem>,
+        missing: Vec<(usize, String)>,
+        #[serde(default)]
+        gone: bool,
+    },
+    /// rendering node -> holder: send the files with these hashes
+    Fetch { id: u64, hashes: Vec<String> },
+    /// holder -> rendering node: the files (named by their hash) and the hashes it does not have
+    FetchData { id: u64, files: Vec<FileEntry>, missing: Vec<String> },
     Cancel { id: u64 },
-    /// exporting node -> head node: an item of a package is exported (its render follows, or it goes back in a block)
-    ItemExported { block: u64, item: usize },
     /// rendering node -> head node: an item done (payload: the PNG) or failed
     Item { block: u64, item: usize, ok: bool, info: String },
+    /// rendering node -> head node: the render chunk's Blender ended (error: why it ended early, with its last lines)
     BlockDone { id: u64, exit: Option<i32>, error: String },
     /// starting node -> head node: the sets there and the state and target list of one set (for the selection)
     GetState { set: String },
@@ -241,7 +304,7 @@ pub enum Msg {
     /// any node -> head node: abort the run
     AbortRun,
     /// head node -> all: the run's progress
-    Status(RunStatus),
+    Status(Box<RunStatus>),
     /// between all nodes: runs and manifests
     ListRuns,
     Runs { runs: Vec<RunSummary> },
@@ -249,6 +312,12 @@ pub enum Msg {
     RunFiles { id: String, files: Vec<FileEntry> },
     GetManifest { set: String },
     Manifest { set: String, from: String, entities: BTreeMap<String, bool> },
+    /// any node -> node: assess yourself (refused with Error while a run is going or the node is busy)
+    Assess,
+    /// assessed node -> the node that asked: the assessment is over
+    AssessDone { ok: bool, text: String },
+    /// stop the assessment going on there
+    AssessAbort,
     Error { what: String },
 }
 
@@ -274,7 +343,7 @@ pub enum HubEv {
 }
 
 enum NetEv {
-    Up { conn: u64, hello: Hello, outbound: bool, addr: String, tx: Sender<Out>, stream: TcpStream },
+    Up { conn: u64, hello: Box<Hello>, outbound: bool, addr: String, tx: Sender<Out>, stream: TcpStream },
     Msg { conn: u64, msg: Msg, data: Vec<u8>, dir: Option<PathBuf> },
     Down { conn: u64, error: String },
     DialFailed { addr: String, error: String },
@@ -344,8 +413,41 @@ pub fn own_ip() -> Option<String> {
     .clone()
 }
 
-/// Relative path from the network: normal components only, no drive, no ..
+/// Listeners test_port() bound, by port: Hub::listen takes its listener from here, so a port stays held from the
+/// check to the use (no other test or test process can take it in between)
+#[cfg(test)]
+static TEST_LISTENERS: std::sync::Mutex<BTreeMap<u16, TcpListener>> = std::sync::Mutex::new(BTreeMap::new());
+
+/// A listen port for a test (127.0.0.1): from the block above the cluster port (DEFAULT_PORT + 1 ..= + TEST_PORTS),
+/// never DEFAULT_PORT itself (a production node on this machine listens there) and never an ephemeral one. Handed out
+/// in turn by a counter shared by the tests of the process (they run in parallel threads), starting at an offset from
+/// the process id (several test processes at once); each candidate is bound here and skipped while taken, the
+/// listener held for the Hub listening on it. 249 ports: a test process keeps ~40 (a Hub's accept thread holds its
+/// listener until the process ends), so a few test processes fit at once
+#[cfg(test)]
+pub fn test_port() -> u16 {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    const TEST_PORTS: u16 = 249;
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let offset = std::process::id() as usize;
+    for _ in 0..TEST_PORTS {
+        let k = (NEXT.fetch_add(1, Ordering::Relaxed).wrapping_add(offset) % usize::from(TEST_PORTS)) as u16;
+        let port = crate::config::DEFAULT_PORT + 1 + k;
+        if let Ok(l) = TcpListener::bind(("127.0.0.1", port)) {
+            TEST_LISTENERS.lock().unwrap().insert(port, l);
+            return port;
+        }
+    }
+    let first = crate::config::DEFAULT_PORT + 1;
+    panic!("no free test port in 127.0.0.1:{first}-{}: all {TEST_PORTS} taken", first + TEST_PORTS - 1);
+}
+
+/// Relative path from the network: normal components only, no drive, no ..; on Windows no ':' either (an
+/// alternate data stream, "a:b")
 pub fn safe_rel(p: &str) -> Option<PathBuf> {
+    if cfg!(windows) && p.contains(':') {
+        return None;
+    }
     let path = Path::new(p);
     let mut out = PathBuf::new();
     for c in path.components() {
@@ -356,6 +458,16 @@ pub fn safe_rel(p: &str) -> Option<PathBuf> {
         }
     }
     (!out.as_os_str().is_empty()).then_some(out)
+}
+
+/// A single folder or file name from the network (a run id, a set name): one normal component
+pub fn safe_name(s: &str) -> bool {
+    safe_rel(s).is_some_and(|p| p.components().count() == 1)
+}
+
+/// A content hash from the network (it names a file in the cache): 32 lower-case hex digits
+pub fn safe_hash(s: &str) -> bool {
+    s.len() == 32 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn write_frame(w: &mut impl Write, msg: &Msg, payload: &Payload) -> io::Result<()> {
@@ -403,7 +515,7 @@ fn read_frame(r: &mut impl Read, inbox: &Path, seq: &mut u64) -> Result<(Msg, Ve
     r.read_exact(&mut b8)?;
     let total = u64::from_le_bytes(b8);
     let files = match &msg {
-        Msg::Block { files, .. } | Msg::Items { files, .. } | Msg::Exported { files, .. } | Msg::RunFiles { files, .. } => Some(files.clone()),
+        Msg::Render { files, .. } | Msg::FetchData { files, .. } | Msg::RunFiles { files, .. } => Some(files.clone()),
         _ => None,
     };
     let Some(files) = files else {
@@ -520,7 +632,7 @@ fn run_conn(stream: TcpStream, conn: u64, hello: Hello, outbound: bool, addr: St
             }
         }
     });
-    if ev.send(NetEv::Up { conn, hello, outbound, addr, tx, stream: ctl }).is_err() {
+    if ev.send(NetEv::Up { conn, hello: Box::new(hello), outbound, addr, tx, stream: ctl }).is_err() {
         return;
     }
     let mut r = BufReader::with_capacity(1 << 20, stream);
@@ -538,6 +650,16 @@ fn run_conn(stream: TcpStream, conn: u64, hello: Hello, outbound: bool, addr: St
             }
         }
     }
+}
+
+/// Binds `addr`; in a test the listener test_port() holds for its port
+fn bind_listener(addr: &str, port: u16) -> io::Result<TcpListener> {
+    #[cfg(test)]
+    if addr.starts_with("127.0.0.1:") && let Some(l) = TEST_LISTENERS.lock().unwrap().remove(&port) {
+        return Ok(l);
+    }
+    let _ = port;
+    TcpListener::bind(addr)
 }
 
 impl Hub {
@@ -632,7 +754,7 @@ impl Hub {
 
     fn listen(&mut self) {
         let addr = self.cfg.listen.clone();
-        let listener = match TcpListener::bind(&addr) {
+        let listener = match bind_listener(&addr, self.cfg.port()) {
             Ok(l) => l,
             Err(e) => {
                 self.listen_error = Some(format!("listen on {addr}: {e}"));
@@ -642,11 +764,8 @@ impl Hub {
         let (ev, token, me, inbox) = (self.tx.clone(), self.cfg.token.clone(), self.me.clone(), self.inbox.clone());
         // connection numbers of the accepted connections: upper range, so they do not collide with the dialed ones
         thread::spawn(move || {
-            let mut next = 1u64 << 32;
-            for stream in listener.incoming().flatten() {
-                next += 1;
+            for (conn, stream) in ((1u64 << 32) + 1..).zip(listener.incoming().flatten()) {
                 let (ev, token, me, inbox) = (ev.clone(), token.clone(), me.clone(), inbox.clone());
-                let conn = next;
                 thread::spawn(move || {
                     let addr = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(45)));
@@ -661,7 +780,7 @@ impl Hub {
                     };
                     let mut seq = 0;
                     let hello = match read_frame(&mut r, &inbox, &mut seq) {
-                        Ok((Msg::Hello(h), _, _)) if h.token == token => h,
+                        Ok((Msg::Hello(h), _, _)) if h.token == token => *h,
                         Ok((Msg::Hello(_), _, _)) => {
                             let _ = write_frame(&mut w, &Msg::Reject { reason: "wrong token".into() }, &Payload::None);
                             return;
@@ -670,7 +789,7 @@ impl Hub {
                     };
                     let mut welcome = me.clone();
                     welcome.token.clear();
-                    if write_frame(&mut w, &Msg::Welcome(welcome), &Payload::None).is_err() {
+                    if write_frame(&mut w, &Msg::Welcome(Box::new(welcome)), &Payload::None).is_err() {
                         return;
                     }
                     run_conn(stream, conn, hello, false, addr, inbox, ev);
@@ -729,11 +848,11 @@ impl Hub {
                     stream.set_read_timeout(Some(Duration::from_secs(45)))?;
                     let _ = stream.set_nodelay(true);
                     let mut w = stream.try_clone()?;
-                    write_frame(&mut w, &Msg::Hello(me), &Payload::None)?;
+                    write_frame(&mut w, &Msg::Hello(Box::new(me)), &Payload::None)?;
                     let mut r = BufReader::new(stream.try_clone()?);
                     let mut seq = 0;
                     match read_frame(&mut r, &inbox, &mut seq)? {
-                        (Msg::Welcome(h), _, _) => Ok((stream, h)),
+                        (Msg::Welcome(h), _, _) => Ok((stream, *h)),
                         (Msg::Reject { reason }, _, _) => bail!("rejected: {reason}"),
                         _ => bail!("unexpected answer"),
                     }
@@ -791,10 +910,10 @@ impl Hub {
                         }
                     }
                     let ip = stream.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
-                    let peer = PeerConn { conn, hello, outbound, addr, ip, tx, stream };
+                    let peer = PeerConn { conn, hello: *hello, outbound, addr, ip, tx, stream };
                     // the welcome of an accepted connection comes from this node's hello at its start: send the
                     // current one (counts, run, disks) right after, whichever side dialed
-                    peer.send(Msg::Hello(Hello { token: String::new(), ..self.me.clone() }), Payload::None);
+                    peer.send(Msg::Hello(Box::new(Hello { token: String::new(), ..self.me.clone() })), Payload::None);
                     self.peers.push(peer);
                     out.push(HubEv::Up { conn });
                 }
@@ -815,10 +934,8 @@ impl Hub {
                 NetEv::Msg { msg: Msg::Ping, .. } => {}
                 NetEv::Msg { conn, msg, data, dir } => {
                     // repeated Hello (counts, running, disks changed): take over the versions
-                    if let Msg::Hello(h) = &msg {
-                        if let Some(p) = self.peers.iter_mut().find(|p| p.conn == conn) {
-                            p.hello = Hello { token: String::new(), ..h.clone() };
-                        }
+                    if let Msg::Hello(h) = &msg && let Some(p) = self.peers.iter_mut().find(|p| p.conn == conn) {
+                        p.hello = Hello { token: String::new(), ..(**h).clone() };
                     }
                     if self.peers.iter().any(|p| p.conn == conn) {
                         out.push(HubEv::Msg { conn, msg, data, dir });
@@ -851,10 +968,8 @@ impl Hub {
     pub fn send_then_remove(&self, conn: u64, msg: Msg, payload: Payload, dir: PathBuf) {
         match self.peer(conn) {
             Some(p) => {
-                if let Err(e) = p.tx.send(Out { msg, payload, cleanup: Some(dir) }) {
-                    if let Some(d) = e.0.cleanup {
-                        let _ = fs::remove_dir_all(d);
-                    }
+                if let Err(e) = p.tx.send(Out { msg, payload, cleanup: Some(dir) }) && let Some(d) = e.0.cleanup {
+                    let _ = fs::remove_dir_all(d);
                 }
             }
             None => {
@@ -877,8 +992,13 @@ mod tests {
         // a drive only exists on Windows; on Linux "C:" is a plain folder name inside the inbox
         if cfg!(windows) {
             assert_eq!(safe_rel("C:/x"), None);
+            assert_eq!(safe_rel("a:b"), None);
+            assert_eq!(safe_rel("Data/tex.png:stream"), None);
+            assert!(!safe_name("run:x"));
         }
         assert_eq!(safe_rel(""), None);
+        assert!(safe_name("2026-11-04_10-00_arms") && !safe_name("../x") && !safe_name("a/b") && !safe_name(".."));
+        assert!(safe_hash("0123456789abcdef0123456789abcdef") && !safe_hash("../../../../etc/passwd") && !safe_hash("0123456789ABCDEF0123456789abcdef"));
     }
 
     /// A node that accepts a connection later than its counts changed: the other side sees the current counts, not
@@ -886,13 +1006,13 @@ mod tests {
     #[test]
     fn current_hello_on_accept() {
         let root = std::env::temp_dir().join(format!("packshot-hello-{}", std::process::id()));
-        let port = 48920 + (std::process::id() % 15) as u16;
+        let port = crate::net::test_port();
         let cfg = |name: &str, listen: String, peers: Vec<String>| NetConfig { name: name.into(), token: "t".into(), listen, peers, discovery: false };
         let me = |name: &str| Hello { name: name.into(), version: "t".into(), export: true, exporters: 0, ..Default::default() };
         let mut a = Hub::new(cfg("a", format!("127.0.0.1:{port}"), Vec::new()), me("a"), root.join("a"));
         // the counts change before anyone is connected (what Engine::announce does)
         a.me.exporters = 2;
-        let mut b = Hub::new(cfg("b", "127.0.0.1:0".into(), vec![format!("127.0.0.1:{port}")]), me("b"), root.join("b"));
+        let mut b = Hub::new(cfg("b", format!("127.0.0.1:{}", crate::net::test_port()), vec![format!("127.0.0.1:{port}")]), me("b"), root.join("b"));
         let t0 = Instant::now();
         loop {
             a.poll();
@@ -917,12 +1037,12 @@ mod tests {
         fs::write(src.join("sub").join("b.bin"), vec![7u8; 100_000]).unwrap();
         let (files, paths) = collect_files(&src, "x/").unwrap();
         let mut buf = Vec::new();
-        write_frame(&mut buf, &Msg::Block { id: 3, jobs: Vec::new(), files: files.clone() }, &Payload::Files(paths)).unwrap();
+        write_frame(&mut buf, &Msg::Render { id: 3, size: 256, jobs: Vec::new(), files: files.clone() }, &Payload::Files(paths)).unwrap();
         write_frame(&mut buf, &Msg::Item { block: 3, item: 1, ok: true, info: "i".into() }, &Payload::Bytes(vec![1, 2, 3])).unwrap();
         let mut r = io::Cursor::new(buf);
         let mut seq = 0;
         let (msg, _, d) = read_frame(&mut r, &dir.join("in"), &mut seq).unwrap();
-        assert!(matches!(msg, Msg::Block { id: 3, .. }));
+        assert!(matches!(msg, Msg::Render { id: 3, .. }));
         let d = d.unwrap();
         assert_eq!(fs::read_to_string(d.join("x").join("a.txt")).unwrap(), "hallo");
         assert_eq!(fs::read(d.join("x").join("sub").join("b.bin")).unwrap().len(), 100_000);

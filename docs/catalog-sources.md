@@ -414,15 +414,19 @@ entities in all. `Data.p4k` holds no 2D item images (`displayIcon` is
 empty or a generic loadout icon; the commodity logos under `ui/sharedassets/commoditylogos/` are category
 pictures with gaps), so the icons are rendered from the models:
 
-1. **Export:** StarBreaker `entity export-batch <jobs.json> --kind decomposed --variant-tags --icon-files`, one
-   process per block of 50 entities (P4k and DataCore load once, ~1.5 s; an entity then takes ~0.2 s instead of
-   ~1.9 s for a single `entity export`). Jobs name the exact class and `worn` for armour (the worn model instead of
+1. **Export:** StarBreaker `entity export-batch --stdin --kind decomposed --variant-tags --icon-files`, long-lived:
+   one process per export slot, P4k and DataCore load once (~0.75 s), then it reads one JSON job per line (the
+   same object as one entry of a jobs file) and answers each with its result line; `{"end_chunk": "<dir>"}` closes
+   an export chunk (answered `{"chunk_done": "<dir>"}`), EOF or `{"quit": true}` ends it; ~0.09 s per entity against
+   0.13 s in batch mode (fork, 2026-11-04). packshot finds the mode in `export-batch --help`; a StarBreaker without it
+   runs `export-batch <jobs.json>` once per export chunk of up to 50 entities, as before (P4k and DataCore load per
+   process, ~1.5 s; an entity then takes ~0.2 s instead of ~1.9 s for a single `entity export`). Jobs name the exact class and `worn` for armour (the worn model instead of
    the loot crate; no usable worn model: the exporter falls back to the default geometry itself);
    `--variant-tags` gives paint variants (`…_tan01`) their own tagged SubGeometry; `--icon-files` leaves out
-   animation clips and diagnostics. Each package lands in `Packages/<name>_LOD1_TEX2/scene.blend`, all of a block
-   share one `Data/` tree (`<work>/export/b<n>/`): a mesh file carries its material in the name
+   animation clips and diagnostics. Each package lands in `Packages/<name>_LOD1_TEX2/scene.blend`, all of a chunk
+   share one `Data/` tree (`<work>/export/x<id>/`): a mesh file carries its material in the name
    (`ui_ore_raw_1_a_LOD1_ui_ore_gold_1_a.blend`), because its slots are named after the material and variants on
-   one geometry used to overwrite each other ("keine Meshes in der Szene", 27 armour pieces in the first full
+   one geometry used to overwrite each other ("no meshes in the scene", 27 armour pieces in the first full
    run). A record's material comes from `SGeometryResourceParams.Geometry.Geometry.Material`, else from its
    `Material` node (`SMaterialNodeParams`, variants by tags): 70 items (54 backpacks, paint editions of weapons)
    name it only there and rendered white or in the base look before. A worn (or paint-variant) export takes the
@@ -432,9 +436,14 @@ pictures with gaps), so the icons are rendered from the models:
    palette of its own falls back to its material's `DefaultPalette`, then to the game's `TintPalettes/default`
    (primary white, secondary sRGB 112, tertiary 21; fork commit 559cb793): before, palette-tinted layers
    stayed white, the Hill Horror Reborn's face red where the game shows it black. Paths inside an export reach ~160
-   characters; Blender on Windows reads none over 259 (missing textures render silently white), so packshot
-   reports a block with a longer path ("Pfade über 259 Zeichen": move `--work` to a shorter folder). The block's
-   export is deleted after its render, one with failures stays for inspection. The
+   characters; Blender on Windows reads none over 259 (missing textures render silently white), so a Windows
+   exporting node reports an export chunk with a longer path ("paths over 259 characters": move `--work` to a
+   shorter folder), and a Windows rendering node checks the paths of every fetched item as linked under its
+   `fetch/` folder before Blender starts, and those of an item it holds itself (its closure in the export folder):
+   an item with a path over 259 characters fails with that reason (naming `--work`), so does one with a path that
+   differs from another in that folder only in case (a Linux holder can have both, NTFS keeps one file; only the
+   paths actually linked count). An
+   export chunk's folder is deleted once every item of it is rendered or failed. The
    **our fork starbreaker-qm** (`local/starbreaker-qm/`, MIT, built from the repo `../starbreaker-qm`, public at
    github.com/w00zla/starbreaker-qm as a GitHub fork of diogotr7/StarBreaker, version
    `0.3.2-qm.n`, commit in `COMMIT`; the catalog extract uses it too) is required. qm.2 (2026-11-01) added
@@ -451,7 +460,13 @@ pictures with gaps), so the icons are rendered from the models:
    fleetyards' (both rebuilt the decal system, a mix did not run) plus our fixes from qm.2. Remotes `fleetyards` and `upstream` in
    that repo; a sync is a merge there, checked by rendering a sample against the current icons. A bundled GLB is unusable for this: for LayerBlend/HardSurface shaders it carries one layer's tileable
    detail texture as base colour, and the vertex colours are blend masks.
-2. **Render:** `src/icons/render.py` in a portable Blender (`local/blender/<version>/`, config under its
+2. **Render:** `src/icons/render.py` in a portable Blender (`blender -b --python render.py -- --stdin`: Blender
+   starts once, prints `ready: pid <pid>`, then takes one JSON job per stdin line, the same object as one entry of
+   the `--jobs <file>` list, and answers each with its `icon:`/`failed:` line; EOF or `quit` ends it; each job opens
+   its own file, so it starts from the same clean state as the next job of a jobs file; `--jobs` and
+   `<src> <out>` still work for direct use; with `--jobs` and `--stdin` it turns on the add-on's path index shared per
+   export root, `manifest.share_path_indexes(True)`, when the add-on has it: off for interactive use, a hit is
+   re-checked and a miss rescans once) (`local/blender/<version>/`, config under its
    `portable/`; `portable/scripts/addons/starbreaker_addon` is a junction to the fork repo's
    `blender_addon/starbreaker_addon`, so addon and exporter always match; the bundle copies its content). The addon
    builds every package's materials when `scene.blend` opens; in background mode (`blender -b`) at once and in
@@ -558,7 +573,7 @@ pictures with gaps), so the icons are rendered from the models:
    scope, arguments, the starting node and the nodes taking part, hashes of `render.py` and the addon, Blender
    version, StarBreaker commit, and the game version, fingerprint and size of the exporting nodes' Data.p4k
    (`p4k_from` names the node it was taken from; hotfixes change it between runs of one set); per entity ok or
-   the error and its files; saved after every block) and `events.jsonl`. A finished run is not changed any more; one
+   the error and its files; saved after every chunk), `events.jsonl` and `run.log`. A finished run is not changed any more; one
    without a single result is removed again. A **set** is `sets/<name>/`: every icon as a hard link to a run's image,
    per entity the latest run of its chain that has an image, plus `set.json` (base, the base's chain at the branch,
    its own runs, the files and the run each links to, where its target list came from) and **`targets.json`, the
@@ -575,8 +590,17 @@ pictures with gaps), so the icons are rendered from the models:
    it (missing links, stray PNGs). No store by content hash: renders are not bit-identical, deduplication gains
    nothing. Measured 2026-11-01 with the former CLI loop (dev PC, 89 entities, one export and one Blender at a time):
    0.17 s export and 0.55 s render per entity; the full run of the 3793 gear targets took 52 min on the render PC
-   (the first one, single exports, 4 h). Log: `render.log` (the console plus full error messages) and
-   `blender.log` (Blender's output, tracebacks of `render.py`) in the work directory, appended per run. Known
+   (the first one, single exports, 4 h). Log: `run.log` in the run folder (the console plus full error messages;
+   under every failure the last 20 lines of its process: the traceback of `render.py`, Blender's or export-batch's
+   last lines, also those from other nodes; in `events.jsonl` as the failure's `trace`) and `blender.log` (Blender's
+   whole output) in the work directory, appended per run. Export folders go once their items are done, failures
+   included (a chunk holds up to hundreds of MB; `--filter <entity>` repeats a failure), and `work/export/`, `cas/`,
+   `fetch/` and `send/` are cleared at start. One packshot process per packshot folder and per work folder:
+   `packshot.lock` in both is locked (by the OS, released when the process ends, however it ends) before anything
+   is touched (the start syncs the target set's folder and clears the work folder); a second process on either
+   exits with that message, naming the first one's process id (from `packshot.pid` next to the lock: Windows does
+   not let another process read a locked file); `--dry-run` takes the locks too (it syncs the set, `--targets`
+   writes it, the DataCore tables go into the work folder), only `--report` reads and needs none (it creates nothing in the packshot folder either). Known
    failures (52 of 6734 in the last 2026-11-01 run, not fixable here): 23 `file not found in P4k: Data\m` -- the
    record names no geometry at all (every `path` of its `SGeometryResourceParams` empty; the message is the
    exporter's, misleading): Javelin cooler, 890J/Idris parts, but also `Food_box_bbk_01_*`, `Food_box_noodle_02_*`,
@@ -593,18 +617,37 @@ pictures with gaps), so the icons are rendered from the models:
    (`src/icons/cli.ts`) writes the target list from the DB (default `local/packshot/targets.json`); until 2026-11-03 that CLI also rendered (one export and
    one Blender at a time, into `local/icons`, bundled by `scripts/icons-bundle.ps1`), packshot replaced it.
    **`pnpm packshot`** (`tools/packshot/`, Rust with ratatui and ratatui-image) runs export and render
-   with several processes at once and Blender on Vulkan (`--gpu-backend vulkan`). There are no roles: every node
-   starts with what it can do now, `--render` (Blender, ¾ of the physical cores by default, `--workers`) and/or
-   `--export` (Data.p4k with `build_manifest.id` and StarBreaker; `export-batch` ¼ of the cores but at least 2,
-   `--exporters`); without both it only starts runs, stores them and watches (it says so at the start). The counts
+   with several processes at once and Blender on Vulkan (`--gpu-backend vulkan`). Every Blender packshot starts (runs,
+   the persistent pool, the assessment's sweeps) gets `--threads 2` (`src/blender.rs`): with 6 Blender the same or
+   slightly more items/s for 35–55 % less CPU, exports alongside lost 15 % instead of 32 %. On Linux each one also gets
+   the **RDSEED shim** in `LD_PRELOAD` (prepended to an existing value): Blender 5.2 builds a `std::random_device` on
+   every node tree update (`blenkernel/intern/node_tree_update.cc` ~2164 → `blenlib/intern/rand.cc` ~290), libstdc++
+   reads it via RDSEED, a slow hardware source shared by all cores (~27 µs per call), and render.py's node writes
+   make ~1860 calls per item: that capped the whole PC at ~13–14 items/s however many Blender ran. The shim
+   (`tools/packshot/shim/rdseed_shim.rs`) replaces only `std::random_device::_M_getval()` in the Blender process
+   (splitmix64 over an atomic counter, seeded once by `getrandom`; thread-safe, no libc); 6 Blender went from 12.9
+   to 22.1 items/s (25.0 with `--threads 2`), images unchanged. Checked 2026-11-05 on the dev PC (459 `_arms_`,
+   6 Blender, 4 exports, StarBreaker 38e26bc3): 12.1 items/s without both (twice), 12.1 with `--threads 2` only
+   (CPU 84 → 52 %), 25.0/25.2 with both; all 459 images bit-identical across the five runs, a varied sample (506
+   targets, 47 types) as close as two runs without the shim (490 against 489 identical, the same turret varying). The
+   assessment's render sweep went from 16.0 to 42.5 items/s at n = 8 and now stops at the VRAM (16 GB). `build.rs` builds it for Linux targets only, as a
+   `no_std` cdylib with rustc and rust-lld (no C compiler, also when the musl binary is built on Windows), packshot
+   embeds it and writes it at start to `<work>/rdseed-shim-<hash>.so`; the start says "Blender: RDSEED shim on". A
+   work path with a blank or colon cannot go into `LD_PRELOAD`: the start says "shim off" and the Blenders run
+   without it. Windows has no shim (MSVC's `random_device` is believed not to use RDSEED; not verified). There are no roles: every node
+   starts with what it can do now, `--render` (Blender, by default the counts of the node's valid compute
+   assessment, else ¾ of the physical cores, `--workers`) and/or `--export` (Data.p4k with `build_manifest.id` and
+   StarBreaker; `export-batch` from the assessment, else ¼ of the cores but at least 2, `--exporters`); without both it only starts runs, stores them and watches (it says so at the start). The counts
    change while it runs (`+`/`-`, `<`/`>` or `[`/`]`), the capabilities do not. The terminal UI has three views on
    every node (Tab or 1–3; log and errors below every view, `e` switches). **1 Run:** without a run the selection with
    its **head node** (`n` cycles through this node and the connected ones) and target set there (`s`), filter and
    scope, the to-render list and the selected item's image; Enter asks for the run name in a dialog (default: filter
    terms and scope) and starts it, here or on the head node; while the target set has no target list, Enter opens
    the target list dialog instead. During a run on this node: progress and ETA, the workers (local and
-   on other nodes: `E` an export, `R` a render (Blender), `P` an item package exported and rendered on another node,
-   e.g. `servbox/R1`, `DRAGONVR/P2`), renders per minute and CPU, the latest render as an image (Sixel, Kitty or iTerm2,
+   on other nodes: `E` an export chunk, `R` a render chunk (Blender), e.g. `servbox/R1`, `DRAGONVR/E2`; phase export, fetch
+   while a render chunk's files come from their holders, render), below them one row with the items waiting for
+   export, the pool (exported, not rendered yet) with those of it waiting for a Blender, and the exported ones (fixed
+   widths), renders per minute and CPU, the latest render as an image (Sixel, Kitty or iTerm2,
    half blocks otherwise; ←/→ pages back; the log says which protocol and cell size the terminal gave,
    `PACKSHOT_GRAPHICS=sixel|kitty|iterm2|halfblocks` forces one; in Konsole packshot takes Sixel itself, since
    ratatui-image leaves Sixel out there and falls back to blurry half blocks, while Konsole's Sixel shows the
@@ -616,11 +659,14 @@ pictures with gaps), so the icons are rendered from the models:
    list, `l` adopts an experiment into live, `x` deletes a run or set (all ask). With another node chosen as head
    node the view shows that node's sets and runs (from its state and run list) read only, Enter chooses the target
    set there; changes only on that node itself. **3 Nodes:** the nodes (this one, the connected ones,
-   addresses not reached: node, connection, workers (`2 export · 6 render`), runs to fetch (`h`), free disk with the
-   share in use, p4k version and fingerprint, add-on, status ready / head node / another state; a node with another
-   state in red) and below the selected node's details: Node (capabilities, OS, IP, connection), Hardware (CPU and
-   cores, RAM, GPU with VRAM from `nvidia-smi`), Disk (free and total of the disk with the packshot folder, and of
-   the work folder's if it is elsewhere), Workers, for other nodes Fetch (`h`: its finished runs for live missing
+   addresses not reached: node, connection, workers (`2 export · 6 render`, behind the assessment's marker: `✓`
+   valid, `!` stale, blank without one), runs to fetch (`h`), free disk with the share in use, p4k version and
+   fingerprint, add-on, status ready / head node / assessing / another state; a node with another state in red) and
+   below the selected node's details: Node (capabilities, OS, IP, connection), Hardware (CPU and cores, RAM, GPU with
+   VRAM from `nvidia-smi`), Disk (free and total of the disk with the packshot folder, and of the work folder's if it
+   is elsewhere), Workers, Holds (the exported items of the run going on that the node holds, not rendered yet; from
+   the head node's status on the others), Assessed (`b`: the chosen counts with their items/s and the date, stale in yellow, or
+   the assessment going on), for other nodes Fetch (`h`: its finished runs for live missing
    here) and Manifest (`m`: its live manifest, entity → image or only failed, so "missing" on the local live counts
    what it already has), App (packshot build, StarBreaker commit), p4k (version, fingerprint, size), Blender with
    add-on. Next to it the **Next run** tile: where it
@@ -641,8 +687,23 @@ pictures with gaps), so the icons are rendered from the models:
    over the target set's `targets.json` (written by `pnpm packshot:targets`, taken into a set as above; on another
    head node its set's list comes with its state) and pose and rig are computed by the exporting node itself (a port of the former CLI's
    `loadGameTables`: identical for all 6734 targets and the 53 rigs on 2026-11-01), so it needs neither Node nor the
-   DB. Blocks are cut only when they are exported: rest / (3 × Blender in the cluster), at least 10, at most
-   `--chunk` (50), and for small rests so that every Blender gets work, so they shrink towards the end of a run.
+   DB. **Two kinds of chunk:** an export chunk goes to one export process of an exporting node, a render chunk to one
+   Blender of a rendering node (one chunk per process at a time); both are cut only when they start, rest / (3 × processes of that kind in the
+   cluster), at least 10, at most `--chunk` (50), and for small rests so that every process gets work, so they shrink
+   towards the end of a run (the export chunk over the items not exported yet, the render chunk over those not in a
+   render chunk yet). That size is then scaled per node by its assessed rate: its items/s per process (at the count it runs now: changed
+   with `+`/`-` or `<`/`>` from the assessed one, the rate at that count from the assessment's steps, which the hello
+   carries, linear between them, flat beyond the last) against the mean per process of the nodes taking part that
+   have a valid assessment (at least 1, at most `--chunk` and the
+   rest), so a slow node such as DRAGONVR gets smaller chunks and the tail does not wait for it; a node without a
+   valid assessment, or a cluster without any, gets the plain size. Between the stages every exported item waits in the head node's **pool**, held by the node
+   that exported it; a render chunk may mix items of different export chunks. The head node assigns on a free
+   process: export chunks go to the fastest node with a free export process (by its assessed rate per process),
+   then the one with the most free; a free Blender takes the items its own node holds when there are a chunk's
+   worth, else those of the holder with the most waiting (no waiting for locality), and among the free Blenders
+   those holding a chunk's worth come first, then the fastest nodes; with less than a chunk waiting there it waits while exports are going, unless a chunk's worth waits in
+   all. **Backlog:** no new export chunk while the exported items not rendered yet plus those being exported reach
+   2 × Blenders in the cluster × the render chunk size (`BACKLOG`), which bounds the holders' disk.
    Measured 2026-11-02 with `render.py` of
    f44dafa (dev PC, 9800X3D and RTX 5080, 459 `_arms_` entities, warm file cache after a first run): 1 Blender
    209 s, 4 Blender 97 s, 6 Blender 98 s, 8 Blender (3 exports) 94 s; a render takes 0.45 s alone and 0.65/0.82/1.00 s
@@ -654,12 +715,17 @@ pictures with gaps), so the icons are rendered from the models:
    an event log, `events.jsonl` in its run folder, one JSON line per event with `t` (seconds since the start):
    `run_start` (run, set, head node, starting node and the nodes taking part, process counts, cores, Blender version
    and backend, hashes of `render.py` and the addon, StarBreaker commit, game version and size of the exporting
-   nodes' Data.p4k), `export_start`/`export_item`/`export_end` (seconds per item, process wall time,
-   paths over 259 characters), `render_start` (how long the block waited for a Blender)/`render_item` (wall and
-   phases)/`render_end`, `failure`, `sample` every 2 s (CPU, GPU via `nvidia-smi` if present, running exports and
-   Blender, blocks pending and ready) and `run_end`. `pnpm packshot --report [log|run folder]` evaluates one (default:
-   the latest run): result and items/s, phases with mean/p50/p95, Blender start-up and slot use, export overhead per block,
-   how often Blender waited for exports, CPU/GPU, slowest items, failures. Same set, 2026-11-02:
+   nodes' Data.p4k), `export_start`/`export_item`/`export_end` per export chunk (`block` its id; seconds per item,
+   process wall time, paths over 259 characters), `render_start` per render chunk (its holders, how long its items
+   waited in the pool)/`render_item` (wall and phases)/`render_end`, `fetch` (a render chunk's files from other
+   nodes: holders, bytes fetched, bytes its node's cache already had, files, seconds), `requeue` (why, how often,
+   counted or not), `failure`, `sample` every 2 s (CPU, GPU via `nvidia-smi` if present, running exports and
+   Blender, items to export, in the pool and held, the cache's bytes, the cluster's Blender slots) and `run_end`. `pnpm packshot --report [log|run folder]` evaluates one (default:
+   the latest run): result and items/s, phases with mean/p50/p95, a render chunk's first-item overhead and the slot use of
+   every node's Blenders (from the worker labels `host/R<n>`: each node's render chunk time against its slots, the
+   cluster's slots from the samples; "Blender for export" against them too; before, both counted only the head
+   node's own Blenders), export overhead per chunk, the transfer (bytes fetched between nodes, the share the caches already
+   had, fetch time), how long items waited for a Blender, CPU/GPU, slowest items, failures. Same set, 2026-11-02:
    alone load 0.19, prep 0.01, render 0.12, glass 0.00, post 0.02 s; with 8 Blender load 0.28 and render 0.67 s. So
    it is the render phase that grows under load (5.5×) while the GPU idles: most likely the shader compilation, which
    runs on the CPU. **Vulkan** removed most of that (2026-11-02, fixed set of 88 armour pieces, Blender directly):
@@ -691,7 +757,11 @@ pictures with gaps), so the icons are rendered from the models:
    UDP 47950 in from the local network (Windows: allow packshot.exe for private networks; Fedora/Nobara/Ubuntu with
    firewalld or ufw: open both); the Windows firewall's silent drop shows as "connection timed out". TCP, one frame
    per message (u32 JSON length, JSON, u64 payload length, payload), files as payload written straight into an inbox
-   folder, paths from the wire checked (no `..`, no drive). The hello carries token, instance, capabilities,
+   folder, paths from the wire checked (no `..`, no drive, on Windows no `:`; so are the paths and hashes in a
+   holder's description of its items, which fail their item otherwise, run ids and set names asked for or sent, the
+   entities and files in a fetched run's `run.json` (else the run is not taken; a run is taken only when this node
+   asked the node sending it for it), the entity and UUIDs of every target a start from another node brings (else no run, with the
+   reason), and a peer's p4k fingerprint in the test set's folder name). The hello carries token, instance, capabilities,
    packshot build, Blender version, add-on hash and StarBreaker commit (always: every bundle carries Blender and
    StarBreaker), Blender and export counts, cores, CPU, RAM, GPU, the disks, whether a run is going there, and with
    `--export` the Data.p4k fingerprint (FNV over its size in bytes and Branch, Version and BuildId from
@@ -710,37 +780,163 @@ pictures with gaps), so the icons are rendered from the models:
    computes the selection over that list and sends the selected targets; the head node appends them to its own
    list, creates the set from live if it does not exist (with live's target list) and starts. It needs neither Data.p4k nor Blender, only
    someone connected who exports and someone who renders. **One run at a time:** while a node has a run going, no
-   other one starts; who is connected at the start takes part. The head node exports with its own StarBreaker if
-   it has `--export`; the other exporting nodes get item packages (entities with type and size, plus `render.py`),
-   take pose and rig from their own DataCore tables, export and, with `--render`, render them themselves and send back
-   only the PNGs, so no export travels. A package holds at most 20 items; a node gets as many packages in their
-   export stage as it has export workers, and (if it renders) no new one while as many exported ones as it has
-   Blenders wait for or are in its Blenders, so a slow node never holds much of the run (on 2026-11-04 DRAGONVR, 4
-   cores, got 5 packages of 50 at once, needed ~63 s to export one and then stopped responding altogether). The
-   exporting node reports every exported item, so every view shows a package as "export 23/50", then as "render". A node with `--export` but without `--render` sends the exported package back
-   to the head node as a block (as many ahead as there are Blenders in the cluster). Exported blocks go to free
-   rendering nodes without packages first (so the head node keeps its CPU for exporting), its own Blender take the
-   rest: the block's export folder, the rigs it needs and `render.py` (1–10 MB for blocks of 1–3 rifles), paths
-   relative to the block; the node renders with its own Blender (one process per block) and sends each PNG with its
-   `icon:` line back, the head node files it like a local render. Every second the head node sends every node the
-   run's status (counts, rate, workers, the latest 50 failures, phases; once more at the end); every node may ask it
-   to abort. Log lines and workers carry the host name of the node that did the item (`DRAGONVR/R2`). A node that
-   drops: its unreported items go back into the queue (packages to be exported again); if the head node drops, its
-   run is over for the others. A block that fails on a node stays there in `work/inbox/` with Blender's last lines
-   until the next start. Checked: a decomposed export renders bit-identically from a moved folder (`scene.json`
+   other one starts; who is connected at the start takes part. Every node works through the same code for the head node's chunks, the head node itself included
+   (`node.rs`, through `LOCAL` instead of a connection). An exporting node takes pose and rig from its own DataCore
+   tables, exports the chunk into `<work>/export/x<id>/`, reports every exported item (every view shows "export
+   23/50") and then **holds** the chunk (rigs copied in) until the head node releases it: once each of its items is
+   rendered or failed, or at the run's end or when the head node drops. **Processes** are long-lived on every node:
+   one Blender per render slot (`render.py --stdin`, a render chunk's jobs fed one at a time with one more waiting in
+   its stdin, so the main loop's tick does not delay it), restarted after 200 jobs (`BLENDER_JOBS`) or above 3 GB
+   resident (`BLENDER_RSS`); one export-batch per export slot with `--stdin` (started with `MALLOC_ARENA_MAX=2` on
+   Linux: glibc's arenas grew it 0.75 → 1.4 GB over 300 jobs, ~1.0 GB with it), restarted after 40 export chunks
+   (`EXPORT_CHUNKS`) or above 2 GB (`EXPORT_RSS`), between chunks; a chunk takes an idle process of its kind (a render
+   chunk one with the same `render.py`, by content hash) or starts one; an idle process quits after 60 s
+   (`IDLE_STOP`) and when a run ends (its memory goes back), one over the slots at once, one asked to quit and still
+   there after 10 s is killed. A rendering node renders the items it holds straight from their export folder; for the others the head node names only the item and its holder, and the
+   renderer fetches the files **straight from the holder** over their connection: it asks for the items (the holder
+   answers with each item's **closure**, its package folder plus every file a JSON file of it names, followed through
+   the material sidecars, as written or case-insensitively like the add-on's `resolve_path`, with size and xxh3-128
+   hash, each file hashed once), then fetches only the hashes it has neither in its **cache** nor on their way
+   (`<work>/cas/`, hash → file, per run, gone at the run's end or when its head node drops), and links each render
+   chunk's folder (`<work>/fetch/`) from the cache laid out as on the holder, one subfolder per export chunk, so the
+   paths in the export stay valid; no compression (90 % of the bytes are PNG textures). So **every node must reach
+   every other one**: discovery does it in one network segment, with `peers` the nodes have to list each other; an
+   item whose holder is not connected to its renderer goes back to the head node (counted, see Failures) and fails
+   with that reason after `MAX_REQUEUES`. Every render chunk renders with the
+   head node's `render.py` and sends each PNG with its `icon:` line back, the head node files it like a local
+   render. Closure checked 2026-11-04 (`closure_renders_like_full`, 45 items across armour, clothing, weapons,
+   ship parts, ores, food, mobiGlas): each rendered from a folder holding only its closure is bit-identical to its
+   render from the whole export folder (RMSE 0.0000 % for all 45; the same item without its largest texture differs,
+   0.38 %, so a missing file is seen); the 45 closures add up to 317 MB against 265 MB for the whole chunk. Every
+   second the head node sends every node the run's status (counts, rate, workers, the latest 50 failures, phases;
+   once more at the end); every node may ask it to abort. Log lines and workers carry the host name of the node that
+   did the item (`DRAGONVR/R2`). **Failures:** a renderer drops: its render chunks' open items go back into the pool
+   (their holder still has them); a holder drops: its exported items not rendered yet go back to be exported again,
+   also those render chunks elsewhere were still fetching; an export chunk on a dropped node: its open items too. A
+   renderer that cannot get an item's files reports it back before its chunk ends (`Unfetched`, never dropped
+   silently): its holder disconnected from it or is not connected to it: back into the pool for another renderer
+   (never placed with that renderer again) while the head node still has the holder and some renderer has not
+   reported it cannot reach it, else to be exported again (the exporter may then be a node it reaches); the holder no
+   longer has a file (or it arrived damaged) or no longer holds the export chunk at all (restarted, released): exported
+   again (only the items waiting for it from that holder then; the same content from elsewhere or asked later is
+   fetched as usual); each of these counts, once per incident (an item put back by `Unfetched` and not placed since
+   does not count again when its holder then drops). The holder keeps every held file per hash (a released chunk takes only its own, the
+   same texture in another held chunk is still sent), and an answer to a fetch request nobody waits for any more is
+   dropped. A chunk without progress (no item reported) for 300 s (`CHUNK_TIMEOUT`) is cancelled on its node (an
+   export chunk held there already is dropped with it) and its open items go back, the one it was stuck on to the
+   back of the queue; each item goes back at most twice (`MAX_REQUEUES`; a timeout counts only for the item it was
+   stuck on, every item when it was stuck on none: an export that reported everything and never ended), then it
+   fails with the reason. A render chunk still fetching its files gets 6 × 300 s (`FETCH_TIMEOUTS`; a slow link is
+   no stall), then every one of its items counts. An `ExportDone` for an export chunk the head node gave up already
+   releases it on its node. A process that dies at work (Blender's segfault, a panic in export-batch) fails only the
+   job it was on, with its last lines as the trace (`Blender ended while rendering it`, `export-batch ended while
+   exporting it`); the chunk's other jobs go to a new process (the export into the same folder). One that dies before
+   it is ready (`ready:`, `{"ready": true}`; `{"ready": false, "error": …}` gives why) or with nothing in it ends
+   its chunk as before: its open items fail with that reason. An item of a render chunk that the node itself held
+   once but no longer holds (released, the node restarted) goes back to be exported again, counted, like one whose
+   holder answers that it does not hold the chunk. If the head node drops, its
+   run is over for the others. A chunk that fails on a node is deleted there like any other; why and its
+   process's last lines go to the head node's `run.log`. Checked: a decomposed export renders bit-identically from a moved folder (`scene.json`
    holds no absolute paths), also from Windows to Linux (same `klwe_pistol_energy_01_gold01`, RMSE 0.05 %); tests
-   with fake tools: a start on another node with its status to the end and the selection afterwards (over the target
+   with fake tools (their nodes listen on 127.0.0.1 ports from 47951–48199 handed out by `net::test_port()`, never
+   47950 and never ephemeral, each held from the check to the listen; no test sends discovery beacons): a start on another node with its status to the end and the selection afterwards (over the target
    list of its set), an abort from another node, the capacity check, the state against the head node, Data.p4k out
    of sync, the current hello for a connection accepted after a change, the DataCore tables failing in the
-   background, target lists per set, the run statistics for the estimate, the views drawn incl. dialogs; with real tools (`cargo test --release -- --ignored`, `SC_DATA_P4K`): a node
-   exports and renders a package (an unknown entity fails in the export), a head node without capabilities hands
-   the whole run to a node that exports and renders, and to an exporting node without Blender plus a rendering one
-   (its blocks come back and go on). The discovery was checked on one PC against a script (beacon heard and
-   dialed, own beacons sent); not yet across the nodes. The first run with servbox
-   (2026-11-03, 6734 items in 949 s, dev PC 6 Blender and 2 exports, before packages and the nodes-first rule) showed
-   the export as the limit: 2 export-batch processes made ~7.3 items/s, no exported block was ever waiting (`ready`
-   0 in every sample), the local Blender were 3.7 of 6 busy, and servbox got 6 blocks (161 items, 2.4 %) because a
-   ready block went to a free local Blender first. Not yet run across all three nodes with packages.
+   background, target lists per set, the run statistics for the estimate, the views drawn incl. dialogs; with fake
+   export-batch and Blender scripts (`chunk_tests`): exported on one node and rendered on another (the second render
+   chunk takes the shared texture from the cache and fetches only its own files; folders and cache gone at the end),
+   a holder dropping (its items exported again), a renderer dropping (its open items rendered elsewhere, fetched
+   from the holder again, nothing exported twice; its cache goes when the head node drops), timeouts with the
+   requeue limit for an export and a render, an export that never ends after its last item, a late `ExportDone`
+   released, a renderer not connected to the holder (the only renderer: exported again, then failed with the reason),
+   a render chunk that never gets its files (cancelled after `FETCH_TIMEOUTS`, not before), the backlog, the
+   long-lived processes (one Blender and one export-batch `--stdin` for every chunk of a run, a Blender restarted at
+   its job limit in the middle of a chunk, the idle ones gone after the run), a crash of either failing only the job
+   in flight (with Blender's last line as its trace), a StarBreaker without `--stdin` (one process per export chunk)
+   and one that is not ready, the final status of `--plain` after its last tick, an assessment aborted here and on
+   request, assessments on request (a rendering node gets its test set
+   from an exporting one, sweeps, saves and announces its rates, refuses a second one meanwhile; the exporting node
+   with its export sweep; the test set reused); unit tests for the pick (plateau, memory cap), the rate at the count a node runs now, the placement by rate, the
+   report's slot use across nodes, the pruned assessment logs, staleness, the
+   `packshot.json` merge and the chunk sizes by rate, a fetched run's `run.json` and a start's targets checked, a run
+   not asked for refused, an unreachable item placed with another renderer or exported again and counted once, and on
+   a node: unsafe paths and hashes from a holder, a fetch answer from the wrong connection, unreachable holders still
+   ending in `Fetched`, a holder without the chunk (exported again), a lost
+   hash hitting only its request, a holder dropping reported back, a cancel dropping a held chunk, the Windows path
+   checks (also for held items; a failed link does not block a case variant), the same texture in two held chunks
+   after one is released, the packshot and work folders' locks; with real tools (`cargo test --release -- --ignored`,
+   `SC_DATA_P4K`): a node exports a chunk, holds it, renders from it and drops it on release (an unknown entity fails
+   in the export), a head node without capabilities hands the whole run to a node that exports and renders, and to
+   an exporting node without Blender plus a rendering one that fetches from it, and the closure check above. The
+   discovery was checked on one PC against a script (beacon heard and dialed, own beacons sent); not yet across the
+   nodes. Measured 2026-11-04 on the dev PC (459 `_arms_`, 6 Blender, 2 exports, warm caches): alone 58.6 s against
+   59.4 s with the blocks before; as two processes on the same PC (the head node exporting only, the other rendering
+   only): 59.2 s, 45 render chunks fetched 806 MB and took 203 MB from the cache (20 % deduplicated), 0.15 s per
+   fetch over loopback. Not yet run across real nodes. Long-lived Blenders against one per render chunk, same PC
+   and set, `--plain`, warm caches, runs interleaved on a quiet machine (2026-11-04, export-batch still per chunk):
+   with 2 exports (the export is the limit) 42.4/42.7/44.8 s against 44.9/45.7/45.7 s; with 4 exports 38.3/38.6 s
+   against 43.1/43.1 s (10.7 → 11.9 items/s, +12 %); a render chunk's first item now costs 0.15 s more than the
+   others instead of 0.6 s. Images: 28 of 29 varied items (armour, clothing, weapons, ship parts, food, a flight
+   controller) bit-identical between `--jobs` and `--stdin` in the same order; the 29th differs as much between two
+   `--jobs` runs (mean 0.004/255). A smaller minimum render chunk (4 instead of 10) gained nothing (44.8 s), so
+   `guided()` keeps 10. The first run with servbox
+   (2026-11-03, 6734 items in 949 s, dev PC 6 Blender and 2 exports, with blocks) showed the export as the limit: 2
+   export-batch processes made ~7.3 items/s, no exported block was ever waiting (`ready` 0 in every sample), the
+   local Blender were 3.7 of 6 busy, and servbox got 6 blocks (161 items, 2.4 %) because a ready block went to a
+   free local Blender first. With item packages (exported and rendered on the node, until 2026-11-04) DRAGONVR (4
+   cores) got 5 packages of 50 at once, needed ~63 s to export one and then stopped responding (packages were then
+   held to 20 items).
+   **Compute assessment** (`tools/packshot/src/assess.rs`), on demand only: `--assess` (this node, needs `--render`;
+   prints the steps and the choice, saves it and exits, like `--report`) or `b` in view 3 for the selected node (asks
+   first; another node gets a request and runs it itself; refused while a run is going in the cluster, while the node
+   works on chunks or assesses already); `b` on a node that is assessing asks to abort it (here, or a request to that
+   node; the sweep's processes stop, the test set's export or fetch is cancelled and released as when it fails, its
+   requester is told). Meanwhile the node reports `assessing` in its hello and gets no work.
+   **Test set:** 48 targets of the target set's list, stratified by type (largest remainder over the types' shares,
+   evenly spread within a type by class name: the same list gives the same set), exported once as one export chunk
+   on this node if it exports, else by a connected exporting node with the same state and fetched from it like a
+   render chunk's files (closures by hash, `node.rs`), kept in `<work>/assess/testset-<p4k>-<list>/` (the export under
+   `x/`, `testset.json` with package, rig and pose per item; 237 MB) and reused while Data.p4k fingerprint and list are
+   the same; an assessment that fails or is stopped while getting it cancels and releases its export chunk on the
+   exporting node and stops its fetch here (cache and `.part` folder gone). Nothing goes into sets or runs; the log goes to `<work>/assess/<date>_<time>/assess.log` (the latest 5 such folders
+   are kept, older ones go at the next start). **Render
+   sweep:** an unmeasured warm-up (one Blender over the whole set: file cache, Blender's own caches; items failing
+   there leave the set), then n Blender at once for n = 1, 2, 3, 4, 6, 8, 10, 12, 16, … (at most 32), long-lived and fed
+   one job at a time as in a run; each first renders one item unmeasured (its start-up and first shader
+   compilations, which a run pays once per process), then one chunk of the set (`--chunk`, at most the set; rotated so
+   they do not render the same item at once); items/s = the sum over the processes of images / time from that first
+   answer to the last (until 2026-11-04 the steps started a Blender per chunk and counted its start-up). The ladder stops when a step gains less than 5 % over the one before (or drops),
+   when items fail, or when the next step would not fit RAM or VRAM (the most any step needed per process over what
+   was in use before it, 10 % of each kept free). A sampler records every 0.5 s the CPU (all cores and the busiest
+   one), GPU utilisation and used VRAM (`nvidia-smi -lms 500`, first GPU, Linux and Windows; empty columns without
+   it) and used RAM; a step's loads are the means while all its processes were measured, VRAM and RAM the peaks. Workers = the
+   smallest n within 5 % of the best, at most what fits in memory. **Export sweep** (exporting nodes): the chosen n
+   Blender keep rendering (fed the set round), an unmeasured export first (Data.p4k into the file cache), then e = 1 …
+   4 export-batch at once over one chunk each (with `--stdin` as in a run: measured from the chunk going in to
+   `chunk_done`, its start-up not counted; else the whole process); exporters = the smallest e within 5 % of the best
+   min(export, render meanwhile) items/s, at most what fits RAM next to the chosen Blenders with the most resident
+   memory one export process took (sampled every 0.5 s; `RAM fits <n> export` in the summary). **Result** in `packshot.json` as `assessment` (every other field kept,
+   keys sorted; written to a temporary file and renamed): workers, exporters, the items/s of render (on an exporting
+   node with its exports alongside) and export, every step (counts, items/s, render items/s meanwhile, start-up,
+   load and render phase, CPU all and busiest core, GPU mean and peak, VRAM, RAM, rises per process, failures,
+   seconds), why the ladder stopped, the memory caps (Blender, export), date, duration and the keys: host name, CPU, packshot build, Blender version,
+   GPU name, `render.py` hash, add-on hash, StarBreaker commit (host name and CPU: a `packshot.json` copied to another
+   machine is stale there, also one without `nvidia-smi`). A key that differs at the start makes it stale: the
+   formula counts again (the start lines say why, view 3 shows `!`). After an assessment the node takes its counts at
+   once unless `--workers`/`--exporters` set them; `+`/`-` and `<`/`>` still change them. The hello carries the
+   assessed items/s, the counts they were measured with, every step's count and items/s and whether they are valid; the head node sizes the chunks by
+   them (above). Measured 2026-11-04 on DRAGONEGG with long-lived Blenders (scratch store on /mnt/DATA, export-batch still per
+   chunk), 2.7 min in all: n = 1/2/3/4/6/8 gave 5.97/10.15/12.86/13.98/15.66/15.99 items/s (+2 % at 8: stop), CPU
+   33/54/68/76/87/92 %, start-up 0.35-0.53 s once per process, load phase 0.08 → 0.34 s, render phase 0.07 → 0.12
+   s; with 6 Blender 1/2/3/4 exports made 5.3/10.8/15.4/19.8 items/s with the render at 15.0-15.6: 6 render, 3
+   export (RAM fits 33 exporters). The same test set with a Blender per chunk, start-up counted (below) made 4.1-10.0
+   items/s. Before, on tmpfs, 3.4 min
+   in all: n = 1/2/3/4/6/8 gave 4.1/6.5/8.2/8.9/9.6/10.0 items/s (+4 % at 8: stop), CPU over all cores 39/56/70/77/88/94 %,
+   the busiest core 88–100 %, GPU 7–18 % (peaks 18–55 %), VRAM 1.2 GB and RAM 1.8 GB per Blender (VRAM caps at 9);
+   the load phase grew 0.13 → 0.54 s, the render phase 0.09 → 0.20 s: the CPU saturates, the GPU does not. Chosen 6
+   Blender; with them 1/2/3 exports made 5.4/10.2/14.5 items/s while the render fell 9.9/9.6/9.3: 2 exports. The
+   rates are this test set's (a mix, from tmpfs), above the `_arms_` runs above; what matters for the chunks is how
+   the nodes compare.
    **Between nodes** only on a key press, never by itself: in view 3, `h` on another node fetches its finished runs
    for its live that are missing here (folders copied, same id from another node gets `-<node>`) and appends them to
    the local live in order (shown with ⇣); `m` fetches its live manifest (`<store>/manifests/`), so "missing" on the
@@ -748,7 +944,8 @@ pictures with gaps), so the icons are rendered from the models:
    recomputed when it arrives); `m` on this node's own row drops it again, its file too.
    **Builds and bundles:** packshot builds for Windows (`cargo build --release`) and as a static Linux binary
    (`--target x86_64-unknown-linux-musl`, linked by Rust's own `rust-lld` per `tools/packshot/.cargo/config.toml`, no
-   C toolchain needed; static PIE without interpreter or shared libraries). StarBreaker comes from
+   C toolchain needed; static PIE without interpreter or shared libraries; the embedded RDSEED shim is built the same
+   way, so the bundles need nothing extra). StarBreaker comes from
    `scripts/starbreaker-build.{sh,ps1} [--platform all|windows|linux]`: the fork's committed HEAD (`git archive`, so
    the working tree does not matter) into `local/starbreaker-qm/` with one `COMMIT`; Windows natively or from Linux
    with mingw, Linux with cargo-zigbuild against glibc 2.31 (the binary needs glibc 2.30: Ubuntu 20.04 and later; a

@@ -1,13 +1,15 @@
-// The run: selection, blocks, export pool (StarBreaker `entity export-batch`, one process per block) and
-// Blender pool (render.py --jobs, one process per block), the images into the run and the target set (store.rs), log.
-// The node that holds a run is its head node: it runs this engine's scheduling, whichever node started it (cluster.rs).
-// Everything runs in the main thread; the child processes report their lines through a channel (one reader thread per stream).
+// The run: selection, scheduling, the images into the run and the target set (store.rs), log. The node that holds a
+// run is its head node, whichever node started it (cluster.rs): it cuts export chunks (each for one StarBreaker
+// `entity export-batch` process) for the exporting nodes and render chunks (each for one Blender with render.py) for
+// the rendering ones, itself included, and files the results. Between the stages each exported item waits in the pool,
+// held on the node that exported it; a render chunk takes items from one holder, its own first (node.rs fetches the
+// rest). Everything runs in the main thread; the processes run in node.rs and report through its messages.
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{Receiver, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::events::{EventLog, GpuProbe, file_hash, round3};
-use crate::net::{Hello, Hub, RemoteJob, RunStatus, RunSummary};
+use crate::net::{Hello, Hub, ItemJob, Msg, Payload, RenderJob, RunStatus, RunSummary};
+use crate::node::LOCAL;
 use crate::store::{EntityResult, Resolved, RunInfo, SetInfo, Store};
 use crate::tables::Tables;
 
@@ -133,93 +136,88 @@ pub enum Kind {
 }
 
 pub struct Worker {
-    pub id: u64,
     pub kind: Kind,
     pub slot: usize,
-    pub block: usize,
-    /// local process; None for a Blender on a node
-    child: Option<Child>,
-    /// node, connection and block number there (cluster.rs)
+    /// the chunk's id, the same on the node doing it
+    pub chunk: u64,
+    /// the node doing it; None: this node (its own Renderer, through node::LOCAL)
     pub node: Option<String>,
     /// host name of the node doing the work (this one or the node)
     pub host: String,
-    /// an item package on another node: it exports (and renders) there
-    pub package: bool,
     pub conn: u64,
-    pub remote: u64,
-    /// jobs in the order the process works through them
+    /// items in the order the process works through them
     pub order: Vec<usize>,
     pub reported: HashSet<usize>,
-    /// a package: the items the other node has exported so far (it reports each one)
-    pub exported: HashSet<usize>,
+    /// an export chunk: the items exported so far (held on its node once the process ends)
+    pub(crate) exported: Vec<usize>,
+    /// a render chunk: its files are on its node (held there, or fetched from their holders)
+    pub fetched: bool,
     pub since: Instant,
-    started: Instant,
+    pub(crate) started: Instant,
     /// sum of the seconds export-batch reports per item (the rest of the process time is loading and writing)
-    item_secs: f64,
-    pub(crate) eof: u8,
-    pub(crate) stderr_tail: String,
-    out_map: HashMap<String, usize>,
+    pub(crate) item_secs: f64,
 }
 
 impl Worker {
-    /// "DRAGONEGG/E1": E an export, R a render (Blender), P an item package on another node (exported and rendered there)
+    /// "DRAGONEGG/E1": E an export (export-batch), R a render (Blender)
     pub fn label(&self) -> String {
-        let kind = if self.kind == Kind::Export {
-            'E'
-        } else if self.package {
-            'P'
-        } else {
-            'R'
-        };
-        format!("{}/{kind}{}", self.host, self.slot)
+        format!("{}/{}{}", self.host, if self.kind == Kind::Export { 'E' } else { 'R' }, self.slot)
     }
     /// the item the process is currently working on (both tools work through their list in order)
     pub fn current(&self) -> Option<usize> {
         self.order.iter().copied().find(|t| !self.reported.contains(t))
     }
 
-    /// A package still in its export stage on the other node: not every item exported or failed yet
-    pub fn exporting(&self) -> bool {
-        self.package && self.exported.len() + self.reported.iter().filter(|t| !self.exported.contains(t)).count() < self.order.len()
-    }
-
-    /// What the views show: (phase, current item, done, total); a package shows its export, then its render
+    /// What the views show: (phase, current item, done, total); a render chunk whose files are still coming from
+    /// their holders is in "fetch"
     pub fn progress(&self) -> (&'static str, Option<usize>, usize, usize) {
-        let total = self.order.len();
-        if self.kind == Kind::Export {
-            return ("export", self.current(), self.reported.len(), total);
-        }
-        if self.exporting() {
-            // export-batch works through the package in order: the first item neither exported nor failed
-            let current = self.order.iter().copied().find(|t| !self.exported.contains(t) && !self.reported.contains(t));
-            return ("export", current, self.exported.len(), total);
-        }
-        let current = if self.package { self.order.iter().copied().find(|t| self.exported.contains(t) && !self.reported.contains(t)) } else { self.current() };
-        ("render", current, self.reported.len(), total)
+        let phase = match self.kind {
+            Kind::Export => "export",
+            Kind::Render if !self.fetched => "fetch",
+            Kind::Render => "render",
+        };
+        (phase, self.current(), self.reported.len(), self.order.len())
     }
 }
 
-/// At most this many items in an item package: small enough that a slow node does not hold back the end of a run
-pub const PACKAGE_MAX: usize = 20;
+/// No progress (no item reported) on a chunk for this long: it is cancelled and its open items go back
+pub const CHUNK_TIMEOUT: Duration = Duration::from_secs(300);
+/// A render chunk still getting its files from other nodes may take this many CHUNK_TIMEOUTs (a slow link is no
+/// stall); then it is cancelled and every one of its items counts
+pub const FETCH_TIMEOUTS: u32 = 6;
+/// An item goes back at most this often (its node dropped, its chunk timed out), then it fails
+pub const MAX_REQUEUES: u32 = 2;
+/// Exports wait while exported items not rendered yet (and those being exported) reach this many render chunks per
+/// Blender in the cluster: bounds the disk the holders need
+pub const BACKLOG: usize = 2;
 
-pub(crate) struct Block {
-    pub(crate) items: Vec<usize>,
-    pub(crate) root: PathBuf,
-    pub(crate) packages: HashMap<usize, PathBuf>,
-    /// exported on another node (without Blender) and sent here: its render jobs, paths relative to root
-    pub(crate) jobs: Option<Vec<RemoteJob>>,
-    failed: bool,
-    /// exported, waiting for a Blender
-    pub(crate) ready_at: Option<Instant>,
-    /// an item package for another node, which exports it itself
-    pub(crate) package: bool,
+/// Exported items waiting for a Blender with the time they came
+pub(crate) type Pool = VecDeque<(usize, Instant)>;
+
+/// An export chunk whose items are held on its node until every one of them is rendered or failed
+pub(crate) struct XChunk {
+    pub(crate) node: String,
+    pub(crate) conn: u64,
+    /// items not done yet
+    pub(crate) open: usize,
 }
 
 pub struct Run {
-    pub(crate) blocks: Vec<Block>,
-    /// items not yet exported; blocks are only cut at export time (smaller towards the end)
-    pub(crate) pending: VecDeque<usize>,
-    pub(crate) ready: VecDeque<usize>,
+    /// items to export
+    pub(crate) todo: VecDeque<usize>,
+    /// exported items waiting for a Blender, oldest first, with the time they came
+    pub(crate) pool: Pool,
+    /// exported items not done yet (in the pool or in a render chunk) -> their export chunk
+    pub(crate) held: HashMap<usize, u64>,
+    pub(crate) xchunks: HashMap<u64, XChunk>,
+    /// how often an item went back
+    pub(crate) requeues: HashMap<usize, u32>,
+    /// items an Unfetched put back into the pool (counted there) and not placed since: their holder's drop does not
+    /// count them again (one incident, one count)
+    pub(crate) uncounted: HashSet<usize>,
+    /// item -> the renderers that could not reach its holder: not placed there again; exported again once no other
+    /// renderer is left (cleared when it is exported again)
+    pub(crate) unreachable: HashMap<usize, HashSet<String>>,
     /// nodes that were connected at the start and take part
     pub nodes: Vec<String>,
     /// the node that started the run (this one or another), filter and scope: for the status of the others
@@ -247,7 +245,7 @@ pub struct Run {
 /// Phases per render, as render.py appends them to the icon: line ("timing load=… prep=… render=… glass=… post=…")
 pub const PHASES: [&str; 5] = ["load", "prep", "render", "glass", "post"];
 
-fn parse_timing(info: &str) -> Option<[f64; 5]> {
+pub(crate) fn parse_timing(info: &str) -> Option<[f64; 5]> {
     let rest = &info[info.find("timing ")? + 7..];
     let mut out = [0.0; 5];
     for pair in rest.split_whitespace() {
@@ -265,15 +263,21 @@ impl Run {
     pub fn phase_avg(&self) -> Option<[f64; 5]> {
         (self.phase_n > 0).then(|| self.phase_sum.map(|s| s / self.phase_n as f64))
     }
-    /// (items before export, exported blocks waiting for a Blender)
+    /// (items before export, exported items waiting for a Blender)
     pub fn waiting(&self) -> (usize, usize) {
-        (self.pending.len(), self.ready.len())
+        (self.todo.len(), self.pool.len())
     }
-}
 
-enum Ev {
-    Line { id: u64, line: String, stderr: bool },
-    Eof { id: u64 },
+    /// Exported items not rendered yet (waiting in the pool or in a render chunk) per node holding them, by name
+    pub fn holders(&self) -> Vec<(String, usize)> {
+        let mut by: std::collections::BTreeMap<&str, usize> = Default::default();
+        for x in self.held.values() {
+            if let Some(c) = self.xchunks.get(x) {
+                *by.entry(c.node.as_str()).or_default() += 1;
+            }
+        }
+        by.into_iter().map(|(n, c)| (n.to_string(), c)).collect()
+    }
 }
 
 /// The selection's head node when it is another node: its sets and the state of the chosen set there
@@ -325,11 +329,7 @@ pub struct Engine {
     /// log lines for console mode (--plain), collected there
     pub echo: Option<Vec<String>>,
     haystack: Vec<String>,
-    tx: Sender<Ev>,
-    rx: Receiver<Ev>,
-    next_id: u64,
     log_file: Option<File>,
-    blender_log: Option<File>,
     /// event log of the current or last run (runs/<run>/events.jsonl)
     pub events: Option<EventLog>,
     gpu: Option<GpuProbe>,
@@ -340,12 +340,15 @@ pub struct Engine {
     pub me: Hello,
     pub peer_runs: HashMap<String, Vec<RunSummary>>,
     pub manifest: Option<Manifest>,
-    pub(crate) fetching: HashSet<String>,
+    /// runs asked for: (node asked, run id); a run's files are taken only from that node
+    pub(crate) fetching: HashSet<(String, String)>,
     pub(crate) next_remote: u64,
-    /// bytes sent to nodes in this session
+    /// bytes the nodes fetched from each other for this node's runs in this session
     pub transferred: u64,
-    /// renders and exports for the head node of another node's run (node.rs)
+    /// this node's exports and renders, for its own runs (through node::LOCAL) and for other nodes' runs (node.rs)
     pub serve: Option<crate::node::Renderer>,
+    /// a chunk without progress for this long is cancelled (CHUNK_TIMEOUT; tests shorten it)
+    pub chunk_timeout: Duration,
     /// head node for the next start: None = this node, else a connected node's host name
     pub head: Option<String>,
     pub remote: Option<RemoteSel>,
@@ -365,6 +368,16 @@ pub struct Engine {
     /// node exports nothing until then
     pub tables_ready: bool,
     tables_load: Option<TablesLoad>,
+    /// this node's compute assessment from packshot.json (assess.rs), what makes it stale (empty: valid), the one
+    /// going on
+    pub assessment: Option<crate::assess::Assessment>,
+    pub assess_stale: Vec<String>,
+    pub(crate) assess_job: Option<crate::assess::AssessJob>,
+    /// test set size and the largest Blender count of a sweep (tests shorten them)
+    pub assess_items: usize,
+    pub assess_max: usize,
+    /// --workers, --exporters given: an assessment does not change them
+    pub fixed_counts: (bool, bool),
 }
 
 /// The DataCore tables loading in the background: its steps and its result come through the channel
@@ -399,6 +412,17 @@ pub fn blender_version(blender: &Path) -> String {
     dir.split('-').find(|p| p.chars().next().is_some_and(|c| c.is_ascii_digit())).unwrap_or(&dir).to_string()
 }
 
+/// An error with a process's output as its trace (record: first line the message, the rest the trace): the last
+/// TRACE_LINES lines of `output`
+pub fn with_trace(msg: &str, output: &str) -> String {
+    let lines: Vec<&str> = output.trim().lines().collect();
+    let tail = lines[lines.len().saturating_sub(TRACE_LINES)..].join("\n");
+    if tail.is_empty() { msg.to_string() } else { format!("{msg}\n{tail}") }
+}
+
+/// Lines of a process's output that go with a failure
+pub const TRACE_LINES: usize = 20;
+
 /// Keep about the last `max` bytes of a text, cut at a character boundary
 pub fn keep_tail(s: &mut String, max: usize) {
     if s.len() > max {
@@ -426,7 +450,7 @@ fn icon_file(t: &Target, k: usize) -> String {
     format!("{prefix}({}) {}.png", t.entity, t.uuids[k])
 }
 
-fn too_long(root: &Path, limit: usize) -> (usize, Option<PathBuf>) {
+pub(crate) fn too_long(root: &Path, limit: usize) -> (usize, Option<PathBuf>) {
     let mut count = 0;
     let mut first = None;
     let mut stack = vec![root.to_path_buf()];
@@ -446,6 +470,88 @@ fn too_long(root: &Path, limit: usize) -> (usize, Option<PathBuf>) {
     (count, first)
 }
 
+/// The pool's items by holder that the renderer `host` can take (not those it could not reach)
+pub(crate) fn pool_by_holder<'a>(run: &'a Run, host: &str) -> HashMap<&'a str, usize> {
+    let mut count: HashMap<&str, usize> = HashMap::new();
+    for (t, _) in &run.pool {
+        if run.unreachable.get(t).is_some_and(|r| r.contains(host)) {
+            continue;
+        }
+        if let Some(x) = run.held.get(t).and_then(|x| run.xchunks.get(x)) {
+            *count.entry(x.node.as_str()).or_default() += 1;
+        }
+    }
+    count
+}
+
+/// A chunk size that shrinks towards the end of a run: the remainder / (3 × processes), at least 10, at most
+/// --chunk, and for small remainders so that every process gets something
+fn guided(rem: usize, slots: usize, max: usize) -> usize {
+    let (rem, slots) = (rem.max(1), slots.max(1));
+    rem.div_ceil(3 * slots).max(10).min(max.max(1)).min(rem.div_ceil(slots)).max(1)
+}
+
+/// A node's items/s at `k` processes from its assessment's steps (count, items/s): linear between the steps, from 0
+/// below the first, flat beyond the last (the CPU is saturated there)
+pub(crate) fn rate_at(steps: &[(usize, f64)], k: usize) -> Option<f64> {
+    let mut s: Vec<(usize, f64)> = steps.iter().copied().filter(|x| x.0 > 0).collect();
+    s.sort_by_key(|x| x.0);
+    let (first, last) = (*s.first()?, *s.last()?);
+    if k <= first.0 {
+        return Some(first.1 * k as f64 / first.0 as f64);
+    }
+    if k >= last.0 {
+        return Some(last.1);
+    }
+    let i = s.iter().position(|x| x.0 >= k)?;
+    let (a, b) = (s[i - 1], s[i]);
+    Some(a.1 + (b.1 - a.1) * (k - a.0) as f64 / (b.0 - a.0) as f64)
+}
+
+/// Items/s per process of a node from its valid assessment (render or export), at the count it runs now (its
+/// hello's; changed with +/- or </> from the assessed one: the rate at that count from the steps, scaled like the
+/// assessed one, which for an exporting node was measured with its exports alongside); None without one
+pub(crate) fn proc_rate(h: &Hello, export: bool) -> Option<f64> {
+    let a = h.assess.as_ref().filter(|a| a.valid)?;
+    let (rate, n, steps, now) = if export { (a.export, a.exporters, &a.export_steps, h.exporters) } else { (a.render, a.workers, &a.steps, h.slots) };
+    if rate <= 0.0 || n == 0 {
+        return None;
+    }
+    let k = if now == 0 { n } else { now };
+    let total = match (k == n, rate_at(steps, k), rate_at(steps, n)) {
+        (false, Some(at), Some(base)) if base > 0.0 => rate * at / base,
+        _ => rate * k as f64 / n as f64,
+    };
+    Some(total / k as f64)
+}
+
+/// A node's chunk share: its rate per process against the mean per process of the nodes with a rate (nodes:
+/// connection, processes, rate per process); 1 for a node without a rate or without any rate in the cluster
+pub(crate) fn rate_share(nodes: &[(u64, usize, Option<f64>)], conn: u64) -> f64 {
+    let known: Vec<(u64, usize, f64)> = nodes.iter().filter_map(|&(c, n, r)| r.map(|r| (c, n, r))).filter(|k| k.1 > 0).collect();
+    let procs: usize = known.iter().map(|k| k.1).sum();
+    let Some(own) = known.iter().find(|k| k.0 == conn) else { return 1.0 };
+    let mean = known.iter().map(|k| k.1 as f64 * k.2).sum::<f64>() / procs.max(1) as f64;
+    if mean > 0.0 { own.2 / mean } else { 1.0 }
+}
+
+/// The free exporter that takes the next export chunk: the fastest by assessed rate per process, then the one with
+/// the most free processes, this node on a tie (free: connection, node, free processes)
+pub(crate) fn pick_exporter(free: Vec<(u64, Option<String>, usize)>, rates: &[(u64, usize, Option<f64>)]) -> Option<(u64, Option<String>, usize)> {
+    free.into_iter().max_by(|a, b| rate_share(rates, a.0).total_cmp(&rate_share(rates, b.0)).then((a.2, a.0 == LOCAL).cmp(&(b.2, b.0 == LOCAL))))
+}
+
+/// The order in which free Blenders are offered a render chunk, by (holds less than a chunk, rate share, free
+/// Blenders): those holding a chunk's worth first, then the fastest, then the most free
+pub(crate) fn renderer_order(a: (bool, f64, usize), b: (bool, f64, usize)) -> std::cmp::Ordering {
+    a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)).then(b.2.cmp(&a.2))
+}
+
+/// A node's chunk: the guided size scaled by its share, at least 1, at most --chunk and the remainder
+pub(crate) fn sized(base: usize, share: f64, max: usize, rem: usize) -> usize {
+    ((base as f64 * share).round() as usize).clamp(1, max.max(1)).min(rem.max(1))
+}
+
 impl Engine {
     /// `set`: the target set; its folder is checked against its chain and repaired
     pub fn new(cfg: Config, targets: Vec<Target>, tables: Tables, mut store: Store, mut set: SetInfo, hub: Option<Hub>, me: Hello) -> Result<Self> {
@@ -455,8 +561,11 @@ impl Engine {
         store.sync(&mut set)?;
         let resolved = store.resolve(&set)?;
         let haystack = targets.iter().map(search_text).collect();
-        let (tx, rx) = channel();
         let manifest = crate::cluster::load_manifest(&store.root);
+        let mut serve = crate::node::Renderer::new(&me.name, &cfg.work, cfg.blender.clone(), cfg.render_script.clone(), 0);
+        if me.export {
+            serve.tools = Some(crate::node::ExportTools { starbreaker: cfg.starbreaker.clone(), p4k: cfg.p4k.clone() });
+        }
         let stats = store.last_stats();
         let own_len = targets.len();
         Ok(Self {
@@ -474,7 +583,8 @@ impl Engine {
             fetching: HashSet::new(),
             next_remote: 1,
             transferred: 0,
-            serve: None,
+            serve: Some(serve),
+            chunk_timeout: CHUNK_TIMEOUT,
             record: None,
             run: None,
             workers: Vec::new(),
@@ -487,11 +597,7 @@ impl Engine {
             history: VecDeque::new(),
             echo: None,
             haystack,
-            tx,
-            rx,
-            next_id: 1,
             log_file: None,
-            blender_log: None,
             events: None,
             gpu: None,
             sys: sysinfo::System::new().ok(),
@@ -507,6 +613,12 @@ impl Engine {
             stats,
             tables_ready: true,
             tables_load: None,
+            assessment: None,
+            assess_stale: Vec::new(),
+            assess_job: None,
+            assess_items: crate::assess::TEST_ITEMS,
+            assess_max: 32,
+            fixed_counts: (false, false),
         })
     }
 
@@ -591,6 +703,7 @@ impl Engine {
     }
 
     /// Origin of the run for run_start: machine, processes, versions of render.py, addon, StarBreaker and p4k
+    #[allow(clippy::too_many_arguments)]
     fn run_meta(&self, run_id: &str, args_line: &str, filter: &str, scope: Scope, total: usize, blocks: usize, size: usize) -> serde_json::Value {
         let version = self.me.blender.clone();
         // the game version comes from the exporting nodes (their Data.p4k are in sync): this one, else the first
@@ -647,11 +760,12 @@ impl Engine {
         let gpu = self.gpu.as_ref().and_then(GpuProbe::get);
         let exporting = self.workers.iter().filter(|w| w.kind == Kind::Export).count();
         let rendering = self.workers.len() - exporting;
-        let (pending, ready, done) = self.run.as_ref().map(|r| (r.pending.len(), r.ready.len(), r.done())).unwrap_or_default();
-        let (max_renderers, max_exporters, paused) = (self.max_renderers, self.max_exporters, self.paused);
+        let (pending, ready, held, done) = self.run.as_ref().map(|r| (r.todo.len(), r.pool.len(), r.held.len(), r.done())).unwrap_or_default();
+        let (max_renderers, max_exporters, paused, slots) = (self.max_renderers, self.max_exporters, self.paused, self.total_slots());
+        let cache = self.serve.as_ref().map(crate::node::Renderer::cached_bytes).unwrap_or(0);
         self.emit("sample", json!({
-            "cpu": cpu, "gpu": gpu, "exporting": exporting, "rendering": rendering, "pending": pending, "ready": ready,
-            "done": done, "max_renderers": max_renderers, "max_exporters": max_exporters, "paused": paused,
+            "cpu": cpu, "gpu": gpu, "exporting": exporting, "rendering": rendering, "pending": pending, "ready": ready, "held": held,
+            "done": done, "max_renderers": max_renderers, "max_exporters": max_exporters, "slots": slots, "paused": paused, "cache_bytes": cache,
         }));
     }
 
@@ -773,20 +887,20 @@ impl Engine {
     /// connected nodes that take part, `starter`: the node that asked for it (cluster.rs)
     #[allow(clippy::too_many_arguments)]
     pub fn start(&mut self, todo: &[usize], args_line: &str, filter: &str, scope: Scope, name: &str, nodes: Vec<String>, starter: &str) -> Result<()> {
-        let work = &self.cfg.work;
-        let mut log_file = OpenOptions::new().create(true).append(true).open(work.join("render.log"))?;
-        writeln!(log_file, "=== {} packshot {}", chrono::Local::now().to_rfc3339(), args_line)?;
-        self.log_file = Some(log_file);
-        let mut blender_log = OpenOptions::new().create(true).append(true).open(work.join("blender.log"))?;
-        writeln!(blender_log, "=== {}", chrono::Local::now().to_rfc3339())?;
-        self.blender_log = Some(blender_log);
+        if let Some(s) = self.serve.as_mut() {
+            s.blender_log(&format!("=== {}", chrono::Local::now().to_rfc3339()));
+        }
         self.errors.clear();
 
         let n = todo.len();
         self.run = Some(Run {
-            blocks: Vec::new(),
-            pending: todo.iter().copied().collect(),
-            ready: VecDeque::new(),
+            todo: todo.iter().copied().collect(),
+            pool: VecDeque::new(),
+            held: HashMap::new(),
+            xchunks: HashMap::new(),
+            requeues: HashMap::new(),
+            uncounted: HashSet::new(),
+            unreachable: HashMap::new(),
             nodes,
             starter: starter.to_string(),
             filter: filter.to_string(),
@@ -808,8 +922,12 @@ impl Engine {
         let name = if name.trim().is_empty() { default_run_name(filter, scope) } else { name.trim().to_string() };
         let run_id = self.store.new_run_id(&name);
         fs::create_dir_all(self.store.run_dir(&run_id))?;
+        // the run's log: the console with full error messages and the failures' traces
+        let mut log_file = OpenOptions::new().create(true).append(true).open(self.store.run_dir(&run_id).join("run.log"))?;
+        writeln!(log_file, "=== {} packshot {}", chrono::Local::now().to_rfc3339(), args_line)?;
+        self.log_file = Some(log_file);
         let slots = self.total_slots();
-        let meta = self.run_meta(&run_id, args_line, filter, scope, n, n.div_ceil(self.block_size().max(1)), self.block_size());
+        let meta = self.run_meta(&run_id, args_line, filter, scope, n, n.div_ceil(self.export_size().max(1)), self.export_size());
         let record = RunInfo {
             id: run_id.clone(),
             name,
@@ -851,15 +969,57 @@ impl Engine {
 
     /// Blenders in the cluster: the own plus the slots of the participating nodes with a matching version
     pub fn total_slots(&self) -> usize {
-        self.max_renderers + self.usable_nodes().iter().map(|(_, slots)| slots).sum::<usize>()
+        self.max_renderers + self.usable_nodes().iter().map(|(_, h)| if h.render { h.slots } else { 0 }).sum::<usize>()
     }
 
-    /// Next block size: remainder / (3 × Blenders in the cluster), at least 10, at most --chunk; for small remainders
-    /// such that every Blender gets something
-    pub fn block_size(&self) -> usize {
-        let rem = self.run.as_ref().map(|r| r.pending.len()).unwrap_or(0).max(1);
-        let total = self.total_slots().max(1);
-        rem.div_ceil(3 * total).max(10).min(self.cfg.chunk.max(1)).min(rem.div_ceil(total)).max(1)
+    /// export-batch processes in the cluster: the own plus those of the participating nodes
+    pub fn export_slots(&self) -> usize {
+        (if self.me.export { self.exporters_now() } else { 0 }) + self.usable_nodes().iter().map(|(_, h)| if h.export { h.exporters } else { 0 }).sum::<usize>()
+    }
+
+    /// Next export chunk: the items to export / (3 × export processes in the cluster), see `guided`
+    pub fn export_size(&self) -> usize {
+        guided(self.run.as_ref().map(|r| r.todo.len()).unwrap_or(0), self.export_slots(), self.cfg.chunk)
+    }
+
+    /// Next render chunk: the items not in a render chunk yet / (3 × Blenders in the cluster), see `guided`
+    pub fn render_size(&self) -> usize {
+        guided(self.render_rem(), self.total_slots(), self.cfg.chunk)
+    }
+
+    fn render_rem(&self) -> usize {
+        let exporting: usize = self.workers.iter().filter(|w| w.kind == Kind::Export).map(|w| w.order.len() - w.reported.len() + w.exported.len()).sum();
+        self.run.as_ref().map(|r| r.todo.len() + r.pool.len()).unwrap_or(0) + exporting
+    }
+
+    /// The nodes taking part with their processes of a kind and their assessed rate per process (LOCAL: this one)
+    fn node_rates(&self, export: bool) -> Vec<(u64, usize, Option<f64>)> {
+        let mut out = Vec::new();
+        if !export {
+            out.push((LOCAL, self.max_renderers, proc_rate(&self.me, false)));
+        } else if self.me.export {
+            out.push((LOCAL, self.exporters_now(), proc_rate(&self.me, true)));
+        }
+        for (c, h) in self.usable_nodes() {
+            match export {
+                false if h.render => out.push((c, h.slots, proc_rate(&h, false))),
+                true if h.export => out.push((c, h.exporters, proc_rate(&h, true))),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Next render chunk for the node on `conn`: proportional to its assessed rate (smaller on slow nodes, so the
+    /// tail does not wait for them), the plain size without rates
+    pub fn render_size_for(&self, conn: u64) -> usize {
+        sized(self.render_size(), rate_share(&self.node_rates(false), conn), self.cfg.chunk, self.render_rem())
+    }
+
+    /// Next export chunk for the node on `conn`, like render_size_for
+    pub fn export_size_for(&self, conn: u64) -> usize {
+        let rem = self.run.as_ref().map(|r| r.todo.len()).unwrap_or(0);
+        sized(self.export_size(), rate_share(&self.node_rates(true), conn), self.cfg.chunk, rem)
     }
 
     /// Make another set the target set (Sets view, Enter); its folder is checked against its chain
@@ -888,25 +1048,16 @@ impl Engine {
         self.run.as_ref().is_some_and(|r| r.finished.is_none())
     }
 
-    /// Aborts: end child processes, save state; what is missing stays for the next run
+    /// Aborts: end the chunks' processes (here and on the nodes), save state; what is missing stays for the next run
     pub fn abort(&mut self) {
-        for w in &mut self.workers {
-            if let Some(c) = w.child.as_mut() {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
-            if w.node.is_some() {
-                if let Some(h) = self.hub.as_ref() {
-                    h.send(w.conn, crate::net::Msg::Cancel { id: w.remote }, crate::net::Payload::None);
-                }
-            }
+        for (conn, id) in self.workers.iter().map(|w| (w.conn, w.chunk)).collect::<Vec<_>>() {
+            self.dispatch(conn, Msg::Cancel { id }, Payload::None);
         }
         self.workers.clear();
-        if let Some(r) = self.run.as_mut() {
-            if r.finished.is_none() {
-                r.finished = Some(Instant::now());
-                r.aborted = true;
-            }
+        self.end_local();
+        if let Some(r) = self.run.as_mut() && r.finished.is_none() {
+            r.finished = Some(Instant::now());
+            r.aborted = true;
         }
         if self.run.as_ref().is_some_and(|r| r.aborted) {
             self.note(Level::Info, "Run aborted");
@@ -950,166 +1101,141 @@ impl Engine {
         self.stats = self.store.last_stats();
     }
 
-    fn spawn(&mut self, kind: Kind, block: usize, mut cmd: Command, order: Vec<usize>, out_map: HashMap<String, usize>) -> Result<()> {
-        let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
-        let id = self.next_id;
-        self.next_id += 1;
-        for (stream, stderr) in [(child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>), false), (child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>), true)] {
-            let Some(stream) = stream else { continue };
-            let tx = self.tx.clone();
-            thread::spawn(move || {
-                let mut reader = BufReader::new(stream);
-                let mut buf = Vec::new();
-                while reader.read_until(b'\n', &mut buf).unwrap_or(0) > 0 {
-                    let line = String::from_utf8_lossy(&buf).trim_end().to_string();
-                    buf.clear();
-                    if tx.send(Ev::Line { id, line, stderr }).is_err() {
-                        return;
-                    }
-                }
-                let _ = tx.send(Ev::Eof { id });
-            });
-        }
-        self.push_worker(id, kind, block, Some(child), None, 0, 0, order, out_map);
-        Ok(())
-    }
-
     /// Register a worker; the slot number counts per machine (local or per node)
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn push_worker(&mut self, id: u64, kind: Kind, block: usize, child: Option<Child>, node: Option<String>, conn: u64, remote: u64, order: Vec<usize>, out_map: HashMap<String, usize>) {
+    pub(crate) fn push_worker(&mut self, kind: Kind, chunk: u64, node: Option<String>, conn: u64, order: Vec<usize>) {
         let used: HashSet<usize> = self.workers.iter().filter(|w| w.kind == kind && w.node == node).map(|w| w.slot).collect();
         let slot = (1..).find(|s| !used.contains(s)).unwrap_or(1);
         let now = Instant::now();
         let host = node.clone().unwrap_or_else(|| self.me.name.clone());
-        self.workers.push(Worker {
-            id,
-            kind,
-            slot,
-            block,
-            child,
-            host,
-            package: false,
-            node,
-            conn,
-            remote,
-            order,
-            reported: HashSet::new(),
-            exported: HashSet::new(),
-            since: now,
-            started: now,
-            item_secs: 0.0,
-            eof: 0,
-            stderr_tail: String::new(),
-            out_map,
-        });
+        self.workers.push(Worker { kind, slot, chunk, host, node, conn, order, reported: HashSet::new(), exported: Vec::new(), fetched: false, since: now, started: now, item_secs: 0.0 });
     }
 
-    pub(crate) fn new_worker_id(&mut self) -> u64 {
-        self.next_id += 1;
-        self.next_id - 1
-    }
-
-    fn start_export(&mut self, b: usize) {
-        let run = self.run.as_ref().unwrap();
-        let block = &run.blocks[b];
-        let root = block.root.clone();
-        let items = block.items.clone();
-        let _ = fs::remove_dir_all(&root);
-        let jobs: Vec<_> = items.iter().map(|&t| json!({ "name": self.targets[t].entity, "output": root, "worn": self.targets[t].worn })).collect();
-        let jobs_file = root.join("jobs.json");
-        let res = fs::create_dir_all(&root).and_then(|_| fs::write(&jobs_file, serde_json::to_vec(&jobs).unwrap_or_default())).map_err(anyhow::Error::from).and_then(|_| {
-            let mut cmd = Command::new(&self.cfg.starbreaker);
-            // --variant-tags: paint variants with their SubGeometry; --icon-files: without animations and diagnostics
-            cmd.arg("entity").arg("export-batch").arg(&jobs_file).arg("--p4k").arg(&self.cfg.p4k).args(["--kind", "decomposed", "--variant-tags", "--icon-files"]);
-            self.spawn(Kind::Export, b, cmd, items.clone(), HashMap::new())
-        });
-        match res {
-            Ok(()) => {
-                let worker = self.workers.last().map(Worker::label).unwrap_or_default();
-                self.emit("export_start", json!({ "block": b, "worker": worker, "items": items.len() }));
+    /// A message to the node doing a chunk: this node's own Renderer (LOCAL) or another node
+    pub(crate) fn dispatch(&mut self, conn: u64, msg: Msg, payload: Payload) {
+        if conn == LOCAL {
+            let mut lines = Vec::new();
+            if let Some(s) = self.serve.as_mut() {
+                s.on_msg(self.hub.as_ref(), LOCAL, msg, None, &mut |l| lines.push(l));
             }
-            Err(e) => {
-                for t in items {
-                    self.record(t, false, Some(format!("export-batch does not start: {e}")), 0.0, "export", "");
+            for l in lines {
+                self.note(Level::Info, l);
+            }
+        } else if let Some(h) = self.hub.as_ref() {
+            h.send(conn, msg, payload);
+        }
+    }
+
+    /// Pose and rig from this node's DataCore tables (`rig` then is the path of its rig file); the items without
+    /// a rig with why
+    pub(crate) fn fill_items(&self, jobs: Vec<ItemJob>) -> (Vec<ItemJob>, Vec<(usize, String)>) {
+        let mut out = Vec::new();
+        let mut bad = Vec::new();
+        for mut j in jobs {
+            match self.tables.rig(&j.kind, &j.sub_type) {
+                Ok(rig) => {
+                    j.rig = rig.to_string_lossy().to_string();
+                    j.pose = self.tables.pose(&j.kind, &j.sub_type);
+                    out.push(j);
                 }
-                self.finish_block(b);
+                Err(e) => bad.push((j.item, format!("rig: {e}"))),
             }
         }
+        (out, bad)
     }
 
-    fn start_render(&mut self, b: usize) {
-        let run = self.run.as_ref().unwrap();
-        let block = &run.blocks[b];
-        let mut order = Vec::new();
-        let mut jobs = Vec::new();
-        let mut out_map = HashMap::new();
-        let mut problems = Vec::new();
-        // exported on another node: the jobs came with the block, paths relative to its folder
-        if let Some(remote) = block.jobs.as_ref() {
-            for j in remote {
-                let rel = |p: &str| crate::net::safe_rel(p).map(|r| block.root.join(r));
-                let (Some(src), Some(rig)) = (rel(&j.src), rel(&j.rig)) else {
-                    problems.push((j.item, format!("unsafe path {} / {}", j.src, j.rig)));
-                    continue;
-                };
-                let out = self.render_png(j.item);
-                out_map.insert(out.to_string_lossy().to_lowercase(), j.item);
-                jobs.push(json!({ "src": src, "out": out, "pose": j.pose, "rig": rig, "size": j.size }));
-                order.push(j.item);
-            }
-        }
-        for &t in &block.items {
-            let Some(pkg) = block.packages.get(&t) else { continue };
-            match self.pose_rig(t) {
-                Ok((pose, rig)) => {
-                    let out = self.render_png(t);
-                    out_map.insert(out.to_string_lossy().to_lowercase(), t);
-                    jobs.push(json!({ "src": pkg.join("scene.blend"), "out": out, "pose": pose, "rig": rig, "size": self.cfg.size }));
-                    order.push(t);
-                }
-                Err(e) => problems.push((t, e.to_string())),
-            }
-        }
-        for (t, e) in problems {
-            self.record(t, false, Some(e), 0.0, "render", "");
-        }
-        if jobs.is_empty() {
-            self.finish_block(b);
+    /// An export chunk to a node (LOCAL: here); it exports with its own Data.p4k and tables and holds the result
+    fn start_export_chunk(&mut self, conn: u64, node: Option<String>, items: Vec<usize>) {
+        let id = self.next_remote;
+        self.next_remote += 1;
+        let jobs: Vec<ItemJob> = items
+            .iter()
+            .map(|&t| {
+                let tg = &self.targets[t];
+                ItemJob { item: t, entity: tg.entity.clone(), worn: tg.worn, kind: tg.kind.clone(), sub_type: tg.sub_type.clone(), pose: [0.0; 3], rig: String::new() }
+            })
+            .collect();
+        let n = items.len();
+        self.push_worker(Kind::Export, id, node, conn, items);
+        let worker = self.workers.last().map(Worker::label).unwrap_or_default();
+        self.emit("export_start", json!({ "block": id, "worker": worker, "items": n }));
+        if conn != LOCAL {
+            self.dispatch(conn, Msg::Export { id, jobs }, Payload::None);
             return;
         }
-        let jobs_file = self.cfg.work.join(format!("render-jobs-b{b}.json"));
-        let res = fs::write(&jobs_file, serde_json::to_vec(&jobs).unwrap_or_default()).map_err(anyhow::Error::from).and_then(|_| {
-            let mut cmd = Command::new(&self.cfg.blender);
-            // Vulkan: under OpenGL the render phase (shader compilation) grew with 8 Blenders from 0.21 to 0.86 s,
-            // under Vulkan it stayed at 0.30 s; the images differ by 0.04/255 on average (2026-11-02)
-            cmd.arg("-b").arg("--gpu-backend").arg("vulkan").arg("--python").arg(&self.cfg.render_script).arg("--").arg("--jobs").arg(&jobs_file);
-            self.spawn(Kind::Render, b, cmd, order.clone(), out_map)
-        });
-        match res {
-            Ok(()) => {
-                let worker = self.workers.last().map(Worker::label).unwrap_or_default();
-                let wait = self.run.as_ref().and_then(|r| r.blocks[b].ready_at).map(|t| round3(t.elapsed().as_secs_f64()));
-                self.emit("render_start", json!({ "block": b, "worker": worker, "items": order.len(), "queue_wait": wait }));
-            }
-            Err(e) => {
-                for t in order {
-                    self.record(t, false, Some(format!("Blender does not start: {e}")), 0.0, "render", "");
-                }
-                self.finish_block(b);
-            }
+        let (jobs, bad) = self.fill_items(jobs);
+        for (item, error) in bad {
+            self.on_item_exported(LOCAL, id, item, false, 0.0, error, None);
+        }
+        if jobs.is_empty() {
+            self.on_export_done(LOCAL, id, None, 0.0, 0.0, String::new(), 0, Vec::new());
+        } else {
+            self.dispatch(LOCAL, Msg::Export { id, jobs }, Payload::None);
         }
     }
 
-    /// Result of an item (export failure or render result)
+    /// A render chunk to a rendering node (LOCAL: here): items of the pool with their holders; the node fetches what
+    /// it does not hold itself
+    fn start_render_chunk(&mut self, conn: u64, node: Option<String>, items: Vec<usize>, waits: Vec<f64>) {
+        // placed: a later requeue counts again
+        if let Some(run) = self.run.as_mut() {
+            for t in &items {
+                run.uncounted.remove(t);
+            }
+        }
+        let id = self.next_remote;
+        self.next_remote += 1;
+        let renderer = node.clone().unwrap_or_else(|| self.me.name.clone());
+        let Some(run) = self.run.as_ref() else { return };
+        let jobs: Vec<RenderJob> = items
+            .iter()
+            .map(|&t| {
+                let chunk = run.held.get(&t).copied().unwrap_or_default();
+                let holder = run.xchunks.get(&chunk).map(|x| x.node.clone()).unwrap_or_default();
+                RenderJob { item: t, entity: self.targets[t].entity.clone(), holder, chunk }
+            })
+            .collect();
+        let mut holders: Vec<String> = jobs.iter().map(|j| j.holder.clone()).collect();
+        holders.sort();
+        holders.dedup();
+        let n = items.len();
+        self.push_worker(Kind::Render, id, node, conn, items.clone());
+        if let Some(w) = self.workers.last_mut() {
+            w.fetched = holders.iter().all(|h| *h == renderer);
+        }
+        let worker = self.workers.last().map(Worker::label).unwrap_or_default();
+        let wait = if waits.is_empty() { 0.0 } else { waits.iter().sum::<f64>() / waits.len() as f64 };
+        self.emit("render_start", json!({ "block": id, "worker": worker, "items": n, "queue_wait": round3(wait), "holders": holders }));
+        // the other nodes render with the head node's render.py
+        let (files, payload) = if conn == LOCAL {
+            (Vec::new(), Payload::None)
+        } else {
+            match fs::metadata(&self.cfg.render_script) {
+                Ok(m) => (vec![crate::net::FileEntry { path: "render.py".into(), size: m.len() }], Payload::Files(vec![self.cfg.render_script.clone()])),
+                Err(e) => {
+                    self.workers.pop();
+                    for t in items {
+                        self.record(t, false, Some(format!("render.py: {e}")), 0.0, "render", "");
+                    }
+                    return;
+                }
+            }
+        };
+        self.dispatch(conn, Msg::Render { id, size: self.cfg.size, jobs, files }, payload);
+    }
+
+    /// Result of an item (export failure or render result); a failure's first line is the message, further lines the
+    /// output of the process before it (traceback, last lines), which goes into run.log and events.jsonl
     pub(crate) fn record(&mut self, t: usize, ok: bool, error: Option<String>, seconds: f64, what: &str, detail: &str) {
         let entity = self.targets[t].entity.clone();
+        let (error, trace) = match error.as_deref().map(str::trim).and_then(|e| e.split_once('\n')) {
+            Some((msg, trace)) => (Some(msg.trim().to_string()), trace.trim().to_string()),
+            None => (error.map(|e| e.trim().to_string()), String::new()),
+        };
         // A success is already in the run (place_icons), a failure goes in here
-        if !ok {
-            if let Some(rec) = self.record.as_mut() {
-                let r = EntityResult { ok: false, error: error.clone(), files: Vec::new() };
-                self.resolved.apply(&rec.id, &entity, &r);
-                rec.entities.insert(entity.clone(), r);
-            }
+        if !ok && let Some(rec) = self.record.as_mut() {
+            let r = EntityResult { ok: false, error: error.clone(), files: Vec::new() };
+            self.resolved.apply(&rec.id, &entity, &r);
+            rec.entities.insert(entity.clone(), r);
         }
         let Some(run) = self.run.as_mut() else { return };
         let i = run.done() + 1;
@@ -1128,12 +1254,17 @@ impl Engine {
             run.done_at.push(Instant::now());
             let e = error.unwrap_or_default();
             self.note(Level::Error, format!("[{i:>w$}/{total}] {what:<6} {entity}  FAILED {e}{detail}"));
-            self.emit("failure", json!({ "entity": entity, "stage": what, "error": e }));
-            self.errors.push((t, e));
-            if let Some(b) = self.run.as_mut().and_then(|r| r.blocks.iter_mut().find(|b| b.items.contains(&t))) {
-                b.failed = true;
+            // the trace only into the files, the views stay one line per item
+            if let Some(f) = self.log_file.as_mut() {
+                for l in trace.lines() {
+                    let _ = writeln!(f, "    | {l}");
+                }
             }
+            let trace = if trace.is_empty() { serde_json::Value::Null } else { json!(trace) };
+            self.emit("failure", json!({ "entity": entity, "stage": what, "error": e, "trace": trace }));
+            self.errors.push((t, e));
         }
+        self.drop_held(t);
     }
 
     /// The finished image into the run (one file per UUID) and as hardlinks into the target set; the entity's old ones go
@@ -1153,47 +1284,226 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn finish_block(&mut self, b: usize) {
-        self.persist();
+    /// An item leaves its holder's account (done, failed, or exported again): the holder releases its export chunk
+    /// once none of its items is open
+    fn drop_held(&mut self, t: usize) {
         let Some(run) = self.run.as_mut() else { return };
-        let block = &run.blocks[b];
-        // Export gone after the render (the full set would be gigabytes); with failures it stays for diagnosis
-        if !block.failed {
-            let _ = fs::remove_dir_all(&block.root);
+        let Some(x) = run.held.remove(&t) else { return };
+        let Some(c) = run.xchunks.get_mut(&x) else { return };
+        c.open = c.open.saturating_sub(1);
+        if c.open == 0 {
+            let conn = c.conn;
+            run.xchunks.remove(&x);
+            self.dispatch(conn, Msg::Release { chunks: vec![x] }, Payload::None);
         }
-        let _ = fs::remove_file(self.cfg.work.join(format!("render-jobs-b{b}.json")));
     }
 
-    fn on_line(&mut self, idx: usize, line: String, stderr: bool) {
-        let kind = self.workers[idx].kind;
-        if kind == Kind::Render {
-            let label = self.workers[idx].label();
-            if let Some(f) = self.blender_log.as_mut() {
-                let _ = writeln!(f, "[{label}] {line}");
-            }
-            if stderr {
-                return;
-            }
-            // render.py: "icon: <png> <info>" / "failed: <png> <error>"
-            let (ok, rest) = if let Some(r) = line.trim().strip_prefix("icon: ") {
-                (true, r)
-            } else if let Some(r) = line.trim().strip_prefix("failed: ") {
-                (false, r)
-            } else {
-                return;
-            };
-            let Some(end) = rest.to_lowercase().find(".png") else { return };
-            let path = rest[..end + 4].to_lowercase();
-            let info = rest[end + 4..].trim().to_string();
-            let Some(&t) = self.workers[idx].out_map.get(&path) else { return };
-            self.render_result(idx, t, ok, info);
+    /// An item goes back: to be exported again (its holder is gone) or into the pool (its holder still has it), in
+    /// front. A `counted` requeue counts against the item (after MAX_REQUEUES it fails with the reason); a `culprit`
+    /// (the item its chunk was stuck on) also goes to the back, so the items behind it get their turn first
+    pub(crate) fn requeue(&mut self, t: usize, export_again: bool, reason: &str, counted: bool, culprit: bool) {
+        let Some(run) = self.run.as_mut() else { return };
+        if run.finished.is_some() {
             return;
         }
-        self.export_line(idx, line, stderr);
+        // one incident counts once: an item an Unfetched put back, not placed since, is not counted again
+        let counted = counted && !run.uncounted.remove(&t);
+        if export_again {
+            run.unreachable.remove(&t);
+        }
+        let n = run.requeues.entry(t).or_default();
+        if counted {
+            *n += 1;
+        }
+        let n = *n;
+        if n > MAX_REQUEUES {
+            self.record(t, false, Some(format!("gave up after {MAX_REQUEUES} requeues: {reason}")), 0.0, if export_again { "export" } else { "render" }, "");
+            return;
+        }
+        let entity = self.targets[t].entity.clone();
+        self.emit("requeue", json!({ "entity": entity, "reason": reason, "count": n, "counted": counted, "to": if export_again { "export" } else { "render" } }));
+        if export_again {
+            self.drop_held(t);
+        }
+        let Some(run) = self.run.as_mut() else { return };
+        match (export_again, culprit) {
+            (true, false) => run.todo.push_front(t),
+            (true, true) => run.todo.push_back(t),
+            (false, false) => run.pool.push_front((t, Instant::now())),
+            (false, true) => run.pool.push_back((t, Instant::now())),
+        }
     }
 
-    /// Result of a render (locally from the icon: line, from the node via the item message; the PNG is then already
-    /// at render_png)
+    /// Open items of a chunk that is given up back: an export's to be exported again (those exported already too: its
+    /// node keeps nothing of it), a render's into the pool while their holder is there, else to be exported again.
+    /// `stuck`: it timed out, only the item it was working on counts (the culprit), the others go back as they were;
+    /// else (its node dropped) every one counts
+    pub(crate) fn requeue_open(&mut self, w: &Worker, reason: &str, stuck: bool) {
+        let open: Vec<usize> = w.order.iter().copied().filter(|t| !w.reported.contains(t) || w.exported.contains(t)).collect();
+        let current = w.current();
+        // every item reported and still no end (an export that never sends ExportDone): no culprit, every one counts,
+        // so it ends
+        let stuck = stuck && current.is_some();
+        for t in open.into_iter().rev() {
+            let held = self.run.as_ref().is_some_and(|r| r.held.get(&t).is_some_and(|x| r.xchunks.contains_key(x)));
+            let culprit = stuck && Some(t) == current;
+            self.requeue(t, w.kind == Kind::Export || !held, reason, !stuck || culprit, culprit);
+        }
+    }
+
+    /// An item of an export chunk exported (or failed) on its node
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn on_item_exported(&mut self, conn: u64, chunk: u64, t: usize, ok: bool, seconds: f64, error: String, worn: Option<bool>) {
+        let Some(idx) = self.workers.iter().position(|w| w.kind == Kind::Export && w.conn == conn && w.chunk == chunk) else { return };
+        let w = &mut self.workers[idx];
+        if !w.order.contains(&t) || !w.reported.insert(t) {
+            return;
+        }
+        w.since = Instant::now();
+        w.item_secs += seconds;
+        let worker = w.label();
+        self.emit("export_item", json!({
+            "entity": self.targets[t].entity, "block": chunk, "worker": worker, "seconds": round3(seconds), "ok": ok, "worn": worn,
+            "error": if ok { serde_json::Value::Null } else { json!(error) },
+        }));
+        if ok {
+            self.workers[idx].exported.push(t);
+            if let Some(run) = self.run.as_mut() {
+                run.exported += 1;
+            }
+        } else {
+            self.record(t, false, Some(if error.is_empty() { "export failed".into() } else { error }), seconds, "export", "");
+        }
+    }
+
+    /// An export chunk's process ended on its node: its exported items go into the pool, held there; items without a
+    /// result failed
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn on_export_done(&mut self, conn: u64, id: u64, exit: Option<i32>, wall: f64, item_seconds: f64, error: String, long_paths: usize, failed: Vec<(usize, String)>) {
+        let Some(idx) = self.workers.iter().position(|w| w.kind == Kind::Export && w.conn == conn && w.chunk == id) else {
+            // an export chunk given up already (timed out, its run over): its node must not keep holding it
+            self.dispatch(conn, Msg::Release { chunks: vec![id] }, Payload::None);
+            return;
+        };
+        let w = self.workers.remove(idx);
+        let missing: Vec<usize> = w.order.iter().copied().filter(|t| !w.reported.contains(t)).collect();
+        let worker = w.label();
+        let wall = if conn == LOCAL || wall > 0.0 { wall } else { w.started.elapsed().as_secs_f64() };
+        self.emit("export_end", json!({
+            "block": id, "worker": worker, "items": w.order.len(), "missing": missing.len(), "wall": round3(wall),
+            "item_seconds": round3(item_seconds.max(w.item_secs)), "exit": exit, "long_paths": long_paths,
+        }));
+        if long_paths > 0 {
+            self.note(Level::Error, format!("Export chunk {id} on {}: {long_paths} paths over 259 characters, put --work in a shorter folder", w.host));
+        }
+        let error = if error.trim().is_empty() { format!("export-batch ended early (exit {exit:?})") } else { error };
+        for t in missing {
+            self.record(t, false, Some(error.clone()), 0.0, "export", "");
+        }
+        let bad: HashSet<usize> = failed.iter().map(|(t, _)| *t).collect();
+        for (t, e) in failed {
+            if w.exported.contains(&t) {
+                self.record(t, false, Some(e), 0.0, "export", "");
+            }
+        }
+        let held: Vec<usize> = w.exported.iter().copied().filter(|t| !bad.contains(t)).collect();
+        self.persist();
+        let Some(run) = self.run.as_mut().filter(|r| r.finished.is_none()) else { return };
+        if held.is_empty() {
+            return;
+        }
+        run.xchunks.insert(id, XChunk { node: w.host.clone(), conn, open: held.len() });
+        let now = Instant::now();
+        for t in held {
+            run.held.insert(t, id);
+            run.pool.push_back((t, now));
+        }
+    }
+
+    /// A render chunk's files are on its node
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn on_fetched(&mut self, conn: u64, id: u64, holders: Vec<String>, bytes: u64, cached: u64, files: usize, secs: f64) {
+        let Some(w) = self.workers.iter_mut().find(|w| w.kind == Kind::Render && w.conn == conn && w.chunk == id) else { return };
+        w.fetched = true;
+        // the first render's time counts from here
+        w.since = Instant::now();
+        let worker = w.label();
+        self.transferred += bytes;
+        self.emit("fetch", json!({ "block": id, "worker": worker, "holders": holders, "bytes": bytes, "cached": cached, "files": files, "secs": round3(secs) }));
+    }
+
+    /// Items of a render chunk that did not get their files on its node: out of the chunk and back, to be exported
+    /// again when `export` (their holder lost a file) or their holder is gone here, else into the pool for another
+    /// renderer (their holder is still there but not reachable from that node), or exported again when every
+    /// renderer has reported it cannot reach that holder; every one counts
+    pub(crate) fn on_unfetched(&mut self, conn: u64, block: u64, items: Vec<usize>, reason: String, export: bool) {
+        let Some(w) = self.workers.iter_mut().find(|w| w.kind == Kind::Render && w.conn == conn && w.chunk == block) else { return };
+        let host = w.host.clone();
+        let items: Vec<usize> = items.into_iter().filter(|t| w.order.contains(t) && !w.reported.contains(t)).collect();
+        w.order.retain(|t| !items.contains(t));
+        let renderers = self.renderer_hosts();
+        for t in items.into_iter().rev() {
+            let Some(run) = self.run.as_mut() else { return };
+            let held = run.held.get(&t).is_some_and(|x| run.xchunks.contains_key(x));
+            let mut again = export || !held;
+            if !again {
+                let tried = run.unreachable.entry(t).or_default();
+                tried.insert(host.clone());
+                again = renderers.iter().all(|r| tried.contains(r));
+            }
+            self.requeue(t, again, &reason, true, false);
+            if let Some(run) = self.run.as_mut().filter(|r| !again && r.held.contains_key(&t)) {
+                run.uncounted.insert(t);
+            }
+        }
+    }
+
+    /// Host names of the nodes that render for this run, this one included when it renders
+    fn renderer_hosts(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.usable_nodes().into_iter().filter(|(_, h)| h.render && h.slots > 0).map(|(_, h)| h.name).collect();
+        if self.max_renderers > 0 {
+            out.push(self.me.name.clone());
+        }
+        out
+    }
+
+    /// A render result from a node (LOCAL: this one): the PNG comes as the payload
+    pub(crate) fn on_item(&mut self, conn: u64, block: u64, item: usize, ok: bool, info: String, data: &[u8]) {
+        let Some(idx) = self.workers.iter().position(|w| w.kind == Kind::Render && w.conn == conn && w.chunk == block) else { return };
+        if !self.workers[idx].order.contains(&item) {
+            return;
+        }
+        let (ok, info) = if ok {
+            match fs::write(self.render_png(item), data) {
+                Ok(()) => (true, info),
+                Err(e) => (false, format!("image from {} not written: {e}", self.workers[idx].host)),
+            }
+        } else {
+            (false, info)
+        };
+        self.render_result(idx, item, ok, info);
+    }
+
+    /// A render chunk's Blender ended: items without a result failed (why and its last lines from the node)
+    pub(crate) fn on_block_done(&mut self, conn: u64, id: u64, exit: Option<i32>, error: String) {
+        let Some(idx) = self.workers.iter().position(|w| w.kind == Kind::Render && w.conn == conn && w.chunk == id) else { return };
+        let w = self.workers.remove(idx);
+        let missing: Vec<usize> = w.order.iter().copied().filter(|t| !w.reported.contains(t)).collect();
+        let worker = w.label();
+        self.emit("render_end", json!({ "block": id, "worker": worker, "items": w.order.len(), "missing": missing.len(), "wall": round3(w.started.elapsed().as_secs_f64()), "exit": exit }));
+        for t in missing {
+            let error = match &w.node {
+                Some(n) if !error.trim().is_empty() => format!("{n}: {}", error.trim()),
+                Some(n) => format!("no image from {n} (Blender aborted?)"),
+                None if !error.trim().is_empty() => error.clone(),
+                None => format!("no image (Blender aborted, exit {exit:?}?)"),
+            };
+            self.record(t, false, Some(error), 0.0, "render", "");
+        }
+        self.persist();
+    }
+
+    /// Result of a render (the PNG is already at render_png)
     pub(crate) fn render_result(&mut self, idx: usize, t: usize, ok: bool, info: String) {
         let w = &mut self.workers[idx];
         if !w.reported.insert(t) {
@@ -1201,13 +1511,13 @@ impl Engine {
         }
         let seconds = w.since.elapsed().as_secs_f64();
         w.since = Instant::now();
-        let (block, worker) = (w.block, w.label());
+        let (block, worker) = (w.chunk, w.label());
         let timing = parse_timing(&info);
         let phases: serde_json::Map<String, serde_json::Value> = timing.map(|ph| PHASES.iter().zip(ph).map(|(k, v)| (k.to_string(), json!(v))).collect()).unwrap_or_default();
         self.emit("render_item", json!({
             "entity": self.targets[t].entity, "block": block, "worker": worker, "wall": round3(seconds), "ok": ok,
             "phases": if timing.is_some() { serde_json::Value::Object(phases) } else { serde_json::Value::Null },
-            "error": if ok { serde_json::Value::Null } else { json!(info) },
+            "error": if ok { serde_json::Value::Null } else { json!(info.lines().next().unwrap_or("")) },
         }));
         if ok {
             if let Err(e) = self.place_icons(t) {
@@ -1231,135 +1541,129 @@ impl Engine {
         }
     }
 
-    fn export_line(&mut self, idx: usize, line: String, stderr: bool) {
-        if stderr {
-            let w = &mut self.workers[idx];
-            w.stderr_tail.push_str(&line);
-            w.stderr_tail.push('\n');
-            keep_tail(&mut w.stderr_tail, 4000);
-            return;
+    /// This node's work: its Renderer's processes (for its own runs and other nodes'), its messages to this node's
+    /// engine
+    fn work(&mut self) {
+        let export_slots = self.exporters_now();
+        let mut lines = Vec::new();
+        let mut local = Vec::new();
+        if let Some(s) = self.serve.as_mut() {
+            s.slots = self.max_renderers;
+            s.export_slots = export_slots;
+            s.tick(self.hub.as_ref(), Duration::ZERO, &mut |l| lines.push(l));
+            local = std::mem::take(&mut s.local);
         }
-        // export-batch: one JSON line per job {name, ok, package, worn, seconds, error}
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else { return };
-        let name = v["name"].as_str().unwrap_or_default().to_lowercase();
-        let w = &self.workers[idx];
-        let Some(&t) = w.order.iter().find(|&&t| self.targets[t].entity.to_lowercase() == name) else { return };
-        let b = w.block;
-        let worker = w.label();
-        let secs = v["seconds"].as_f64().unwrap_or(0.0);
-        self.workers[idx].reported.insert(t);
-        self.workers[idx].since = Instant::now();
-        self.workers[idx].item_secs += secs;
-        self.emit("export_item", json!({
-            "entity": self.targets[t].entity, "block": b, "worker": worker, "seconds": round3(secs),
-            "ok": v["ok"].as_bool() == Some(true), "worn": v["worn"], "error": v["error"],
-        }));
-        if v["ok"].as_bool() == Some(true) {
-            if let Some(pkg) = v["package"].as_str() {
-                if let Some(run) = self.run.as_mut() {
-                    run.blocks[b].packages.insert(t, PathBuf::from(pkg));
-                    run.exported += 1;
-                }
-            }
-        } else {
-            let e = v["error"].as_str().unwrap_or("export failed").to_string();
-            self.record(t, false, Some(e), v["seconds"].as_f64().unwrap_or(0.0), "export", "");
+        for l in lines {
+            self.note(Level::Info, l);
+        }
+        for (msg, data) in local {
+            self.on_msg(LOCAL, msg, data, None);
         }
     }
 
-    pub(crate) fn on_exit(&mut self, idx: usize) {
-        let mut w = self.workers.remove(idx);
-        let status = w.child.as_mut().and_then(|c| c.wait().ok());
-        let b = w.block;
-        let missing: Vec<usize> = w.order.iter().copied().filter(|t| !w.reported.contains(t)).collect();
-        let wall = round3(w.started.elapsed().as_secs_f64());
-        let exit = status.and_then(|s| s.code());
-        let (worker, items) = (w.label(), w.order.len());
-        match w.kind {
-            Kind::Export => {
-                let long = if cfg!(windows) { self.run.as_ref().map(|r| too_long(&r.blocks[b].root, 259).0).unwrap_or(0) } else { 0 };
-                self.emit("export_end", json!({
-                    "block": b, "worker": worker, "items": items, "missing": missing.len(), "wall": wall,
-                    "item_seconds": round3(w.item_secs), "exit": exit, "long_paths": long,
-                }));
-            }
-            Kind::Render => {
-                self.emit("render_end", json!({ "block": b, "worker": worker, "items": items, "missing": missing.len(), "wall": wall, "exit": exit }));
-            }
+    /// This node's holdings and cache of its own run go (run over or aborted)
+    fn end_local(&mut self) {
+        let me = self.me.name.clone();
+        if let Some(s) = self.serve.as_mut() {
+            s.end_run(LOCAL, &me);
         }
-        match w.kind {
-            Kind::Export => {
-                let code_ok = status.is_some_and(|s| s.success());
-                for t in missing {
-                    let tail = w.stderr_tail.trim().lines().last().unwrap_or("").to_string();
-                    self.record(t, false, Some(format!("export-batch aborted {tail}").trim().to_string()), 0.0, "export", "");
-                }
-                if !code_ok && !w.stderr_tail.trim().is_empty() {
-                    let tail = w.stderr_tail.trim().to_string();
-                    self.note(Level::Error, format!("    {tail}"));
-                }
-                let Some(run) = self.run.as_mut() else { return };
-                let root = run.blocks[b].root.clone();
-                let has_packages = !run.blocks[b].packages.is_empty();
-                // On Windows Blender cannot read paths over 259 characters: missing textures silently render white
-                if cfg!(windows) {
-                    let (n, first) = too_long(&root, 259);
-                    if n > 0 {
-                        self.note(Level::Error, format!("Block {}: {n} paths over 259 characters ({}), put --work in a shorter folder", b + 1, first.map(|p| p.display().to_string()).unwrap_or_default()));
-                    }
-                }
-                if has_packages {
-                    let run = self.run.as_mut().unwrap();
-                    run.blocks[b].ready_at = Some(Instant::now());
-                    run.ready.push_back(b);
-                } else {
-                    self.finish_block(b);
-                }
-            }
-            Kind::Render => {
-                for t in missing {
-                    let error = match &w.node {
-                        // the node sends Blender's last line (it keeps the block for diagnosis)
-                        Some(n) => format!("no image from {n} (Blender aborted?) {}", w.stderr_tail.trim()).trim().to_string(),
-                        None if self.render_png(t).exists() => "no result reported (Blender aborted?)".into(),
-                        None => "no image (Blender aborted?)".into(),
-                    };
-                    self.record(t, false, Some(error), 0.0, "render", "");
-                }
-                self.finish_block(b);
-            }
-        }
-        w.order.clear();
     }
 
-    /// One tick: process lines of the child processes, finish ended ones, start new ones
+    /// One tick: the cluster's messages, this node's processes, scheduling, samples
     pub fn tick(&mut self) {
-        let deadline = Instant::now() + Duration::from_millis(30);
-        while let Ok(ev) = self.rx.try_recv() {
-            match ev {
-                Ev::Line { id, line, stderr } => {
-                    if let Some(idx) = self.workers.iter().position(|w| w.id == id) {
-                        self.on_line(idx, line, stderr);
-                    }
-                }
-                Ev::Eof { id } => {
-                    if let Some(w) = self.workers.iter_mut().find(|w| w.id == id) {
-                        w.eof += 1;
-                    }
-                }
-            }
-            if Instant::now() > deadline {
-                break;
-            }
-        }
-        // Both streams closed: the process is done (the last lines are already processed)
-        while let Some(idx) = self.workers.iter().position(|w| w.eof >= 2) {
-            self.on_exit(idx);
-        }
         self.poll_tables();
         self.poll_net();
+        self.poll_assess();
+        self.work();
         self.schedule();
         self.sample();
+    }
+
+    /// Chunks without progress for `chunk_timeout`: cancelled on their node, their open items back
+    /// (a render chunk still fetching its files gets FETCH_TIMEOUTS of them: the transfer is no stall)
+    fn check_timeouts(&mut self) {
+        let timeout = self.chunk_timeout;
+        let fetching = |w: &Worker| w.kind == Kind::Render && !w.fetched;
+        while let Some(idx) = self.workers.iter().position(|w| w.since.elapsed() > if fetching(w) { timeout * FETCH_TIMEOUTS } else { timeout }) {
+            let w = self.workers.remove(idx);
+            let reason = if fetching(&w) {
+                format!("files not fetched in {:.0} s on {}", (timeout * FETCH_TIMEOUTS).as_secs_f64(), w.label())
+            } else {
+                format!("no progress for {:.0} s on {}", timeout.as_secs_f64(), w.label())
+            };
+            self.note(Level::Error, format!("{} chunk {} cancelled: {reason}", if w.kind == Kind::Export { "Export" } else { "Render" }, w.chunk));
+            self.dispatch(w.conn, Msg::Cancel { id: w.chunk }, Payload::None);
+            // a fetch that does not end is not an item's fault: every one counts
+            self.requeue_open(&w, &reason, !fetching(&w));
+        }
+    }
+
+    /// The nodes with a free export process: (connection, node; None = this node, free count)
+    fn free_exporters(&self) -> Vec<(u64, Option<String>, usize)> {
+        let busy = |conn: u64| self.workers.iter().filter(|w| w.kind == Kind::Export && w.conn == conn).count();
+        let mut out = Vec::new();
+        if self.me.export {
+            out.push((LOCAL, None, self.exporters_now().saturating_sub(busy(LOCAL))));
+        }
+        for (c, h) in self.usable_nodes() {
+            if h.export {
+                out.push((c, Some(h.name.clone()), h.exporters.saturating_sub(busy(c))));
+            }
+        }
+        out.retain(|(_, _, free)| *free > 0);
+        out
+    }
+
+    /// The nodes with a free Blender: (connection, node; None = this node, host name, free count)
+    fn free_renderers(&self) -> Vec<(u64, Option<String>, String, usize)> {
+        let busy = |conn: u64| self.workers.iter().filter(|w| w.kind == Kind::Render && w.conn == conn).count();
+        let mut out = vec![(LOCAL, None, self.me.name.clone(), self.max_renderers.saturating_sub(busy(LOCAL)))];
+        for (c, h) in self.usable_nodes() {
+            if h.render {
+                out.push((c, Some(h.name.clone()), h.name.clone(), h.slots.saturating_sub(busy(c))));
+            }
+        }
+        out.retain(|(.., free)| *free > 0);
+        out
+    }
+
+    /// The next render chunk: a free Blender takes the items its own node holds when there are enough, else those of
+    /// the holder with the most waiting (its own on a tie); with fewer than a chunk waiting there it waits while
+    /// exports are going, unless enough wait in all
+    fn pick_render(&self) -> Option<(u64, Option<String>, String, usize)> {
+        let run = self.run.as_ref()?;
+        if run.pool.is_empty() {
+            return None;
+        }
+        let size_of = |conn: u64| self.render_size_for(conn);
+        // per free Blender: what waits for it by holder (without the items it could not reach)
+        let mut free: Vec<_> = self.free_renderers().into_iter().map(|f| {
+            let count = pool_by_holder(run, &f.2);
+            (f, count)
+        }).collect();
+        // the nodes holding enough for a chunk first, then the fastest by assessed rate per process, then the most
+        // free Blenders
+        let rates = self.node_rates(false);
+        free.sort_by(|((ca, _, ha, na), cnt_a), ((cb, _, hb, nb), cnt_b)| {
+            let rank = |c: u64, h: &String, n: usize, cnt: &HashMap<&str, usize>| (cnt.get(h.as_str()).copied().unwrap_or(0) < size_of(c), rate_share(&rates, c), n);
+            renderer_order(rank(*ca, ha, *na, cnt_a), rank(*cb, hb, *nb, cnt_b))
+        });
+        let exporting = self.workers.iter().any(|w| w.kind == Kind::Export);
+        for ((conn, node, host, _), count) in free {
+            let own = |name: &str| count.get(name).copied().unwrap_or(0);
+            let size = size_of(conn);
+            let holder = if own(&host) >= size {
+                host.clone()
+            } else {
+                let Some(best) = count.iter().map(|(h, n)| (*n, *h == host.as_str(), *h)).max() else { continue };
+                best.2.to_string()
+            };
+            let avail = own(&holder);
+            if avail >= size || !exporting || count.values().sum::<usize>() >= size {
+                return Some((conn, node, holder, size.min(avail)));
+            }
+        }
+        None
     }
 
     fn schedule(&mut self) {
@@ -1367,58 +1671,61 @@ impl Engine {
         if run.finished.is_some() {
             return;
         }
+        self.check_timeouts();
         if !self.paused {
-            let slots = self.total_slots();
+            // export chunks while the exported items not rendered yet stay below the backlog (disk on the holders)
             loop {
                 let run = self.run.as_ref().unwrap();
-                let exporting = self.workers.iter().filter(|w| w.kind == Kind::Export).count();
-                // exports only as far ahead as the Blenders in the cluster can take them (disk space)
-                if exporting >= self.exporters_now() || run.pending.is_empty() || exporting + run.ready.len() > slots {
+                if run.todo.is_empty() {
                     break;
                 }
-                // cut the block only now: smaller towards the end of the run
-                let size = self.block_size();
+                let exporting: usize = self.workers.iter().filter(|w| w.kind == Kind::Export).map(|w| w.order.len() - w.reported.len() + w.exported.len()).sum();
+                if run.held.len() + exporting >= BACKLOG * self.total_slots() * self.render_size() {
+                    break;
+                }
+                // the fastest node by its assessed rate per process first, then the most free processes
+                let Some((conn, node, _)) = pick_exporter(self.free_exporters(), &self.node_rates(true)) else { break };
+                // cut the chunk only now: smaller towards the end of the run, by the node's rate
+                let size = self.export_size_for(conn);
                 let run = self.run.as_mut().unwrap();
-                let items: Vec<usize> = (0..size).filter_map(|_| run.pending.pop_front()).collect();
-                let b = run.blocks.len();
-                let root = self.cfg.work.join("export").join(format!("b{b}"));
-                run.blocks.push(Block { items, root, packages: HashMap::new(), jobs: None, failed: false, ready_at: None, package: false });
-                self.start_export(b);
+                let items: Vec<usize> = (0..size).filter_map(|_| run.todo.pop_front()).collect();
+                self.start_export_chunk(conn, node, items);
             }
-            // the other exporting nodes (same state: same Data.p4k and StarBreaker) export packages of their own
-            loop {
-                if self.run.as_ref().unwrap().pending.is_empty() {
-                    break;
-                }
-                let Some(conn) = self.free_exporter() else { break };
-                let size = self.block_size().min(PACKAGE_MAX);
+            // an exported item whose holder is no longer known cannot be fetched: exported again
+            let orphans: Vec<usize> = {
                 let run = self.run.as_mut().unwrap();
-                let items: Vec<usize> = (0..size).filter_map(|_| run.pending.pop_front()).collect();
-                let b = run.blocks.len();
-                let root = self.cfg.work.join("export").join(format!("p{b}"));
-                run.blocks.push(Block { items, root, packages: HashMap::new(), jobs: None, failed: false, ready_at: None, package: true });
-                self.start_package(b, conn);
+                let (out, keep): (Pool, Pool) = run.pool.drain(..).partition(|(t, _)| !run.held.get(t).is_some_and(|x| run.xchunks.contains_key(x)));
+                run.pool = keep;
+                out.into_iter().map(|(t, _)| t).collect()
+            };
+            for t in orphans.into_iter().rev() {
+                self.requeue(t, true, "its holder is gone", true, false);
             }
-            // exported blocks go to free rendering nodes first, so this node keeps its CPU for exporting; the rest renders here
-            loop {
-                if self.run.as_ref().unwrap().ready.is_empty() {
+            // render chunks on free Blenders
+            while let Some((conn, node, holder, n)) = self.pick_render() {
+                let renderer = node.clone().unwrap_or_else(|| self.me.name.clone());
+                let run = self.run.as_mut().unwrap();
+                let mut items = Vec::new();
+                let mut waits = Vec::new();
+                let mut rest = VecDeque::new();
+                while let Some((t, at)) = run.pool.pop_front() {
+                    let here = run.held.get(&t).and_then(|x| run.xchunks.get(x)).is_some_and(|x| x.node == holder) && !run.unreachable.get(&t).is_some_and(|r| r.contains(&renderer));
+                    if here && items.len() < n {
+                        items.push(t);
+                        waits.push(at.elapsed().as_secs_f64());
+                    } else {
+                        rest.push_back((t, at));
+                    }
+                }
+                run.pool = rest;
+                if items.is_empty() {
                     break;
                 }
-                let Some(conn) = self.free_node() else { break };
-                let b = self.run.as_mut().unwrap().ready.pop_front().unwrap();
-                self.start_remote(b, conn);
-            }
-            loop {
-                let rendering = self.workers.iter().filter(|w| w.kind == Kind::Render && w.node.is_none()).count();
-                if rendering >= self.max_renderers {
-                    break;
-                }
-                let Some(b) = self.run.as_mut().unwrap().ready.pop_front() else { break };
-                self.start_render(b);
+                self.start_render_chunk(conn, node, items, waits);
             }
         }
         let run = self.run.as_ref().unwrap();
-        if self.workers.is_empty() && run.ready.is_empty() && run.pending.is_empty() {
+        if self.workers.is_empty() && run.pool.is_empty() && run.todo.is_empty() {
             let r = self.run.as_mut().unwrap();
             r.finished = Some(Instant::now());
             let (ok, failed, mins) = (r.ok, r.failed, r.started.elapsed().as_secs_f64() / 60.0);
@@ -1426,6 +1733,7 @@ impl Engine {
             self.note(Level::Info, format!("Done: {ok} rendered, {failed} failed, {mins:.1} min -> {dir}, set {}", self.set.name));
             self.emit_run_end();
             self.close_record(false);
+            self.end_local();
         }
     }
 
@@ -1436,5 +1744,84 @@ impl Engine {
         let span = window.min(end.duration_since(run.started).as_secs_f64()).max(1.0);
         let n = run.done_at.iter().filter(|t| end.duration_since(**t).as_secs_f64() <= span).count();
         n as f64 * 60.0 / span
+    }
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::*;
+    use crate::net::AssessInfo;
+
+    fn node(render: f64, workers: usize, valid: bool) -> Hello {
+        Hello { assess: Some(AssessInfo { render, export: 4.0, workers, exporters: 2, valid, ..Default::default() }), ..Default::default() }
+    }
+
+    /// The rate at the count a node runs now: from its steps when +/- changed it (fewer Blenders are faster each, more
+    /// share the CPU), scaled like the assessed rate; without steps the assessed rate per process
+    #[test]
+    fn rate_at_actual_count() {
+        let steps = vec![(1, 2.0), (2, 3.6), (4, 6.0), (6, 6.3)];
+        assert_eq!(rate_at(&steps, 3), Some(4.8));
+        assert_eq!(rate_at(&steps, 12), Some(6.3), "flat beyond the last step");
+        assert_eq!(rate_at(&[(2, 4.0)], 1), Some(2.0));
+        assert_eq!(rate_at(&[], 3), None);
+        let mut h = node(6.3, 6, true);
+        h.assess.as_mut().unwrap().steps = steps;
+        h.slots = 6;
+        assert!((proc_rate(&h, false).unwrap() - 1.05).abs() < 1e-9, "the assessed count: as assessed");
+        h.slots = 3;
+        assert!((proc_rate(&h, false).unwrap() - 1.6).abs() < 1e-9, "3 Blender: 4.8 items/s, 1.6 each");
+        h.slots = 12;
+        assert!((proc_rate(&h, false).unwrap() - 6.3 / 12.0).abs() < 1e-9, "12 share what 6 made");
+        // with exports alongside the assessed rate is lower than the step's: the step rates scale by it
+        let mut h = node(5.0, 6, true);
+        h.assess.as_mut().unwrap().steps = vec![(1, 2.0), (2, 3.6), (4, 6.0), (6, 6.3)];
+        h.slots = 3;
+        assert!((proc_rate(&h, false).unwrap() - 5.0 * 4.8 / 6.3 / 3.0).abs() < 1e-9);
+        // old assessments without steps: per process as assessed
+        let mut h = node(6.3, 6, true);
+        h.slots = 3;
+        assert!((proc_rate(&h, false).unwrap() - 1.05).abs() < 1e-9);
+    }
+
+    /// Placement: the fastest free exporter (by assessed rate per process) gets the next export chunk, before the
+    /// one with more free processes; a Blender holding a chunk's worth comes first, then the fastest
+    #[test]
+    fn placement_prefers_fast_nodes() {
+        let rates = vec![(LOCAL, 2, Some(1.0)), (5, 2, Some(3.0)), (6, 4, None)];
+        let free = vec![(LOCAL, None, 2), (5, Some("fast".into()), 1), (6, Some("unrated".into()), 4)];
+        assert_eq!(pick_exporter(free, &rates).map(|f| f.0), Some(5));
+        let none: Vec<(u64, usize, Option<f64>)> = vec![(LOCAL, 2, None), (5, 2, None)];
+        assert_eq!(pick_exporter(vec![(LOCAL, None, 1), (5, Some("b".into()), 2)], &none).map(|f| f.0), Some(5), "no rates: the most free");
+        assert_eq!(pick_exporter(vec![(LOCAL, None, 2), (5, Some("b".into()), 2)], &none).map(|f| f.0), Some(LOCAL), "a tie: this node");
+        let mut order = vec![(true, 2.0, 6), (false, 0.5, 1), (false, 1.5, 1), (true, 0.5, 8)];
+        order.sort_by(|a, b| renderer_order(*a, *b));
+        assert_eq!(order, vec![(false, 1.5, 1), (false, 0.5, 1), (true, 2.0, 6), (true, 0.5, 8)]);
+    }
+
+    /// Chunks by the nodes' assessed rates: a slow node's chunks shrink, a fast one's grow up to --chunk; without
+    /// rates (or with a stale one) every node gets the plain size
+    #[test]
+    fn chunk_size_by_rate() {
+        // per process: DRAGONEGG 6.3/6 = 1.05, servbox 8.1/9 = 0.9, DRAGONVR 1.8/3 = 0.6 items/s
+        let (egg, serv, vr) = (node(6.3, 6, true), node(8.1, 9, true), node(1.8, 3, true));
+        assert!((proc_rate(&egg, false).unwrap() - 1.05).abs() < 1e-9);
+        assert_eq!(proc_rate(&egg, true), Some(2.0));
+        assert_eq!(proc_rate(&node(6.3, 6, false), false), None, "stale: no rate");
+        assert_eq!(proc_rate(&Hello::default(), false), None);
+        let nodes = vec![(0, 6, proc_rate(&egg, false)), (1, 9, proc_rate(&serv, false)), (2, 3, proc_rate(&vr, false))];
+        // mean per process (6.3 + 8.1 + 1.8) / 18 = 0.9
+        let share = |c| rate_share(&nodes, c);
+        assert!((share(0) - 1.05 / 0.9).abs() < 1e-9 && (share(1) - 1.0).abs() < 1e-9 && (share(2) - 0.6 / 0.9).abs() < 1e-9);
+        // early in a run the plain size is --chunk: the fast node stays at 50, the slow one gets 33
+        assert_eq!((sized(50, share(0), 50, 5000), sized(50, share(1), 50, 5000), sized(50, share(2), 50, 5000)), (50, 50, 33));
+        // towards the end (plain 10): 12, 10, 7
+        assert_eq!((sized(10, share(0), 50, 200), sized(10, share(1), 50, 200), sized(10, share(2), 50, 200)), (12, 10, 7));
+        assert_eq!(sized(10, share(0), 50, 3), 3, "never more than is left");
+        // a node without a rate: share 1, the others against the mean of those with one
+        let mixed = vec![(0, 6, proc_rate(&egg, false)), (1, 9, None)];
+        assert_eq!((rate_share(&mixed, 0), rate_share(&mixed, 1)), (1.0, 1.0));
+        let none: Vec<(u64, usize, Option<f64>)> = vec![(0, 6, None), (1, 9, None)];
+        assert_eq!(sized(guided(1000, 15, 50), rate_share(&none, 1), 50, 1000), guided(1000, 15, 50), "no rates: as before");
     }
 }

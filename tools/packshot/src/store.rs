@@ -199,6 +199,11 @@ impl Store {
         Ok(store)
     }
 
+    /// The packshot folder as it is, without creating anything (--report only reads)
+    pub fn open_read(root: &Path) -> Self {
+        Self { root: root.to_path_buf(), runs: HashMap::new() }
+    }
+
     pub fn run_dir(&self, id: &str) -> PathBuf {
         self.root.join("runs").join(id)
     }
@@ -710,5 +715,13 @@ mod tests {
         assert_eq!(slug("arms legs, helmet"), "arms-legs-helmet");
         assert_eq!(slug("_arms_"), "_arms_");
         assert_eq!(slug("  "), "");
+    }
+
+    /// --report opens the packshot folder without creating anything in it
+    #[test]
+    fn open_read_creates_nothing() {
+        let d = tmp("read");
+        let store = Store::open_read(&d);
+        assert!(store.latest_events().is_none() && !d.exists());
     }
 }

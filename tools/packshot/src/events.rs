@@ -1,7 +1,9 @@
 // Event log per run for the evaluation: runs/<run>/events.jsonl, one JSON line per event with "t" (seconds
 // since the run start) and "ev". Events: run_start (origin: machine, processes, hashes of render.py and addon,
-// StarBreaker commit, p4k), export_start/export_item/export_end, render_start/render_item/render_end (phases from
-// render.py), failure, sample (every 2 s: CPU, GPU, processes, queue), run_end. `packshot --report` evaluates a log.
+// StarBreaker commit, p4k), export_start/export_item/export_end (per export chunk, "block" its id),
+// render_start/render_item/render_end (per render chunk, phases from render.py), fetch (a render chunk's files from
+// other nodes: holders, bytes fetched and from the cache, seconds), requeue, failure, sample (every 2 s: CPU, GPU,
+// processes, queue), run_end. `packshot --report` evaluates a log.
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -171,7 +173,7 @@ pub fn report(path: &Path) -> Result<String> {
         f(num(&start["p4k_bytes"]) / 1e9, 1)
     ));
     out.push(format!(
-        "  Selection: filter \"{}\" · scope {} · {} entities in {} blocks of {}",
+        "  Selection: filter \"{}\" · scope {} · {} entities in {} export chunks of {}",
         start["filter"].as_str().unwrap_or(""),
         start["scope"].as_str().unwrap_or("?"),
         start["total"],
@@ -205,7 +207,7 @@ pub fn report(path: &Path) -> Result<String> {
         }
     }
 
-    // Blender: start (first item of a block minus its phases) and slot use
+    // Blender: start (first item of a render chunk minus its phases) and slot use
     let mut first_by_block: HashMap<i64, &Value> = HashMap::new();
     for e in &items {
         let b = e["block"].as_i64().unwrap_or(-1);
@@ -216,37 +218,73 @@ pub fn report(path: &Path) -> Result<String> {
         .filter(|e| e["phases"].is_object())
         .map(|e| num(&e["wall"]) - PHASES.iter().map(|p| num(&e["phases"][*p])).sum::<f64>())
         .collect();
-    let render_walls: f64 = of("render_end").map(|e| num(&e["wall"])).sum();
+    // per node (the worker label "host/R3"): its render chunks' time and the Blenders it used (the highest slot)
+    let mut nodes: std::collections::BTreeMap<String, (f64, usize)> = Default::default();
+    for e in of("render_end") {
+        let label = e["worker"].as_str().unwrap_or("?");
+        let (host, slot) = label.rsplit_once("/R").map(|(h, s)| (h.to_string(), s.parse().unwrap_or(1))).unwrap_or((label.to_string(), 1));
+        let n = nodes.entry(host).or_default();
+        n.0 += num(&e["wall"]);
+        n.1 = n.1.max(slot);
+    }
+    let busy = |b: f64, slots: f64| if wall > 0.0 && slots > 0.0 { b / (wall * slots) * 100.0 } else { 0.0 };
+    let render_walls: f64 = nodes.values().map(|n| n.0).sum();
+    let used: usize = nodes.values().map(|n| n.1).sum();
     let samples: Vec<&Value> = of("sample").collect();
-    let slots = if samples.is_empty() { num(&start["renderers"]) } else { mean(&samples.iter().map(|s| num(&s["max_renderers"])).collect::<Vec<_>>()) };
+    // the cluster's Blenders: from the samples (newer logs), else what the nodes used
+    let slots = match samples.iter().filter_map(|s| s["slots"].as_f64()).collect::<Vec<_>>() {
+        v if !v.is_empty() => mean(&v),
+        _ if used > 0 => used as f64,
+        _ => num(&start["renderers"]),
+    };
     out.push(String::new());
     out.push(format!(
-        "Blender: {} processes, start avg {} s, slots {} % busy",
+        "Blender: {} render chunks, first item's extra time avg {} s, {} Blender slots in the cluster {} % busy",
         of("render_end").count(),
         f(mean(&startup), 2),
-        f(if wall > 0.0 && slots > 0.0 { render_walls / (wall * slots) * 100.0 } else { 0.0 }, 0)
+        f(slots, 0),
+        f(busy(render_walls, slots), 0)
     ));
+    if nodes.len() > 1 {
+        for (host, (b, n)) in &nodes {
+            out.push(format!("  {host}: {n} Blender, {} % busy", f(busy(*b, *n as f64), 0)));
+        }
+    }
 
-    // Export: seconds per item according to StarBreaker, process overhead (loading p4k/DataCore, writing) per block
+    // Export: seconds per item according to StarBreaker, process overhead (loading p4k/DataCore, writing) per chunk
     let ex_items: Vec<f64> = of("export_item").filter(|e| e["ok"] == true).map(|e| num(&e["seconds"])).collect();
     let overhead: Vec<f64> = of("export_end").map(|e| num(&e["wall"]) - num(&e["item_seconds"])).collect();
     let ex_walls: Vec<f64> = of("export_end").map(|e| num(&e["wall"])).collect();
     out.push(format!(
-        "Export: {} blocks, avg {} s per item, block avg {} s, of which overhead avg {} s",
+        "Export: {} chunks, avg {} s per item, chunk avg {} s, of which overhead avg {} s",
         ex_walls.len(),
         f(mean(&ex_items), 3),
         f(mean(&ex_walls), 1),
         f(mean(&overhead), 1)
     ));
 
-    // Wait times: blocks for a free Blender, Blender for the export
+    // Wait times: items in the pool for a free Blender, Blender for the export
     let waits: Vec<f64> = of("render_start").map(|e| num(&e["queue_wait"])).collect();
+    // "rendering" counts the cluster's render chunks: against the cluster's Blenders, not the head node's own
     let starved = samples
         .iter()
-        .filter(|s| num(&s["rendering"]) < num(&s["max_renderers"]) && num(&s["ready"]) == 0.0 && num(&s["exporting"]) + num(&s["pending"]) > 0.0)
+        .filter(|s| num(&s["rendering"]) < s["slots"].as_f64().unwrap_or(slots) && num(&s["ready"]) == 0.0 && num(&s["exporting"]) + num(&s["pending"]) > 0.0)
         .count();
+    // between the nodes: what render chunks fetched from the holders, what their cache already had
+    let fetches: Vec<&Value> = of("fetch").collect();
+    let (moved, cached) = (fetches.iter().map(|e| num(&e["bytes"])).fold(0.0, |a, b| a + b), fetches.iter().map(|e| num(&e["cached"])).fold(0.0, |a, b| a + b));
+    let secs: Vec<f64> = fetches.iter().map(|e| num(&e["secs"])).collect();
     out.push(format!(
-        "Waiting: blocks for Blender avg {} s (max {} s) · Blender for export in {} % of samples",
+        "Transfer: {} render chunks fetched {} MB, {} MB from the cache ({} % deduplicated), fetch avg {} s (max {} s)",
+        fetches.len(),
+        f(moved / 1e6, 1),
+        f(cached / 1e6, 1),
+        f(if moved + cached > 0.0 { cached / (moved + cached) * 100.0 } else { 0.0 }, 0),
+        f(mean(&secs), 2),
+        f(secs.iter().copied().fold(0.0, f64::max), 2)
+    ));
+    out.push(format!(
+        "Waiting: items for Blender avg {} s (max {} s) · Blender for export in {} % of samples",
         f(mean(&waits), 1),
         f(waits.iter().copied().fold(0.0, f64::max), 1),
         f(if samples.is_empty() { 0.0 } else { starved as f64 / samples.len() as f64 * 100.0 }, 0)
@@ -292,4 +330,36 @@ pub fn report(path: &Path) -> Result<String> {
     out.push(String::new());
     out.push(format!("Log: {}", path.display()));
     Ok(out.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The report's slot use counts every node's Blenders: render chunks of two nodes, the samples with the cluster's
+    /// slots; an old log without them takes the slots the nodes used
+    #[test]
+    fn report_across_nodes() {
+        let dir = std::env::temp_dir().join(format!("packshot-report-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut lines = vec![json!({"ev": "run_start", "t": 0.0, "run": "r", "renderers": 1, "total": 4})];
+        for (w, wall) in [("a/R1", 10.0), ("b/R1", 10.0), ("b/R2", 10.0)] {
+            lines.push(json!({"ev": "render_end", "worker": w, "wall": wall}));
+        }
+        let samples = |slots: Option<u64>, rendering: u64| json!({"ev": "sample", "rendering": rendering, "max_renderers": 1, "slots": slots, "ready": 0, "exporting": 1, "pending": 0});
+        let log = |extra: Vec<Value>| {
+            let path = dir.join("events.jsonl");
+            let all: Vec<String> = lines.iter().chain(extra.iter()).chain(std::iter::once(&json!({"ev": "run_end", "wall": 10.0}))).map(Value::to_string).collect();
+            fs::write(&path, all.join("\n")).unwrap();
+            report(&path).unwrap()
+        };
+        // 3 Blenders in the cluster, 3 busy for the whole run: 100 %; 2 of 3 rendering with exports going: starved
+        let text = log(vec![samples(Some(3), 2), samples(Some(3), 3)]);
+        assert!(text.contains("3 Blender slots in the cluster 100 % busy") && text.contains("  b: 2 Blender, 100 % busy"), "{text}");
+        assert!(text.contains("Blender for export in 50 % of samples"), "{text}");
+        let text = log(vec![]);
+        assert!(text.contains("3 Blender slots in the cluster 100 % busy"), "{text}");
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

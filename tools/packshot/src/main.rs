@@ -6,7 +6,11 @@
 // pnpm thumbs:build reads live). Every node starts with what it can do now (--render, --export); with a token in
 // packshot.json the nodes find each other and every node can start a run, on itself or on another node as its main
 // node (cluster.rs, node.rs). Runs in the repo (paths under local/) and in the bundle (paths next to the exe),
-// without Node.js and without the DB.
+// without Node.js and without the DB. The worker counts come from the node's compute assessment when it has a valid
+// one (assess.rs), else from the cores.
+mod assess;
+mod blender;
+mod cas;
 mod cluster;
 mod config;
 mod engine;
@@ -47,9 +51,14 @@ const HELP: &str = "Usage: pnpm packshot [--render] [--export] [options]
   --plain               No TUI: starts a run on this node at once and prints one line per item
   --serve               No TUI and no run of its own: works for the other nodes' runs and prints lines (as a service)
   --dry-run             Only list what would be rendered (with pose and rig), then exit
-  --workers <n>         Blender processes at once (default ¾ of the physical cores)
-  --exporters <n>       StarBreaker exports at once (default ¼ of the physical cores, at least 2)
-  --chunk <n>           At most n entities per block (one export and one Blender process, default 50)
+  --workers <n>         Blender processes at once (default: the node's valid assessment, else ¾ of the physical
+                        cores)
+  --exporters <n>       StarBreaker exports at once (default: the node's valid assessment, else ¼ of the physical
+                        cores, at least 2)
+  --chunk <n>           At most n entities per chunk (an export chunk goes to one export-batch, a render chunk to one
+                        Blender; both shrink towards the end of a run; default 50). The processes are long-lived: one
+                        Blender (render.py --stdin) per render slot, one export-batch --stdin per export slot (one
+                        per export chunk when StarBreaker lacks --stdin)
   --size <px>           Edge length (default 256)
   --targets <file>      Give the target set this target list (replaces its own); every set carries one, a new set
                         takes its base's; starting a run in the TUI asks for one while the set has none
@@ -60,16 +69,30 @@ const HELP: &str = "Usage: pnpm packshot [--render] [--export] [options]
   --render-script <py>  render.py (default: src/icons/render.py or cli/render.py)
   --store <dir>         The packshot folder: packshot.json, targets.json, runs/, sets/, work/ (default: local/packshot
                         in the repo, else the folder itself, as in a bundle)
-  --work <dir>          Work directory (default: work/ in the packshot folder)
+  --work <dir>          Work directory (default: work/ in the packshot folder); one packshot process per packshot
+                        folder and per work directory (packshot.lock in each; --report needs none)
   --refresh-tables      Read the pose and light tables from the DataCore again
-  --report [log]        Evaluate an event log or run folder (default: the latest run), then exit
+  --report [log]        Evaluate an event log or run folder (default: the latest run), then exit; reads only
+  --assess              Assess this node's compute (needs --render; with --export the exports too), print the
+                        steps and the choice, save it in packshot.json, then exit; in the TUI key b in view 3 (also
+                        for another node). A test set of 48 targets, stratified by type from the target set's list,
+                        is exported once (here, else by a connected exporting node and fetched from it) and kept in
+                        work/assess/; n long-lived Blender at once, each warmed by one item, then over one chunk,
+                        n = 1, 2, 3, 4, 6, 8, … until the gain drops under 5 % or RAM/VRAM run out (CPU per core,
+                        GPU, VRAM, RAM every 0.5 s); workers = the smallest n within 5 % of the best; then
+                        export-batch e = 1 … 4 with them rendering alongside, capped by RAM. Stale (formula again)
+                        once host, CPU, packshot, Blender, GPU, render.py, add-on or StarBreaker differ. The head
+                        node sizes every node's chunks by its assessed items/s and prefers the faster nodes; b in
+                        view 3 on a node that is assessing aborts it
 Every run is a folder runs/<date>_<time>_<name>/ on its head node: its images (<Name> (<class>) <uuid>.png),
-run.json (origin, result per entity) and events.jsonl (processes, phases per item, CPU/GPU every 2 s, failures). A
+run.json (origin, result per entity), events.jsonl (processes, phases per item, CPU/GPU every 2 s, failures) and
+run.log (the console, under every failure its process's last lines). A
 set (sets/<name>/) holds all icons as hard links to the runs' images, per entity the latest run with an image.
 Cluster: packshot.json in the store folder, e.g. {\"token\": \"<secret>\"}; the nodes with the same token find each
 other by UDP broadcast on port 47950 (TCP the same); optional: \"listen\": \"0.0.0.0:47950\", \"peers\": [\"host\",
 \"192.168.1.20:47950\"] for nodes the broadcast does not reach, \"discovery\": false; every node is known by its host
-name; without a token everything stays local.
+name; every node must reach every other one (exported items go straight from the node that exported them to the
+one that renders them); without a token everything stays local.
 Target list in the repo: pnpm packshot:targets (writes local/packshot/targets.json from the DB), then key t in
 view 2 or --targets";
 
@@ -113,16 +136,49 @@ fn find_blender(root: &Path) -> Option<PathBuf> {
 
 /// SC_DATA_P4K from .env when the environment has none (like node --env-file-if-exists)
 fn env_p4k(root: &Path) -> Option<String> {
-    if let Ok(v) = env::var("SC_DATA_P4K") {
-        if !v.is_empty() {
-            return Some(v);
-        }
+    if let Ok(v) = env::var("SC_DATA_P4K") && !v.is_empty() {
+        return Some(v);
     }
     let text = fs::read_to_string(root.join(".env")).ok()?;
     text.lines().find_map(|l| {
         let v = l.trim().strip_prefix("SC_DATA_P4K=")?.trim();
         Some(v.trim_matches(|c| c == '"' || c == '\'').to_string())
     })
+}
+
+/// An exclusive lock on <dir>/packshot.lock, held as long as the returned file is open; the OS releases it when the
+/// process ends, however it ends. The process id goes into packshot.pid next to it (Windows does not let another
+/// process read a locked file), so a refusal names the process
+fn lock_dir(dir: &Path) -> Result<fs::File> {
+    fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
+    let path = dir.join("packshot.lock");
+    let pid_file = dir.join("packshot.pid");
+    let f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).with_context(|| path.display().to_string())?;
+    match f.try_lock() {
+        Ok(()) => {
+            fs::write(&pid_file, std::process::id().to_string()).with_context(|| pid_file.display().to_string())?;
+            Ok(f)
+        }
+        Err(fs::TryLockError::WouldBlock) => {
+            let pid = fs::read_to_string(&pid_file).ok().filter(|s| !s.trim().is_empty()).map(|s| format!(" (process {})", s.trim())).unwrap_or_default();
+            bail!("Another packshot works in {}{pid}: one process per packshot folder and per work folder", dir.display())
+        }
+        Err(fs::TryLockError::Error(e)) => Err(anyhow::Error::from(e).context(format!("lock {}", path.display()))),
+    }
+}
+
+/// The packshot folder and the work folder belong to one process at a time: start-up syncs the target set's folder
+/// (links created and removed) and clears the work folder's exports, cache and inbox, which would pull the files
+/// away under another packshot there. Both are locked before anything is touched (the work folder once when it is
+/// the packshot folder itself)
+fn lock_folders(store: &Path, work: &Path) -> Result<Vec<fs::File>> {
+    let mut locks = vec![lock_dir(store)?];
+    fs::create_dir_all(work).with_context(|| work.display().to_string())?;
+    let same = fs::canonicalize(store).ok().zip(fs::canonicalize(work).ok()).is_some_and(|(a, b)| a == b);
+    if !same {
+        locks.push(lock_dir(work)?);
+    }
+    Ok(locks)
 }
 
 fn main() {
@@ -140,7 +196,7 @@ fn real_main() -> Result<()> {
     while let Some(a) = it.next() {
         let Some(key) = a.strip_prefix("--") else { bail!("Unknown argument: {a}\n\n{HELP}") };
         match key {
-            "plain" | "serve" | "dry-run" | "force" | "refresh-tables" | "render" | "export" | "help" => {
+            "plain" | "serve" | "dry-run" | "force" | "refresh-tables" | "render" | "export" | "assess" | "help" => {
                 flags.insert(key.to_string());
             }
             "node" => bail!("--node is gone: every node starts with what it can do, e.g. --render (and --export)\n\n{HELP}"),
@@ -174,8 +230,11 @@ fn real_main() -> Result<()> {
     let num = |key: &str, default: usize| -> Result<usize> { opt.get(key).map(|v| v.parse::<usize>().with_context(|| format!("--{key} {v}"))).unwrap_or(Ok(default)) };
     let auto = auto_workers();
 
-    let mut store = Store::open(&store_dir)?;
+    // one process per packshot folder and per work folder, locked before anything is touched (a dry run too: it syncs
+    // the target set's folder, --targets writes the set, the DataCore tables go into the work folder); --report only
+    // reads and runs beside another one
     if flags.contains("report") {
+        let store = Store::open_read(&store_dir);
         let log = path("report")
             .map(|p| if p.is_dir() { p.join("events.jsonl") } else { p })
             .or_else(|| store.latest_events())
@@ -183,9 +242,15 @@ fn real_main() -> Result<()> {
         println!("{}", events::report(&log)?);
         return Ok(());
     }
+    let _locks = lock_folders(&store_dir, &work)?;
+    let mut store = Store::open(&store_dir)?;
     let (render, export) = (flags.contains("render"), flags.contains("export"));
     let net_cfg = NetConfig::load(&store_dir.join("packshot.json"))?;
     let serve = flags.contains("serve");
+    let assess = flags.contains("assess");
+    if assess && !render {
+        bail!("--assess measures the Blender processes: it needs --render");
+    }
     if serve && !net_cfg.enabled() {
         bail!("--serve works for the other nodes: it needs a token in {}", store_dir.join("packshot.json").display());
     }
@@ -229,19 +294,45 @@ fn real_main() -> Result<()> {
         None if flags.contains("force") => Scope::All,
         None => Scope::Missing,
     };
+    // the DataCore tables: in the TUI they load in the background (it shows the steps), the console modes wait
+    let tables_later = export && !(flags.contains("plain") || flags.contains("dry-run") || serve || assess);
+    let disk_paths = if work.starts_with(&store_dir) { vec![store_dir.clone()] } else { vec![store_dir.clone(), work.clone()] };
+    let caps = Caps { render, export, blender: blender.as_deref(), starbreaker: starbreaker.as_deref(), p4k: export.then_some(p4k.as_path()) };
+    let mut me = cluster::own_hello(&net_cfg.name, caps, 0, 0, auto.2, cluster::disk_info(&disk_paths));
+    // the node's assessment: its counts are the defaults while it is valid (same packshot, Blender, GPU, render.py,
+    // add-on, StarBreaker)
+    let assessment = assess::load(&store_dir.join("packshot.json"));
+    let stale = assessment.as_ref().map(|a| a.keys.diff(&assess::Keys::of(&me, &render_script))).unwrap_or_default();
+    let valid = assessment.as_ref().filter(|_| stale.is_empty());
+    let workers = valid.map(|a| a.workers).unwrap_or(auto.0);
+    let exporters = valid.and_then(|a| a.exporters).unwrap_or(auto.1);
     let args = Args {
         filter: opt.get("filter").cloned().unwrap_or_default(),
         scope,
         plain: flags.contains("plain"),
         serve,
         dry_run: flags.contains("dry-run"),
-        workers: if render { num("workers", auto.0)?.max(1) } else { 0 },
-        exporters: if export { num("exporters", auto.1)?.max(1) } else { 0 },
+        workers: if render { num("workers", workers)?.max(1) } else { 0 },
+        exporters: if export { num("exporters", exporters)?.max(1) } else { 0 },
         name: opt.get("name").cloned().unwrap_or_default(),
         line: raw.join(" "),
     };
+    // no export workers offered before the tables are there
+    me.slots = args.workers;
+    me.exporters = if tables_later { 0 } else { args.exporters };
+    me.assess = assessment.as_ref().map(|a| a.info(stale.is_empty()));
 
     fs::create_dir_all(&work)?;
+    // Linux: the RDSEED shim for every Blender (src/blender.rs)
+    let shim = if args.dry_run { Ok(None) } else { blender::install(&work) };
+    let shim_line = match &shim {
+        Ok(Some(p)) => Some((engine::Level::Info, format!("Blender: RDSEED shim on ({}) · --threads {}", p.display(), blender::THREADS))),
+        Ok(None) => None,
+        Err(e) => Some((engine::Level::Error, format!("Blender: RDSEED shim off: {e:#}"))),
+    };
+    if let Some((_, l)) = &shim_line {
+        println!("{l}");
+    }
     let set_name = opt.get("set").cloned().unwrap_or_else(|| store::LIVE.to_string());
     let mut set = if store.sets()?.contains(&set_name) {
         store.load_set(&set_name)?
@@ -265,17 +356,18 @@ fn real_main() -> Result<()> {
     if (args.plain || args.dry_run) && targets.is_empty() {
         bail!("--plain and --dry-run need a target list in set {} (--targets <file>)", set.name);
     }
-    // the DataCore tables: in the TUI they load in the background (it shows the steps), the console modes wait
-    let tables_later = export && !(args.plain || args.dry_run || args.serve);
     let tables = if export && !tables_later { Tables::load(starbreaker.as_deref().unwrap_or(Path::new("")), &p4k, &work, flags.contains("refresh-tables"), |s| println!("{s}"))? } else { Tables::default() };
-    let disk_paths = if work.starts_with(&store_dir) { vec![store_dir.clone()] } else { vec![store_dir.clone(), work.clone()] };
-    let caps = Caps { render, export, blender: blender.as_deref(), starbreaker: starbreaker.as_deref(), p4k: export.then_some(p4k.as_path()) };
-    // no export workers offered before the tables are there
-    let me = cluster::own_hello(&net_cfg.name, caps, args.workers, if tables_later { 0 } else { args.exporters }, auto.2, cluster::disk_info(&disk_paths));
     let cfg = Config { p4k, starbreaker: starbreaker.unwrap_or_default(), blender: blender.unwrap_or_default(), render_script, work: work.clone(), size: num("size", 256)? as u32, chunk: num("chunk", 50)?.max(1) };
-    // Network only with a token and not for a dry run; blocks of an earlier session in the inbox are stale
+    // Network only with a token and not for a dry run; files of an earlier session in the inbox are stale
     if net_cfg.enabled() && !args.dry_run {
         let _ = fs::remove_dir_all(work.join("inbox"));
+    }
+    // exports, fetched files and render folders of an earlier session are stale too (a run that ended early leaves
+    // them; its failures are in its run.log)
+    if !args.dry_run {
+        for d in ["export", "cas", "fetch", "send"] {
+            let _ = fs::remove_dir_all(work.join(d));
+        }
     }
     let hub = (net_cfg.enabled() && !args.dry_run).then(|| Hub::new(net_cfg.clone(), me.clone(), work.join("inbox")));
     if let Some(h) = hub.as_ref() {
@@ -287,23 +379,16 @@ fn real_main() -> Result<()> {
             println!("Cluster: {e}");
         }
     }
-    // works for the head node of another node's run (packages: exports first)
-    let renderer = hub.is_some().then(|| {
-        let mut r = node::Renderer::new(cfg.blender.clone(), args.workers, work.join("preview.png"));
-        r.export_slots = args.exporters;
-        if export {
-            r.tools = Some(node::ExportTools { starbreaker: cfg.starbreaker.clone(), p4k: cfg.p4k.clone(), rigs: work.join("dcb").join("rigs") });
-        }
-        r
-    });
     let mut engine = Engine::new(cfg, targets, tables, store, set, hub, me)?;
     // the file the TUI offers for a set's target list
     engine.targets_file = store_dir.join("targets.json");
-    engine.serve = renderer;
     engine.max_renderers = args.workers;
     engine.max_exporters = args.exporters;
     engine.cores = auto.2;
     engine.disk_paths = disk_paths;
+    engine.assessment = assessment;
+    engine.assess_stale = stale;
+    engine.fixed_counts = (opt.contains_key("workers"), opt.contains_key("exporters"));
     let caps_line = match (render, export) {
         (false, false) => "no --render/--export: this node only starts runs, stores them and watches".to_string(),
         _ => format!("{} export · {} render (Blender on Vulkan) · {} physical cores", args.exporters, args.workers, auto.2),
@@ -311,6 +396,9 @@ fn real_main() -> Result<()> {
     println!("{caps_line}");
     // what printed before the TUI took the screen: into its log as well
     startup_notes(&mut engine, &caps_line, &store_dir, &work);
+    if let Some((level, l)) = shim_line {
+        engine.note(level, l);
+    }
     if tables_later {
         engine.load_tables(flags.contains("refresh-tables"));
     }
@@ -330,6 +418,9 @@ fn real_main() -> Result<()> {
     }
     if args.serve {
         return serve_plain(&mut engine);
+    }
+    if assess {
+        return assess_plain(&mut engine);
     }
     if args.plain {
         return plain(&mut engine, &args);
@@ -354,7 +445,12 @@ fn startup_notes(engine: &mut Engine, caps_line: &str, store_dir: &Path, work: &
         Some(v) if !v.is_empty() => (Info, format!("{name} {v} ({})", path.display())),
         _ => (Info, format!("{name}: not found")),
     };
-    notes.push(tool("Blender", Some(me.blender.as_str()).filter(|_| !engine.cfg.blender.as_os_str().is_empty()), &engine.cfg.blender));
+    notes.push(match (&engine.assessment, engine.assess_stale.first()) {
+        (None, _) => (Info, "Assessment: none (counts from the cores)".into()),
+        (Some(a), None) => (Info, format!("Assessment of {}: {}", a.info(true).date, assess::summary(a))),
+        (Some(a), Some(why)) => (Error, format!("Assessment of {} stale, counts from the cores: {why}", a.info(false).date)),
+    });
+    notes.push(tool("Blender", (!engine.cfg.blender.as_os_str().is_empty()).then_some(me.blender.as_str()), &engine.cfg.blender));
     notes.push(tool("StarBreaker", me.starbreaker.as_deref(), &engine.cfg.starbreaker));
     if me.export {
         let gb = me.p4k_bytes.map(|b| format!(" · {:.0} GB", b as f64 / 1e9)).unwrap_or_default();
@@ -372,6 +468,40 @@ fn startup_notes(engine: &mut Engine, caps_line: &str, store_dir: &Path, work: &
     }
     for (level, text) in notes {
         engine.note(level, text);
+    }
+}
+
+/// --assess: assess this node, print the progress, the steps and the choice. With a cluster it first waits 5 s for
+/// the other nodes (a node without --export needs one that exports the test set)
+fn assess_plain(engine: &mut Engine) -> Result<()> {
+    engine.echo = Some(Vec::new());
+    if engine.hub.is_some() {
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(5) {
+            engine.tick();
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    let flush = |e: &mut Engine| {
+        for l in e.echo.as_mut().map(std::mem::take).unwrap_or_default() {
+            println!("{} {l}", chrono::Local::now().format("%H:%M:%S"));
+        }
+    };
+    flush(engine);
+    let before = engine.assessment.as_ref().map(|a| a.date.clone());
+    engine.start_assess(None)?;
+    while engine.assessing() {
+        engine.tick();
+        flush(engine);
+        thread::sleep(Duration::from_millis(50));
+    }
+    flush(engine);
+    match engine.assessment.as_ref().filter(|a| Some(&a.date) != before.as_ref()) {
+        Some(a) => {
+            println!("\n{}", assess::table(a));
+            Ok(())
+        }
+        None => bail!("assessment failed (see above)"),
     }
 }
 
@@ -415,6 +545,12 @@ fn plain(engine: &mut Engine, args: &Args) -> Result<()> {
         }
         thread::sleep(Duration::from_millis(50));
     }
+    // the other nodes get the run's end before this process goes (its last tick ended the run after sending the
+    // status of that second)
+    engine.final_status();
+    if engine.hub.is_some() {
+        thread::sleep(Duration::from_millis(500));
+    }
     for l in engine.echo.as_mut().map(std::mem::take).unwrap_or_default() {
         println!("{l}");
     }
@@ -432,4 +568,31 @@ fn plain(engine: &mut Engine, args: &Args) -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A second process on the same packshot folder (with another work folder) or on the same work folder (with
+    /// another packshot folder) is refused before it touches anything, naming the first one; once the first one is
+    /// gone (its locks released by the OS) it starts. A work folder that is the packshot folder is locked once
+    #[test]
+    fn folder_locks() {
+        let root = std::env::temp_dir().join(format!("packshot-lock-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (store, work) = (root.join("store"), root.join("store/work"));
+        let first = lock_folders(&store, &work).unwrap();
+        let me = format!("process {}", std::process::id());
+        for (s, w) in [(store.clone(), root.join("other-work")), (root.join("other-store"), work.clone())] {
+            let err = lock_folders(&s, &w).unwrap_err().to_string();
+            assert!(err.starts_with("Another packshot works in") && err.contains(&me) && !err.contains("--work"), "{err}");
+        }
+        drop(first);
+        let again = lock_folders(&store, &work).unwrap();
+        assert_eq!(again.len(), 2);
+        drop(again);
+        assert_eq!(lock_folders(&store, &store).unwrap().len(), 1, "the same folder once");
+        let _ = fs::remove_dir_all(&root);
+    }
 }

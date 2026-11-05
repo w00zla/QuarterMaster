@@ -1,9 +1,8 @@
-// Packt die gerenderten Icons (das Set live von packshot, local/packshot/sets/live/[<Name> (<class>) ]<uuid>.png,
-// 256 px; nur die UUID am Ende zählt)
-// zu Thumbnails für die Apps: je UUID drei
-// AVIFs (s/m/l, src/thumbs.ts), auf den Inhalt beschnitten und mit etwas Rand quadratisch aufgefüllt, plus
-// thumbs.json {uuid: hash}. Hash = die ersten 8 Hex-Zeichen von SHA-256 des PNGs: ein neu gerendertes Icon
-// bekommt eine neue URL, unveränderte bleiben im Cache der Clients. Veraltete Dateien im Ziel werden gelöscht.
+// Packs the rendered icons (packshot's set live, local/packshot/sets/live/[<Name> (<class>) ]<uuid>.png, 256 px;
+// only the UUID at the end counts) into thumbnails for the apps: three AVIFs per UUID (s/m/l, src/thumbs.ts),
+// trimmed to the content and padded square with a small border, plus thumbs.json {uuid: hash}. Hash = the first 8
+// hex characters of the PNG's SHA-256: a newly rendered icon gets a new URL, unchanged ones stay in the clients'
+// cache. Stale files in the target are deleted.
 // Usage: pnpm thumbs:build [--in local/packshot/sets/live] [--out local/thumbs] [--force]
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,12 +13,12 @@ import sharp from 'sharp';
 import { THUMB_FILE, THUMB_SIZES, thumbFile, type ThumbSize } from '../thumbs.ts';
 
 const HELP = `Usage: pnpm thumbs:build [options]
-  --in <dir>     Die PNGs, …<uuid>.png (default: local/packshot/sets/live; Unterordner werden nicht gelesen)
-  --out <dir>    Ziel: s/, m/, l/ und thumbs.json (default: local/thumbs)
-  --force        Vorhandene Thumbnails neu erzeugen`;
+  --in <dir>     The PNGs, …<uuid>.png (default: local/packshot/sets/live; subfolders are not read)
+  --out <dir>    Target: s/, m/, l/ and thumbs.json (default: local/thumbs)
+  --force        Create existing thumbnails again`;
 
 const PNG = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.png$/i;
-// AVIF-Qualität: gemessen das kleinste Format ab 96 px, bei 40 px gleichauf mit WebP
+// AVIF quality: measured the smallest format from 96 px up, even with WebP at 40 px
 const QUALITY = 45;
 const EFFORT = 6;
 const SIZES = Object.keys(THUMB_SIZES) as ThumbSize[];
@@ -39,7 +38,7 @@ if (args.help) {
 const inDir = resolve(args.in);
 const outDir = resolve(args.out);
 if (!existsSync(inDir)) {
-  console.error(`Nicht gefunden: ${inDir}`);
+  console.error(`Not found: ${inDir}`);
   process.exit(1);
 }
 for (const size of SIZES) mkdirSync(join(outDir, size), { recursive: true });
@@ -47,7 +46,7 @@ for (const size of SIZES) mkdirSync(join(outDir, size), { recursive: true });
 const sources = readdirSync(inDir, { withFileTypes: true })
   .filter((d) => d.isFile() && PNG.test(d.name))
   .map((d) => ({ uuid: PNG.exec(d.name)![1]!.toLowerCase(), file: join(inDir, d.name) }));
-// Zwei Dateien zu einer UUID (alte <uuid>.png neben einer mit Namen): welche gilt, ist nicht zu entscheiden
+// Two files for one UUID (an old <uuid>.png next to one with a name): which one holds cannot be decided
 const seen = new Map<string, string>();
 const doubles: string[] = [];
 for (const s of sources) {
@@ -56,13 +55,13 @@ for (const s of sources) {
   else seen.set(s.uuid, s.file);
 }
 if (doubles.length) {
-  console.error(`${doubles.length} UUIDs doppelt in ${inDir}, eine Datei je UUID löschen:\n  ${doubles.slice(0, 20).join('\n  ')}`);
+  console.error(`${doubles.length} UUIDs twice in ${inDir}, delete one file per UUID:\n  ${doubles.slice(0, 20).join('\n  ')}`);
   process.exit(1);
 }
 console.log(`${sources.length} Icons in ${inDir} -> ${outDir}`);
 
 async function pack(file: string, hash: string, uuid: string) {
-  // Auf den Inhalt beschneiden (transparenter Rand), dann je Größe einpassen und Rand anfügen
+  // trim to the content (transparent border), then fit per size and add the border
   const trimmed = await sharp(file).trim({ threshold: 1 }).toBuffer();
   for (const size of SIZES) {
     const px = THUMB_SIZES[size];
@@ -86,7 +85,7 @@ let skipped = 0;
 const failures: string[] = [];
 const started = Date.now();
 let next = 0;
-// sharp rechnet selbst mehrfädig; ein paar Bilder gleichzeitig halten die Kerne trotzdem besser beschäftigt
+// sharp is multi-threaded itself; a few images at once still keep the cores busier
 await Promise.all(Array.from({ length: Math.max(1, Math.floor(availableParallelism() / 2)) }, async () => {
   while (next < sources.length) {
     const { uuid, file } = sources[next++]!;
@@ -107,7 +106,7 @@ await Promise.all(Array.from({ length: Math.max(1, Math.floor(availableParalleli
   }
 }));
 
-// Veraltet: alte Hashes und UUIDs, die es nicht mehr gibt
+// Stale: old hashes and UUIDs that are gone
 let removed = 0;
 for (const size of SIZES) {
   for (const f of readdirSync(join(outDir, size))) {
@@ -121,6 +120,6 @@ const sorted = Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.
 writeFileSync(join(outDir, 'thumbs.json.tmp'), JSON.stringify(sorted));
 renameSync(join(outDir, 'thumbs.json.tmp'), join(outDir, 'thumbs.json'));
 
-console.log(`Fertig: ${packed} gepackt, ${skipped} vorhanden, ${removed} veraltete Dateien gelöscht, ${failures.length} Fehler, ${((Date.now() - started) / 1000).toFixed(0)} s`);
+console.log(`Done: ${packed} packed, ${skipped} present, ${removed} stale files deleted, ${failures.length} failures, ${((Date.now() - started) / 1000).toFixed(0)} s`);
 for (const f of failures) console.log(`  ! ${f}`);
 if (failures.length) process.exit(1);

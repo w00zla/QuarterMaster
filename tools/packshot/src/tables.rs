@@ -179,6 +179,12 @@ impl Tables {
         [self.base[0] + o[0], self.base[1] + o[1], self.base[2] + o[2]]
     }
 
+    /// Tables with one rig, the default one (tests with fake tools)
+    #[cfg(test)]
+    pub fn with_rig(rig: PathBuf) -> Self {
+        Self { rigs: HashMap::from([(DEFAULT_RIG.to_string(), rig)]), ..Default::default() }
+    }
+
     pub fn rig(&self, kind: &str, sub_type: &str) -> Result<&PathBuf> {
         let reference = best(&self.groups, kind, sub_type).unwrap_or(&self.default_group);
         let name = group_name(reference);

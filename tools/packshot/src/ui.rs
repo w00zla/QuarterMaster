@@ -3,7 +3,8 @@
 // them) with throughput, the image preview (Sixel/Kitty/iTerm2, else half blocks; for another node's run the images
 // rendered here). 2 Sets: the sets with their runs, the selected run's result and images on the right, details on i.
 // 3 Nodes: this node and the others with capabilities, disks and details, the state check, fetching runs and the
-// live manifest. Log and errors at the bottom, keys in the last line.
+// live manifest, the compute assessment (b, this node or another one). Log and errors at the bottom, keys in the last
+// line.
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
@@ -140,6 +141,10 @@ enum Confirm {
     Adopt(String),
     /// replace a set's target list: (set, file, question)
     ReplaceTargets { set: String, path: String, text: String },
+    /// assess a node's compute: this one (None) or another one
+    Assess { conn: Option<u64>, name: String },
+    /// stop the assessment going on there
+    AbortAssess { conn: Option<u64>, name: String },
 }
 
 /// A row of the Sets view
@@ -232,6 +237,7 @@ pub fn run(engine: Engine, args: Args) -> Result<()> {
     app.refresh_sets();
     let result = main_loop(&mut terminal, &mut app);
     app.engine.abort();
+    app.engine.stop_assess();
     if let Some(s) = app.engine.serve.as_mut() {
         s.stop();
     }
@@ -259,12 +265,8 @@ fn main_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         }
         app.sample();
         terminal.draw(|f| draw(f, app))?;
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(k) = event::read()? {
-                if k.kind == KeyEventKind::Press {
-                    app.key(k.code, k.modifiers)?;
-                }
-            }
+        if event::poll(Duration::from_millis(100))? && let Event::Key(k) = event::read()? && k.kind == KeyEventKind::Press {
+            app.key(k.code, k.modifiers)?;
         }
     }
     Ok(())
@@ -566,6 +568,23 @@ impl App {
                     self.refresh_sets();
                 }
                 Confirm::ReplaceTargets { set, path, .. } if yes => self.apply_targets(&set, &path),
+                Confirm::Assess { conn, name } if yes => {
+                    let r = match conn {
+                        None => self.engine.start_assess(None),
+                        Some(c) => self.engine.request_assess(c),
+                    };
+                    self.report(&format!("No assessment of {name}"), r);
+                }
+                Confirm::AbortAssess { conn, name } if yes => {
+                    let r = match conn {
+                        None => {
+                            self.engine.abort_assess(None);
+                            Ok(())
+                        }
+                        Some(c) => self.engine.request_abort_assess(c),
+                    };
+                    self.report(&format!("Assessment of {name} not aborted"), r);
+                }
                 Confirm::Adopt(name) if yes => {
                     match self.engine.store.adopt(&name) {
                         Ok(n) => self.engine.note(Level::Ok, format!("{n} runs of {name} appended to live")),
@@ -827,6 +846,11 @@ impl App {
                 self.engine.drop_manifest();
                 self.refresh();
             }
+            // assess this node's compute (asks: it takes minutes), or abort the one going on
+            KeyCode::Char('b') if self.node_sel == 0 => {
+                let name = self.engine.me.name.clone();
+                self.confirm = Some(if self.engine.assessing() { Confirm::AbortAssess { conn: None, name } } else { Confirm::Assess { conn: None, name } });
+            }
             _ => {
                 let Some(conn) = self.selected_conn() else { return };
                 match code {
@@ -839,6 +863,11 @@ impl App {
                         self.engine.fetch_manifest(conn);
                     }
                     KeyCode::Char('r') => self.engine.refresh_runs(conn),
+                    KeyCode::Char('b') => {
+                        let name = self.node_rows().get(self.node_sel).map(|r| r.1.clone()).unwrap_or_default();
+                        let assessing = self.engine.hub.as_ref().and_then(|h| h.peer(conn)).is_some_and(|p| p.hello.assessing);
+                        self.confirm = Some(if assessing { Confirm::AbortAssess { conn: Some(conn), name } } else { Confirm::Assess { conn: Some(conn), name } });
+                    }
                     _ => {}
                 }
             }
@@ -852,12 +881,8 @@ impl App {
             return h.get(p).copied();
         }
         // the selection's image: only when this node holds the target set
-        if !self.engine.running() && self.engine.head.is_none() {
-            if let Some(&t) = self.sel.todo.get(self.selected) {
-                if self.engine.has_render(t) {
-                    return Some(t);
-                }
-            }
+        if !self.engine.running() && self.engine.head.is_none() && let Some(&t) = self.sel.todo.get(self.selected) && self.engine.has_render(t) {
+            return Some(t);
         }
         h.back().copied()
     }
@@ -880,7 +905,7 @@ fn num(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -949,6 +974,8 @@ fn draw_dialog(f: &mut Frame, app: &App) {
             Confirm::DeleteSet(n) => ("Delete set", format!("Delete set {n} and its runs that no other set uses?"), "Enter: delete  ·  any other key: back", true),
             Confirm::Adopt(n) => ("Adopt into live", format!("Append the runs of {n} to live? Nothing is rendered."), "Enter: adopt  ·  any other key: back", false),
             Confirm::ReplaceTargets { text, .. } => ("Replace target list", text.clone(), "Enter: replace  ·  any other key: back", true),
+            Confirm::Assess { name, .. } => ("Assess compute", format!("Assess {name}? It takes a few minutes; {name} takes no work meanwhile."), "Enter: assess  ·  any other key: back", false),
+            Confirm::AbortAssess { name, .. } => ("Abort the assessment", format!("Abort the assessment going on {}? Nothing of it is saved.", if name == &e.me.name { "here".to_string() } else { format!("on {name}") }), "Enter: abort  ·  any other key: back", true),
         };
         lines.push(Line::from(text));
         (title.to_string(), keys, warn)
@@ -1249,7 +1276,6 @@ fn draw_workers(f: &mut Frame, app: &App, area: Rect) {
     let rows: Vec<WorkerStatus> = ws
         .into_iter()
         .map(|w| {
-            // a package on another node: its export there, then its render
             let (phase, current, done, total) = w.progress();
             WorkerStatus { label: w.label(), phase: phase.into(), entity: current.map(|t| e.targets[t].entity.clone()).unwrap_or_default(), done, total, secs: w.since.elapsed().as_secs_f64() }
         })
@@ -1259,8 +1285,8 @@ fn draw_workers(f: &mut Frame, app: &App, area: Rect) {
         let (queued, ready) = run.waiting();
         let idle = e.workers.iter().filter(|w| w.kind == Kind::Render).count() < e.total_slots() && ready == 0 && queued > 0;
         summary.push(Line::from(vec![
-            format!("{} entities waiting for export · {ready} blocks waiting for Blender · {} exported", num(queued), num(run.exported)).fg(DIM),
-            if e.transferred > 0 { format!(" · {} to other nodes", mb(e.transferred)).fg(DIM) } else { "".into() },
+            queue_text(queued, run.held.len(), ready, run.exported).fg(DIM),
+            if e.transferred > 0 { format!(" · {} moved between nodes", mb(e.transferred)).fg(DIM) } else { "".into() },
             if idle { Span::styled("  Blender waits for export: > for more exports", Style::new().fg(WARN)) } else { "".into() },
         ]));
         summary.push(phase_line(run.phase_avg()));
@@ -1272,11 +1298,17 @@ fn draw_workers(f: &mut Frame, app: &App, area: Rect) {
 /// Workers of another node's run, as its head node reports them
 fn draw_remote_workers(f: &mut Frame, app: &App, st: &RunStatus, area: Rect) {
     let summary = vec![
-        Line::from(format!("{} entities waiting for export · {} blocks waiting for Blender · {} exported", num(st.pending), st.ready, num(st.exported))).fg(DIM),
+        Line::from(queue_text(st.pending, st.held, st.ready, st.exported)).fg(DIM),
         phase_line(st.phase_avg),
     ];
     let rate = format!("Renders/min (2 min, {}): {:.0}", st.head, st.rate);
     workers_panel(f, app, area, &st.workers, &[], summary, rate);
+}
+
+/// The run's queue in one row, fixed widths: waiting for export, the pool (exported, not rendered yet) with those of
+/// it waiting for a Blender, exported in all
+fn queue_text(queued: usize, pool: usize, ready: usize, exported: usize) -> String {
+    format!("{:>6} waiting for export · pool {:>6} ({:>6} waiting for Blender) · {:>6} exported", num(queued), num(pool), num(ready), num(exported))
 }
 
 /// Mean per phase from render.py; the largest highlighted (that is where the CPU time goes)
@@ -1307,7 +1339,11 @@ fn workers_panel(f: &mut Frame, app: &App, area: Rect, rows: &[WorkerStatus], go
     f.render_widget(Paragraph::new(Line::from(format!("{:<20}{:<8}{:<40}{:>8}{:>9}", "Node/id", "Phase", "Entity", "Block", "Time")).fg(DIM)), head_area);
     let mut lines = Vec::new();
     for w in rows {
-        let color = if w.phase == "render" { ACCENT } else { WARN };
+        let color = match w.phase.as_str() {
+            "render" => ACCENT,
+            "fetch" => DIM,
+            _ => WARN,
+        };
         let current = if w.entity.is_empty() { "…" } else { w.entity.as_str() };
         lines.push(Line::from(vec![
             Span::styled(format!("{:<20.19}", w.label), Style::new().fg(color).bold()),
@@ -1643,11 +1679,9 @@ fn draw_run_detail(f: &mut Frame, app: &mut App, area: Rect, id: &str) {
     for (k, p) in files.iter().enumerate().take((rows_n * cols) as usize) {
         let (cx, cy) = (k as u16 % cols, k as u16 / cols);
         let cell = Rect { x: imgs.x + cx * cell_w, y: imgs.y + cy * cell_h, width: cell_w.saturating_sub(1), height: cell_h.saturating_sub(1) };
-        if !app.thumbs.contains_key(p) {
-            if let Ok(img) = image::open(p) {
-                let proto = app.picker.new_resize_protocol(img);
-                app.thumbs.insert(p.clone(), proto);
-            }
+        if !app.thumbs.contains_key(p) && let Ok(img) = image::open(p) {
+            let proto = app.picker.new_resize_protocol(img);
+            app.thumbs.insert(p.clone(), proto);
         }
         if let Some(proto) = app.thumbs.get_mut(p) {
             f.render_stateful_widget(StatefulImage::default().resize(Resize::Fit(None)), cell, proto);
@@ -1670,15 +1704,27 @@ fn disk_cell(h: &Hello) -> String {
     h.disks.first().map(|d| format!("{:.0} GB ({})", d.free as f64 / 1e9, d.used_pct())).unwrap_or_else(|| "?".into())
 }
 
+/// Exported items of the run going on (here, or the one another head node reports) that `node` holds; None without
+/// a run
+fn held_by(e: &Engine, node: &str) -> Option<usize> {
+    if let (true, Some(run)) = (e.running(), e.run.as_ref()) {
+        return Some(run.holders().into_iter().find(|h| h.0 == node).map(|h| h.1).unwrap_or(0));
+    }
+    let st = e.remote_run.as_ref().map(|r| &r.status).filter(|s| !s.finished)?;
+    Some(st.holders.iter().find(|h| h.0 == node).map(|h| h.1).unwrap_or(0))
+}
+
 fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
-    // the details tile needs 9 lines (node, hardware, disk, workers, fetch, manifest, app, p4k, Blender), the state
-    // tile gets room for a few more nodes
+    // the details tile needs 11 lines (node, hardware, disk, workers, holds, assessed, fetch, manifest, app, p4k,
+    // Blender),
+    // the state tile gets room for a few more nodes
     let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(14)]).areas(area);
     let e = &app.engine;
     // this node with its current counts
     let mut me = e.me.clone();
     me.slots = e.max_renderers;
     me.exporters = e.exporters_now();
+    me.assess = e.assess_info();
     let title = match e.hub.as_ref() {
         None => "Nodes · no cluster (no token in packshot.json)".to_string(),
         Some(h) => match (&h.listen_error, &h.discovery_error) {
@@ -1690,8 +1736,9 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
     let block = boxed(title);
     let inner = block.inner(top);
     f.render_widget(block, top);
-    // columns: node, connection, workers per type, hardware, free disk, p4k (version and fingerprint), add-on, status
-    let cols = |n: &str, c: &str, w: &str, ft: &str, k: &str, p: &str, d: &str| format!("{n:<14.13}{c:<13.12}{w:<21.20}{ft:<26.25}{k:<15.14}{p:<35.34}{d:<10.9}");
+    // columns: node, connection, workers per type (behind the assessment's marker), runs to fetch, free disk, p4k
+    // (version and fingerprint), add-on, status
+    let cols = |n: &str, c: &str, w: &str, ft: &str, k: &str, p: &str, d: &str| format!("{n:<14.13}{c:<13.12}{w:<23.22}{ft:<26.25}{k:<15.14}{p:<35.34}{d:<10.9}");
     // runs there that are missing here (h fetches them)
     let fetch_cell = |name: &str| {
         let runs = e.fetchable(name);
@@ -1703,16 +1750,23 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
         _ => "–".to_string(),
     };
     let short = |s: Option<&str>| s.map(|s| s.chars().take(8).collect::<String>()).unwrap_or_else(|| "–".into());
-    let mut lines = vec![Line::from(format!("{}Status", cols("Node", "Connection", "Workers", "Fetch (h)", "Disk", "p4k", "Add-on"))).fg(DIM)];
+    let mut lines = vec![Line::from(format!("{}Status", cols("Node", "Connection", "  Workers", "Fetch (h)", "Disk", "p4k", "Add-on"))).fg(DIM)];
     let rows = app.node_rows();
     for (i, (conn, name)) in rows.iter().enumerate() {
         let row = |h: &Hello, c: &str, status: (&str, Color)| {
             let fetch = if h.name == e.me.name { "–".to_string() } else { fetch_cell(&h.name) };
-            let text = cols(name, c, &h.workers_text(), &fetch, &disk_cell(h), &p4k_cell(h), &short(h.addon.as_deref()));
+            let workers = format!("{} {}", crate::assess::marker(h), h.workers_text());
+            let text = cols(name, c, &workers, &fetch, &disk_cell(h), &p4k_cell(h), &short(h.addon.as_deref()));
             Line::from(vec![Span::raw(text), Span::styled(status.0.to_string(), Style::new().fg(status.1))])
         };
         let mut line = if i == 0 {
-            let status = if e.running() { ("head node", WARN) } else { ("ready", OK) };
+            let status = if e.running() {
+                ("head node", WARN)
+            } else if e.assessing() {
+                ("assessing", WARN)
+            } else {
+                ("ready", OK)
+            };
             row(&me, "here", status)
         } else if let Some(p) = e.hub.as_ref().and_then(|h| h.peer(*conn)) {
             let h = &p.hello;
@@ -1722,6 +1776,8 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
                 row(h, conn_s, ("another state", BAD)).fg(BAD)
             } else if h.running {
                 row(h, conn_s, ("head node", WARN))
+            } else if h.assessing {
+                row(h, conn_s, ("assessing", WARN))
             } else {
                 row(h, conn_s, ("ready", OK))
             }
@@ -1773,6 +1829,13 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
             };
             let workers = if h.render || h.export { h.workers_text() } else { "– (starts, stores, watches)".into() };
             lines.push(Line::from(vec![Span::styled(format!("{:<13}", "Workers"), Style::new().fg(DIM)), Span::styled(workers, Style::new().fg(color))]));
+            // exported items of the run going on that it holds, not rendered yet
+            let holds = held_by(e, &h.name).map(|n| format!("{} items", num(n))).unwrap_or_else(|| "–".into());
+            lines.push(row("Holds", holds));
+            // the assessment: its result, stale in yellow, or the one going on
+            let assessed = if here { e.assess_text() } else if h.assessing { "assessing …".into() } else { crate::assess::info_text(h.assess.as_ref(), h.render) };
+            let stale = h.assess.as_ref().is_some_and(|a| !a.valid);
+            lines.push(Line::from(vec![Span::styled(format!("{:<13}", "Assessed (b)"), Style::new().fg(DIM)), Span::styled(assessed, Style::new().fg(if stale { WARN } else { Color::Reset }))]));
             if !here {
                 let runs = e.fetchable(&h.name);
                 let images: usize = runs.iter().map(|r| r.images).sum();
@@ -1943,8 +2006,8 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
             (View::Sets, true, _) => &[("↑↓", "set/run"), ("i", "details"), ("Tab", "view"), ("q", "abort+quit")],
             (View::Sets, false, _) if app.remote_sets().is_some() => &[("↑↓", "set/run"), ("Enter", "target set there"), ("i", "details"), ("Tab", "view"), ("q", "quit")],
             (View::Sets, false, _) => &[("↑↓", "set/run"), ("Enter", "target set"), ("n", "new set"), ("t", "target list"), ("l", "to live"), ("x", "delete"), ("i", "details"), ("Tab", "view"), ("q", "quit")],
-            (View::Nodes, _, _) if app.node_sel == 0 => &[("↑↓", "node"), ("m", "drop manifest"), ("Tab", "view"), ("q", if running { "abort+quit" } else { "quit" })],
-            (View::Nodes, _, _) => &[("↑↓", "node"), ("h", "fetch runs"), ("m", "fetch manifest"), ("r", "refresh"), ("Tab", "view"), ("q", if running { "abort+quit" } else { "quit" })],
+            (View::Nodes, _, _) if app.node_sel == 0 => &[("↑↓", "node"), ("m", "drop manifest"), ("b", "assess/abort"), ("Tab", "view"), ("q", if running { "abort+quit" } else { "quit" })],
+            (View::Nodes, _, _) => &[("↑↓", "node"), ("h", "fetch runs"), ("m", "fetch manifest"), ("r", "refresh"), ("b", "assess/abort"), ("Tab", "view"), ("q", if running { "abort+quit" } else { "quit" })],
         }
     };
     let mut spans = Vec::new();
@@ -2063,6 +2126,16 @@ mod tests {
         app.view = View::Nodes;
         let s = screen(&mut app);
         assert!(s.contains("Next run") && s.contains("on DRAGONEGG · set live · 1 to render") && s.contains("2 workers") && s.contains("6 workers"), "{s}");
+        assert!(s.contains("Assessed (b) none") && s.contains("    2 export · 6 render"), "{s}");
+        // a stale assessment: its values with the marker, in the row and in the details
+        app.engine.assessment = Some(crate::assess::Assessment { workers: 6, render: 6.3, exporters: Some(2), export: Some(7.1), date: "2026-11-04T14:02:00+01:00".into(), ..Default::default() });
+        app.engine.assess_stale = vec!["Blender 5.2.4 (assessed 5.2.3)".into()];
+        let s = screen(&mut app);
+        assert!(s.contains("Assessed (b) ! stale · 6 render 6.3/s · 2 export 7.1/s · 2026-11-04 14:02") && s.contains("  ! 2 export · 6 render"), "{s}");
+        app.engine.assess_stale.clear();
+        let s = screen(&mut app);
+        assert!(s.contains("Assessed (b) ✓ 6 render") && s.contains("  ✓ 2 export · 6 render"), "{s}");
+        app.engine.assessment = None;
         if std::env::var("PACKSHOT_SHOW").is_ok() {
             println!("{s}");
         }
@@ -2093,13 +2166,25 @@ mod tests {
             total: 10,
             ok: 3,
             failed: 1,
-            workers: vec![WorkerStatus { label: "servbox/R1".into(), phase: "render".into(), entity: "gun_b".into(), done: 1, total: 4, secs: 2.0 }],
+            held: 7,
+            ready: 3,
+            holders: vec![("DRAGONEGG".into(), 5), ("servbox".into(), 2)],
+            workers: vec![
+                WorkerStatus { label: "servbox/R1".into(), phase: "render".into(), entity: "gun_b".into(), done: 1, total: 4, secs: 2.0 },
+                WorkerStatus { label: "DRAGONEGG/R1".into(), phase: "fetch".into(), entity: "gun_d".into(), done: 0, total: 2, secs: 0.5 },
+            ],
             errors: vec![("gun_c".into(), "boom".into())],
             ..Default::default()
         };
         app.engine.remote_run = Some(RemoteRun { from: "servbox".into(), status, at: Instant::now() });
         let s = screen(&mut app);
         assert!(s.contains("head node servbox") && s.contains("servbox/R1") && s.contains("gun_b") && s.contains("4/10") && s.contains("Errors 1"), "{s}");
+        assert!(s.contains("pool      7 (     3 waiting for Blender)") && s.contains("DRAGONEGG/R1        fetch"), "{s}");
+        // the items each node holds, in view 3's details
+        app.view = View::Nodes;
+        let s = screen(&mut app);
+        assert!(s.contains("Holds        5 items"), "{s}");
+        app.view = View::Run;
         let _ = crate::store::remove_tree(&root);
     }
 }
