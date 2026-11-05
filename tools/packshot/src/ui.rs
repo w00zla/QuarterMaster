@@ -19,7 +19,6 @@ use ratatui::{DefaultTerminal, Frame};
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
-use sysinfo::System;
 
 use crate::Args;
 use crate::engine::{Engine, Kind, Level, PHASES, Scope, Selection};
@@ -176,9 +175,9 @@ struct App {
     /// thumbnails of the selected run in the Sets view
     thumbs: HashMap<PathBuf, StatefulProtocol>,
     node_sel: usize,
-    sys: Option<System>,
-    cpu: VecDeque<u64>,
     rate: VecDeque<u64>,
+    /// exported items not rendered yet (the pool), sampled like the throughput
+    pool: VecDeque<u64>,
     last_sample: Instant,
     was_running: bool,
     /// the state of the remote head node seen last (selection recomputed when it changes)
@@ -276,9 +275,8 @@ impl App {
             details: false,
             thumbs: HashMap::new(),
             node_sel: 0,
-            sys: System::new().ok(),
-            cpu: VecDeque::new(),
             rate: VecDeque::new(),
+            pool: VecDeque::new(),
             last_sample: Instant::now() - Duration::from_secs(10),
             was_running: false,
             state_seq: 0,
@@ -366,15 +364,13 @@ impl App {
             return;
         }
         self.last_sample = Instant::now();
-        if let Some(sys) = self.sys.as_mut() {
-            sys.refresh_cpu_usage();
-            push(&mut self.cpu, sys.global_cpu_usage().round() as u64);
-        }
         if self.engine.running() {
             push(&mut self.rate, self.engine.rate(60.0).round() as u64);
+            push(&mut self.pool, self.engine.run.as_ref().map_or(0, |r| r.held.len()) as u64);
         } else if let Some(st) = self.remote_status() {
-            let r = st.rate.round() as u64;
+            let (r, held) = (st.rate.round() as u64, st.held as u64);
             push(&mut self.rate, r);
+            push(&mut self.pool, held);
         }
     }
 
@@ -910,7 +906,7 @@ fn boxed(title: impl Into<String>) -> Block<'static> {
     Block::bordered().border_style(Style::new().fg(DIM)).title(Span::styled(format!(" {} ", title.into()), Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)))
 }
 
-/// Height of the bottom row in views 1 and 3 (throughput and CPU; the node details): the same, so the views line up
+/// Height of the bottom row in views 1 and 3 (throughput and pool; the node details): the same, so the views line up
 const BOTTOM_ROW: u16 = 14;
 
 fn draw(f: &mut Frame, app: &mut App) {
@@ -1313,9 +1309,9 @@ fn phase_line(avg: Option<[f64; 5]>) -> Line<'static> {
     Line::from(spans)
 }
 
-/// The workers table with its summary, below throughput and CPU
+/// The workers table with its summary, above throughput and pool
 fn workers_panel(f: &mut Frame, app: &App, area: Rect, rows: &[WorkerStatus], gone: &[String], summary: Vec<Line<'static>>, rate_title: String) {
-    // fixed heights, so nothing jumps while workers come and go: throughput and CPU as high as the details row of
+    // fixed heights, so nothing jumps while workers come and go: throughput and pool as high as the details row of
     // view 3 (both at the bottom), the workers take the rest
     let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(BOTTOM_ROW)]).areas(area);
     let block = boxed("Workers");
@@ -1351,7 +1347,9 @@ fn workers_panel(f: &mut Frame, app: &App, area: Rect, rows: &[WorkerStatus], go
     f.render_widget(Paragraph::new(lines), rows_area);
     f.render_widget(Paragraph::new(summary), sum_area);
 
-    let block = boxed("Throughput and CPU");
+    // the run's throughput, and its pool (exported, not rendered yet): near 0 the exports hold the run back, at the
+    // limit (the backpressure, known on the head node) the renderers do
+    let block = boxed("Throughput and pool");
     let inner = block.inner(bottom);
     f.render_widget(block, bottom);
     let [a, b] = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).spacing(2).areas(inner);
@@ -1361,12 +1359,18 @@ fn workers_panel(f: &mut Frame, app: &App, area: Rect, rows: &[WorkerStatus], go
         let v: Vec<u64> = data.iter().copied().skip(data.len().saturating_sub(s.width as usize)).collect();
         let mut sp = Sparkline::default().data(&v).style(Style::new().fg(color));
         if let Some(m) = max {
-            sp = sp.max(m);
+            sp = sp.max(m.max(1));
         }
         f.render_widget(sp, s);
     };
     spark(f, a, rate_title, &app.rate, None, ACCENT);
-    spark(f, b, format!("CPU here: {} %", app.cpu.back().copied().unwrap_or(0)), &app.cpu, Some(100), OK);
+    let limit = app.engine.running().then(|| app.engine.pool_limit() as u64);
+    let now = app.pool.back().copied().unwrap_or(0);
+    let title = match limit {
+        Some(l) => format!("Waiting for Blender: {now} / {l}"),
+        None => format!("Waiting for Blender: {now}"),
+    };
+    spark(f, b, title, &app.pool, limit, WARN);
 }
 
 /// Preview of a node that is not the head node: the latest image rendered here

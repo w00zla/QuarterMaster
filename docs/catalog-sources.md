@@ -685,7 +685,7 @@ pictures with gaps), so the icons are rendered from the models:
    with the start lines (version, node, capabilities, folders, target set and list, tools, cluster). With `--export`
    the TUI opens at once and reads the DataCore tables in the background (steps in the log, the time in the run
    header); the node offers no export workers until they are there, and if reading fails it stays without export.
-   Lists take half of the middle, throughput/CPU the other half, the log a third of the screen. What it renders: a filter
+   Throughput (renders per minute) and pool (exported items not rendered yet: near 0 the exports hold the run back, at the limit of the backpressure, shown on the head node, the renderers do) side by side in a row as high as view 3's details row (both at the bottom; this node's CPU is gone from it), the lists take the rest of the middle, the log a third of the screen. What it renders: a filter
    (terms separated by blanks or commas, any of them in the class, the name or the type) and a scope: missing (not in
    the target set), failed last time (in the set's chain, also when an old image exists) or all (replaces, asks
    first); `--filter`/`--scope` preset both, `--plain` starts a run on this node without the TUI. The selection runs

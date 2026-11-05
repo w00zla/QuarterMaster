@@ -999,6 +999,11 @@ impl Engine {
     }
 
     /// Next render chunk: the items not in a render chunk yet / (3 × Blenders in the cluster), see `guided`
+    /// The pool's backpressure: exporters take no new chunk while exported-unrendered plus exporting items reach it
+    pub fn pool_limit(&self) -> usize {
+        BACKLOG * self.total_slots() * self.render_size()
+    }
+
     pub fn render_size(&self) -> usize {
         guided(self.render_rem(), self.total_slots(), self.cfg.chunk)
     }
@@ -1699,7 +1704,7 @@ impl Engine {
                     break;
                 }
                 let exporting: usize = self.workers.iter().filter(|w| w.kind == Kind::Export).map(|w| w.order.len() - w.reported.len() + w.exported.len()).sum();
-                if run.held.len() + exporting >= BACKLOG * self.total_slots() * self.render_size() {
+                if run.held.len() + exporting >= self.pool_limit() {
                     break;
                 }
                 // the fastest node by its assessed rate per process first, then the most free processes
