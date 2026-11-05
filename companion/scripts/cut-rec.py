@@ -3,7 +3,7 @@ CTC-Blank, ASCII, Latin-1, Latin-Ext-A (polnische, tschechische Packs), μ, ▲�
 letzte MatMul (80 × Klassen) und ihr Bias verlieren die übrigen Spalten; das Softmax danach verteilt
 über die verbliebenen Klassen, ihre Reihenfolge (argmax) bleibt. Auf der GPU hielt jede Breiten-Session
 die Ausgaben über alle 6906 Klassen (~240 MB VRAM beim Gear-Scan, 2026-10-31). Eingabe ist der Download von
-fetch-ocr-models.mjs. Das Wörterbuch geht nach resources/rec/ (in git, der Zeichensatz der App); das geschnittene
+fetch-ocr-models.mjs. Das Wörterbuch geht nach ../sc-ohseearr/models/sc-rec-latin/dict.txt (in git dort, der Zeichensatz der App); das geschnittene
 Modell nach local/ocr-train/: die App liest dort das Fine-Tuning auf der Spielschrift (companion/ocrtrain/), das
 geschnittene Modell ist dessen Lehrer (teacher_crops.py) und Vergleich.
 Aufruf (Python nur über die venv): local/detector/.venv/Scripts/python.exe -I companion/scripts/cut-rec.py
@@ -16,7 +16,7 @@ from onnx import numpy_helper
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "../src-tauri/resources/ocr")
-DST = os.path.join(HERE, "../src-tauri/resources/rec")
+DST = os.path.join(HERE, "../../../sc-ohseearr/models/sc-rec-latin")
 MODEL_DST = os.path.join(HERE, "../../local/ocr-train")
 
 
@@ -46,7 +46,7 @@ for v in list(m.graph.value_info) + list(m.graph.output):
 os.makedirs(MODEL_DST, exist_ok=True)
 out = os.path.join(MODEL_DST, "rec-tiny-latin-cut.onnx")
 onnx.save(m, out)
-with open(os.path.join(DST, "rec_dict-tiny-latin.txt"), "w", encoding="utf-8", newline="\n") as f:
+with open(os.path.join(DST, "dict.txt"), "w", encoding="utf-8", newline="\n") as f:
     f.write("".join(chars[i - 1] + "\n" for i in keep[1:-1]))
 
 # Prüfung: die Wahrscheinlichkeiten des Schnitts = die des Originals über die behaltenen Klassen, neu normiert

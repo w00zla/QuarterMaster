@@ -92,16 +92,16 @@ pnpm companion:build          # release build for this OS: build:linux (AppImage
 pnpm --filter sc-quartermaster-companion build:linux      # standalone AppImage (no installer, like BindSight)
 pnpm --filter sc-quartermaster-companion build:windows    # NSIS setup (DirectML.dll next to the exe, tauri.setup.conf.json) + .sig (self-updating; needs TAURI_SIGNING_PRIVATE_KEY = the key's content) and the bare exe (zip it as …_x64-standalone.zip)
 pnpm --filter sc-quartermaster-companion typecheck        # companion SPA typecheck
-pnpm --filter sc-quartermaster-companion ocr:models      # once per checkout: OCR models (PP-OCRv6 tiny; on Windows also DirectML.dll for the GPU, bundled by build:windows) into companion/src-tauri/resources/ocr (not in git; every Rust build needs them)
+pnpm --filter sc-quartermaster-companion ocr:models      # once per checkout: OCR models (PP-OCRv6 tiny; on Windows also DirectML.dll for the GPU, bundled by build:windows) into companion/src-tauri/resources/ocr (not in git; cut-rec.py and build:windows need them; the app's models come from ../sc-ohseearr)
 cargo test --release --manifest-path companion/src-tauri/Cargo.toml # its Rust tests (the OCR tests read local/screenshots/… if present)
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]   # what the OCR reads in an image
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example inventory_dump -- <out dir> <screenshots dir>... [--threads n] [--gpu]   # the warehouse read over screenshot folders or debug recordings (around the cursor once a frame gave a strong layout, as in the app), with its phases (models vs. rest)
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example components_dump -- <dir>... [--threads n] [--gpu]   # the character inventory's tooltip title and lines per image, with its phases; --gpu needs DirectML.dll copied next to the example exe
-# Warehouse layout detector (NanoDet, resources/layout/warehouse.onnx in git): training scripts in companion/detector/, Python only via local/detector/.venv
+# Warehouse layout detector (NanoDet, sc-ohseearr's package models/sc-warehouse-layout): training scripts in companion/detector/, Python only via local/detector/.venv
 #   (setup, NanoDet checkout and retraining: docs/companion.md "The layout detector")
 local/detector/.venv/Scripts/python.exe -I companion/detector/labels.py local/detector/data <recording>... --neg <dir>...   # training data from debug recordings (before the detector), screenshots without a warehouse as negatives
 local/detector/.venv/Scripts/python.exe -I companion/detector/eval.py <model.onnx> local/detector/data                     # recall/precision per kind, CPU time
-# Text recognizer (resources/rec/rec-tiny-latin.onnx in git: cut to Latin, fine-tuned on the game's font Blender Pro): scripts in companion/ocrtrain/
+# Text recognizer (sc-ohseearr's package models/sc-rec-latin: cut to Latin, fine-tuned on the game's font Blender Pro): scripts in companion/ocrtrain/
 #   (same venv, needs transformers; the font from Data.p4k stays in local/fonts-sc/, never in git; steps and numbers: docs/companion.md "The recognizer's fine-tune")
 local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/eval.py onnx:<model.onnx>      # exact lines / character error rate on the labelled real tooltip lines (local/ocr-eval/)
 # Companion log: %LOCALAPPDATA%\com.w00zla.quartermaster.companion\logs\companion.log (Linux: ~/.local/share/…/logs; 2 MB, 3 old files kept); every OCR read is logged

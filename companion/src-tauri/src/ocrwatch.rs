@@ -598,7 +598,7 @@ pub struct FastCapture(pub Arc<AtomicU64>);
 pub const PULL_TIMEOUT_MS: u64 = 3000;
 pub const GAME_SEEN: &str = "game-seen";
 
-/// Whether the OCR can run on the GPU (`ocr::Engine`, DirectML): the redistributable DirectML.dll next
+/// Whether the OCR can run on the GPU (sc-ohseearr's engine, DirectML): the redistributable DirectML.dll next
 /// to the exe (the setup brings it; Windows' own is too old) and no failure in this run (then the OCR
 /// goes on on the CPU). The settings grey their switch out otherwise (`gpu_status`, event `ocr-gpu`).
 #[derive(Clone)]

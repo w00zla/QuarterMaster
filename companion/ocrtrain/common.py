@@ -1,4 +1,4 @@
-"""Gemeinsames fürs Fine-Tuning von PP-OCRv6 tiny rec: Wörterbuch (320 Klassen wie resources/rec), Vorverarbeitung
+"""Gemeinsames fürs Fine-Tuning von PP-OCRv6 tiny rec: Wörterbuch (320 Klassen wie sc-ohseearr/models/sc-rec-latin), Vorverarbeitung
 wie die App (BGR, Höhe 48, x/127.5-1, rechts mit 0 aufgefüllt, mindestens 320 breit), das HF-Modell mit auf die
 320 Klassen geschnittenem Kopf (Logits ohne Softmax fürs Training), Dekodierung und Metriken."""
 import csv
@@ -15,7 +15,7 @@ HF_REPO = "PaddlePaddle/PP-OCRv6_tiny_rec_safetensors"
 H, MIN_W, MAX_W = 48, 320, 1920
 
 _full = [l.rstrip("\r\n") for l in open(f"{ROOT}/companion/src-tauri/resources/ocr/rec_dict-tiny.txt", encoding="utf-8")]
-LATIN = [l.rstrip("\r\n") for l in open(f"{ROOT}/companion/src-tauri/resources/rec/rec_dict-tiny-latin.txt", encoding="utf-8")]
+LATIN = [l.rstrip("\r\n") for l in open(f"{ROOT}/../sc-ohseearr/models/sc-rec-latin/dict.txt", encoding="utf-8")]
 # Klassen: 0 = Blank, die Zeichen, zuletzt das Leerzeichen (wie die App)
 CHARS = [""] + LATIN + [" "]
 INDEX = {c: i for i, c in enumerate(CHARS) if c}

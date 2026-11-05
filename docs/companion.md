@@ -308,10 +308,11 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 ### The layout detector
 
 - **Model**: NanoDet-Plus-m (RangiLyu/nanodet, Apache-2.0; ShuffleNetV2 1.0× backbone, GhostPAN, ~1.2 M
-  parameters in the exported graph) with our weights, `companion/src-tauri/resources/layout/warehouse.onnx`
-  (5.7 MB, **in git**: nowhere else to fetch it from; compiled in like the OCR models). Input 1×3×320×480
-  BGR, normalized with the training's mean/std; output per prior point (strides 8–64) the four kinds'
-  scores and per side a distribution over 8 bins (`ocr::layout_boxes`: score ≥ 0.35, NMS 0.5 per kind).
+  parameters in the exported graph) with our weights, sc-ohseearr's model package `sc-warehouse-layout`
+  (`../sc-ohseearr/models/sc-warehouse-layout/`, 5.7 MB, in git there; compiled in like the OCR models). Input
+  1×3×320×480 BGR, normalized with the training's mean/std; output per prior point (strides 8–64) the four kinds'
+  scores and per side a distribution over 8 bins (sc-ohseearr's `NanoDet`, numbers in the package's `model.toml`:
+  score ≥ 0.35, NMS 0.5 per kind).
   Kinds: `badge` (the light box "X 14"), `quality` ("526Q"), `title` (the tooltip's first line),
   `tipline` (its other lines). On the GPU one DirectML session (fixed shape).
 - **Training** (`companion/detector/`, Python in a uv venv; the data and the NanoDet checkout in
@@ -563,13 +564,20 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 - The warehouse's layout detector (`Ocr::detect_layout`, our NanoDet-Plus weights in git, made on its
   first use) runs on the same engine and threads and counts in the detector's timings: see "The layout
   detector" under the warehouse scan.
-- `ocr.rs`: PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
+- **The engine and the models live in sc-ohseearr** (since 2026-11-05; the sibling checkout `../sc-ohseearr`, a
+  path dependency, so it must sit next to this repo wherever the companion is built; its `docs/adr/` holds the
+  plan): `sc-ohseearr-core` (ONNX Runtime sessions, the model families, model packages with a `model.toml`
+  manifest) and the packages `paddle-det-tiny`, `sc-rec-latin`, `sc-warehouse-layout`, compiled in (the Windows
+  release is a bare exe). `ocr.rs` keeps the companion's interface on top (`Ocr` with the lazily made layout
+  detector, `LayoutKind`) until the readers move there too; the regression check for such moves is that
+  `inventory_dump`, `components_dump` and `ocr_dump` print the same over the recordings and screenshots.
+- PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
   and recognizer, dictionary of 6904 characters, mostly CJK; its detector's normalization and DB thresholds
-  from its inference.yml; fetched by `scripts/fetch-ocr-models.mjs` with pinned SHA-256 and compiled in
-  with `include_bytes!`: the Windows release is a bare exe) on ONNX Runtime via `ort` (prebuilt, static).
-  The app's recognizer is **ours** (in git under `src-tauri/resources/rec/`, 2.3 MB): tiny's recognizer with its
+  from its inference.yml; `scripts/fetch-ocr-models.mjs` still fetches the originals into `resources/ocr/` for
+  `cut-rec.py` and DirectML.dll) on ONNX Runtime via `ort` (prebuilt, static).
+  The app's recognizer is **ours** (sc-ohseearr's `sc-rec-latin`, 2.3 MB): tiny's recognizer with its
   output layer **cut to Latin** (2026-10-31, `scripts/cut-rec.py`: blank, ASCII, Latin-1, Latin-Ext-A for Polish
-  and Czech packs, μ, ▲▼ and the space, 320 of 6906 classes; its dictionary `rec_dict-tiny-latin.txt` is the app's
+  and Czech packs, μ, ▲▼ and the space, 320 of 6906 classes; its dictionary (the package's `dict.txt`) is the app's
   charset) and then **fine-tuned on the game's font** (see "The recognizer's fine-tune" below). The CJK classes
   gave misreads ("日", "团", "物") and on the GPU every recognizer session held outputs over all 6906 (~240 MB VRAM
   in the gear scan). A Chinese pack is no longer read; Cyrillic never was (the dictionary has none).
@@ -592,7 +600,7 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
   HTTP ranges, SHA-256 pinned), `build:windows` bundles it into the setup (`tauri.setup.conf.json`:
   `$INSTDIR\DirectML.dll`; `publish-win-companion.ps1` puts it next to the exe in the standalone zip too; not in `tauri dev`).
   DirectML compiles a session's graph for the first input shape it runs, every other shape cost ~20 ms
-  of CPU per run: `ocr::Engine` keeps one session per input shape with its dimensions fixed (the
+  of CPU per run: sc-ohseearr's engine keeps one session per input shape with its dimensions fixed (the
   detector's shapes are fixed per screen area and resolution; the recognizer's batches are padded to 6
   lines of a width out of 320–2560). A probe session at load tells whether DirectML works. Each session
   keeps its largest run's buffers until the scan stops, so the VRAM is the sum over the shapes (2026-10-31,
@@ -637,7 +645,7 @@ detector's uv venv, which got `transformers` for it; `label.ts` in Node), all da
   lines read the same, as good on the eval set): the fine-tune starts from it, its head cut like
   `cut-rec.py` (`common.py`). CTC only, BatchNorm frozen, AdamW 1e-4 cosine, batch 128, 10 epochs (~4 min
   each on the RTX 5080). `export.py`: ONNX opset 17 with the input's batch and width as **named** dynamic
-  dimensions (`ocr::Engine` fixes them by name for DirectML), softmax output like the original; checked
+  dimensions (sc-ohseearr's engine fixes them by name for DirectML), softmax output like the original; checked
   against PyTorch (≤ 2e-4).
 - **Data**: 100k synthetic lines (`render.py --mix v2`, needs `--pack` = a `global.ini`): Blender Pro
   Medium at the measured cap heights (~9 px at 1080p, ~13 at 3840×1600), widths and margins of the
@@ -667,7 +675,7 @@ detector's uv venv, which got `transformers` for it; `label.ts` in Node), all da
   `PY companion/ocrtrain/teacher_crops.py`, `PY companion/ocrtrain/train.py --data synth2 --data teacher
   ×10 --val synth2-val --out run3` (`last.pt`: the end of the cosine schedule; `best.pt` only when the sum
   of real and teacher error rates beat the untrained model's), `PY companion/ocrtrain/eval.py
-  onnx:<model>`, `PY companion/ocrtrain/export.py <pt> <onnx>`, copy to `resources/rec/rec-tiny-latin.onnx`,
+  onnx:<model>`, `PY companion/ocrtrain/export.py <pt> <onnx>`, copy to `../sc-ohseearr/models/sc-rec-latin/model.onnx`,
   `cargo test` as the gate.
 
 ## Refinery

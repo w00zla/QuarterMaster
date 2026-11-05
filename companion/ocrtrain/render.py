@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).replace("\\", "/")
 LOCAL = ROOT + "/local"
 FONT = LOCAL + "/fonts-sc/ttf/BlenderProMedium-Regular.ttf"
-DICT = ROOT + "/companion/src-tauri/resources/rec/rec_dict-tiny-latin.txt"
+DICT = ROOT + "/../sc-ohseearr/models/sc-rec-latin/dict.txt"
 INI_EN = None            # --pack: global.ini des Spielers (Sprachpaket, englisch)
 INI_DE = LOCAL + "/localization/sc-deutsch/global.ini"
 EVAL = LOCAL + "/ocr-eval"

@@ -31,9 +31,12 @@ serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "gzip"] }
 # Finding the blueprint lines in GBs of old logs
 memchr = "2"
-# OCR of the refinery terminal: ONNX Runtime (prebuilt, linked statically) for the PP-OCRv5 models,
-# rustls for its build-time download like reqwest
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-rustls"] }
+# The OCR: sc-ohseearr's engine (ONNX Runtime, prebuilt and linked statically) and its model packages, compiled
+# in; the sibling checkout ../sc-ohseearr
+sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core" }
+sc-ohseearr-model-paddle-det-tiny = { path = "../../../sc-ohseearr/models/paddle-det-tiny" }
+sc-ohseearr-model-sc-rec-latin = { path = "../../../sc-ohseearr/models/sc-rec-latin" }
+sc-ohseearr-model-sc-warehouse-layout = { path = "../../../sc-ohseearr/models/sc-warehouse-layout" }
 # Decoding screenshots (tests, test frames); live frames come as raw pixels; encoding the debug
 # view's frames (JPEG for the event, PNG for the export)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -41,13 +44,12 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 base64 = "0.21"
 # The main and the debug window come back where they were (place, size, monitor)
 tauri-plugin-window-state = "2"
-fast_image_resize = "6.1.0"
 
 # Screen capture for the refinery OCR (DXGI Desktop Duplication); the version Tauri already uses
 [target.'cfg(windows)'.dependencies]
 # The OCR on the GPU: ONNX Runtime's DirectML API (its Windows binaries have it anyway; the redistributable
 # DirectML.dll comes next to the exe, see scripts/fetch-ocr-models.mjs)
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["directml"] }
+sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core", features = ["directml"] }
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",

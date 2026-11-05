@@ -3159,12 +3159,14 @@ name = "quartermaster-companion"
 version = "2.0.1"
 dependencies = [
  "base64 0.21.7",
- "fast_image_resize",
  "image",
  "log",
  "memchr",
- "ort",
  "reqwest",
+ "sc-ohseearr-core",
+ "sc-ohseearr-model-paddle-det-tiny",
+ "sc-ohseearr-model-sc-rec-latin",
+ "sc-ohseearr-model-sc-warehouse-layout",
  "serde",
  "serde_json",
  "tauri",
@@ -3604,6 +3606,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sc-ohseearr-core"
+version = "0.1.0"
+dependencies = [
+ "fast_image_resize",
+ "image",
+ "log",
+ "ort",
+ "serde",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
+name = "sc-ohseearr-model-paddle-det-tiny"
+version = "0.1.0"
+dependencies = [
+ "sc-ohseearr-core",
+]
+
+[[package]]
+name = "sc-ohseearr-model-sc-rec-latin"
+version = "0.1.0"
+dependencies = [
+ "sc-ohseearr-core",
+]
+
+[[package]]
+name = "sc-ohseearr-model-sc-warehouse-layout"
+version = "0.1.0"
+dependencies = [
+ "sc-ohseearr-core",
 ]
 
 [[package]]
