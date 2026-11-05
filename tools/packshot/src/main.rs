@@ -299,7 +299,7 @@ fn real_main() -> Result<()> {
     let disk_paths = if work.starts_with(&store_dir) { vec![store_dir.clone()] } else { vec![store_dir.clone(), work.clone()] };
     let caps = Caps { render, export, blender: blender.as_deref(), starbreaker: starbreaker.as_deref(), p4k: export.then_some(p4k.as_path()) };
     let mut me = cluster::own_hello(&net_cfg.name, caps, 0, 0, auto.2, cluster::disk_info(&disk_paths));
-    // the node's assessment: its counts are the defaults while it is valid (same packshot, Blender, GPU, render.py,
+    // the node's assessment: its counts are the defaults while it is valid (same Blender, GPU, render.py,
     // add-on, StarBreaker)
     let assessment = assess::load(&store_dir.join(assess::FILE));
     let stale = assessment.as_ref().map(|a| a.keys.diff(&assess::Keys::of(&me, &render_script))).unwrap_or_default();

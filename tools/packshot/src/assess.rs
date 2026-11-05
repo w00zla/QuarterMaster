@@ -51,10 +51,11 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
 /// Assessment log folders kept in <work>/assess/ (the oldest go at the start of the next one)
 const KEEP_LOGS: usize = 5;
 
-/// What an assessment depends on: when any of it differs, the assessment is stale and the formula counts again
+/// What an assessment depends on: when any of it differs, the assessment is stale and the formula counts again.
+/// Not the packshot build: any source change gives a new one without changing the load (a "packshot" key in an
+/// older file is ignored)
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Keys {
-    pub packshot: String,
     pub blender: String,
     #[serde(default)]
     pub gpu: Option<String>,
@@ -74,7 +75,6 @@ pub struct Keys {
 impl Keys {
     pub fn of(me: &Hello, render_script: &Path) -> Self {
         Self {
-            packshot: me.version.clone(),
             blender: me.blender.clone(),
             gpu: me.gpu.clone(),
             render_py: crate::events::file_hash(render_script),
@@ -93,7 +93,6 @@ impl Keys {
                 out.push(format!("{what} {} (assessed {})", is.unwrap_or("?"), was.unwrap_or("?")));
             }
         };
-        cmp("packshot", Some(&self.packshot), Some(&now.packshot));
         cmp("Blender", Some(&self.blender), Some(&now.blender));
         cmp("GPU", self.gpu.as_deref(), now.gpu.as_deref());
         cmp("render.py", self.render_py.as_deref(), now.render_py.as_deref());
@@ -1643,7 +1642,6 @@ mod tests {
 
     fn keys() -> Keys {
         Keys {
-            packshot: "0.1.0+aaaa".into(),
             blender: "5.2.3".into(),
             gpu: Some("RTX 5080 · VRAM 16 GB".into()),
             render_py: Some("r1".into()),
@@ -1654,7 +1652,7 @@ mod tests {
         }
     }
 
-    /// Stale when any key differs: packshot build, Blender, GPU, render.py, add-on, StarBreaker, host, CPU (a
+    /// Stale when any key differs: Blender, GPU, render.py, add-on, StarBreaker, host, CPU (a
     /// assessment.json copied to a machine without nvidia-smi is stale there); a peer's p4k fingerprint stays one
     /// folder name
     #[test]

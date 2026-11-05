@@ -919,9 +919,10 @@ pictures with gaps), so the icons are rendered from the models:
    (replaced as a whole; written to a temporary file and renamed; `packshot.json` stays the cluster config only): workers, exporters, the items/s of render (on an exporting
    node with its exports alongside) and export, every step (counts, items/s, render items/s meanwhile, start-up,
    load and render phase, CPU all and busiest core, GPU mean and peak, VRAM, RAM, rises per process, failures,
-   seconds), why the ladder stopped, the memory caps (Blender, export), date, duration and the keys: host name, CPU, packshot build, Blender version,
-   GPU name, `render.py` hash, add-on hash, StarBreaker commit (host name and CPU: a `packshot.json` copied to another
-   machine is stale there, also one without `nvidia-smi`). A key that differs at the start makes it stale: the
+   seconds), why the ladder stopped, the memory caps (Blender, export), date, duration and the keys: host name, CPU, Blender version,
+   GPU name, `render.py` hash, add-on hash, StarBreaker commit (host name and CPU: an `assessment.json` copied to another
+   machine is stale there, also one without `nvidia-smi`; not the packshot build: any source change makes a new one
+   without changing the load). A key that differs at the start makes it stale: the
    formula counts again (the start lines say why, view 3 shows `!`). After an assessment the node takes its counts at
    once unless `--workers`/`--exporters` set them; `+`/`-` and `<`/`>` still change them. The hello carries the
    assessed items/s, the counts they were measured with, every step's count and items/s and whether they are valid; the head node sizes the chunks by
