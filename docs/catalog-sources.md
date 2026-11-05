@@ -567,7 +567,8 @@ pictures with gaps), so the icons are rendered from the models:
    `packshot.json`, `targets.json` (the file offered as a set's target list), `runs/`, `sets/`, `manifests/` and `work/` (the cache: exports, renders, DataCore
    tables, logs); in the repo that is `local/packshot/`, in a bundle the bundle folder itself (`--store`, `--work`). Blender renders one image per entity into the work directory (`<work>/render/<class>.png`); it then
    moves into the **run**, the folder of that packshot run, `runs/<YYYY-MM-DD_HH-MM>_<name>/` (name from `--name`,
-   else filter terms and scope, e.g. `arms_missing`), as `<Name> (<class>) <uuid>.png` per catalog UUID (English
+   else the filter terms, what the scope does (`missing`, `retry`, `full`) and the first 6 characters of the add-on's
+   and `render.py`'s hashes, e.g. `arms_full_addon-6ea0d4_renderpy-6da3cb`), as `<Name> (<class>) <uuid>.png` per catalog UUID (English
    name, so the renders can be checked by eye in Explorer; further UUIDs of the entity are hard links), read-only.
    The run also holds `run.json` (its set, node, start and end, the origin as in the event log's `run_start`: filter,
    scope, arguments, the starting node and the nodes taking part, hashes of `render.py` and the addon, Blender
@@ -659,9 +660,13 @@ pictures with gaps), so the icons are rendered from the models:
    list, `l` adopts an experiment into live, `x` deletes a run or set (all ask). With another node chosen as head
    node the view shows that node's sets and runs (from its state and run list) read only, Enter chooses the target
    set there; changes only on that node itself. **3 Nodes:** the nodes (this one, the connected ones,
-   addresses not reached: node, connection, workers (`2 export · 6 render`, behind the assessment's marker: `✓`
-   valid, `!` stale, blank without one), runs to fetch (`h`), free disk with the share in use, p4k version and
-   fingerprint, add-on, status ready / head node / assessing / another state; a node with another state in red) and
+   addresses not reached: node, connection, workers with the assessment (`✓ export 4 (26.9/s) · render 8 (38.4/s)`:
+   `✓` valid, `!` stale, blank without one; per type the count it runs now and, assessed, the items/s measured at
+   that count; no date, the details have it), Run (during a run, here or the one this node works for: the node's
+   items/s over the last 2 minutes and its images so far, `27.3/s · 412`; the head node sends them per node in its
+   status), runs to fetch (`h`), free disk with the share in use, Prerequisites
+   (what must be the same on every node: `✓` when it is, else what differs: build, Blender, add-on, StarBreaker,
+   Data.p4k; versions and the p4k fingerprint in the details), status ready / head node / assessing / another state; a node with another state in red) and
    below the selected node's details: Node (capabilities, OS, IP, connection), Hardware (CPU and cores, RAM, GPU with
    VRAM from `nvidia-smi`), Disk (free and total of the disk with the packshot folder, and of the work folder's if it
    is elsewhere), Workers, Holds (the exported items of the run going on that the node holds, not rendered yet; from

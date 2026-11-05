@@ -232,6 +232,9 @@ pub struct RunStatus {
     pub held: usize,
     #[serde(default)]
     pub holders: Vec<(String, usize)>,
+    /// per node: images rendered there and its items/s over the last 2 minutes (view 3)
+    #[serde(default)]
+    pub nodes: Vec<(String, usize, f64)>,
     pub elapsed: f64,
     /// renders per minute over the last 2 minutes
     pub rate: f64,

@@ -748,6 +748,7 @@ impl Engine {
             ready: run.pool.len(),
             held: run.held.len(),
             holders: run.holders(),
+            nodes: self.run_throughput(120.0),
             elapsed: run.finished.unwrap_or_else(std::time::Instant::now).duration_since(run.started).as_secs_f64(),
             rate: self.rate(120.0),
             slots: self.total_slots(),
@@ -1490,6 +1491,9 @@ else:
         assert!(png.starts_with("ssssssss|own gun_"), "rendered from the fetched files: {png}");
         let renders = events(&a, "render_start");
         assert!(renders.iter().all(|e| e["worker"].as_str().unwrap().starts_with("b/R") && e["holders"] == json!(["a"])), "{renders:?}");
+        // the throughput per node (view 3 and the status): all six images on b
+        let tp = a.run_throughput(120.0);
+        assert!(tp.len() == 1 && tp[0].0 == "b" && tp[0].1 == 6 && tp[0].2 > 0.0, "{tp:?}");
         let fetches = events(&a, "fetch");
         assert_eq!(fetches.len(), 2, "{fetches:?}");
         let (first, second) = (&fetches[0], &fetches[1]);

@@ -22,7 +22,7 @@ use ratatui_image::{Resize, StatefulImage};
 use sysinfo::System;
 
 use crate::Args;
-use crate::engine::{Engine, Kind, Level, PHASES, Scope, Selection, default_run_name};
+use crate::engine::{Engine, Kind, Level, PHASES, Scope, Selection};
 use crate::net::{Hello, RunStatus, WorkerStatus};
 use crate::store::LIVE;
 
@@ -487,7 +487,7 @@ impl App {
             return Ok(());
         }
         if step == 0 {
-            let name = if self.name.is_empty() { default_run_name(&self.filter, self.scope) } else { self.name.clone() };
+            let name = if self.name.is_empty() { self.engine.default_run_name(&self.filter, self.scope) } else { self.name.clone() };
             self.input = Some(Input::RunName(Field::new(name)));
             return Ok(());
         }
@@ -910,6 +910,9 @@ fn boxed(title: impl Into<String>) -> Block<'static> {
     Block::bordered().border_style(Style::new().fg(DIM)).title(Span::styled(format!(" {} ", title.into()), Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)))
 }
 
+/// Height of the bottom row in views 1 and 3 (throughput and CPU; the node details): the same, so the views line up
+const BOTTOM_ROW: u16 = 14;
+
 fn draw(f: &mut Frame, app: &mut App) {
     let [tabs, rest, log, keys] = Layout::vertical([Constraint::Length(1), Constraint::Fill(2), Constraint::Fill(1), Constraint::Length(1)]).areas(f.area());
     draw_tabs(f, app, tabs);
@@ -1312,8 +1315,9 @@ fn phase_line(avg: Option<[f64; 5]>) -> Line<'static> {
 
 /// The workers table with its summary, below throughput and CPU
 fn workers_panel(f: &mut Frame, app: &App, area: Rect, rows: &[WorkerStatus], gone: &[String], summary: Vec<Line<'static>>, rate_title: String) {
-    // fixed heights: workers and throughput share the space equally, so nothing jumps while workers come and go
-    let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(area);
+    // fixed heights, so nothing jumps while workers come and go: throughput and CPU as high as the details row of
+    // view 3 (both at the bottom), the workers take the rest
+    let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(BOTTOM_ROW)]).areas(area);
     let block = boxed("Workers");
     let inner = block.inner(top);
     f.render_widget(block, top);
@@ -1700,7 +1704,7 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
     // the details tile needs 11 lines (node, hardware, disk, workers, holds, assessed, fetch, manifest, app, p4k,
     // Blender),
     // the state tile gets room for a few more nodes
-    let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(14)]).areas(area);
+    let [top, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(BOTTOM_ROW)]).areas(area);
     let e = &app.engine;
     // this node with its current counts
     let mut me = e.me.clone();
@@ -1718,27 +1722,55 @@ fn draw_nodes(f: &mut Frame, app: &mut App, area: Rect) {
     let block = boxed(title);
     let inner = block.inner(top);
     f.render_widget(block, top);
-    // columns: node, connection, workers per type (behind the assessment's marker), runs to fetch, free disk, p4k
-    // (version and fingerprint), add-on, status
-    let cols = |n: &str, c: &str, w: &str, ft: &str, k: &str, p: &str, d: &str| format!("{n:<14.13}{c:<13.12}{w:<23.22}{ft:<26.25}{k:<15.14}{p:<35.34}{d:<10.9}");
+    // columns: node, connection, workers (the assessment's marker, then per type the count and, assessed, its
+    // items/s at that count), the run's throughput there, runs to fetch, free disk, prerequisites, status
+    let cols = |n: &str, c: &str, w: &str, t: &str, ft: &str, k: &str, d: &str| format!("{n:<14.13}{c:<13.12}{w:<43.42}{t:<17.16}{ft:<26.25}{k:<15.14}{d:<36.35}");
+    // the run going on (here or the one this node works for): per node its items/s over the last 2 minutes and
+    // its images so far
+    let throughput: Vec<(String, usize, f64)> = if e.running() {
+        e.run_throughput(120.0)
+    } else {
+        e.remote_run.as_ref().filter(|r| !r.status.finished).map(|r| r.status.nodes.clone()).unwrap_or_default()
+    };
+    let run_cell = |h: &Hello| match throughput.iter().find(|x| x.0 == h.name) {
+        Some((_, n, r)) => format!("{r:.1}/s · {}", num(*n)),
+        None if !throughput.is_empty() || e.running() => "0/s".to_string(),
+        None => "–".to_string(),
+    };
+    // "✓ export 4 (26.9/s) · render 8 (38.4/s)": ✓ valid / ! stale / blank without one (no date: the details have it)
+    let workers_cell = |h: &Hello| {
+        let a = h.assess.as_ref();
+        let rate = |steps: Option<&Vec<(usize, f64)>>, k: usize| steps.and_then(|s| crate::engine::rate_at(s, k)).map(|r| format!(" ({r:.1}/s)")).unwrap_or_default();
+        let mut parts = Vec::new();
+        if h.export {
+            parts.push(format!("export {}{}", h.exporters, rate(a.map(|a| &a.export_steps), h.exporters)));
+        }
+        if h.render {
+            parts.push(format!("render {}{}", h.slots, rate(a.map(|a| &a.steps), h.slots)));
+        }
+        format!("{} {}", crate::assess::marker(h), if parts.is_empty() { "–".to_string() } else { parts.join(" · ") })
+    };
     // runs there that are missing here (h fetches them)
     let fetch_cell = |name: &str| {
         let runs = e.fetchable(name);
         if runs.is_empty() { "–".to_string() } else { format!("{} runs · {} images", runs.len(), num(runs.iter().map(|r| r.images).sum())) }
     };
-    let p4k_cell = |h: &Hello| match (&h.p4k_version, &h.p4k_id) {
-        (Some(v), Some(id)) => format!("{v} · {}", id.get(..8).unwrap_or(id)),
-        (None, Some(id)) => id.get(..8).unwrap_or(id).to_string(),
-        _ => "–".to_string(),
+    // Prerequisites: what has to be the same on every node (packshot build, Blender, add-on, StarBreaker, Data.p4k
+    // among the exporting nodes); the same: ✓, else what differs (the row is red then, the details say how)
+    let prereq_cell = |h: &Hello| {
+        let diff = e.differences(h);
+        if diff.is_empty() {
+            "✓".to_string()
+        } else {
+            diff.iter().map(|d| match d.split(' ').next().unwrap_or("") { "packshot" => "build", w => w }).collect::<Vec<_>>().join(", ")
+        }
     };
-    let short = |s: Option<&str>| s.map(|s| s.chars().take(8).collect::<String>()).unwrap_or_else(|| "–".into());
-    let mut lines = vec![Line::from(format!("{}Status", cols("Node", "Connection", "  Workers", "Fetch (h)", "Disk", "p4k", "Add-on"))).fg(DIM)];
+    let mut lines = vec![Line::from(format!("{}Status", cols("Node", "Connection", "  Workers", "Run", "Fetch (h)", "Disk", "Prerequisites"))).fg(DIM)];
     let rows = app.node_rows();
     for (i, (conn, name)) in rows.iter().enumerate() {
         let row = |h: &Hello, c: &str, status: (&str, Color)| {
             let fetch = if h.name == e.me.name { "–".to_string() } else { fetch_cell(&h.name) };
-            let workers = format!("{} {}", crate::assess::marker(h), h.workers_text());
-            let text = cols(name, c, &workers, &fetch, &disk_cell(h), &p4k_cell(h), &short(h.addon.as_deref()));
+            let text = cols(name, c, &workers_cell(h), &run_cell(h), &fetch, &disk_cell(h), &prereq_cell(h));
             Line::from(vec![Span::raw(text), Span::styled(status.0.to_string(), Style::new().fg(status.1))])
         };
         let mut line = if i == 0 {
@@ -2108,15 +2140,15 @@ mod tests {
         app.view = View::Nodes;
         let s = screen(&mut app);
         assert!(s.contains("Next run") && s.contains("on DRAGONEGG · set live · 1 to render") && s.contains("2 workers") && s.contains("6 workers"), "{s}");
-        assert!(s.contains("Assessed (b) none") && s.contains("    2 export · 6 render"), "{s}");
-        // a stale assessment: its values with the marker, in the row and in the details
+        assert!(s.contains("Assessed (b) none") && s.contains("  export 2 · render 6 ") && s.contains("Prerequisites"), "{s}");
+        // a stale assessment: the marker and the rates in the workers column (no date), all of it in the details
         app.engine.assessment = Some(crate::assess::Assessment { workers: 6, render: 6.3, exporters: Some(2), export: Some(7.1), date: "2026-11-04T14:02:00+01:00".into(), ..Default::default() });
         app.engine.assess_stale = vec!["Blender 5.2.4 (assessed 5.2.3)".into()];
         let s = screen(&mut app);
-        assert!(s.contains("Assessed (b) ! stale · 6 render 6.3/s · 2 export 7.1/s · 2026-11-04 14:02") && s.contains("  ! 2 export · 6 render"), "{s}");
+        assert!(s.contains("Assessed (b) ! stale · 6 render 6.3/s · 2 export 7.1/s · 2026-11-04 14:02") && s.contains("! export 2 · render 6"), "{s}");
         app.engine.assess_stale.clear();
         let s = screen(&mut app);
-        assert!(s.contains("Assessed (b) ✓ 6 render") && s.contains("  ✓ 2 export · 6 render"), "{s}");
+        assert!(s.contains("Assessed (b) ✓ 6 render") && s.contains("✓ export 2 · render 6"), "{s}");
         app.engine.assessment = None;
         if std::env::var("PACKSHOT_SHOW").is_ok() {
             println!("{s}");

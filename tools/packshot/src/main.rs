@@ -36,65 +36,41 @@ use net::Hub;
 use store::Store;
 use tables::Tables;
 
-const HELP: &str = "Usage: pnpm packshot [--render] [--export] [options]
-  --render              This node renders (Blender); the count of Blender processes changes with + / -
-  --export              This node exports (Data.p4k, build_manifest.id next to it, StarBreaker); the count changes
-                        with < / >
-                        Without both the node only starts runs, stores them and watches
-  --filter <terms>      Only entities where one of the terms (blanks/commas) occurs in the class name, the display
-                        name or the type (case-insensitive); change it in the TUI with /
-  --scope <s>           missing (default): not in the set yet · failed: failed last time in the set · all: re-render
-                        all (force)
-  --force               = --scope all
-  --set <name>          Target set here (default live); a new name branches off live
-  --name <name>         Run name (default: filter terms and scope)
-  --plain               No TUI: starts a run on this node at once and prints one line per item
-  --serve               No TUI and no run of its own: works for the other nodes' runs and prints lines (as a service)
-  --dry-run             Only list what would be rendered (with pose and rig), then exit
-  --workers <n>         Blender processes at once (default: the node's valid assessment, else ¾ of the physical
-                        cores)
-  --exporters <n>       StarBreaker exports at once (default: the node's valid assessment, else ¼ of the physical
-                        cores, at least 2)
-  --chunk <n>           At most n entities per chunk (an export chunk goes to one export-batch, a render chunk to one
-                        Blender; both shrink towards the end of a run; default 50). The processes are long-lived: one
-                        Blender (render.py --stdin) per render slot, one export-batch --stdin per export slot (one
-                        per export chunk when StarBreaker lacks --stdin)
-  --size <px>           Edge length (default 256)
-  --targets <file>      Give the target set this target list (replaces its own); every set carries one, a new set
-                        takes its base's; starting a run in the TUI asks for one while the set has none
-                        (offering the target lists in the packshot folder)
-  --p4k <path>          Data.p4k (default: $SC_DATA_P4K, .env, Data.p4k in the folder)
-  --starbreaker <bin>   StarBreaker CLI, our fork (default: local/starbreaker-qm/ or starbreaker/)
-  --blender <bin>       Blender (default: local/blender/*/ or blender/)
-  --render-script <py>  render.py (default: src/icons/render.py or cli/render.py)
-  --store <dir>         The packshot folder: packshot.json, targets.json, runs/, sets/, work/ (default: local/packshot
-                        in the repo, else the folder itself, as in a bundle)
-  --work <dir>          Work directory (default: work/ in the packshot folder); one packshot process per packshot
-                        folder and per work directory (packshot.lock in each; --report needs none)
-  --refresh-tables      Read the pose and light tables from the DataCore again
-  --report [log]        Evaluate an event log or run folder (default: the latest run), then exit; reads only
-  --assess              Assess this node's compute (needs --render; with --export the exports too), print the
-                        steps and the choice, save it in assessment.json, then exit; in the TUI key b in view 3 (also
-                        for another node). A test set of 48 targets, stratified by type from the target set's list,
-                        is exported once (here, else by a connected exporting node and fetched from it) and kept in
-                        work/assess/; n long-lived Blender at once, each warmed by one item, then counted over ≥ 8 images each,
-                        n = 1, 2, 3, 4, 6, 8, … until the gain drops under 5 % or RAM/VRAM run out (CPU per core,
-                        GPU, VRAM, RAM every 0.5 s); workers = the smallest n within 5 % of the best; then
-                        export-batch e = 1 … 4 with them rendering alongside, capped by RAM. Stale (formula again)
-                        once host, CPU, packshot, Blender, GPU, render.py, add-on or StarBreaker differ. The head
-                        node sizes every node's chunks by its assessed items/s and prefers the faster nodes; b in
-                        view 3 on a node that is assessing aborts it
-Every run is a folder runs/<date>_<time>_<name>/ on its head node: its images (<Name> (<class>) <uuid>.png),
-run.json (origin, result per entity), events.jsonl (processes, phases per item, CPU/GPU every 2 s, failures) and
-run.log (the console, under every failure its process's last lines). A
-set (sets/<name>/) holds all icons as hard links to the runs' images, per entity the latest run with an image.
-Cluster: packshot.json in the store folder, e.g. {\"token\": \"<secret>\"}; the nodes with the same token find each
-other by UDP broadcast on port 47950 (TCP the same); optional: \"listen\": \"0.0.0.0:47950\", \"peers\": [\"host\",
-\"192.168.1.20:47950\"] for nodes the broadcast does not reach, \"discovery\": false; every node is known by its host
-name; every node must reach every other one (exported items go straight from the node that exported them to the
-one that renders them); without a token everything stays local.
-Target list in the repo: pnpm packshot:targets (writes local/packshot/targets.json from the DB), then key t in
-view 2 or --targets";
+const HELP: &str = "Usage: packshot [--render] [--export] [options]
+
+What this node does (neither: it only starts runs and watches them)
+  --render               render with Blender (TUI: + / - processes)
+  --export               export with StarBreaker (TUI: < / > processes)
+
+What to render
+  --filter <terms>       class name, display name or type contains a term (TUI: /)
+  --scope <s>            missing (default) · failed · all
+  --force                same as --scope all
+  --set <name>           target set (default live; a new name branches off live)
+  --targets <file>       give the target set this target list
+  --name <name>          run name (default: filter, scope, add-on and render.py hashes)
+
+Modes
+  --plain                no TUI: run here, one line per item
+  --serve                no TUI: only work for other nodes' runs
+  --dry-run              list what would be rendered, then exit
+  --report [log|dir]     evaluate a run's event log (default: the latest run), then exit
+  --assess               measure this node, save assessment.json, then exit (TUI: b in view 3)
+
+Tuning
+  --workers <n>          Blender processes (default: the assessment, else ¾ of the cores)
+  --exporters <n>        export processes (default: the assessment, else ¼ of the cores, at least 2)
+  --chunk <n>            at most n items per chunk (default 50)
+  --size <px>            icon edge length (default 256)
+  --refresh-tables       read the pose and light tables from the DataCore again
+
+Paths
+  --store <dir>          packshot folder
+  --work <dir>           work folder (default: work/ in the packshot folder)
+  --p4k <path>           Data.p4k (default: $SC_DATA_P4K)
+  --starbreaker <bin>    StarBreaker
+  --blender <bin>        Blender
+  --render-script <py>   render.py";
 
 pub struct Args {
     pub filter: String,

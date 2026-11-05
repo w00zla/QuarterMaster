@@ -96,11 +96,25 @@ impl Scope {
     }
 }
 
-/// Name of a run without --name: filter terms and scope ("arms-legs_missing", "all_failed")
-pub fn default_run_name(filter: &str, scope: Scope) -> String {
+/// Name of a run without --name: the filter terms (none: nothing), what the scope does (missing, retry, full) and the
+/// first 6 characters of the add-on's and render.py's hashes, the two things that change the images:
+/// "arms-legs_full_addon-6ea0d4_renderpy-6da3cb", "missing_addon-…"
+pub fn default_run_name(filter: &str, scope: Scope, addon: Option<&str>, render_py: Option<&str>) -> String {
     let terms: Vec<&str> = filter.split([' ', ',']).filter(|s| !s.is_empty()).collect();
-    let f = if terms.is_empty() { "all".to_string() } else { terms.join("-") };
-    format!("{}_{}", crate::store::slug(&f).chars().take(32).collect::<String>(), scope.key())
+    let what = match scope {
+        Scope::Missing => "missing",
+        Scope::Failed => "retry",
+        Scope::All => "full",
+    };
+    let short = |h: Option<&str>| h.map(|h| h.chars().take(6).collect::<String>()).unwrap_or_else(|| "none".into());
+    let mut parts = Vec::new();
+    if !terms.is_empty() {
+        parts.push(crate::store::slug(&terms.join("-")).chars().take(32).collect::<String>());
+    }
+    parts.push(what.to_string());
+    parts.push(format!("addon-{}", short(addon)));
+    parts.push(format!("renderpy-{}", short(render_py)));
+    parts.join("_")
 }
 
 pub struct Selection {
@@ -235,6 +249,8 @@ pub struct Run {
     pub aborted: bool,
     /// times of finished renders (throughput, ETA)
     pub done_at: Vec<Instant>,
+    /// times of the images per node that rendered them (the nodes' throughput in view 3)
+    pub rendered_by: HashMap<String, Vec<Instant>>,
     /// sum of the phases from render.py (PHASES) over `phase_n` renders
     pub phase_sum: [f64; 5],
     pub phase_n: usize,
@@ -914,12 +930,13 @@ impl Engine {
             finished: None,
             aborted: false,
             done_at: Vec::new(),
+            rendered_by: HashMap::new(),
             phase_sum: [0.0; 5],
             phase_n: 0,
             logged_end: false,
         });
         // The run: folder with start time and name, run.json with the origin, at the end of the chain in the target set
-        let name = if name.trim().is_empty() { default_run_name(filter, scope) } else { name.trim().to_string() };
+        let name = if name.trim().is_empty() { self.default_run_name(filter, scope) } else { name.trim().to_string() };
         let run_id = self.store.new_run_id(&name);
         fs::create_dir_all(self.store.run_dir(&run_id))?;
         // the run's log: the console with full error messages and the failures' traces
@@ -1510,7 +1527,7 @@ impl Engine {
         }
         let seconds = w.since.elapsed().as_secs_f64();
         w.since = Instant::now();
-        let (block, worker) = (w.chunk, w.label());
+        let (block, worker, host) = (w.chunk, w.label(), w.host.clone());
         let timing = parse_timing(&info);
         let phases: serde_json::Map<String, serde_json::Value> = timing.map(|ph| PHASES.iter().zip(ph).map(|(k, v)| (k.to_string(), json!(v))).collect()).unwrap_or_default();
         self.emit("render_item", json!({
@@ -1533,6 +1550,9 @@ impl Engine {
                 }
                 let parts: Vec<String> = PHASES.iter().zip(ph).map(|(k, v)| format!("{k} {v:.2}")).collect();
                 detail = format!("  {worker}  ({})", parts.join(" · "));
+            }
+            if let Some(run) = self.run.as_mut() {
+                run.rendered_by.entry(host).or_default().push(Instant::now());
             }
             self.record(t, true, None, seconds, "render", &detail);
         } else {
@@ -1737,12 +1757,44 @@ impl Engine {
     }
 
     /// Renders per minute over the last `window` seconds
+    /// Per node of the run going on here: (node, images, items/s over the last `window` seconds)
+    pub fn run_throughput(&self, window: f64) -> Vec<(String, usize, f64)> {
+        let Some(run) = self.run.as_ref() else { return Vec::new() };
+        let end = run.finished.unwrap_or_else(Instant::now);
+        let span = window.min(end.duration_since(run.started).as_secs_f64()).max(1.0);
+        let mut out: Vec<(String, usize, f64)> = run
+            .rendered_by
+            .iter()
+            .map(|(node, at)| (node.clone(), at.len(), at.iter().filter(|t| end.duration_since(**t).as_secs_f64() <= span).count() as f64 / span))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// default_run_name with this node's add-on and render.py (they are the same on every node of a run)
+    pub fn default_run_name(&self, filter: &str, scope: Scope) -> String {
+        default_run_name(filter, scope, self.me.addon.as_deref(), crate::events::file_hash(&self.cfg.render_script).as_deref())
+    }
+
     pub fn rate(&self, window: f64) -> f64 {
         let Some(run) = self.run.as_ref() else { return 0.0 };
         let end = run.finished.unwrap_or_else(Instant::now);
         let span = window.min(end.duration_since(run.started).as_secs_f64()).max(1.0);
         let n = run.done_at.iter().filter(|t| end.duration_since(**t).as_secs_f64() <= span).count();
         n as f64 * 60.0 / span
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    /// Without --name: filter terms, what the scope does, the add-on's and render.py's hashes
+    #[test]
+    fn run_names() {
+        assert_eq!(default_run_name("", Scope::All, Some("6ea0d4c6b77492ba"), Some("6da3cb0c523f77d7")), "full_addon-6ea0d4_renderpy-6da3cb");
+        assert_eq!(default_run_name("arms, legs", Scope::Missing, Some("6ea0d4c6"), None), "arms-legs_missing_addon-6ea0d4_renderpy-none");
+        assert_eq!(default_run_name("", Scope::Failed, None, Some("abcdef12")), "retry_addon-none_renderpy-abcdef");
     }
 }
 
