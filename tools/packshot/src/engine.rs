@@ -368,7 +368,7 @@ pub struct Engine {
     /// node exports nothing until then
     pub tables_ready: bool,
     tables_load: Option<TablesLoad>,
-    /// this node's compute assessment from packshot.json (assess.rs), what makes it stale (empty: valid), the one
+    /// this node's compute assessment from assessment.json (assess.rs), what makes it stale (empty: valid), the one
     /// going on
     pub assessment: Option<crate::assess::Assessment>,
     pub assess_stale: Vec<String>,

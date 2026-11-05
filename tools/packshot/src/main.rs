@@ -74,7 +74,7 @@ const HELP: &str = "Usage: pnpm packshot [--render] [--export] [options]
   --refresh-tables      Read the pose and light tables from the DataCore again
   --report [log]        Evaluate an event log or run folder (default: the latest run), then exit; reads only
   --assess              Assess this node's compute (needs --render; with --export the exports too), print the
-                        steps and the choice, save it in packshot.json, then exit; in the TUI key b in view 3 (also
+                        steps and the choice, save it in assessment.json, then exit; in the TUI key b in view 3 (also
                         for another node). A test set of 48 targets, stratified by type from the target set's list,
                         is exported once (here, else by a connected exporting node and fetched from it) and kept in
                         work/assess/; n long-lived Blender at once, each warmed by one item, then over one chunk,
@@ -301,7 +301,7 @@ fn real_main() -> Result<()> {
     let mut me = cluster::own_hello(&net_cfg.name, caps, 0, 0, auto.2, cluster::disk_info(&disk_paths));
     // the node's assessment: its counts are the defaults while it is valid (same packshot, Blender, GPU, render.py,
     // add-on, StarBreaker)
-    let assessment = assess::load(&store_dir.join("packshot.json"));
+    let assessment = assess::load(&store_dir.join(assess::FILE));
     let stale = assessment.as_ref().map(|a| a.keys.diff(&assess::Keys::of(&me, &render_script))).unwrap_or_default();
     let valid = assessment.as_ref().filter(|_| stale.is_empty());
     let workers = valid.map(|a| a.workers).unwrap_or(auto.0);

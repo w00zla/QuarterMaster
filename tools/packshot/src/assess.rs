@@ -12,7 +12,7 @@
 // the best, capped by memory. An exporting node then runs export-batch with e = 1 … EXPORT_MAX while the chosen n
 // Blender render alongside (export-batch --stdin as in a run when StarBreaker has it) and takes the e where the
 // smaller of export and render rate stops improving, capped by RAM with the most an export process took. The result
-// goes into packshot.json ("assessment", every other field kept) with the keys that make it stale.
+// goes into its own file, assessment.json in the packshot folder, with the keys that make it stale.
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -64,7 +64,7 @@ pub struct Keys {
     pub addon: Option<String>,
     #[serde(default)]
     pub starbreaker: Option<String>,
-    /// host name and CPU: a packshot.json copied to another machine is stale there (also without nvidia-smi)
+    /// host name and CPU: an assessment.json copied to another machine is stale there (also without nvidia-smi)
     #[serde(default)]
     pub host: Option<String>,
     #[serde(default)]
@@ -143,7 +143,7 @@ pub struct Step {
     pub secs: f64,
 }
 
-/// The result of an assessment, in packshot.json as "assessment"
+/// The result of an assessment: assessment.json in the packshot folder
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Assessment {
     pub date: String,
@@ -189,24 +189,18 @@ impl Assessment {
     }
 }
 
-/// The assessment in packshot.json, if there is one
+/// The node's assessment file in the packshot folder
+pub const FILE: &str = "assessment.json";
+
+/// The assessment in its file, if there is one
 pub fn load(path: &Path) -> Option<Assessment> {
-    let v: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    serde_json::from_value(v.get("assessment")?.clone()).ok()
+    serde_json::from_slice(&fs::read(path).ok()?).ok()
 }
 
-/// The assessment into packshot.json: every other field kept (the token too), written atomically
+/// The assessment into its file (replaced as a whole), written atomically
 pub fn save(path: &Path, a: &Assessment) -> Result<()> {
-    let mut v: Value = match fs::read(path) {
-        Ok(b) if b.iter().all(u8::is_ascii_whitespace) => json!({}),
-        Ok(b) => serde_json::from_slice(&b).with_context(|| path.display().to_string())?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => json!({}),
-        Err(e) => return Err(e).with_context(|| path.display().to_string()),
-    };
-    let obj = v.as_object_mut().ok_or_else(|| anyhow!("{} is not a JSON object", path.display()))?;
-    obj.insert("assessment".into(), serde_json::to_value(a)?);
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(&v)?).with_context(|| tmp.display().to_string())?;
+    fs::write(&tmp, serde_json::to_vec_pretty(a)?).with_context(|| tmp.display().to_string())?;
     fs::rename(&tmp, path).with_context(|| path.display().to_string())
 }
 
@@ -1517,7 +1511,7 @@ impl Engine {
                 let _ = writeln!(f, "{l}");
             }
         }
-        let path = self.store.root.join("packshot.json");
+        let path = self.store.root.join(FILE);
         match save(&path, &a) {
             Ok(()) => self.assess_note(Level::Ok, format!("Assessment saved in {}: {}", path.display(), summary(&a))),
             Err(e) => self.assess_note(Level::Error, format!("Assessment not saved: {e:#}")),
@@ -1661,7 +1655,7 @@ mod tests {
     }
 
     /// Stale when any key differs: packshot build, Blender, GPU, render.py, add-on, StarBreaker, host, CPU (a
-    /// packshot.json copied to a machine without nvidia-smi is stale there); a peer's p4k fingerprint stays one
+    /// assessment.json copied to a machine without nvidia-smi is stale there); a peer's p4k fingerprint stays one
     /// folder name
     #[test]
     fn staleness() {
@@ -1685,35 +1679,24 @@ mod tests {
         assert_eq!(marker(&Hello::default()), ' ');
     }
 
-    /// The assessment goes into packshot.json next to token, peers and whatever else is there; a second save
-    /// replaces it; a file that is not JSON is not overwritten
+    /// The assessment has a file of its own: packshot.json (token, peers) is not touched; a second save replaces it
     #[test]
-    fn packshot_json_merge() {
+    fn own_file() {
         let dir = std::env::temp_dir().join(format!("packshot-assess-json-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("packshot.json");
-        fs::write(&path, r#"{"token": "s3cret", "peers": ["servbox"], "discovery": false, "extra": {"x": 1}}"#).unwrap();
+        let cfg = r#"{"token": "s3cret", "peers": ["servbox"], "discovery": false}"#;
+        fs::write(dir.join("packshot.json"), cfg).unwrap();
+        let path = dir.join(FILE);
+        assert_eq!(load(&path), None);
         let a = Assessment { workers: 6, render: 6.3, keys: keys(), ..Default::default() };
         save(&path, &a).unwrap();
-        let v: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!((v["token"].as_str(), v["peers"][0].as_str(), v["discovery"].as_bool(), v["extra"]["x"].as_i64()), (Some("s3cret"), Some("servbox"), Some(false), Some(1)));
         assert_eq!(load(&path), Some(a.clone()));
-        // the cluster config still reads
-        let cfg = crate::config::NetConfig::load(&path).unwrap();
-        assert!(cfg.enabled() && cfg.peers == vec!["servbox".to_string()]);
         let b = Assessment { workers: 4, ..a };
         save(&path, &b).unwrap();
         assert_eq!(load(&path).unwrap().workers, 4);
-        assert!(!dir.join("packshot.json.tmp").exists());
-        // no file yet: created with the assessment only
-        let fresh = dir.join("new.json");
-        save(&fresh, &b).unwrap();
-        assert_eq!(load(&fresh).unwrap().workers, 4);
-        fs::write(&path, "{ not json").unwrap();
-        assert!(save(&path, &b).is_err());
-        assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
-        let _ = fs::remove_dir_all(&dir);
+        assert!(!dir.join("assessment.json.tmp").exists());
+        assert_eq!(fs::read_to_string(dir.join("packshot.json")).unwrap(), cfg, "packshot.json untouched");
     }
 
     /// Old assessment log folders go, the latest KEEP_LOGS and the test sets stay

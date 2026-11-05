@@ -915,8 +915,8 @@ pictures with gaps), so the icons are rendered from the models:
    4 export-batch at once over one chunk each (with `--stdin` as in a run: measured from the chunk going in to
    `chunk_done`, its start-up not counted; else the whole process); exporters = the smallest e within 5 % of the best
    min(export, render meanwhile) items/s, at most what fits RAM next to the chosen Blenders with the most resident
-   memory one export process took (sampled every 0.5 s; `RAM fits <n> export` in the summary). **Result** in `packshot.json` as `assessment` (every other field kept,
-   keys sorted; written to a temporary file and renamed): workers, exporters, the items/s of render (on an exporting
+   memory one export process took (sampled every 0.5 s; `RAM fits <n> export` in the summary). **Result** in its own file, `assessment.json` in the packshot folder
+   (replaced as a whole; written to a temporary file and renamed; `packshot.json` stays the cluster config only): workers, exporters, the items/s of render (on an exporting
    node with its exports alongside) and export, every step (counts, items/s, render items/s meanwhile, start-up,
    load and render phase, CPU all and busiest core, GPU mean and peak, VRAM, RAM, rises per process, failures,
    seconds), why the ladder stopped, the memory caps (Blender, export), date, duration and the keys: host name, CPU, packshot build, Blender version,
