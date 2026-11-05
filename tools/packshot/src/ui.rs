@@ -191,10 +191,7 @@ pub fn run(engine: Engine, args: Args) -> Result<()> {
     let mut terminal = ratatui::init();
     // Ask for the graphics protocol and cell size (after entering the alternate screen); else half blocks.
     // PACKSHOT_GRAPHICS=sixel|kitty|iterm2|halfblocks forces one
-    let (mut picker, queried) = match Picker::from_query_stdio() {
-        Ok(p) => (p, true),
-        Err(_) => (Picker::halfblocks(), false),
-    };
+    let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
     picker.set_background_color(Some(image::Rgba([22u8, 24, 28, 255])));
     let forced = std::env::var("PACKSHOT_GRAPHICS").ok().map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty());
     let mut graphics_note = None;
@@ -213,23 +210,8 @@ pub fn run(engine: Engine, args: Args) -> Result<()> {
             other => graphics_note = Some(format!("PACKSHOT_GRAPHICS={other} unknown: sixel, kitty, iterm2 or halfblocks")),
         }
     }
-    let fs = picker.font_size();
-    let line = format!(
-        "Image preview: {:?}{} · cell {}×{} px{}",
-        picker.protocol_type(),
-        if forced.is_some() && graphics_note.is_none() {
-            " (PACKSHOT_GRAPHICS)"
-        } else if konsole {
-            " (Konsole)"
-        } else {
-            ""
-        },
-        fs.width,
-        fs.height,
-        if queried { "" } else { " (the terminal did not answer the graphics query)" }
-    );
+    // the chosen protocol is not logged (no use in the app's log); only a wrong PACKSHOT_GRAPHICS is
     let mut engine = engine;
-    engine.note(Level::Info, line);
     if let Some(n) = graphics_note {
         engine.note(Level::Error, n);
     }
