@@ -903,9 +903,11 @@ pictures with gaps), so the icons are rendered from the models:
    sweep:** an unmeasured warm-up (one Blender over the whole set: file cache, Blender's own caches; items failing
    there leave the set), then n Blender at once for n = 1, 2, 3, 4, 6, 8, 10, 12, 16, … (at most 32), long-lived and fed
    one job at a time as in a run; each first renders one item unmeasured (its start-up and first shader
-   compilations, which a run pays once per process), then one chunk of the set (`--chunk`, at most the set; rotated so
-   they do not render the same item at once); items/s = the sum over the processes of images / time from that first
-   answer to the last (until 2026-11-04 the steps started a Blender per chunk and counted its start-up). The ladder stops when a step gains less than 5 % over the one before (or drops),
+   compilations, which a run pays once per process), then all of them keep rendering the set round (rotated so they
+   do not render the same item at once) until at least 8 images per process (and the whole set) have come in; items/s
+   = those images / that window, the same steady-state measure as the render rate of the export sweep (until
+   2026-11-05 one chunk per process, summed per process: servbox read 30.0 items/s with 16 Blender alone against 36.6
+   alongside the exports; until 2026-11-04 a Blender per chunk with its start-up counted). The ladder stops when a step gains less than 5 % over the one before (or drops),
    when items fail, or when the next step would not fit RAM or VRAM (the most any step needed per process over what
    was in use before it, 10 % of each kept free). A sampler records every 0.5 s the CPU (all cores and the busiest
    one), GPU utilisation and used VRAM (`nvidia-smi -lms 500`, first GPU, Linux and Windows; empty columns without

@@ -77,7 +77,7 @@ const HELP: &str = "Usage: pnpm packshot [--render] [--export] [options]
                         steps and the choice, save it in assessment.json, then exit; in the TUI key b in view 3 (also
                         for another node). A test set of 48 targets, stratified by type from the target set's list,
                         is exported once (here, else by a connected exporting node and fetched from it) and kept in
-                        work/assess/; n long-lived Blender at once, each warmed by one item, then over one chunk,
+                        work/assess/; n long-lived Blender at once, each warmed by one item, then counted over ≥ 8 images each,
                         n = 1, 2, 3, 4, 6, 8, … until the gain drops under 5 % or RAM/VRAM run out (CPU per core,
                         GPU, VRAM, RAM every 0.5 s); workers = the smallest n within 5 % of the best; then
                         export-batch e = 1 … 4 with them rendering alongside, capped by RAM. Stale (formula again)

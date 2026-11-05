@@ -5,8 +5,8 @@
 // unmeasured warm-up (one Blender over the whole set: file cache, Blender's own caches; items failing there leave the
 // set) the render sweep runs n Blender processes at once, n = 1, 2, 3, 4, 6, 8, …, long-lived and fed one job at a
 // time as in a run, each warmed by one unmeasured item (start-up and first shader compilations, paid once per
-// process in a run) and then measured over one run-sized chunk of the set (rotated, so they do not render the same
-// item at once), until the gain
+// process in a run) and then counted over a window of at least MEASURED_PER_BLENDER images per process, fed the set
+// round (rotated, so they do not render the same item at once), until the gain
 // over the previous step is under PLATEAU or the next step would not fit RAM or VRAM; a sampler records CPU (total
 // and the busiest core), GPU and VRAM (nvidia-smi) and RAM every 0.5 s. Workers = the smallest n within PLATEAU of
 // the best, capped by memory. An exporting node then runs export-batch with e = 1 … EXPORT_MAX while the chosen n
@@ -50,6 +50,8 @@ const SILENCE: Duration = Duration::from_secs(300);
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
 /// Assessment log folders kept in <work>/assess/ (the oldest go at the start of the next one)
 const KEEP_LOGS: usize = 5;
+/// Images counted per Blender in a render step (after its first, unmeasured one)
+const MEASURED_PER_BLENDER: usize = 8;
 
 /// What an assessment depends on: when any of it differs, the assessment is stale and the formula counts again.
 /// Not the packshot build: any source change gives a new one without changing the load (a "packshot" key in an
@@ -788,39 +790,58 @@ impl Sweep {
         self.p.chunk.max(1).min(self.p.items.len())
     }
 
-    /// n Blender at once as in a run (long-lived, fed one job at a time): each first renders one item unmeasured
-    /// (its start-up and first shader compilations, paid once per process in a run), then one chunk; items/s = the
-    /// sum over the processes of images / time from that first answer to the last; loads while all were measured
+    /// n Blender at once as in a run (long-lived, fed the test set round, rotated so they do not render the same item
+    /// at once): once every process has answered its first item (its start-up and first shader compilations, paid once
+    /// per process in a run), the images of all of them are counted until there are at least MEASURED_PER_BLENDER per
+    /// process (and the whole set); items/s = those images / that window, the same steady-state measure as the render
+    /// rate in the export sweep (one chunk per process made many processes look slower than they are: servbox 30.0
+    /// items/s with 16 Blender alone against 36.6 alongside the exports, 2026-11-05)
     fn render_step(&mut self, n: usize) -> Result<Step> {
-        let (len, c) = (self.p.items.len(), self.chunk());
+        let len = self.p.items.len();
         let base = self.sampler.latest();
         let t0 = Instant::now();
         let dir = self.p.dir.join(format!("r{n}"));
         let mut ids = Vec::new();
         for k in 0..n {
-            // rotated, so they do not render the same item at once; the warm item is the one before the chunk
-            let off = k * len / n;
-            let items: Vec<usize> = std::iter::once((off + len - 1) % len).chain((0..c).map(|j| (off + j) % len)).collect();
-            ids.push(self.spawn(false, &items, &dir.join(format!("p{k}")), None)?);
+            ids.push(self.spawn(false, &[], &dir.join(format!("p{k}")), Some(k * len / n))?);
         }
-        let procs = self.wait_all(&ids, &mut |_, _| Ok(()))?;
+        let ended = |s: &mut Self, id: usize| -> Result<()> {
+            let tail = s.procs.get(&id).and_then(|p| p.tail.lock().ok().map(|t| t.clone())).unwrap_or_default();
+            bail!("{}", crate::engine::with_trace(&format!("a Blender of the step with {n} ended"), &tail))
+        };
+        // warm: every process has answered once
+        while !ids.iter().all(|id| self.procs.get(id).is_some_and(|p| !p.answers.is_empty())) {
+            for id in self.pump()? {
+                ended(self, id)?;
+            }
+        }
+        let from = Instant::now();
+        let seen: Vec<usize> = ids.iter().map(|id| self.procs.get(id).map_or(0, |p| p.answers.len())).collect();
+        let want = len.max(MEASURED_PER_BLENDER * n);
+        let counted = |s: &Self| ids.iter().zip(&seen).map(|(id, k)| s.procs.get(id).map_or(0, |p| p.answers.len().saturating_sub(*k))).sum::<usize>();
+        while counted(self) < want {
+            for id in self.pump()? {
+                ended(self, id)?;
+            }
+        }
+        let t1 = Instant::now();
+        let mut procs = Vec::new();
+        for id in &ids {
+            if let Some(mut p) = self.procs.remove(id) {
+                let _ = p.child.kill();
+                let _ = p.child.wait();
+                procs.push(p);
+            }
+        }
         let _ = fs::remove_dir_all(&dir);
-        let measured = |p: &Proc| p.answers.get(1..).unwrap_or(&[]).to_vec();
-        let rate: f64 = procs
-            .iter()
-            .filter(|p| p.answers.len() > 1)
-            .map(|p| {
-                let (w, l) = (p.answers[0].0, p.answers[p.answers.len() - 1].0);
-                measured(p).iter().filter(|a| a.1).count() as f64 / l.duration_since(w).as_secs_f64().max(1e-3)
-            })
-            .sum();
-        let warm = procs.iter().filter_map(|p| p.answers.first().map(|a| a.0)).max().unwrap_or(t0);
-        let first_end = procs.iter().filter_map(|p| p.answers.last().map(|a| a.0).or(p.ended)).min().unwrap_or_else(Instant::now);
-        let a = agg(&self.sampler.window(if warm < first_end { warm } else { t0 }, first_end));
+        let measured: Vec<&(Instant, bool, Option<[f64; 5]>)> = procs.iter().zip(&seen).flat_map(|(p, k)| p.answers.iter().skip(*k)).filter(|a| a.0 <= t1).collect();
+        let images = measured.iter().filter(|a| a.1).count();
+        let failed = measured.iter().filter(|a| !a.1).count();
+        let rate = images as f64 / t1.duration_since(from).as_secs_f64().max(1e-3);
+        let a = agg(&self.sampler.window(from, t1));
         let starts: Vec<f64> = procs.iter().filter_map(|p| p.ready_at.map(|r| r.duration_since(p.started).as_secs_f64())).collect();
-        let phases: Vec<[f64; 5]> = procs.iter().flat_map(|p| measured(p).into_iter().filter_map(|x| x.2)).collect();
+        let phases: Vec<[f64; 5]> = measured.iter().filter_map(|x| x.2).collect();
         let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
-        let failed = procs.iter().map(|p| (c + 1).saturating_sub(p.icons())).sum();
         let per = |peak: Option<u64>, before: Option<u64>| peak.zip(before).map(|(p, b)| (p.saturating_sub(b) / n as u64) >> 20);
         Ok(Step {
             n,
@@ -979,7 +1000,7 @@ fn export_row(s: &Step, prev: Option<&Step>) -> String {
 
 /// The result as a table: the render sweep, the export sweep, the choice
 pub fn table(a: &Assessment) -> String {
-    let mut out = vec![format!("Render sweep: {} test items, {} per Blender (chunk), each warmed by one item first", a.items, a.chunk), RENDER_HEAD.to_string()];
+    let mut out = vec![format!("Render sweep: {} test items fed round, each Blender warmed by one item, then at least {MEASURED_PER_BLENDER} images per Blender counted", a.items), RENDER_HEAD.to_string()];
     for (i, s) in a.render_steps.iter().enumerate() {
         out.push(render_row(s, i.checked_sub(1).map(|j| &a.render_steps[j])));
     }
@@ -1017,7 +1038,7 @@ pub fn sweep(p: SweepParams, cancel: Arc<AtomicBool>, out: Sender<SweepEv>) -> R
     s.warm_up()?;
     s.settle()?;
     let c = s.chunk();
-    s.say(format!("Render sweep: {} test items, {c} per Blender", s.p.items.len()));
+    s.say(format!("Render sweep: {} test items fed round, at least {MEASURED_PER_BLENDER} images per Blender counted", s.p.items.len()));
     s.say(RENDER_HEAD.to_string());
     let mut steps: Vec<Step> = Vec::new();
     let mut stop = format!("ladder end at {}", s.p.max);
