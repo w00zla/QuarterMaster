@@ -652,9 +652,7 @@ impl Engine {
         }
         let conn = self.conn_of(&node).with_context(|| format!("{node} is not connected"))?;
         let targets: Vec<Target> = todo.iter().map(|&t| self.targets[t].clone()).collect();
-        let n = targets.len();
         self.reply(conn, Msg::StartRun { targets, set: set.clone(), name: name.to_string(), filter: filter.to_string(), scope: scope.key().to_string(), line: line.to_string() }, Payload::None);
-        self.note(Level::Info, format!("Asking {node} to start a run over {n} entities into its set {set}"));
         Ok(())
     }
 
@@ -708,7 +706,6 @@ impl Engine {
         let Some(from) = self.remote_run.as_ref().filter(|r| !r.status.finished).map(|r| r.from.clone()) else { return };
         if let Some(conn) = self.conn_of(&from) {
             self.reply(conn, Msg::AbortRun, Payload::None);
-            self.note(Level::Info, format!("Asking {from} to abort its run"));
         }
     }
 
@@ -853,9 +850,6 @@ impl Engine {
             self.fetching.insert((name.clone(), r.id.clone()));
             self.reply(conn, Msg::GetRun { id: r.id.clone() }, Payload::None);
         }
-        if !runs.is_empty() {
-            self.note(Level::Info, format!("Fetching {} runs from {name}", runs.len()));
-        }
         runs.len()
     }
 
@@ -877,9 +871,7 @@ impl Engine {
 
     /// Key m: fetch the other node's live manifest
     pub fn fetch_manifest(&mut self, conn: u64) {
-        let name = self.peer_name(conn);
         self.reply(conn, Msg::GetManifest { set: LIVE.into() }, Payload::None);
-        self.note(Level::Info, format!("Asking {name} for its live manifest"));
     }
 
     /// Request a node's run list again
@@ -1819,7 +1811,7 @@ else:
         assert_eq!((run.ok, run.failed), (6, 0), "{:?}", h.errors);
         assert!(events(&h, "export_end").len() >= 3 && events(&h, "render_end").len() >= 3);
         assert_eq!((pids(&h, "export"), pids(&h, "blender")), (1, 1), "one process of each kind for all chunks");
-        assert!(h.log.iter().any(|l| l.text.contains("export-batch --stdin: one long-lived process")), "probed");
+        assert!(!h.log.iter().any(|l| l.text.contains("export-batch without --stdin")), "the --stdin mode was found");
         // a job limit of 4: the second Blender takes over in the middle of a chunk, nothing is lost
         h.serve.as_mut().unwrap().blender_jobs = 4;
         let todo = h.add_targets((6..16).map(|k| target(&format!("gun_{k}"))).collect());
@@ -1915,7 +1907,7 @@ else:
         let a = r.assessment.clone().expect("r has an assessment");
         assert!(a.workers >= 1 && a.workers <= 3 && a.render > 0.0 && a.exporters.is_none() && a.export_steps.is_empty(), "{a:?}");
         assert_eq!(a.items, 6);
-        assert!(r.log.iter().any(|l| l.text.contains("fetching them")), "the test set came from b");
+        assert!(r.log.iter().any(|l| l.text.contains("items exported on b")), "the test set came from b");
         let saved: serde_json::Value = serde_json::from_slice(&fs::read(r.store.root.join("packshot.json")).unwrap()).unwrap();
         assert_eq!((saved["token"].as_str(), saved["assessment"]["workers"].as_u64()), (Some("t"), Some(a.workers as u64)));
         assert!(b.serve.as_ref().is_some_and(|s| !s.busy()), "b released the test set's chunk");
@@ -1925,7 +1917,7 @@ else:
         // a second assessment takes the kept test set
         r.start_assess(None).unwrap();
         tick_until(&mut [&mut x, &mut b, &mut r], "r assessed again", 60, &mut |n| !n[2].assessing());
-        assert!(r.log.iter().any(|l| l.text.starts_with("Test set from")), "kept test set used");
+        assert!(r.log.iter().any(|l| l.text.starts_with("Test set: kept")), "kept test set used");
         // b: exports the test set itself, then the export sweep with its Blender rendering alongside
         b.start_assess(None).unwrap();
         tick_until(&mut [&mut x, &mut b, &mut r], "b assessed", 60, &mut |n| !n[1].assessing());

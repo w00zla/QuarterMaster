@@ -632,7 +632,7 @@ pictures with gaps), so the icons are rendered from the models:
    targets, 47 types) as close as two runs without the shim (490 against 489 identical, the same turret varying). The
    assessment's render sweep went from 16.0 to 42.5 items/s at n = 8 and now stops at the VRAM (16 GB). `build.rs` builds it for Linux targets only, as a
    `no_std` cdylib with rustc and rust-lld (no C compiler, also when the musl binary is built on Windows), packshot
-   embeds it and writes it at start to `<work>/rdseed-shim-<hash>.so`; the start says "Blender: RDSEED shim on". A
+   embeds it and writes it at start to `<work>/rdseed-shim-<hash>.so` (silently; only a shim that cannot be used is logged). A
    work path with a blank or colon cannot go into `LD_PRELOAD`: the start says "shim off" and the Blenders run
    without it. Windows has no shim (MSVC's `random_device` is believed not to use RDSEED; not verified). There are no roles: every node
    starts with what it can do now, `--render` (Blender, by default the counts of the node's valid compute

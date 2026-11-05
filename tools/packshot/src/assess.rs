@@ -1202,7 +1202,7 @@ impl Engine {
         self.assess_note(Level::Info, format!("Assessment of {}{by}: {} test items · log {}", self.me.name, items.len(), dir.join("assess.log").display()));
         self.announce_assess();
         if let Some(entries) = read_testset(&testset) {
-            self.assess_note(Level::Info, format!("Test set from {}", testset.display()));
+            self.assess_note(Level::Info, "Test set: kept from an earlier assessment".to_string());
             self.start_sweep(entries);
             return Ok(());
         }
@@ -1213,7 +1213,7 @@ impl Engine {
                 ItemJob { item: t, entity: tg.entity.clone(), worn: tg.worn, kind: tg.kind.clone(), sub_type: tg.sub_type.clone(), pose: [0.0; 3], rig: String::new() }
             })
             .collect();
-        self.assess_note(Level::Info, format!("Test set: exporting {} items on {holder}", jobs.len()));
+        self.assess_note(Level::Info, format!("Test set: {} items exported on {holder}", jobs.len()));
         if conn == LOCAL {
             let (jobs, bad) = self.fill_items(jobs);
             for (t, e) in bad {
@@ -1243,7 +1243,6 @@ impl Engine {
             bail!("{} does not render", h.name);
         }
         self.dispatch(conn, Msg::Assess, Payload::None);
-        self.note(Level::Info, format!("Asking {} to assess itself", h.name));
         Ok(())
     }
 
@@ -1268,7 +1267,6 @@ impl Engine {
             bail!("{} is not assessing", h.name);
         }
         self.dispatch(conn, Msg::AssessAbort, Payload::None);
-        self.note(Level::Info, format!("Asking {} to abort its assessment", h.name));
         Ok(())
     }
 
@@ -1353,13 +1351,11 @@ impl Engine {
             return self.assess_fail(format!("test set not exported on {holder}: {}", error.lines().next().unwrap_or("no item")));
         }
         let jobs: Vec<RenderJob> = ok.iter().map(|&t| RenderJob { item: t, entity: self.targets[t].entity.clone(), holder: holder.clone(), chunk: id }).collect();
-        let n = jobs.len();
         let tmp = testset.with_extension("part");
         let _ = fs::remove_dir_all(&tmp);
         if let Some(job) = self.assess_job.as_mut() {
             job.phase = Phase::Fetch { conn, id };
         }
-        self.assess_note(Level::Info, format!("Test set: {n} items exported on {holder}, fetching them"));
         let mut lines = Vec::new();
         if let Some(s) = self.serve.as_mut() {
             s.fetch_keep(self.hub.as_ref(), id, jobs, tmp, &mut |l| lines.push(l));

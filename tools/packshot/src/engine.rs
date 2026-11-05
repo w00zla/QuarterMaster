@@ -636,7 +636,6 @@ impl Engine {
         });
         self.tables_ready = false;
         self.tables_load = Some(TablesLoad { rx, started: Instant::now() });
-        self.note(Level::Info, "DataCore tables: loading in the background, exports start once they are there");
     }
 
     /// Seconds the tables have been loading, None when they are not loading
@@ -658,7 +657,8 @@ impl Engine {
         let secs = load.started.elapsed().as_secs_f64();
         for m in msgs {
             match m {
-                Ok(step) => self.note(Level::Info, step),
+                // the steps are not logged: only "ready" (exports start) or the error
+                Ok(_) => {}
                 Err(Ok(tables)) => {
                     self.tables = tables;
                     self.tables_ready = true;
@@ -956,7 +956,6 @@ impl Engine {
         match EventLog::create(&self.store.run_dir(&run_id).join("events.jsonl")) {
             Ok(mut log) => {
                 log.emit("run_start", meta);
-                self.note(Level::Info, format!("Event log: {}", log.path.display()));
                 self.events = Some(log);
             }
             Err(e) => self.note(Level::Error, format!("Event log not created: {e}")),

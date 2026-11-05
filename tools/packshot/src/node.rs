@@ -1001,7 +1001,10 @@ impl Renderer {
             return v;
         }
         let v = self.tools.as_ref().is_some_and(|t| supports_stdin(&t.starbreaker));
-        log(if v { "export-batch --stdin: one long-lived process per export slot".into() } else { "export-batch without --stdin: one process per export chunk".into() });
+        // only the fallback is worth a line: it explains slower exports
+        if !v {
+            log("export-batch without --stdin: one process per export chunk".into());
+        }
         self.export_stdin = Some(v);
         v
     }

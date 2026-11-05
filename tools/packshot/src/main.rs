@@ -326,8 +326,8 @@ fn real_main() -> Result<()> {
     // Linux: the RDSEED shim for every Blender (src/blender.rs)
     let shim = if args.dry_run { Ok(None) } else { blender::install(&work) };
     let shim_line = match &shim {
-        Ok(Some(p)) => Some((engine::Level::Info, format!("Blender: RDSEED shim on ({}) · --threads {}", p.display(), blender::THREADS))),
-        Ok(None) => None,
+        // the normal case says nothing; only a shim that could not be used is worth a line
+        Ok(_) => None,
         Err(e) => Some((engine::Level::Error, format!("Blender: RDSEED shim off: {e:#}"))),
     };
     if let Some((_, l)) = &shim_line {
@@ -345,8 +345,7 @@ fn real_main() -> Result<()> {
     println!("Set: {} ({} runs) in {}", set.name, set.chain().count(), store.set_dir(&set.name).display());
     // the set's target list: --targets gives it a new one
     if let Some(f) = path("targets") {
-        let n = store.set_targets(&mut set, &f)?;
-        println!("Target list of {}: {n} targets from {}", set.name, f.display());
+        store.set_targets(&mut set, &f)?;
     }
     let targets: Vec<Target> = store.load_targets(&set)?;
     match &set.targets {
@@ -371,9 +370,9 @@ fn real_main() -> Result<()> {
     }
     let hub = (net_cfg.enabled() && !args.dry_run).then(|| Hub::new(net_cfg.clone(), me.clone(), work.join("inbox")));
     if let Some(h) = hub.as_ref() {
-        match &h.listen_error {
-            Some(e) => println!("Cluster: {e}"),
-            None => println!("Cluster: {} listening on {}", h.me.name, h.cfg.listen),
+        // only a port that could not be bound is worth a line
+        if let Some(e) = &h.listen_error {
+            println!("Cluster: {e}");
         }
         if let Some(e) = &h.discovery_error {
             println!("Cluster: {e}");
