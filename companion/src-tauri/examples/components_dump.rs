@@ -1,21 +1,24 @@
 //! Offline check of the character inventory read over folders of screenshots or debug exports:
 //! `cargo run --release --example components_dump -- <screenshots dir>... [--threads n] [--gpu]`
 //!
-//! A debug recording's frames are read with the cursor stored next to them (`read-N.json`).
+//! A debug recording's frames are read with the cursor stored next to them (`read-N.json`), each on its
+//! own (sc-ohseearr's `read_components`: the page over every place, the tooltip always; adapted as in the
+//! app, `components::to_legacy`).
 //! Prints every frame's page, the tile under the cursor, tooltip title and lines as the OCR read them (what `components.ts`
 //! matches the stat names against), then the boxes of the read areas; per frame and on average where
 //! the read's time went (`ocr::Timings`, the rest is the read's own work).
 use std::path::{Path, PathBuf};
 
-use companion_lib::components::read_components;
-use companion_lib::ocr::{Model, Ocr};
+use companion_lib::components::to_legacy;
+use companion_lib::ocr::{self, Model};
+use sc_ohseearr_gear_inventory::read_components;
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let threads = take_threads(&mut args);
     // --gpu: on DirectML (DirectML.dll 1.15 next to this exe, e.g. copied from resources/ocr)
     let gpu = args.iter().position(|a| a == "--gpu").map(|i| args.remove(i)).is_some();
-    let mut ocr = Ocr::new(threads, Model::Tiny, gpu).expect("ocr models");
+    let mut ocr = ocr::load(threads, Model::Tiny, gpu).expect("ocr models");
     let (mut frames, mut total_ms, mut model_ms) = (0u128, 0u128, 0u128);
     for dir in args {
         for path in sorted(Path::new(&dir), "jpg").into_iter().chain(sorted(Path::new(&dir), "png")) {
@@ -23,7 +26,7 @@ fn main() {
             let frame = image::open(&path).expect("frame").to_rgb8();
             let t = std::time::Instant::now();
             let cursor = cursor_of(&path);
-            let (read, boxes) = read_components(&mut ocr, &frame, cursor).expect("read");
+            let (read, boxes) = to_legacy(read_components(&mut ocr, &frame, cursor, None).expect("read"));
             let ms = t.elapsed().as_millis();
             let phases = ocr.take_timings();
             frames += 1;

@@ -1,9 +1,10 @@
 //! Quartermaster Companion: follows SC's `Game.log` for blueprint unlocks and
 //! books them, once the user confirms, through the Quartermaster web app's API
 //! with the user's API token. Structure after BindSight (`config.rs`, `logwatch.rs`).
-//! Reads the inventory terminals (`inventory.rs`) and the refinery terminal (`refinery.rs`) from
-//! frames during a scan session the user starts (`ocr.rs`, `ocrwatch.rs`), in the player's game
-//! language (`locale.rs`); the frames come from the screen capture (`capture.rs`, Windows only so far).
+//! Reads the warehouse (`inventory.rs`), the character inventory (`components.rs`) and the refinery
+//! terminal (`refinery.rs`) from frames during a scan session the user starts (`ocr.rs`, `ocrwatch.rs`)
+//! with sc-ohseearr's readers, in the player's game language (sc-ohseearr's `Locale`); the frames come
+//! from the screen capture (`capture.rs` on sc-ohseearr's capture crate, Windows only so far).
 //! The scan overlay (`overlay.rs`, Windows only) shows the main window's detections over the game.
 
 #[cfg(windows)]
@@ -12,7 +13,6 @@ pub mod components;
 mod config;
 mod gamelog;
 pub mod inventory;
-pub mod locale;
 mod logwatch;
 pub mod ocr;
 mod ocrwatch;
@@ -436,8 +436,13 @@ async fn download_update(app: AppHandle, http: tauri::State<'_, reqwest::Client>
 #[tauri::command]
 fn game_names(app: AppHandle, keys: Vec<String>) -> std::collections::HashMap<String, String> {
     let game_dir = app.state::<Mutex<AppData>>().lock().unwrap().config.game_dir.clone();
-    let keys = keys.into_iter().map(|k| k.to_ascii_lowercase()).collect();
-    locale::read_values(&locale::ini_path(std::path::Path::new(&game_dir)), &keys)
+    let Ok(pack) = sc_ohseearr_sc::LocTable::load(&sc_ohseearr_sc::locale::pack_path(std::path::Path::new(&game_dir))) else { return Default::default() };
+    keys.into_iter()
+        .filter_map(|k| {
+            let k = k.to_ascii_lowercase();
+            pack.get(&k).map(|v| (k, v.to_string()))
+        })
+        .collect()
 }
 
 /// Whether the scan runs.
@@ -611,8 +616,8 @@ fn debug_info(app: AppHandle) -> DebugInfo {
         log_dir: shown(app.path().app_log_dir()),
         cache_dir: cache.as_ref().map(|d| d.display().to_string()).unwrap_or_default(),
         game_dir: config.game_dir.clone(),
-        language: locale::language(game_dir),
-        pack: file_info(&locale::ini_path(game_dir)),
+        language: sc_ohseearr_sc::locale::language(game_dir),
+        pack: file_info(&sc_ohseearr_sc::locale::pack_path(game_dir)),
         catalog,
     }
 }

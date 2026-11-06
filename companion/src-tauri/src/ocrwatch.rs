@@ -5,15 +5,20 @@
 //! Reading is **one scan** the user switches on and off (off at every start), with a `Scope`: which of
 //! the screens it reads (the frontend's filters). The worker finds the screen itself (`Screen`, sent as
 //! `scan-screen` on every change): without one it probes every `PROBE_MS` (the refinery's big titles,
-//! the character inventory's page number, the warehouse grid). Warehouse and character inventory: each
-//! read goes out as `inventory-read` (`inventory.rs`: the tiles, the tooltip, the layout;
+//! the character inventory's page number, the warehouse grid). The screens are read by sc-ohseearr's
+//! readers (`Readers`), which keep what they learn across frames (the warehouse's layout, the character
+//! inventory's UI scale); their output is adapted to the companion's payloads. Warehouse and character
+//! inventory: each read goes out as `inventory-read` (`inventory.rs`: the tiles, the tooltip, the layout;
 //! `components.rs`: the hovered item's tooltip lines, the page, the cursor's cell). Refinery: the
 //! screen is a visit (`refinery-visit` true) and each work order overview goes out as
 //! `refinery-overview`; a live frame is read once the view came to rest after it moved and every 2 s
-//! (the `Gate`, a 96×40 grey thumbnail: the game's scene changes a little all the time, checking every
-//! changed frame took ~5 % CPU); a few reads without the terminal or a minute without frames end the
-//! visit. The OCR is dropped as soon as the scan stops (its memory arena keeps the full reads' peak);
-//! the next start loads it again.
+//! (sc-ohseearr's `Gate`, a 96×40 grey thumbnail: the game's scene changes a little all the time,
+//! checking every changed frame took ~5 % CPU); a few reads without the terminal or a minute without
+//! frames end the visit. The refinery reader finds the terminal by its texts in the player's language:
+//! the game's `global.ini` (`Locale`: the language pack, else the English table `global-english.ini` in
+//! the app's local data folder); without either the refinery is not read. The OCR and the readers are
+//! dropped as soon as the scan stops (the OCR's memory arena keeps the full reads' peak, the warehouse
+//! reader holds its layout detector); the next start loads them again.
 //!
 //! Troubleshooting (`Debug`, the inventory panel's debug dialog): while on, every read goes out a
 //! second time as `inventory-debug` with the frame as a JPEG (scaled to 1280 px wide) for the overlay
@@ -30,15 +35,20 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use image::{GrayImage, ImageFormat, RgbImage};
+use image::{ImageFormat, RgbImage};
+use sc_ohseearr_gear_inventory::GearInventoryReader;
+use sc_ohseearr_refinery::RefineryReader;
+use sc_ohseearr_sc::{Locale, LocaleSource, ScreenReader};
+use sc_ohseearr_warehouse::WarehouseReader;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::components::{hovered_tile, read_count, read_page, read_tooltip, ComponentRead, Page, Ui};
-use crate::inventory::{read_grid, Grid, Layout};
-use crate::locale::{LabelSource, Labels};
+pub use sc_ohseearr_capture_win::{Gate, Pixels, PULL_TIMEOUT_MS};
+
+use crate::components::ComponentRead;
+use crate::inventory::Grid;
 use crate::ocr::{Model, Ocr, TextBox};
-use crate::refinery::{read_overview, terminal_in_view, Overview, Read};
+use crate::refinery::{Overview, Read};
 
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
 pub const REFINERY_VISIT: &str = "refinery-visit";
@@ -57,78 +67,14 @@ const RECORD_JPEG_QUALITY: u8 = 90;
 // ONNX Runtime threads: the game runs at the same time (3: the inventory reads confirm every stack
 // twice, the user waits for them)
 const OCR_THREADS: usize = 3;
-const THUMB: (u32, u32) = (96, 40);
-// Samples per thumbnail pixel and axis (a box average of the frame's pixels; fewer let small details
-// flicker)
-const THUMB_SAMPLES: u32 = 16;
-// Mean absolute difference of the thumbnails (0–255): below STILL the view did not move, above NEW it
-// changed. Changes on the terminal are small (a message over the panel going away: 0.3), so during a
-// visit it is read again every REREAD_MS anyway.
-const STILL: f32 = 3.0;
-const NEW: f32 = 1.5;
-const REREAD_MS: u64 = 2_000;
 // Full reads in a row without the terminal that end a visit
 const LEAVE_AFTER: u32 = 3;
 // A visit also ends without any frame for this long (the game not in front)
 const VISIT_GAP: Duration = Duration::from_secs(60);
-
-/// A captured image: the capture's BGRA rows (converted only when read) or a test image.
-pub enum Pixels {
-    Rgb(RgbImage),
-    /// Tightly packed rows, 4 bytes per pixel
-    Bgra { data: Vec<u8>, width: u32, height: u32 },
-}
-
-impl Pixels {
-    fn size(&self) -> (u32, u32) {
-        match self {
-            Pixels::Rgb(img) => img.dimensions(),
-            Pixels::Bgra { width, height, .. } => (*width, *height),
-        }
-    }
-
-    /// Red, green, blue at (x, y).
-    fn rgb(&self, x: u32, y: u32) -> [u8; 3] {
-        match self {
-            Pixels::Rgb(img) => img.get_pixel(x, y).0,
-            Pixels::Bgra { data, width, .. } => {
-                let i = ((y * width + x) * 4) as usize;
-                [data[i + 2], data[i + 1], data[i]]
-            }
-        }
-    }
-
-    /// The grey thumbnail for the gate: each pixel the mean of a grid of samples in its cell (cheap even
-    /// on 4K frames, unlike a full resize).
-    pub fn thumb(&self) -> GrayImage {
-        let (w, h) = self.size();
-        GrayImage::from_fn(THUMB.0, THUMB.1, |tx, ty| {
-            let mut sum = 0u32;
-            for sy in 0..THUMB_SAMPLES {
-                for sx in 0..THUMB_SAMPLES {
-                    let x = ((tx * THUMB_SAMPLES + sx) * w / (THUMB.0 * THUMB_SAMPLES)).min(w.saturating_sub(1));
-                    let y = ((ty * THUMB_SAMPLES + sy) * h / (THUMB.1 * THUMB_SAMPLES)).min(h.saturating_sub(1));
-                    let [r, g, b] = self.rgb(x, y);
-                    sum += (r as u32 * 77 + g as u32 * 150 + b as u32 * 29) >> 8;
-                }
-            }
-            image::Luma([(sum / (THUMB_SAMPLES * THUMB_SAMPLES)) as u8])
-        })
-    }
-
-    pub fn into_rgb(self) -> RgbImage {
-        match self {
-            Pixels::Rgb(img) => img,
-            Pixels::Bgra { data, width, height } => {
-                let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
-                for px in data.as_chunks::<4>().0 {
-                    rgb.extend_from_slice(&[px[2], px[1], px[0]]);
-                }
-                RgbImage::from_raw(width, height, rgb).expect("width × height × 3 bytes")
-            }
-        }
-    }
-}
+/// The English `global.ini` in the app's local data folder: the game's texts for players without a language
+/// pack (the game keeps its English texts in `Data.p4k`; sc-ohseearr's `scripts/extract-global-ini.*` extracts
+/// them)
+const ENGLISH_TABLE: &str = "global-english.ini";
 
 pub struct Frame {
     /// When it was taken (Unix ms)
@@ -464,62 +410,6 @@ fn jpeg_bytes(image: &RgbImage) -> Result<Vec<u8>, String> {
     Ok(bytes.into_inner())
 }
 
-/// Decides which live frames are worth reading.
-pub struct Gate {
-    previous: Option<GrayImage>,
-    last_read: Option<GrayImage>,
-    last_read_ms: u64,
-    /// The view moved since the last read (idle: only a view that came to rest is checked)
-    moved: bool,
-    /// At a refinery terminal: read again every REREAD_MS
-    visit: bool,
-    /// How long after a read a still view is read again during a visit
-    reread_ms: u64,
-}
-
-impl Default for Gate {
-    fn default() -> Self {
-        // The first still view is checked
-        Self { previous: None, last_read: None, last_read_ms: 0, moved: true, visit: false, reread_ms: REREAD_MS }
-    }
-}
-
-fn diff(a: &GrayImage, b: &GrayImage) -> f32 {
-    let sum: u64 = a.pixels().zip(b.pixels()).map(|(p, q)| p[0].abs_diff(q[0]) as u64).sum();
-    sum as f32 / (THUMB.0 * THUMB.1) as f32
-}
-
-impl Gate {
-    /// Whether to read the frame with this thumbnail (taken at `at_ms`), still since the last frame: idle,
-    /// once the view came to rest after it moved; during a visit, when it changed since the last read or
-    /// REREAD_MS after it.
-    pub fn pass(&mut self, t: GrayImage, at_ms: u64) -> bool {
-        let still = self.previous.as_ref().is_some_and(|p| diff(p, &t) < STILL);
-        if self.previous.is_some() && !still {
-            self.moved = true;
-        }
-        let pass = still
-            && if self.visit {
-                let new = self.last_read.as_ref().is_none_or(|l| diff(l, &t) > NEW);
-                new || at_ms.saturating_sub(self.last_read_ms) >= self.reread_ms
-            } else {
-                self.moved
-            };
-        if pass {
-            self.moved = false;
-            self.last_read = Some(t.clone());
-            self.last_read_ms = at_ms;
-        }
-        self.previous = Some(t);
-        pass
-    }
-
-    /// Whether a visit is going on after the read of the passed frame.
-    pub fn read(&mut self, visit: bool) {
-        self.visit = visit;
-    }
-}
-
 /// Whether the scan runs (the capture runs only then; off at start). Off: every frame is dropped
 /// unread.
 pub type Detect = Arc<AtomicBool>;
@@ -591,11 +481,10 @@ pub const GAME_FRONT: &str = "game-front";
 /// The worker's pull on the screens read every frame (warehouse, character inventory): when the capture
 /// may grab the next frame (Unix ms; 0: off, the normal once a second). The worker sets it once a read
 /// is done (now: a fresh frame for the next read, none grabbed while it reads), the capture grabs as
-/// soon as the mouse cursor rests (`capture::REST`) and sets it PULL_TIMEOUT_MS ahead, in case no read
-/// answers (the screen changed, the scan stopped).
+/// soon as the mouse cursor rests (sc-ohseearr's `REST`) and sets it PULL_TIMEOUT_MS ahead, in case no
+/// read answers (the screen changed, the scan stopped).
 #[derive(Default, Clone)]
 pub struct FastCapture(pub Arc<AtomicU64>);
-pub const PULL_TIMEOUT_MS: u64 = 3000;
 pub const GAME_SEEN: &str = "game-seen";
 
 /// Whether the OCR can run on the GPU (sc-ohseearr's engine, DirectML): the redistributable DirectML.dll next
@@ -672,6 +561,41 @@ struct Visit {
     last_frame: Instant,
 }
 
+/// The screen readers (sc-ohseearr's), each with what it keeps across frames: the warehouse reader its last
+/// strong layout (the next read's prior: its area around the cursor, its pitch, its columns for ties; dropped when
+/// the screen is left) and its layout detector, the character inventory reader its UI scale (from the last page
+/// number read), the refinery reader its labels. Made anew when the scan stops: their memory goes, and the next
+/// start may see the screens from elsewhere.
+#[derive(Default)]
+struct Readers {
+    warehouse: WarehouseReader,
+    gear: GearInventoryReader,
+    refinery: RefineryReader,
+}
+
+/// The game's texts for the readers (`LocaleSource`: the language pack of the configured game folder, the English
+/// table in the app's local data folder), None without either. That the refinery cannot be read then is logged
+/// once per change (`missing`).
+fn locale_of<'a>(source: &'a mut LocaleSource, app: &AppHandle, missing: &mut bool) -> Option<&'a Locale> {
+    let game_dir = PathBuf::from(&app.state::<Mutex<crate::AppData>>().lock().unwrap().config.game_dir);
+    let english = app.path().app_local_data_dir().ok().map(|d| d.join(ENGLISH_TABLE));
+    match source.get(&game_dir, english.as_deref()) {
+        Ok(locale) => {
+            if std::mem::replace(missing, false) {
+                log::info!("refinery readable again: the game's texts found");
+            }
+            Some(locale)
+        }
+        Err(e) => {
+            if !std::mem::replace(missing, true) {
+                let english = english.map_or("(no local data folder)".to_string(), |p| p.display().to_string());
+                log::warn!("refinery not readable: {e} (language pack of {}, English table {english})", game_dir.display());
+            }
+            None
+        }
+    }
+}
+
 struct Worker {
     app: AppHandle,
     detect: Detect,
@@ -688,18 +612,18 @@ struct Worker {
     gpu: Gpu,
     on_gpu: bool,
     gate: Gate,
-    labels: LabelSource,
+    readers: Readers,
+    /// The game's texts (`locale_of`), and whether the last look found none
+    locale: LocaleSource,
+    locale_missing: bool,
+    /// The frame being read (`sc_ohseearr_sc::Frame::id`: a probe's work is kept for the read of the same frame)
+    frame_id: u64,
     visit: Option<Visit>,
-    /// The last strong warehouse read's layout: the next read's prior (its area around the cursor,
-    /// its pitch, its columns for ties); dropped when the screen is left
-    last_layout: Option<Layout>,
     /// Which screen the scan looks at, and how many reads in a row found nothing there
     screen: Screen,
     screen_misses: u32,
     /// When the scan last probed a frame for a screen (probing without a known screen is throttled)
     last_probe_ms: u64,
-    /// The character inventory's scale (`components::Ui`), from the last page number read
-    ui_scale: Option<f32>,
     /// The capture of the frame being read, and the counts of the frames not read since the last read
     capture: CaptureInfo,
     unread: CaptureInfo,
@@ -716,7 +640,7 @@ pub(crate) fn unix_ms(t: SystemTime) -> u64 {
 fn ensure_ocr(slot: &mut Option<Ocr>, model: Model, gpu: bool) -> Result<&mut Ocr, String> {
     if slot.is_none() {
         let started = Instant::now();
-        *slot = Some(Ocr::new(OCR_THREADS, model, gpu).map_err(|e| format!("models: {e}"))?);
+        *slot = Some(crate::ocr::load(OCR_THREADS, model, gpu).map_err(|e| format!("models: {e}"))?);
         log::info!("OCR {model:?} loaded in {:?} on the {}", started.elapsed(), if gpu { "GPU" } else { "CPU" });
     }
     Ok(slot.as_mut().expect("loaded above"))
@@ -737,13 +661,14 @@ impl Worker {
             gpu,
             on_gpu: false,
             gate: Gate::default(),
-            labels: LabelSource::default(),
+            readers: Readers::default(),
+            locale: LocaleSource::default(),
+            locale_missing: false,
+            frame_id: 0,
             visit: None,
-            last_layout: None,
             screen: Screen::Unknown,
             screen_misses: 0,
             last_probe_ms: 0,
-            ui_scale: None,
             capture: CaptureInfo::default(),
             unread: CaptureInfo::default(),
             rgb_time: Duration::ZERO,
@@ -760,9 +685,10 @@ impl Worker {
             // Checked without a frame too: once off, the capture sends none
             if !self.detect.load(Ordering::Relaxed) {
                 self.set_screen(Screen::Unknown, "scan stopped");
-                // The next start may see the terminal from elsewhere
-                self.last_layout = None;
-                self.ui_scale = None;
+                // The next start may see the terminal from elsewhere: the readers start over (their memory,
+                // the layout detector's, goes too), the game's texts are read again
+                self.readers = Readers::default();
+                self.locale = LocaleSource::default();
                 // Off: the OCR's memory goes right away (the next start loads it again in well under a
                 // second); while the scan runs it stays, read or not
                 if self.tiny.take().is_some() {
@@ -803,6 +729,7 @@ impl Worker {
             let converting = Instant::now();
             let image = frame.pixels.into_rgb();
             self.rgb_time = converting.elapsed();
+            self.frame_id += 1;
             self.use_gpu();
             let result = match self.screen {
                 // The terminal: once the view came to rest after it moved, and every REREAD_MS
@@ -843,7 +770,9 @@ impl Worker {
         let setting = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu;
         let (mut parts, mut info) = (Vec::new(), OcrInfo { models: Vec::new(), gpu: self.on_gpu, setting, status: self.gpu.state(), ms: 0 });
         for (name, slot) in [("tiny", &mut self.tiny)] {
-            let Some(t) = slot.as_mut().map(Ocr::take_timings) else { continue };
+            let Some(mut t) = slot.as_mut().map(Ocr::take_timings) else { continue };
+            // The warehouse reader's layout detector counts as the detector's
+            t += self.readers.warehouse.take_timings();
             if t.det_runs + t.rec_runs > 0 {
                 parts.push(format!("{name}: {t}"));
                 info.models.push(name);
@@ -851,12 +780,6 @@ impl Worker {
             }
         }
         (parts.join(", "), info)
-    }
-
-    /// The labels in the player's language (re-read when the game's language or pack changes).
-    fn labels_now(&mut self) -> Labels {
-        let game_dir = PathBuf::from(&self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.game_dir);
-        self.labels.get(&game_dir).clone()
     }
 
     /// Switches the screen: the refinery's starts or ends a visit; the frontend hears of every change.
@@ -867,7 +790,7 @@ impl Worker {
         let at_ms = unix_ms(SystemTime::now());
         if self.screen == Screen::Warehouse {
             // The next warehouse may be seen from elsewhere: its first read fits the whole pane again
-            self.last_layout = None;
+            self.readers.warehouse.reset();
         }
         if self.screen == Screen::Refinery {
             self.visit = None;
@@ -889,16 +812,23 @@ impl Worker {
         let _ = self.app.emit(SCAN_SCREEN, screen.name());
     }
 
-    /// Looks for a screen in a frame: the refinery's big titles first (cheap), then the inventory's
-    /// reads (the page number, else the warehouse grid; a frame with neither is tried as the
-    /// character inventory too), each only when in scope.
+    /// Looks for a screen in a frame: the refinery's big titles first (cheap; not without the game's
+    /// texts), then the inventory's reads (the page number, else the warehouse grid; a frame with
+    /// neither is tried as the character inventory too), each only when in scope.
     fn probe(&mut self, scope: Scope, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
         if scope.refinery {
-            let labels = self.labels_now();
-            let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
-            let started = Instant::now();
-            let found = terminal_in_view(ocr, &image, &labels)?;
-            log::debug!("terminal check in {:?}: {found}", started.elapsed());
+            let found = match locale_of(&mut self.locale, &self.app, &mut self.locale_missing) {
+                Some(locale) => {
+                    let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
+                    let started = Instant::now();
+                    let frame = sc_ohseearr_sc::Frame { id: self.frame_id, image: &image, cursor, locale: Some(locale) };
+                    let found = self.readers.refinery.probe(ocr, &frame)?;
+                    log::debug!("terminal check in {:?}: {found}", started.elapsed());
+                    found
+                }
+                // Not readable (logged by `locale_of`)
+                None => false,
+            };
             if found {
                 self.set_screen(Screen::Refinery, "titles seen");
                 return self.look_refinery(at_ms, cursor, image);
@@ -920,6 +850,11 @@ impl Worker {
         let (width, height) = image.dimensions();
         // Only this read's phases (a probe's terminal check came before)
         self.take_phases();
+        // For the names' loc keys (not used yet); the readers read without it too, and only the refinery's
+        // paths log that it is missing
+        let mut quiet = self.locale_missing;
+        let locale = locale_of(&mut self.locale, &self.app, &mut quiet);
+        let frame = sc_ohseearr_sc::Frame { id: self.frame_id, image: &image, cursor, locale };
         let started = Instant::now();
         let mut grid = None;
         let mut components = None;
@@ -927,47 +862,39 @@ impl Worker {
         let mut found = false;
         // Applied once the OCR is done (set_screen needs the whole worker)
         let mut screen = self.screen;
+        let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
+        let readers = &mut self.readers;
         if screen != Screen::Inventory {
-            // Probing: the page number over every place it can have (the scale is not known yet)
-            let probe_page = screen == Screen::Unknown && scope.inventory;
-            let page = if probe_page {
-                let (page, page_boxes) = read_page(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, None)?;
-                boxes.extend(page_boxes);
-                page
-            } else {
-                None
-            };
-            if page.is_none() && scope.warehouse {
-                let (g, grid_boxes) = read_grid(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, cursor, self.last_layout.as_ref(), debug)?;
+            // Probing: the page number over every place it can have (a kept scale is not trusted yet; the
+            // read below still starts from it)
+            let page = screen == Screen::Unknown && scope.inventory && readers.gear.probe_with(ocr, &frame, false)?;
+            if !page && scope.warehouse {
+                // Every tile's badge only while debugging. A strong fit becomes the reader's prior: the next
+                // reads look around the cursor, weaker fits keep its pitch
+                readers.warehouse.set_diagnostics(debug);
+                let (g, grid_boxes) = crate::inventory::to_legacy(readers.warehouse.read(ocr, &frame)?);
                 boxes.extend(grid_boxes);
-                if let Some(g) = &g {
-                    // Only a strong fit sets the layout the weaker reads keep
-                    if g.fit_weight >= crate::inventory::STRONG_FIT_WEIGHT {
-                        self.last_layout = Some(g.layout());
-                    }
+                if g.is_some() {
                     found = true;
                     screen = Screen::Warehouse;
                 }
                 grid = g;
             }
-            if scope.inventory && (screen == Screen::Unknown || page.is_some()) {
-                // The page or nothing at all: try the character inventory
-                let (read, k) = inventory_screen(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, cursor, page, self.ui_scale, &mut boxes)?;
+            if scope.inventory && (screen == Screen::Unknown || page) {
+                // The page or nothing at all: try the character inventory (the probe's page read is reused;
+                // the reader keeps the scale the page tells)
+                let (read, gear_boxes) = crate::components::to_legacy(readers.gear.read(ocr, &frame)?);
+                boxes.extend(gear_boxes);
                 found = found || read.page.is_some() || read.tooltip.is_some();
-                if page.is_some() {
+                if page {
                     screen = Screen::Inventory;
-                    self.ui_scale = Some(k);
                 }
                 components = Some(read);
             }
         } else {
-            // The page number where the known scale puts it (cheap)
-            let (page, page_boxes) = read_page(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, self.ui_scale)?;
-            boxes.extend(page_boxes);
-            let (read, k) = inventory_screen(ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?, &image, cursor, page, self.ui_scale, &mut boxes)?;
-            if page.is_some() {
-                self.ui_scale = Some(k);
-            }
+            // The page number where the kept scale puts it (cheap), the rest
+            let (read, gear_boxes) = crate::components::to_legacy(readers.gear.read(ocr, &frame)?);
+            boxes.extend(gear_boxes);
             found = read.page.is_some() || read.tooltip.is_some();
             components = Some(read);
         }
@@ -1015,12 +942,18 @@ impl Worker {
     /// Reads the refinery terminal's work order overview in a frame (the screen is the visit; a few
     /// reads in a row without the terminal leave it).
     fn look_refinery(&mut self, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
-        let labels = self.labels_now();
         // Only this read's phases (a probe's terminal check came before)
         self.take_phases();
         let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
         let started = Instant::now();
-        let read = read_overview(ocr, &image, &labels)?;
+        let read = match locale_of(&mut self.locale, &self.app, &mut self.locale_missing) {
+            Some(locale) => {
+                let frame = sc_ohseearr_sc::Frame { id: self.frame_id, image: &image, cursor, locale: Some(locale) };
+                crate::refinery::to_legacy(self.readers.refinery.read(ocr, &frame)?.output)
+            }
+            // The game's texts went away during a visit (logged by `locale_of`): nothing can be read
+            None => Read::Nothing,
+        };
         let ms = started.elapsed().as_millis() as u64;
         // Read again every REREAD_MS, not only when the view moved
         self.gate.read(true);
@@ -1065,29 +998,6 @@ impl Worker {
     }
 }
 
-/// The rest of a character inventory read once its page number was read: the scale from the page's
-/// place (else the last one, else the measured place), the tile under the cursor (lit by the game;
-/// without one no tooltip can belong to a tile, so the tooltip is not read; the page read keeps the
-/// screen), the tooltip, and with a tooltip the tile's stack count. Also the scale it used.
-fn inventory_screen(ocr: &mut Ocr, image: &RgbImage, cursor: Option<(f32, f32)>, page: Option<(Page, f32)>, last: Option<f32>, boxes: &mut Vec<TextBox>) -> Result<(ComponentRead, f32), String> {
-    let k = page.map(|p| p.1).or(last).unwrap_or(1.0);
-    let ui = Ui::new(image, k);
-    let mut cell = cursor.and_then(|c| hovered_tile(image, ui, c));
-    let tooltip = if cell.is_none() && cursor.is_some() {
-        None
-    } else {
-        let (tooltip, tip_boxes) = read_tooltip(ocr, image, ui)?;
-        boxes.extend(tip_boxes);
-        tooltip
-    };
-    if let (Some(c), Some(_)) = (cell.as_mut(), &tooltip) {
-        let (count, count_boxes) = read_count(ocr, image, c.rect)?;
-        c.count = count;
-        boxes.extend(count_boxes);
-    }
-    Ok((ComponentRead { tooltip, page: page.map(|p| p.0), cell }, k))
-}
-
 /// Test source: reads every image file in `dir` once (by name), checking for new ones every 2 s.
 fn spawn_folder_source(dir: PathBuf, tx: Sender<Frame>) {
     log::info!("OCR test frames from {}", dir.display());
@@ -1117,57 +1027,4 @@ fn spawn_folder_source(dir: PathBuf, tx: Sender<Frame>) {
             std::thread::sleep(Duration::from_secs(2));
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn flat(v: u8) -> GrayImage {
-        Pixels::Rgb(RgbImage::from_pixel(192, 80, image::Rgb([v, v, v]))).thumb()
-    }
-
-    #[test]
-    fn gate_checks_a_view_once_it_came_to_rest() {
-        let mut gate = Gate::default();
-        let (a, b) = (flat(40), flat(200));
-        // First frame: nothing to compare with yet; then still: checked once
-        assert!(!gate.pass(a.clone(), 0));
-        assert!(gate.pass(a.clone(), 1_000));
-        gate.read(false);
-        assert!(!gate.pass(a.clone(), 2_000));
-        assert!(!gate.pass(a.clone(), 10_000));
-        // Small changes while standing (the scene's animations) are no movement: nothing
-        assert!(!gate.pass(flat(42), 11_000));
-        assert!(!gate.pass(a.clone(), 12_000));
-        // Moving (not still), then at rest again: checked once
-        assert!(!gate.pass(b.clone(), 13_000));
-        assert!(gate.pass(b.clone(), 14_000));
-        gate.read(false);
-        assert!(!gate.pass(b, 15_000));
-    }
-
-    #[test]
-    fn gate_reads_again_every_two_seconds_during_a_visit() {
-        let mut gate = Gate::default();
-        let a = flat(40);
-        assert!(!gate.pass(a.clone(), 0));
-        assert!(gate.pass(a.clone(), 1_000));
-        gate.read(true);
-        // Unchanged (a small change on the terminal looks the same in the thumbnail): again after 2 s
-        assert!(!gate.pass(a.clone(), 2_000));
-        assert!(gate.pass(a.clone(), 3_000));
-        gate.read(false);
-        // The visit ended: once per change again
-        assert!(!gate.pass(a, 6_000));
-    }
-
-    #[test]
-    fn bgra_and_rgb_give_the_same_picture() {
-        // 2×1: a red and a blue pixel
-        let bgra = Pixels::Bgra { data: vec![0, 0, 255, 255, 255, 0, 0, 255], width: 2, height: 1 };
-        let rgb = Pixels::Rgb(RgbImage::from_raw(2, 1, vec![255, 0, 0, 0, 0, 255]).unwrap());
-        assert_eq!(bgra.thumb(), rgb.thumb());
-        assert_eq!(bgra.into_rgb(), rgb.into_rgb());
-    }
 }

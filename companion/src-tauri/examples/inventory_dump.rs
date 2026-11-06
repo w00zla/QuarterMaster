@@ -2,7 +2,9 @@
 //! `cargo run --release --example inventory_dump -- <out dir> <screenshots dir>... [--threads n] [--gpu]`
 //!
 //! A debug recording's frames are read with the cursor stored next to them (`read-N.json`), and,
-//! as in the app, around the cursor once a frame of the folder gave a strong layout.
+//! as in the app, around the cursor once a frame of the folder gave a strong layout (one
+//! `WarehouseReader` per folder, every tile's badge read as while debugging; its output adapted as in
+//! the app, `inventory::to_legacy`).
 //! Prints every frame's layout, tooltip and tiles (cell, quality, count, hovered, texts), the cells
 //! read and where the read's time went (`ocr::Timings`, the rest is the read's own work; the average
 //! at the end), then writes an overlay per frame into the out dir (the frame at half size: tiles green,
@@ -10,9 +12,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use companion_lib::inventory::{read_grid, Layout, STRONG_FIT_WEIGHT};
-use companion_lib::ocr::{Model, Ocr, Rect};
+use companion_lib::inventory::to_legacy;
+use companion_lib::ocr::{self, Model, Rect};
 use image::{Rgb, RgbImage};
+use sc_ohseearr_sc::{Frame, ScreenReader};
+use sc_ohseearr_warehouse::WarehouseReader;
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -21,20 +25,21 @@ fn main() {
     let threads = take_threads(&mut args);
     // --gpu: on DirectML (DirectML.dll 1.15 next to this exe, e.g. copied from resources/ocr)
     let gpu = args.iter().position(|a| a == "--gpu").map(|i| args.remove(i)).is_some();
-    let mut ocr = Ocr::new(threads, Model::Tiny, gpu).expect("ocr models");
+    let mut ocr = ocr::load(threads, Model::Tiny, gpu).expect("ocr models");
+    let mut reader = WarehouseReader::new();
+    reader.set_diagnostics(true);
     let (mut frames, mut total_ms, mut model_ms) = (0u128, 0u128, 0u128);
     for dir in args {
-        let mut last: Option<Layout> = None;
+        reader.reset();
         for path in sorted(Path::new(&dir), "jpg").into_iter().chain(sorted(Path::new(&dir), "png")) {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
             let frame = image::open(&path).expect("frame").to_rgb8();
             let t = std::time::Instant::now();
-            let (grid, boxes) = read_grid(&mut ocr, &frame, cursor_of(&path), last.as_ref(), true).expect("read");
+            let reading = reader.read(&mut ocr, &Frame { id: frames as u64, image: &frame, cursor: cursor_of(&path), locale: None }).expect("read");
+            let (grid, boxes) = to_legacy(reading);
             let ms = t.elapsed().as_millis();
-            if let Some(g) = grid.as_ref().filter(|g| g.fit_weight >= STRONG_FIT_WEIGHT) {
-                last = Some(g.layout());
-            }
-            let phases = ocr.take_timings();
+            let mut phases = ocr.take_timings();
+            phases += reader.take_timings();
             frames += 1;
             total_ms += ms;
             model_ms += phases.total().as_millis();

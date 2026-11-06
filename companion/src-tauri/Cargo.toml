@@ -36,7 +36,15 @@ memchr = "2"
 sc-ohseearr-core = { path = "../../sc-ohseearr/crates/core" }
 sc-ohseearr-model-paddle-det-tiny = { path = "../../sc-ohseearr/models/paddle-det-tiny" }
 sc-ohseearr-model-sc-rec-latin = { path = "../../sc-ohseearr/models/sc-rec-latin" }
-sc-ohseearr-model-sc-warehouse-layout = { path = "../../sc-ohseearr/models/sc-warehouse-layout" }
+# The screen readers: sc-ohseearr's Star Citizen layer (reader interface, the game's texts from global.ini) and its
+# use cases (the warehouse reader brings its layout detector, `sc-warehouse-layout`, compiled in)
+sc-ohseearr-sc = { path = "../../sc-ohseearr/crates/sc" }
+sc-ohseearr-warehouse = { path = "../../sc-ohseearr/usecases/warehouse" }
+sc-ohseearr-gear-inventory = { path = "../../sc-ohseearr/usecases/gear-inventory" }
+sc-ohseearr-refinery = { path = "../../sc-ohseearr/usecases/refinery" }
+# Screen capture of the game window (DXGI Desktop Duplication, cursor, rest; Windows only) and the parts the
+# platform independent worker uses too (`Pixels`, the change gate `Gate`), which build everywhere
+sc-ohseearr-capture-win = { path = "../../sc-ohseearr/crates/capture-win" }
 # Decoding screenshots (tests, test frames); live frames come as raw pixels; encoding the debug
 # view's frames (JPEG for the event, PNG for the export)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -45,20 +53,14 @@ base64 = "0.21"
 # The main and the debug window come back where they were (place, size, monitor)
 tauri-plugin-window-state = "2"
 
-# Screen capture for the refinery OCR (DXGI Desktop Duplication); the version Tauri already uses
 [target.'cfg(windows)'.dependencies]
 # The OCR on the GPU: ONNX Runtime's DirectML API (its Windows binaries have it anyway; the redistributable
 # DirectML.dll comes next to the exe, see scripts/fetch-ocr-models.mjs)
 sc-ohseearr-core = { path = "../../sc-ohseearr/crates/core", features = ["directml"] }
+# The scan overlay's window (place, DPI, hotkeys); the version Tauri already uses
 windows = { version = "0.62", features = [
     "Win32_Foundation",
-    "Win32_Graphics_Direct3D",
-    "Win32_Graphics_Direct3D11",
-    "Win32_Graphics_Dxgi",
-    "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
-    "Win32_System_Diagnostics_ToolHelp",
-    "Win32_System_Threading",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",

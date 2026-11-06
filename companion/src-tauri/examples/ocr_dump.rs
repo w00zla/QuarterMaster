@@ -6,7 +6,7 @@ fn main() {
     let img = image::open(&args[1]).expect("image").to_rgb8();
     let side: u32 = args.get(2).map_or(800, |s| s.parse().unwrap());
     let threads: usize = args.get(3).map_or(4, |s| s.parse().unwrap());
-    let mut ocr = companion_lib::ocr::Ocr::new(threads, Model::Tiny, false).expect("models");
+    let mut ocr = companion_lib::ocr::load(threads, Model::Tiny, false).expect("models");
     let t = std::time::Instant::now();
     let boxes = ocr.read(&img, side).expect("read");
     for b in &boxes {

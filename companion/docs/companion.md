@@ -14,8 +14,10 @@ user web app's API with the user's API token ("Access Key"):
 Linux and Windows; the screen capture and so every scan and the overlay are Windows only so far.
 
 Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `logwatch`, `gamelog`, `server`,
-`ocr`, `inventory` (warehouse read), `components` (character inventory read), `refinery`, `locale`,
-`ocrwatch` (scan worker), `capture`, `overlay`. Vue SPA with three pages (`index.html` → `App.vue`,
+`ocr` (loads the OCR), `inventory` (warehouse), `components` (character inventory), `refinery` (the three: the
+companion's payloads and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker),
+`capture` (the capture loop on sc-ohseearr's capture crate), `overlay`. The screen readers, the game's texts
+(`Locale`) and the capture itself are sc-ohseearr's (`../sc-ohseearr`, path dependencies; see "OCR"). Vue SPA with three pages (`index.html` → `App.vue`,
 `debug.html` → `DebugApp.vue`, `overlay.html` → `OverlayApp.vue`) importing the shared styles, `Icon.vue`,
 `Tooltip.vue` and the web app's `ConfirmDialog.vue` and `Picker.vue` relatively. Pure logic in
 `src/{match,inventory,components,refinery}.ts`, tested from `test/companion-*.test.ts`.
@@ -205,18 +207,25 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   scan"); a filter change applies to the next frame.
 - **Which screen** (`Screen` in `ocrwatch.rs`, sent as `scan-screen`: `none`, `warehouse`, `inventory`,
   `refinery`): without one the worker probes every 2 s (`PROBE_MS`): the refinery's big titles first
-  (`terminal_in_view`, 30–110 ms), then the cheap page number read (~30 ms, `read_page`; only "n/m" with
-  m ≤ 99) for the character inventory, else the grid read for the warehouse, and a frame with neither is
-  tried as the inventory too. The decision stands until the reader found nothing 3 reads in a row
-  (`SCREEN_MISSES`, the refinery's `LEAVE_AFTER`: a switch takes the player seconds), a minute without
-  frames, the scan's stop or the screen's filter going off.
-- The refinery screen reads a live frame once the view came to rest after it moved and every 2 s (`Gate`:
-  a 96×40 grey thumbnail sampled from the frame; checking every changed frame took ~5 % CPU in the verse).
+  (the refinery reader's `probe`, 30–110 ms; skipped without the game's texts, see "OCR"), then the cheap
+  page number read (~30 ms, the gear reader's `probe_with(.., false)`: every place the page can have, a
+  kept scale not trusted; only "n/m" with m ≤ 99) for the character inventory, else the grid read for the
+  warehouse, and a frame with neither is tried as the inventory too. The decision stands until the reader
+  found nothing 3 reads in a row (`SCREEN_MISSES`, the refinery's `LEAVE_AFTER`: a switch takes the player
+  seconds), a minute without frames, the scan's stop or the screen's filter going off.
+- The readers are sc-ohseearr's (`Readers` in `ocrwatch.rs`: `WarehouseReader`, `GearInventoryReader`,
+  `RefineryReader`, ADR 0010 there: `probe`/`read` on a `Frame` with its id, cursor and `Locale`); each keeps
+  what it learned across frames (the warehouse's last strong layout, reset when its screen is left; the
+  character inventory's UI scale); their output goes through `to_legacy` into the companion's payloads.
+- The refinery screen reads a live frame once the view came to rest after it moved and every 2 s
+  (sc-ohseearr's `Gate`: a 96×40 grey thumbnail sampled from the frame; checking every changed frame took
+  ~5 % CPU in the verse).
   Warehouse and inventory read every delivered frame (1/s, the character inventory up to 2/s, paced by the read time) without the gate: the world behind the
   translucent inventory screen never comes to rest (the gate delayed reads by 3–6 s in the first test).
 - The worker reads the newest frame when it falls behind. The `Ocr` is loaded by the first read
   (well under a second) and dropped within 5 s of the stop (memory back; the memory arena stays on:
-  off made reads 30 % slower). "Preparing…" while the sync loads the catalog and the player's language
+  off made reads 30 % slower), the readers (the warehouse's layout detector with them) and the game's
+  texts too. "Preparing…" while the sync loads the catalog and the player's language
   pack (`refinerySync.ts` `loadCatalog`: the companion's only catalog fetch, `/api/companion/catalog` de and
   en (since 2026-11-01; before: the web app's `/api/catalog`), once connected, again when the game folder
   changes; kept in memory and on disk (ETag), the unlocks panel uses its responses). It has only what the
@@ -233,8 +242,8 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
 
 ## Warehouse scan (freight manager)
 
-The freight elevator terminal's tab Warehouse (`inventory.rs`, pure part `inventory.ts`, store
-`inventorySync.ts`): materials and items. 4 columns of tiles, scrolled without pages, every tile with a
+The freight elevator terminal's tab Warehouse (sc-ohseearr's warehouse reader, `inventory.rs` adapts it,
+pure part `inventory.ts`, store `inventorySync.ts`): materials and items. 4 columns of tiles, scrolled without pages, every tile with a
 count badge top right ("X1", "X14") and an info icon top left, a material tile with its quality bottom left
 ("572Q", the dim Q read as 0, a letter or ".0"). The icons look alike, so the name comes from the tooltip of
 the hovered tile, which opens at the cursor (title; materials also "Capacity: …", the chip "<name>"
@@ -243,9 +252,14 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
 ### The read (Rust)
 
+- **Since 2026-11-06 sc-ohseearr's** `WarehouseReader` (`../sc-ohseearr/usecases/warehouse`, ported 1:1 from
+  this repo's `inventory.rs`, which now only adapts its output to `Grid`: the field mapping in its module
+  docs). It keeps the last strong layout as its prior (`reset` when the warehouse screen is left, a new
+  reader when the scan stops) and reads every tile's badge after `set_diagnostics(true)` (the debug window
+  open). What follows describes its read.
 - Only the pane right of the screen centre is read (the elevator pane is ignored), and only 0.25–0.95 of
   the height (the grid with room, below it a bottom row's tooltip). **Since 2026-10-31 with the
-  warehouse's own layout detector** (`Ocr::detect_layout`, see "The layout detector" below): it finds
+  warehouse's own layout detector** (the reader's, see "The layout detector" below): it finds
   the badges, quality texts, the tooltip's title and its other lines as boxes of their kind, nothing is
   recognized for the fit. It sees windows of the frame scaled to 720 px height, 480×320 each (720×480
   frame pixels at 1080p): the first read of a session covers the pane with overlapping windows (40 px,
@@ -287,7 +301,7 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 - Badges: only the hovered tile's (every tile's while the debug window is open: the costly part). First the
   nearest detected badge around the tile's top right corner (`BADGE_SEARCH`), with room on its right
   (`BADGE_RIGHT_PAD`: a digit at the crop's edge reads as "8"), then the tile's badge
-  area; upscaled 3×, recognized with the badge's characters only (`Ocr::recognize_images_only`,
+  area; upscaled 3×, recognized with the badge's characters only (`recognize_images_only`,
   "Xx× 0123456789": the multi-language model read a "6" as "日" before the cut, see "OCR"); the first read with digits wins, a bare
   "X" = 1 flagged uncertain (so far always a real X1 whose thin 1 got lost). Not read when the tooltip
   covers over 5 % of the area: it opens at the cursor, near the tile's top over its own badge. The
@@ -309,7 +323,9 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
 - **Model**: NanoDet-Plus-m (RangiLyu/nanodet, Apache-2.0; ShuffleNetV2 1.0× backbone, GhostPAN, ~1.2 M
   parameters in the exported graph) with our weights, sc-ohseearr's model package `sc-warehouse-layout`
-  (`../sc-ohseearr/models/sc-warehouse-layout/`, 5.7 MB, in git there; compiled in like the OCR models). Input
+  (`../sc-ohseearr/models/sc-warehouse-layout/`, 5.7 MB, in git there; compiled in like the OCR models; the
+  warehouse reader owns it, made on its first read on the `Ocr`'s threads and device, its timings
+  (`take_timings`) counted as the detector's in the read's phases). Input
   1×3×320×480 BGR, normalized with the training's mean/std; output per prior point (strides 8–64) the four kinds'
   scores and per side a distribution over 8 bins (sc-ohseearr's `NanoDet`, numbers in the package's `model.toml`:
   score ≥ 0.35, NMS 0.5 per kind).
@@ -370,18 +386,21 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 ## Gear scan (character inventory)
 
 Ship components and FPS gear (weapons, attachments, armor, gadgets; since 2026-10-22, checked against
-`local/screenshots/inventory 4`, 3840×1600) (`components.rs`, pure part `components.ts`), read in the
-character inventory's "Storage Access" screen, because only its tooltip shows an item's stats.
+`local/screenshots/inventory 4`, 3840×1600) (sc-ohseearr's gear-inventory reader, `components.rs` adapts it,
+pure part `components.ts`), read in the character inventory's "Storage Access" screen, because only its
+tooltip shows an item's stats. Since 2026-11-06 the read is sc-ohseearr's `GearInventoryReader`
+(`../sc-ohseearr/usecases/gear-inventory`, ported 1:1 from this repo's `components.rs`, which now only adapts
+its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows describes its read.
 
 - The storage pane on the right: a grid 4 units wide, a tile 1 unit (coolers, missiles) or 2 (weapons)
   wide, rows mixed like 2+2 or 1+2+1, 6 rows in view, scrolled row by row with a green thumb on its right,
   pages "2/3" below it. The UI is a panel in perspective around the frame's centre: the in-game FOV and the
   aspect ratio scale it as a whole about the centre. Every position is measured on 3840×1600 (the user's
-  FOV) as a share of the height from the centre and scaled per frame by `Ui::k` (1080p 16:9: ~1.05), which
-  the page number's place tells (`read_page`: its centre at 0.597/0.340 at k = 1; x and y must agree
-  within 6 %, which a tile's "40/40" elsewhere does not). Probing reads the page over every place k
-  0.75–1.4 allows, the screen once known only where the last k puts it (cheap); k is kept until the scan
-  stops. The left (personal) pane is not read.
+  FOV) as a share of the height from the centre and scaled per frame by `k` (sc-ohseearr's `CenterUi`;
+  1080p 16:9: ~1.05), which the page number's place tells (`read_page`: its centre at 0.597/0.340 at k = 1;
+  x and y must agree within 6 %, which a tile's "40/40" elsewhere does not). Probing reads the page over
+  every place k 0.75–1.4 allows, the screen once known only where the last k puts it (cheap); k is kept
+  until the scan stops (the reader is made anew then). The left (personal) pane is not read.
 - The tooltip opens at a **fixed place** right of the character (not at the cursor); only that area (right of
   the centre, 0.22–0.76 of the height, scaled to 1800 px height: up for the small texts, down on larger
   frames, 3840×2160 ~8 % faster) and the page
@@ -434,13 +453,14 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 - A sighting's identity is **page + content row + units + content** (a tile hovered again after a scroll is
   the same sighting, equal components on other tiles stay apart). A tooltip counts only once the cursor
   stayed on its tile for a read or had rested ≥ 200 ms when the frame was grabbed (`SETTLED_MS`, the
-  capture waits for that: `capture::REST`), then two agreeing reads in a row (2 reads per tile since
+  capture waits for that: sc-ohseearr's `REST`), then two agreeing reads in a row (2 reads per tile since
   2026-10-27, ≥ 3 before). The stack count is
   not part of the identity: a count that changes on the same tile (two agreeing reads) updates the
   sighting. One proposal per sighting (its pieces, quality 0, the stats if any).
-- Screenshot tests over `local/screenshots/inventory 3` and `inventory 4`; `cargo run --release --example components_dump --
-  <dir>…` prints page, the tile under the stored cursor, title and lines per image (a recording's
-  frames with their cursor).
+- Screenshot tests over `local/screenshots/inventory 3` and `inventory 4` (sc-ohseearr's, with the reader);
+  `cargo run --release --example components_dump -- <dir>…` prints page, the tile under the stored cursor,
+  title and lines per image (a recording's frames with their cursor; sc-ohseearr's `read_components`, the
+  stateless read, through the app's adapter).
 
 ## Inventory panel, locations, registering
 
@@ -561,16 +581,26 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 
 ## OCR
 
-- The warehouse's layout detector (`Ocr::detect_layout`, our NanoDet-Plus weights in git, made on its
-  first use) runs on the same engine and threads and counts in the detector's timings: see "The layout
-  detector" under the warehouse scan.
-- **The engine and the models live in sc-ohseearr** (since 2026-11-05; the sibling checkout `../sc-ohseearr`, a
-  path dependency, so it must sit next to this repo wherever the companion is built; its `docs/adr/` holds the
-  plan): `sc-ohseearr-core` (ONNX Runtime sessions, the model families, model packages with a `model.toml`
-  manifest) and the packages `paddle-det-tiny`, `sc-rec-latin`, `sc-warehouse-layout`, compiled in (the Windows
-  release is a bare exe). `ocr.rs` keeps the companion's interface on top (`Ocr` with the lazily made layout
-  detector, `LayoutKind`) until the readers move there too; the regression check for such moves is that
-  `inventory_dump`, `components_dump` and `ocr_dump` print the same over the recordings and screenshots.
+- The warehouse's layout detector (our NanoDet-Plus weights, owned by the warehouse reader, made on its
+  first read) runs on the same engine, threads and device as the `Ocr` and counts in the detector's
+  timings: see "The layout detector" under the warehouse scan.
+- **The engine, the models and the readers live in sc-ohseearr** (the engine and models since 2026-11-05, the
+  readers, the game's texts and the capture since 2026-11-06; the sibling checkout `../sc-ohseearr`, path
+  dependencies, so it must sit next to this repo wherever the companion is built; its `docs/adr/` holds the
+  plan, 0006/0007/0010 the readers): `sc-ohseearr-core` (ONNX Runtime sessions, the model families, model
+  packages with a `model.toml` manifest), the packages `paddle-det-tiny`, `sc-rec-latin`, `sc-warehouse-layout`,
+  compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the reader interface `ScreenReader`, the
+  game's texts `Locale`), the use cases `sc-ohseearr-warehouse`, `-gear-inventory`, `-refinery` (the readers)
+  and `sc-ohseearr-capture-win` (the capture, also `Pixels` and the change gate for the worker on every
+  platform). `ocr.rs` only loads the `Ocr` (`ocr::load`; `Model::Tiny` stays for the log and the debug data);
+  `inventory.rs`, `components.rs` and `refinery.rs` keep the companion's serde payloads (frontend, events,
+  recordings) and map the readers' neutral output onto them (`to_legacy`; the readers' fields like
+  `Field::raw`/`ambiguous` and the names' loc keys are not used beyond that yet). The regression check for
+  such moves is `scripts/regression-dumps.sh <out> [repo root]`: `inventory_dump`, `components_dump` and
+  `ocr_dump` over a fixed selection of recordings and screenshots, compared byte for byte (`*.norm.txt`,
+  `overlays.sha256`) against the build before; identical for the readers' move (740 warehouse frames, 444
+  character inventory frames, 62 images; the refinery's overviews over `refinery flow`, `… 2`, `… 3` with the
+  English table identical too).
 - PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
   and recognizer, dictionary of 6904 characters, mostly CJK; its detector's normalization and DB thresholds
   from its inference.yml; `scripts/fetch-ocr-models.mjs` still fetches the originals into `resources/ocr/` for
@@ -625,10 +655,19 @@ character inventory's "Storage Access" screen, because only its tooltip shows an
 - Frames are scaled by **height** (the game's UI scales with it: 16:9 like ultrawide). Read times on
   3840×1600: warehouse ~0.7–1.0 s (more with the debug window: every badge), character inventory
   ~0.25–0.4 s, refinery overview ~0.9 s.
-- Labels from `locale.rs`: `user.cfg`'s `g_language` picks `data/Localization/<language>/global.ini` (a
-  language pack, also one replacing the English texts like StarStrings; keys case-insensitive, a pack's
-  `key,P=` suffix dropped; re-read when `user.cfg` or the file change, checked every 10 s); every label
-  matches in English and the pack's wording; Rust `game_names(keys)` returns pack texts for loc keys.
+- **The game's texts** (sc-ohseearr's `Locale`, ADR 0007 there: no game text compiled in): `user.cfg`'s
+  `g_language` picks `data/Localization/<language>/global.ini` (a language pack, also one replacing the English
+  texts like StarStrings; keys case-insensitive, a pack's `key,P=` suffix dropped), and the game's own English
+  texts come from **`global-english.ini` in the app's local data folder** (Windows
+  `%LOCALAPPDATA%\com.w00zla.quartermaster.companion\global-english.ini`): the game keeps them inside
+  `Data.p4k`, sc-ohseearr's `scripts/extract-global-ini.{ps1,sh}` extracts them per game build. How players get
+  that file without placing it by hand is open (see "Open"). `ocrwatch` keeps a `LocaleSource` (re-read when
+  `user.cfg`, the pack or the English table change, checked every 10 s; dropped when the scan stops) and
+  passes the locale into every reader's frame: the refinery reader anchors on loc keys (below), the others
+  only resolve names to loc keys (not used yet). With neither a pack nor the English table the refinery is
+  not read: its probe counts as no terminal, a visit in progress counts misses until it ends; logged once
+  per change ("refinery not readable: …", warning; "refinery readable again", info). No UI shows it.
+  Rust `game_names(keys)` returns pack texts for loc keys (sc-ohseearr's `LocTable` over the pack).
 
 ### The recognizer's fine-tune
 
@@ -680,7 +719,13 @@ detector's uv venv, which got `transformers` for it; `label.ts` in Node), all da
 
 ## Refinery
 
-- Read (`refinery.rs`): only the terminal's **work order overview**: the station from the title (never a
+- Read: since 2026-11-06 sc-ohseearr's `RefineryReader` (`../sc-ohseearr/usecases/refinery`, ported 1:1 from
+  this repo's `refinery.rs`, which now only adapts its output to `Overview`/`Read`). Its anchors (table head,
+  PROCESSING/COMPLETED, time remaining, the columns, "Refinement Center") are 9 loc keys whose texts come from
+  the frame's `Locale`: the pack's wording, then the English table's (before: 9 English labels compiled in plus
+  the pack's; with only a pack the English wording is no longer tried, so the English table belongs next to a
+  pack too). Without either table it is not read (see "OCR"). Over the screenshots below with the English
+  table the overviews read exactly as before. It reads only the terminal's **work order overview**: the station from the title (never a
   `// …` label like "// REFINERY SYSTEM C47.02": the slanted terminal makes its box as tall), then every
   work order panel side by side (found by its table head "MATERIALS YIELDED"; header PROCESSING or
   COMPLETED; columns by the head's words; rows by the names, starting after the material's icon within 0.35
@@ -689,9 +734,9 @@ detector's uv venv, which got `transformers` for it; `label.ts` in Node), all da
   as digits only: a lone thin "1" went missing):
   processing orders with quality, yield (cSCU) and time remaining, completed ones with quality and yield. A
   panel cut by the edge is left out (the terminal scrolls sideways). Full read at 800 px height,
-  anchor-first; `terminal_in_view` is the cheap check (320 px height, the big titles: 30–110 ms). Checked
+  anchor-first; the reader's `probe` is the cheap check (320 px height, the big titles: 30–110 ms). Checked
   against the screenshots of 2026-10-07/08 (`local/screenshots/refinery flow`, `… 2`, `… 3`, all tests pass
-  with v6 since 2026-10-19) and the recordings of 2026-10-19 (1080p and 3840×1600: station, rows and time
+  with v6 since 2026-10-19; the tests are sc-ohseearr's now) and the recordings of 2026-10-19 (1080p and 3840×1600: station, rows and time
   left as the terminal shows them). Names go through `findMaterial`, which also takes a name without its
   accents (the OCR read "HEPHAESTÁNITE").
 - The refinery screen is a **visit** (`refinery-visit` `{atMs, active}`), each overview as
@@ -718,7 +763,11 @@ detector's uv venv, which got `transformers` for it; `label.ts` in Node), all da
 
 ## Screen capture (Windows)
 
-`capture.rs`: while a scan session runs and the foreground window belongs to `StarCitizen.exe` (not
+`capture.rs`, since 2026-11-06 the loop on sc-ohseearr's `sc-ohseearr-capture-win` (`WindowCapture`: the
+window, in front or not, `is_running`, `grab_window` with the skips counted into the next frame's info; `Rest`;
+everything below about the duplication is that crate's; `capture.rs` keeps the interval, the worker's pull,
+the events and its own `CaptureInfo` with `dropped`/`gated`/`waitMs`; `foreground_game`/`client_rect` for the
+overlay wrap the crate): while a scan session runs and the foreground window belongs to `StarCitizen.exe` (not
 minimized), one frame per second. The game not in front (any other window, the companion's own too):
 no frames, the scan idle (`GameFront`, event `game-front`: the worker leaves its screen within a second,
 the scan row shows "Spiel nicht im Fokus"; with the companion in front and the game window still up the
@@ -856,6 +905,9 @@ GPU process should not compete with the game; not measured yet.
 - "[CS2] StrikeForce Missile" stays unknown (the catalog says "StrikeForce II Missile"); which tooltips show
   stats at all; Quantum Fuel Burn (a lower value is the improvement, the bounds run 0…+20 %).
 - `--disable-gpu` and the RAM with the OCR running are not measured in game.
+- How players get the English `global-english.ini` (the game's own texts, needed for the refinery without a
+  language pack) without placing it by hand: not decided (the server per build, a download, a p4k reader).
+  The readers on sc-ohseearr (2026-11-06) are verified offline only (identical dumps), not yet in game.
 - Not built: the Linux screen capture (xdg portal), the AppImage's updater, CI, tray/autostart, a release script; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.
