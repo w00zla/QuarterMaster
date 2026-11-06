@@ -1,4 +1,4 @@
-<p align="center"><img src="src/assets/logo-88.png" alt="Quartermaster" width="88"></p>
+<p align="center"><img src="docs/logo.jpg" alt="Quartermaster Companion" width="800"></p>
 
 # Quartermaster Companion
 
