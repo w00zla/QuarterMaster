@@ -1,4 +1,4 @@
-// The companion app's inventory scan (companion/src/inventory.ts): reads of the freight manager's
+// The companion app's inventory scan (src/inventory.ts): reads of the freight manager's
 // warehouse as the OCR delivers them (as in the user's screenshots and live frames of 2026-10-18)
 // turned into sightings and into proposals, one per stack.
 import assert from 'node:assert/strict';

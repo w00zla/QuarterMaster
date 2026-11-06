@@ -1,4 +1,4 @@
-// The companion app's gear scan (companion/src/components.ts): tooltips of the character
+// The companion app's gear scan (src/components.ts): tooltips of the character
 // inventory as the OCR delivers them (as in the user's screenshots of 2026-10-18) turned into
 // sightings with converted stats and into proposals, one per tile; FPS gear and stacks as of 2026-10-22.
 import assert from 'node:assert/strict';

@@ -1,4 +1,4 @@
-// The companion app's user filters (companion/src/userFilters.ts): wildcard terms per kind against an
+// The companion app's user filters (src/userFilters.ts): wildcard terms per kind against an
 // item's names.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';

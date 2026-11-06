@@ -1,4 +1,4 @@
-// The companion's scan overlay: how many rows its fixed tile shows per display (companion/src/overlayLayout.ts,
+// The companion's scan overlay: how many rows its fixed tile shows per display (src/overlayLayout.ts,
 // the heights in overlay.rs).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';

@@ -1,4 +1,4 @@
-// The companion app's matching of Game.log blueprint names to the catalog (companion/src/match.ts).
+// The companion app's matching of Game.log blueprint names to the catalog (src/match.ts).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { buildIndex, matchUnlock, type CatalogEntry } from '../src/match.ts';

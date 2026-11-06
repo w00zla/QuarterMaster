@@ -1,4 +1,4 @@
-// The companion app's refinery sync (companion/src/refinery.ts): terminal overviews as the OCR reads
+// The companion app's refinery sync (src/refinery.ts): terminal overviews as the OCR reads
 // them (rows as in the user's screenshots of 2026-10-08 at CRU-L1) against the user's running jobs.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
