@@ -367,11 +367,6 @@
   gap: 12px;
 }
 
-.list-panel {
-  flex: 1;
-  min-width: 0;
-}
-
 .stack {
   flex: 1;
   min-width: 0;
@@ -419,13 +414,6 @@
 
 .mini tr.link:hover td {
   background: var(--bg-surface-2);
-}
-
-/* A section title with an info icon after it. */
-.section-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .kv dt {

@@ -1,6 +1,6 @@
 /* Building blocks of the user web app's views, on top of the admin UI's ui.css. */
 
-/* Hintergrund der Eingabefelder (.input, Picker); im Hinzufügen-Bereich eine Stufe heller */
+/* Background of the input fields (.input, Picker) */
 :root {
   --field-bg: var(--bg-surface-2);
 }
@@ -12,11 +12,6 @@
   max-width: 1440px;
   margin: 0 auto;
   width: 100%;
-}
-
-/* Panels holding pickers: the suggestion lists must not be clipped */
-.panel.unclipped {
-  overflow: visible;
 }
 
 .form {
@@ -77,19 +72,6 @@
 
 .input.short {
   width: 90px;
-}
-
-/* An amount field with its unit after it */
-.with-unit {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.with-unit .unit {
-  font-size: 13px;
-  color: var(--text-2);
-  white-space: nowrap;
 }
 
 .check {
@@ -153,22 +135,6 @@
   gap: 10px;
 }
 
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
-  grid-column: 1 / -1;
-  /* Set apart from the fields above by a quiet dashed line */
-  padding-top: 12px;
-  border-top: 1px dashed var(--border-dim);
-}
-
-.hint-line {
-  font-size: 12px;
-  color: var(--text-3);
-}
-
 /* The change a confirmation step books, as a short block */
 .summary {
   display: flex;
@@ -199,42 +165,6 @@
   width: auto;
   flex: 1 1 160px;
   max-width: 220px;
-}
-
-/* The add form inside a list's panel, between its head and the filters: eine eigene, eingerückte
-   Karte mit Akzentrahmen, ihre Felder eine Stufe heller (--field-bg) */
-.add-area {
-  --field-bg: var(--bg-surface-3);
-  margin: 12px 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
-  border-radius: var(--radius-panel);
-  background: color-mix(in srgb, var(--bg-base) 50%, var(--bg-surface));
-}
-
-.add-area > .head > svg {
-  color: var(--accent);
-}
-
-/* Unter der Karte trennt eine Linie die Filter ab */
-.add-area + .filters {
-  border-top: 1px solid var(--border-dim);
-}
-
-/* Its title ("Add stock to …") runs straight into the form, no line between */
-.add-area > .head {
-  border-bottom: none;
-}
-
-/* The scope switch above a view: personal or one of your orgs, als eine zusammenhängende Leiste */
-.scope-bar {
-  display: flex;
-  flex-wrap: wrap;
-  width: fit-content;
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  overflow: hidden;
-  background: var(--bg-surface);
 }
 
 .scope {
@@ -274,7 +204,7 @@
   min-height: 53px;
 }
 
-/* Tabellenzeilen enger als im Admin (dort 8px oben/unten); die Trennlinie vor den Aktionen läuft mit */
+/* Table rows tighter than ui.css's (8px top and bottom there); the separator before the actions follows */
 .data-row {
   padding-top: 4px;
   padding-bottom: 4px;
@@ -323,65 +253,4 @@
 
 .qcell > :last-child {
   text-align: right;
-}
-
-/* The list view "Thumbnails" (ViewToggle): taller rows of one height, larger text, the thumbnail column
-   first (THUMB_COLUMN, M thumbnails at 48 px) */
-.table.view-thumbs {
-  font-size: 15px;
-}
-
-.table.view-thumbs > .data-row {
-  min-height: 48px;
-  padding-top: 1px;
-  padding-bottom: 1px;
-}
-
-/* Sub-rows without a thumbnail (the batches under a material): lower, about a compact row's height */
-.table.view-thumbs > .batch-row:not(:has(> .thumb-cell)) {
-  min-height: 34px;
-}
-
-/* The separator before the actions keeps running over the full row height */
-.table.view-thumbs > .data-row > .sep {
-  margin-top: -1px;
-  margin-bottom: -1px;
-  padding-top: 1px;
-  padding-bottom: 1px;
-}
-
-/* The thumbnail column's cell: the image alone, no line box around it */
-.thumb-cell {
-  display: flex;
-  align-items: center;
-}
-
-/* Thumbnail and name under one info card (InfoTip), spaced like the name cell's items */
-.name-tip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* An info card (InfoTip) answers over the whole cell width, not only on the image and the name */
-.info-anchor {
-  display: block;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* An info card (InfoTip) around a thumbnail alone: no line box around the image */
-.info-anchor:has(> .thumb:only-child) {
-  display: inline-flex;
-  flex-shrink: 0;
-  vertical-align: middle;
-}
-
-/* Spalten mit Personen (Halter, Besitzer, Von): dieselbe Schrift wie die UEC-Spalten */
-.user-cell {
-  font-family: var(--font-mono);
-  font-size: 12px;
 }

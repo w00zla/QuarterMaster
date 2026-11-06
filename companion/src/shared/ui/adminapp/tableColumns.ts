@@ -38,13 +38,7 @@ export interface ColumnSpec {
   title?: string;
 }
 
-// The thumbnail column of the view 'thumbs' (first, empty head; the web app's thumbnails at 48 CSS px)
-export const THUMB_COLUMN: ColumnSpec = { key: "thumb", label: "", width: 48, sortable: false, fixed: true };
-
 const MIN_WIDTH = 40;
-
-// Natural ordering: "button2" < "button10", case-insensitive.
-export const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 interface Stored {
   widths?: Record<string, number>;
@@ -228,21 +222,4 @@ export function useTableColumns(storageKey: string, columns: MaybeRefOrGetter<Co
   );
 
   return { widths, template, minWidth, sort, toggleSort, startResize, resetWidth, observe, columns: cols, all, hidden, toggleHidden, view, toggleView };
-}
-
-// Stable sort by the current column; `valueOf` yields the cell value for a
-// column key, `tieBreak` orders rows whose values compare equal.
-export function sortRows<T>(
-  rows: T[],
-  sort: SortState,
-  valueOf: (row: T, key: string) => string | number,
-  tieBreak: (a: T, b: T) => number = () => 0,
-): T[] {
-  const dir = sort.dir === "asc" ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    const va = valueOf(a, sort.key);
-    const vb = valueOf(b, sort.key);
-    const c = typeof va === "number" && typeof vb === "number" ? va - vb : collator.compare(String(va), String(vb));
-    return c * dir || tieBreak(a, b);
-  });
 }
