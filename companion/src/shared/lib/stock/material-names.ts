@@ -1,6 +1,5 @@
 // Material names as people and the refinery terminal write them ("TITANIUM", "quanta") resolved against
-// the catalog's names of bookable resources. Pure: shared by the bot and the companion app (no server
-// imports here).
+// the catalog's names of bookable resources (from sc-quartermaster's src/stock/material-names.ts). Pure.
 
 /** Letters and digits only, upper case (as the companion's Rust side compares texts). */
 export const norm = (text: string) => text.normalize("NFC").replace(/[^\p{L}\p{N}]/gu, "").toUpperCase();

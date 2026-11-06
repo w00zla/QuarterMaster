@@ -3638,7 +3638,6 @@ name = "sc-ohseearr-gear-inventory"
 version = "0.1.0"
 dependencies = [
  "image",
- "log",
  "sc-ohseearr-core",
  "sc-ohseearr-sc",
  "serde",
@@ -3670,7 +3669,6 @@ name = "sc-ohseearr-refinery"
 version = "0.1.0"
 dependencies = [
  "image",
- "log",
  "sc-ohseearr-core",
  "sc-ohseearr-sc",
  "serde",
@@ -3691,7 +3689,6 @@ name = "sc-ohseearr-warehouse"
 version = "0.1.0"
 dependencies = [
  "image",
- "log",
  "sc-ohseearr-core",
  "sc-ohseearr-model-sc-warehouse-layout",
  "sc-ohseearr-sc",

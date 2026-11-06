@@ -15,9 +15,23 @@
 // the cursor stayed on its tile for a read or had rested when the frame was grabbed (right after a
 // move the game may still show the previous tile's tooltip), and a sighting only once two such reads
 // in a row agree (an OCR glitch in one read books nothing).
-import { FPS_TYPES } from "./shared/lib/catalog/components.ts";
 import { norm } from "./shared/lib/stock/material-names.ts";
 import type { CatalogStat, CompanionCatalogResponse, StockAddRequest, StockBatch } from "./shared/lib/webapp/api-types.ts";
+
+/** The item types the web app counts as FPS gear (from sc-quartermaster's src/catalog/components.ts), with
+ * the sub types that count, null = all: personal weapons, their attachments, mining gadgets and armor incl.
+ * undersuit and backpack. Only the types matter here (a catalog component of one of them is FPS gear). */
+const FPS_TYPES: Readonly<Record<string, readonly string[] | null>> = {
+  WeaponPersonal: ["Small", "Medium", "Large", "Knife", "Gadget"],
+  WeaponAttachment: ["IronSight", "Barrel", "BottomAttachment", "Utility"],
+  Gadget: ["Gadget"],
+  Char_Armor_Helmet: null,
+  Char_Armor_Torso: null,
+  Char_Armor_Arms: null,
+  Char_Armor_Legs: null,
+  Char_Armor_Backpack: null,
+  Char_Armor_Undersuit: null,
+};
 
 // --- what the OCR sends ------------------------------------------------------------------------------
 

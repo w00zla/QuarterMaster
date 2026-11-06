@@ -1,4 +1,4 @@
-// The level of a quality as the web app and the bot show it (pure: the web app's SPA imports it too).
+// The level of a quality as the web app and the bot show it (from sc-quartermaster's src/stock/quality.ts).
 
 /** Star level of a quality: one per 100 from 500 (500-599 = 1 ... 900-999 = 5). */
 export const qualityStars = (q: number) => Math.min(5, Math.floor(q / 100) - 4);

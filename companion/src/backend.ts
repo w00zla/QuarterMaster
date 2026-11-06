@@ -2,7 +2,6 @@
 // Rust with the configured server and token: no CORS in the way).
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { ThumbSize } from "./shared/lib/thumbs.ts";
 import type { CompanionOutdated, CompanionPlatform } from "./shared/lib/webapp/api-types.ts";
 import type { OverlayDisplay } from "./overlayLayout.ts";
 
@@ -133,6 +132,9 @@ export const getGameFront = () => call<boolean>("get_game_front");
 export const setOverlayWindow = (on: boolean) => call<void>("set_overlay", { on });
 // Texts of these loc keys (lower case) in the player's active language pack (global.ini); missing keys are left out
 export const gameNames = (keys: string[]) => call<Record<string, string>>("game_names", { keys });
+// The thumbnail sizes the server keeps: 40, 96 and 256 px (twice the CSS size: 20 px next to a name, 48 px in
+// the thumbnail view and the overlay's top row, 128 px in tooltips)
+export type ThumbSize = "s" | "m" | "l";
 // An item thumbnail as a data: URL (the app's cache, else the server's /thumbs/…; thumbs.ts keeps them per session)
 export const thumbData = (size: ThumbSize, uuid: string, hash: string) => call<string>("thumb", { size, uuid, hash });
 
