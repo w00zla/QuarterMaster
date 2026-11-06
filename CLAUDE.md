@@ -51,7 +51,7 @@ pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry
 pnpm loc:import --remove --source <name> --lang <code>
 pnpm packshot:targets [--out <f>]     # the target list for packshot from the DB (gear, shop items for the item finder, ore chunks): ../sc-packshot/local/packshot/targets.json
 # The icons are rendered by packshot in ../sc-packshot (own repo since 2026-11-05: its CLAUDE.md, docs/pipeline.md, ADRs; Blender, store and bundles live there); this repo only writes its target list and reads its set live
-scripts/starbreaker-build.sh [--platform all|windows|linux]   # (.ps1 on Windows) builds the StarBreaker fork ../starbreaker-ps (committed HEAD, git archive) into local/starbreaker-ps/ + COMMIT, for catalog:extract
+# StarBreaker fork (../starbreaker-ps) for catalog:extract: $STARBREAKER_BIN, else local/starbreaker-ps/; build it with ../sc-packshot/scripts/starbreaker-build.{sh,ps1} or the fork's own build
 pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]                # tools/thumbs (Rust, ravif): the PNGs of packshot's set live (../sc-packshot/local/packshot/sets/live) -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)
 
 pnpm adminapp            # admin API + built UI on 127.0.0.1:3000 (basic auth from .env)

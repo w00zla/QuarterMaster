@@ -8,7 +8,8 @@ As of 2026-10-04, game build `4.10.1-LIVE.12660092`.
 ## Decision
 
 - **Primary source: own extract** from the local `Data.p4k` via StarBreaker (MIT; v0.3.2 until 2026-11-01, since then
-  our fork starbreaker-ps in `local/starbreaker-ps/`, see "Icons").
+  our fork `../starbreaker-ps`, binary in `local/starbreaker-ps/` or wherever `$STARBREAKER_BIN` points; build it with
+  `../sc-packshot/scripts/starbreaker-build.{sh,ps1}` or the fork's own build).
 - **Reference / fallback: [StarCitizenWiki/scunpacked-data](https://github.com/StarCitizenWiki/scunpacked-data)** (ScDataDumper output, one commit per patch, no LICENSE).
 - **Extractor and importer in TypeScript.** The extractor runs locally per patch; the importer is a CLI with metrics, safeguards and dry-run.
 - **Contract = our own snapshot format** (versioned: `schemaVersion` + game build). Extractor implementations are swappable behind it.
