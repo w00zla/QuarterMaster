@@ -1,9 +1,9 @@
-// Packs the rendered icons (packshot's set live, local/packshot/sets/live/[<Name> (<class>) ]<uuid>.png, 256 px;
+// Packs the rendered icons (packshot's set live, ../sc-packshot/local/packshot/sets/live/[<Name> (<class>) ]<uuid>.png, 256 px;
 // only the UUID at the end counts) into thumbnails for the apps: three AVIFs per UUID (s/m/l, src/thumbs.ts),
 // trimmed to the content and padded square with a small border, plus thumbs.json {uuid: hash}. Hash = the first 8
 // hex characters of the PNG's SHA-256: a newly rendered icon gets a new URL, unchanged ones stay in the clients'
 // cache. Stale files in the target are deleted.
-// Usage: pnpm thumbs:build [--in local/packshot/sets/live] [--out local/thumbs] [--force]
+// Usage: pnpm thumbs:build [--in ../sc-packshot/local/packshot/sets/live] [--out local/thumbs] [--force]
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
 const HELP: &str = "Usage: pnpm thumbs:build [options]
-  --in <dir>     The PNGs, …<uuid>.png (default: local/packshot/sets/live; subfolders are not read)
+  --in <dir>     The PNGs, …<uuid>.png (default: ../sc-packshot/local/packshot/sets/live; subfolders are not read)
   --out <dir>    Target: s/, m/, l/ and thumbs.json (default: local/thumbs)
   --force        Create existing thumbnails again";
 
@@ -41,7 +41,7 @@ struct Args {
 
 fn parse_args() -> Result<Args> {
     let mut args = Args {
-        input: PathBuf::from("local/packshot/sets/live"),
+        input: PathBuf::from("../sc-packshot/local/packshot/sets/live"),
         output: PathBuf::from("local/thumbs"),
         force: false,
     };

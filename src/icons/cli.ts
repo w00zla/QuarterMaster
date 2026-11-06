@@ -1,14 +1,14 @@
-// Writes the target list for the icon render (tools/packshot): every gear item of the app (ship components + FPS
+// Writes the target list for packshot (../sc-packshot, the icon renderer): every gear item of the app (ship components + FPS
 // gear, the same rule as the stock service), the harvestables, the shop items and the resources with a thumbnail
-// entity (raw and refined share the chunk), grouped by entity. `pnpm packshot` renders them; it reads targets.json
-// in the packshot folder and does not need the DB.
+// entity (raw and refined share the chunk), grouped by entity. packshot renders them; it reads targets.json
+// in its packshot folder (../sc-packshot/local/packshot by default) and does not need the DB.
 // Usage: pnpm packshot:targets [--out <targets.json>]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const HELP = `Usage: pnpm packshot:targets [--out <file>]
-  --out <file>   Write the target list from the DB (default: local/packshot/targets.json, the packshot folder in the repo)`;
+  --out <file>   Write the target list from the DB (default: ../sc-packshot/local/packshot/targets.json, packshot's folder)`;
 
 // names: the display name per UUID (same order) for the icons' file names
 interface Target { uuids: string[]; names?: string[]; entity: string; type: string; subType: string; worn: boolean }
@@ -58,7 +58,7 @@ async function loadTargets(): Promise<Target[]> {
 async function main() {
   const { values: args } = parseArgs({
     options: {
-      out: { type: 'string', default: 'local/packshot/targets.json' },
+      out: { type: 'string', default: '../sc-packshot/local/packshot/targets.json' },
       help: { type: 'boolean', default: false },
     },
   });

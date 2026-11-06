@@ -1,4 +1,4 @@
-// Thin wrapper around the StarBreaker CLI: our fork starbreaker-qm (fleetyards fork + github.com/diogotr7/StarBreaker).
+// Thin wrapper around the StarBreaker CLI: our fork starbreaker-ps (fleetyards fork + github.com/diogotr7/StarBreaker).
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
