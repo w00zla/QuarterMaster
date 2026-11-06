@@ -6,7 +6,7 @@
 # Node
 node_modules/
 
-# Python (the layout detector's training scripts in companion/detector/)
+# Python
 __pycache__/
 
 # Local environment
