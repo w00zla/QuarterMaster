@@ -2,7 +2,7 @@
 
 # Quartermaster Companion
 
-A desktop companion for Star Citizen and the [Quartermaster](https://github.com/w00zla/sc-quartermaster) web app: it
+A desktop companion for Star Citizen and the [Quartermaster](https://github.com/w00zla/QuarterMaster) web app: it
 reads what the game shows and turns it into stock, blueprint and refinery entries, without typing.
 
 - **Blueprints** from the game's `Game.log`: every unlock as it happens, and the history from old logs.
