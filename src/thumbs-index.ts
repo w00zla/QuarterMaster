@@ -3,7 +3,7 @@
 // a broken one keeps the previous index (the upload replaces it atomically).
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { THUMB_HASH } from '../thumbs.ts';
+import { THUMB_HASH } from './thumbs.ts';
 
 const RECHECK_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

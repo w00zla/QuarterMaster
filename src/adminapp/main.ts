@@ -27,7 +27,7 @@ import * as st from './stock.ts';
 import * as u from './users.ts';
 import { getThumbs } from './thumbs.ts';
 import { THUMB_FILE, THUMB_SIZES } from '../thumbs.ts';
-import { thumbIndex } from '../webapp/thumbs.ts';
+import { thumbIndex } from '../thumbs-index.ts';
 
 const { ADMINAPP_USER, ADMINAPP_PASSWORD, ADMINAPP_HOST = '127.0.0.1', ADMINAPP_PORT = '3000' } = process.env;
 if (!ADMINAPP_USER || !ADMINAPP_PASSWORD) {

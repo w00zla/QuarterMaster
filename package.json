@@ -17,7 +17,7 @@
     "catalog:extract": "node src/catalog/extract/cli.ts",
     "catalog:import": "node --env-file-if-exists=.env src/catalog/import/cli.ts",
     "loc:import": "node --env-file-if-exists=.env src/catalog/import/loc-cli.ts",
-    "packshot:targets": "node --env-file-if-exists=.env src/icons/cli.ts",
+    "packshot:targets": "node --env-file-if-exists=.env src/catalog/thumb-targets-cli.ts",
     "thumbs:build": "cargo run --release --quiet --manifest-path tools/thumbs/Cargo.toml --",
     "adminapp": "node --env-file-if-exists=.env src/adminapp/main.ts",
     "adminapp:dev": "pnpm --filter sc-quartermaster-adminapp dev",

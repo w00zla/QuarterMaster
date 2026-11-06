@@ -23,7 +23,7 @@ import { HttpError, registerRoutes } from './routes.ts';
 import {
   ABSOLUTE_MS, SESSION_COOKIE, createSession, deleteSession, validateSession, type Session,
 } from './session.ts';
-import { thumbIndex } from './thumbs.ts';
+import { thumbIndex } from '../thumbs-index.ts';
 import { THUMB_FILE, THUMB_SIZES } from '../thumbs.ts';
 import { apiTokenInfo, createApiToken, validateApiToken } from './token.ts';
 

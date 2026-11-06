@@ -1,6 +1,5 @@
-// Writes the target list for packshot (../sc-packshot, the icon renderer): every gear item of the app (ship components + FPS
-// gear, the same rule as the stock service), the harvestables, the shop items and the resources with a thumbnail
-// entity (raw and refined share the chunk), grouped by entity. packshot renders them; it reads targets.json
+// Writes the target list for packshot (../sc-packshot, the icon renderer): the thumbnail targets of thumb-targets.ts
+// (gear, harvestables, shop items, resources with a thumbnail entity; raw and refined share the chunk), grouped by entity. packshot renders them; it reads targets.json
 // in its packshot folder (../sc-packshot/local/packshot by default) and does not need the DB.
 // Usage: pnpm packshot:targets [--out <targets.json>]
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -15,24 +14,10 @@ interface Target { uuids: string[]; names?: string[]; entity: string; type: stri
 
 /** The items and resources the app shows, grouped by entity (resources share chunks). */
 async function loadTargets(): Promise<Target[]> {
-  const [{ sql }, { connect }, { componentItemSql }, { locText }, { shopItemSql }] = await Promise.all([
-    import('drizzle-orm'), import('../db/client.ts'), import('../stock/service.ts'), import('../db/query.ts'),
-    import('../catalog/components.ts'),
-  ]);
+  const [{ connect }, { thumbTargets }] = await Promise.all([import('../db/client.ts'), import('./thumb-targets.ts')]);
   const { db, close } = connect(process.env.DATABASE_URL);
   try {
-    // Gear plus harvestables (recipe inputs such as Hadanite): the same bookable rule as the stock service; plus the
-    // shop items (clothing, food, …) whose thumbnails the item finder shows
-    const items = (await db.execute(sql`SELECT i.uuid, i.class_name, i.type, i.sub_type,
-        coalesce(${locText('en', sql`i.name_key`)}, i.class_name) AS name FROM catalog.item i
-      WHERE i.retired_at IS NULL AND (EXISTS (SELECT 1 FROM catalog.blueprint_input bi WHERE bi.item_uuid = i.uuid)
-        OR ${componentItemSql('i.uuid')} OR ${sql.raw(shopItemSql('i'))}) ORDER BY i.type, i.sub_type, i.class_name`)) as unknown as
-      { uuid: string; class_name: string; type: string; sub_type: string | null; name: string }[];
-    // rttThumbnailEntityClass is a file reference (file://…/thumbnailentity_resource_rock_gold.json)
-    const resources = (await db.execute(sql`SELECT r.uuid, r.data->>'rttThumbnailEntityClass' AS entity,
-        coalesce(${locText('en', sql`r.name_key`)}, r.key) AS name
-      FROM catalog.resource r WHERE r.retired_at IS NULL AND coalesce(r.data->>'rttThumbnailEntityClass', '') <> '' ORDER BY r.key`)) as unknown as
-      { uuid: string; entity: string; name: string }[];
+    const { items, resources } = await thumbTargets(db, 'en');
     const byEntity = new Map<string, Target>();
     for (const i of items) {
       // armour and clothing worn, not as the loot crate

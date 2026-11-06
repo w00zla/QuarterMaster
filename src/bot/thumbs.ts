@@ -6,7 +6,7 @@
 import { fileURLToPath } from 'node:url';
 import { ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder } from 'discord.js';
 import { thumbFile } from '../thumbs.ts';
-import { thumbIndex } from '../webapp/thumbs.ts';
+import { thumbIndex } from '../thumbs-index.ts';
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 

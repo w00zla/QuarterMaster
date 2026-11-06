@@ -54,8 +54,8 @@ removing imported text sources), the bot's status texts and assigning privileges
   while it has not set its mark), the user data checks (`GET /api/checks`, every check listed also without
   hits: stock of retired materials, stock at retired locations, registered retired blueprints, jobs outside the UEX refineries) and the catalog (counts, texts
   missing per language, blueprints without a known source and those registered anyway, without output; `GET /api/overview`) and the item thumbnails (`GET /api/thumbs`, `src/adminapp/thumbs.ts`:
-  how many of the renderer's targets — gear items by the stock service's rule, materials with a thumbnail entity
-  — have one, when `thumbs.json` was written, the targets without one by name, linked; after a game patch's
+  how many of the thumbnail targets (`src/catalog/thumb-targets.ts`, the same list packshot renders; `docs/webapp.md`
+  "Thumbnails") have one, when `thumbs.json` was written, the targets without one by name, linked; after a game patch's
   import the new items show up there until the next render). The catalog's detail panels (items, materials,
   blueprints: the crafted item) show the large thumbnail; the admin serves `/thumbs/…` itself from `THUMBS_DIR`
   (the web app's directory, mounted read-only), behind its basic auth.

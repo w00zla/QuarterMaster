@@ -1,13 +1,11 @@
 // The item thumbnails as the admin sees them: which UUIDs have one (THUMBS_DIR/thumbs.json, the same index
 // the web app serves from), when the manifest was written, and which of the items and materials that should
-// have one lack it (the render targets of src/icons/cli.ts: gear items by the stock service's rule, materials
-// with a thumbnail entity). A new game patch brings items without a render: they show up here.
+// have one lack it (the same targets packshot renders: src/catalog/thumb-targets.ts). A new game patch brings
+// items without a render: they show up here.
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
-import { locText as text, rows } from '../db/query.ts';
-import { componentItemSql } from '../stock/service.ts';
+import { thumbTargets } from '../catalog/thumb-targets.ts';
 import type { ThumbsResponse } from './api-types.ts';
 
 export async function getThumbs(db: Db, lang: string, dir: string | null, index: ReadonlyMap<string, string>): Promise<ThumbsResponse> {
@@ -17,12 +15,11 @@ export async function getThumbs(db: Db, lang: string, dir: string | null, index:
   } catch {
     // No manifest yet
   }
-  const targets = await rows<{ uuid: string; kind: 'item' | 'resource'; name: string; type: string | null }>(db, sql`
-    SELECT i.uuid, 'item' AS kind, coalesce(${text(lang, sql`i.name_key`)}, i.class_name) AS name, i.type
-    FROM catalog.item i WHERE i.retired_at IS NULL AND ${componentItemSql('i.uuid')}
-    UNION ALL
-    SELECT r.uuid, 'resource', coalesce(${text(lang, sql`r.name_key`)}, r.key), NULL
-    FROM catalog.resource r WHERE r.retired_at IS NULL AND coalesce(r.data->>'rttThumbnailEntityClass', '') <> ''`);
+  const { items, resources } = await thumbTargets(db, lang);
+  const targets: { uuid: string; kind: 'item' | 'resource'; name: string; type: string | null }[] = [
+    ...items.map((i) => ({ uuid: i.uuid, kind: 'item' as const, name: i.name, type: i.type })),
+    ...resources.map((r) => ({ uuid: r.uuid, kind: 'resource' as const, name: r.name, type: null })),
+  ];
   const missing = targets.filter((t) => !index.has(t.uuid)).sort((a, b) => a.name.localeCompare(b.name));
   return { updatedAt, count: index.size, targets: targets.length, hashes: Object.fromEntries(index), missing };
 }
