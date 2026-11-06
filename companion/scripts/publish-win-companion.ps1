@@ -1,9 +1,9 @@
 #Requires -Version 7
 # Publishes the built Windows companion release (pnpm companion:build first): the NSIS setup with its
 # updater signature and the standalone zip (the exe with DirectML.dll for the OCR on the GPU) go to local/companion/ (as quartermaster-companion_<v>_x64-setup.exe(.sig) and
-# _x64-standalone.zip), companion.json gets the version and both files (a linux entry stays), then the
-# files the manifest names go to the VM's checkout, the manifest last (copied first, it would send
-# outdated apps to downloads that are not there yet; like push-companion.sh).
+# _x64-standalone.zip), companion.json gets the version and both files (a linux entry stays), then
+# scripts/push-companion.mjs copies the files the manifest names to the VM's checkout, the manifest last
+# (the one push implementation, Node + Windows' OpenSSH scp).
 #
 #   scripts/publish-win-companion.ps1 <user@host> [-DeployPath /opt/sc-quartermaster]
 #
@@ -28,7 +28,7 @@ $version = $Matches[1]
 
 $release = 'src-tauri/target/release'
 $setup = "$release/bundle/nsis/Quartermaster Companion_${version}_x64-setup.exe"
-# The one the setup bundles too (pnpm ocr:models)
+# The one the setup bundles too (pnpm directml)
 $dml = 'src-tauri/resources/ocr/DirectML.dll'
 foreach ($f in $setup, "$setup.sig", "$release/quartermaster-companion.exe", $dml) {
   if (-not (Test-Path -LiteralPath $f)) { throw "Missing build output: $f (pnpm companion:build first)" }
@@ -54,15 +54,13 @@ $out.windowsSetup = $m.windowsSetup
 $out | ConvertTo-Json | Set-Content $manifest
 Write-Host "==> $manifest written"
 
-$files = @($out.windows, $out.linux, $out.windowsSetup, "$($out.windowsSetup).sig") | Where-Object { $_ } | ForEach-Object { "$dir/$_" }
-foreach ($f in $files) {
-  if (-not (Test-Path -LiteralPath $f)) { throw "Missing in ${dir}: $f" }
+# The push reads DEPLOY_PATH and COMPANION_DIR; set for it only, the caller's session keeps its own
+$saved = $env:DEPLOY_PATH, $env:COMPANION_DIR
+try {
+  $env:DEPLOY_PATH = $DeployPath
+  $env:COMPANION_DIR = $dir
+  node scripts/push-companion.mjs $Target
+  if ($LASTEXITCODE -ne 0) { throw "push-companion.mjs failed ($LASTEXITCODE)" }
+} finally {
+  $env:DEPLOY_PATH, $env:COMPANION_DIR = $saved
 }
-
-$dest = "${Target}:$DeployPath/local/companion/"
-Write-Host "==> Companion $version to $dest"
-scp @files $dest
-if ($LASTEXITCODE -ne 0) { throw "scp failed ($LASTEXITCODE)" }
-scp $manifest $dest
-if ($LASTEXITCODE -ne 0) { throw "scp of the manifest failed ($LASTEXITCODE)" }
-Write-Host '==> Done: the web app picks the manifest up within seconds'
