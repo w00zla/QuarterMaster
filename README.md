@@ -8,7 +8,7 @@ the API of the companion desktop app.
 
 Sibling repositories:
 
-- [sc-qm-companion](https://github.com/w00zla/sc-qm-companion): the companion desktop app (Game.log, scans, overlay)
+- [QuarterMasterCompanion](https://github.com/w00zla/QuarterMasterCompanion) (local checkout `../sc-qm-companion`): the companion desktop app (Game.log, scans, overlay)
 - [sc-ohseearr](https://github.com/w00zla/sc-ohseearr): OCR engine, models and training
 - [sc-packshot](https://github.com/w00zla/sc-packshot): the item icon renderer
 - [starbreaker-ps](https://github.com/w00zla/starbreaker-ps): the StarBreaker fork used to read the game data
