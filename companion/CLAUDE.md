@@ -57,7 +57,7 @@ Debug recordings (the debug window's "Record data") hold every read's frame + JS
 - The refinery read needs the game's texts: the active language pack's `global.ini`, else an English table at
   `<app local data>/global-english.ini` (made with sc-ohseearr's `scripts/extract-global-ini.*`). No game texts are
   compiled in.
-- `local/` is gitignored: screenshots and debug recordings (here a junction to `../sc-quartermaster/local`).
+- `local/` is gitignored: `logo.png`, scratch examples, and junctions to the data in `../sc-ohseearr/local` (screenshots, debug recordings, OCR data, the training venv `detector/.venv`) and to `../sc-quartermaster/local/companion` (the release files the server serves).
 - Text files are LF (`.gitattributes`), `core.filemode` false (the checkout may be shared by Windows and Linux);
   `node_modules` and `src-tauri/target` are per platform.
 
