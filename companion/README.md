@@ -39,6 +39,10 @@ pnpm companion:build     # release build for this OS
 Tests: `pnpm typecheck`, `pnpm test`, `cargo test --release --manifest-path src-tauri/Cargo.toml`.
 Everything about how it works: [docs/companion.md](docs/companion.md).
 
+## Game data and fan content
+
+Quartermaster Companion is an unofficial Star Citizen fan project, not endorsed by or affiliated with the Cloud Imperium group of companies. Game content and materials are copyright Cloud Imperium Rights LLC and Cloud Imperium Rights Ltd. Star Citizen® is a registered trademark of Cloud Imperium Rights LLC.
+
 ## License
 
 Not decided yet; all rights reserved until then. Bundled third-party parts keep their licenses (fonts in

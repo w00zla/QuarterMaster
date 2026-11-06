@@ -23,7 +23,7 @@ Neighbours (sibling checkouts next to this one):
 
 | File | Content |
 |---|---|
-| `docs/companion.md` | everything about the app: Game.log, server/config/releases, window and state, the scan session, warehouse and gear scans, inventory panel, debug window, OCR, refinery, capture, overlay, WebView2, decisions, measurements, open points |
+| `docs/companion.md` | everything about the app: requirements, structure (and what was copied from sc-quartermaster), Game.log, server/config, release, window and state, the scan session, warehouse and gear scans, inventory panel, debug window, OCR (pointers into sc-ohseearr), refinery, capture, overlay, WebView2, decisions, open points |
 | `.claude/open-points.md` | open decisions and follow-ups the user schedules (local, not in git) |
 
 ## Commands
@@ -36,12 +36,13 @@ pnpm companion:fast             # test build for the game: profile `fast` -> src
 pnpm companion:build            # release build for this OS (LTO, minutes): build:windows (NSIS setup + .sig, needs TAURI_SIGNING_PRIVATE_KEY, and the bare exe) or build:linux (AppImage)
 pnpm typecheck                  # vue-tsc over src/
 pnpm test                       # node tests in test/ (pure frontend logic)
-cargo test --release --manifest-path src-tauri/Cargo.toml          # Rust tests (screenshot tests read local/… when present)
+cargo test --release --manifest-path src-tauri/Cargo.toml          # Rust tests (pure: no local data; the readers' screenshot tests are sc-ohseearr's)
 cargo run --release --manifest-path src-tauri/Cargo.toml --example inventory_dump -- <out dir> <dir>... [--threads n] [--gpu]   # warehouse read over screenshots/recordings, overlays per frame
 cargo run --release --manifest-path src-tauri/Cargo.toml --example components_dump -- <dir>... [--threads n] [--gpu]            # character inventory read
-cargo run --release --manifest-path src-tauri/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]                    # raw OCR of an image
-scripts/regression-dumps.sh <out dir> [repo root]   # the three dumps over the fixed recordings/screenshots, normalized: compare with a baseline before and after any OCR/reader change (byte-identical is the bar)
-scripts/publish-win-companion.ps1 <user@host>       # Windows release: setup + .sig + standalone zip into $COMPANION_DIR (default local/companion), companion.json updated, uploaded to the server's DEPLOY_PATH
+cargo run --release --manifest-path ../sc-ohseearr/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]                # raw OCR of an image (sc-ohseearr's)
+scripts/regression-dumps.sh <out dir> [repo root]   # the three dumps (inventory_dump, components_dump, sc-ohseearr's ocr_dump) over the fixed recordings/screenshots, normalized: compare with a baseline before and after any OCR/reader change (byte-identical is the bar)
+scripts/publish-win-companion.ps1 <user@host>       # Windows release: setup + .sig + standalone zip into $COMPANION_DIR (default local/companion), companion.json updated, then pushed by push-companion.mjs
+scripts/push-companion.sh <user@host>               # the push alone (Linux entry point of scripts/push-companion.mjs): the manifest's files, then companion.json, to the server's DEPLOY_PATH
 ```
 
 Companion log: `%LOCALAPPDATA%\com.w00zla.quartermaster.companion\logs\companion.log` (Linux: `~/.local/share/…/logs`;
@@ -52,7 +53,8 @@ Debug recordings (the debug window's "Record data") hold every read's frame + JS
 
 - Rust in `src-tauri/` (the reads are adapters over sc-ohseearr: `inventory.rs`, `components.rs`, `refinery.rs` only map
   its neutral output to the payloads the frontend and the recordings use; `ocrwatch.rs` is the scan worker and screen
-  state machine, `capture.rs` the capture loop, `overlay.rs` the overlay window). Vue 3 + Vite + TypeScript 6 in `src/`.
+  state machine, `capture.rs` the capture loop, `overlay.rs` the overlay window). Vue 3 + Vite + TypeScript 6 in `src/`
+  (`src/components/`, `src/styles/`, pure modules flat in `src/`; the parts copied from sc-quartermaster are owned here).
 - The refinery read needs the game's texts: the active language pack's `global.ini`, else an English table at
   `<app local data>/global-english.ini` (made with sc-ohseearr's `scripts/extract-global-ini.*`). No game texts are
   compiled in.
