@@ -12,8 +12,9 @@ reads what the game shows and turns it into stock, blueprint and refinery entrie
 - **Overlay**: what the scan sees, drawn click-through over the game.
 - German and English; follows the game's language pack.
 
-The OCR, the screen readers and the capture come from [sc-ohseearr](../sc-ohseearr) (a separate repository for OCR of
-Star Citizen screens).
+The OCR, the screen readers, the game's language tables and the window capture come from
+[sc-ohseearr](https://github.com/w00zla/sc-ohseearr), a separate repository for OCR of Star Citizen screens (engine,
+models, readers, training).
 
 ## Requirements
 
@@ -23,9 +24,12 @@ Star Citizen screens).
 
 ## Build
 
-Next to this checkout you need `../sc-ohseearr`. Then:
+The Rust side uses [sc-ohseearr](https://github.com/w00zla/sc-ohseearr) as path dependencies, so clone both side by side:
 
 ```sh
+git clone https://github.com/w00zla/sc-ohseearr
+git clone https://github.com/w00zla/sc-qm-companion
+cd sc-qm-companion
 pnpm install
 pnpm ocr:models          # once: DirectML.dll for the GPU OCR (Windows) and the original OCR models
 pnpm companion:start     # develop (tauri dev)
