@@ -11,7 +11,7 @@
 // and when this page asks). A detected item (`flash` counts up) lets the location line light up briefly.
 import { computed, onMounted, ref, watch } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
-import Icon from "./shared/ui/adminapp/components/Icon.vue";
+import Icon from "./components/Icon.vue";
 import Thumb from "./components/Thumb.vue";
 import type { OverlayView } from "./overlay";
 

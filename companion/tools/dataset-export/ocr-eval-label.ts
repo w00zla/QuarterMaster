@@ -20,8 +20,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { buildComponentCatalog, findComponents, parseField } from '../../src/components.ts';
-import { norm } from '../../src/shared/lib/stock/material-names.ts';
-import type { CompanionCatalogResponse } from '../../src/shared/lib/webapp/api-types.ts';
+import { norm } from '../../src/materialNames.ts';
+import type { CompanionCatalogResponse } from '../../src/apiTypes.ts';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const args = process.argv.slice(2);

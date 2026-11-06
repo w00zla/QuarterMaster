@@ -3,7 +3,7 @@
 // sightings with converted stats and into proposals, one per tile; FPS gear and stacks as of 2026-10-22.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CatalogStat, CompanionCatalogResponse, StockBatch } from '../src/shared/lib/webapp/api-types.ts';
+import type { CatalogStat, CompanionCatalogResponse, StockBatch } from '../src/apiTypes.ts';
 import {
   addRequest, buildComponentCatalog, ComponentScan, findComponents, inStockOf, parseField, parseNumber, proposalsOf, SETTLED_MS, sightingOf, statFromTooltip, statNameKeys, statsOf,
   type ComponentCatalog, type ComponentProposal, type ComponentRead,

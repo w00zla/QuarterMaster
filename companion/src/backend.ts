@@ -2,7 +2,7 @@
 // Rust with the configured server and token: no CORS in the way).
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { CompanionOutdated, CompanionPlatform } from "./shared/lib/webapp/api-types.ts";
+import type { CompanionOutdated, CompanionPlatform } from "./apiTypes.ts";
 import type { OverlayDisplay } from "./overlayLayout.ts";
 
 export interface Config {

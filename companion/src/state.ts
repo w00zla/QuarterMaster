@@ -3,7 +3,7 @@
 // loading (loadingTexts).
 import { computed, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
-import type { MeResponse } from "./shared/lib/webapp/api-types";
+import type { MeResponse } from "./apiTypes";
 import { api as backendApi, getConfig, isConnectionError, logState, outdated, setUnlockScan, type Config, type LogState } from "./backend";
 import { applyLangSetting, t } from "./i18n";
 import { errorText, toastError } from "./toasts";

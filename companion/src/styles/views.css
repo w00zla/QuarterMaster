@@ -1,4 +1,5 @@
-/* Building blocks of the user web app's views, on top of the admin UI's ui.css. */
+/* Building blocks of the views (forms, fields, switches, filters, table rows), on top of ui.css; from the
+   Quartermaster web app's styles.css. */
 
 /* Background of the input fields (.input, Picker) */
 :root {
@@ -217,7 +218,7 @@
   padding-bottom: 4px;
 }
 
-/* Icon buttons always with a subtle outline (the admin's ui.css draws them bare) */
+/* Icon buttons always with a subtle outline (ui.css draws them bare) */
 .icon-btn {
   width: 26px;
   height: 26px;

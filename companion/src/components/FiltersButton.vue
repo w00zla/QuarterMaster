@@ -2,8 +2,8 @@
 // The icon button "Benutzerfilter" in the Gear and Resources heads after the kind filter: opens
 // FiltersDialog.vue; lit (accent) while some filter applies, else a quiet icon.
 import { ref } from "vue";
-import Icon from "../shared/ui/adminapp/components/Icon.vue";
-import Tooltip from "../shared/ui/adminapp/components/Tooltip.vue";
+import Icon from "./Icon.vue";
+import Tooltip from "./Tooltip.vue";
 import { t } from "../i18n";
 import { filtersActive } from "../inventorySync";
 import FiltersDialog from "./FiltersDialog.vue";

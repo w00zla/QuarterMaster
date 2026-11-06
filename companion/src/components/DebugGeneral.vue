@@ -9,8 +9,8 @@
 // window ("general-report", debugReport.ts).
 import { onMounted, ref } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
-import Icon from "../shared/ui/adminapp/components/Icon.vue";
-import Tooltip from "../shared/ui/adminapp/components/Tooltip.vue";
+import Icon from "./Icon.vue";
+import Tooltip from "./Tooltip.vue";
 import { appInfo, debugInfo, openFolder, type AppFolder, type DebugInfo } from "../backend";
 import type { GeneralReport, MissingText } from "../debugReport";
 import { t } from "../i18n";

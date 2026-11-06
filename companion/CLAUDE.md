@@ -19,12 +19,11 @@ Neighbours (sibling checkouts next to this one):
   **Required to build.** Its `docs/adr/` holds the OCR decisions.
 - `../sc-quartermaster`: the web app/bot whose API the companion talks to (token `qmt_…`, version header,
   `/api/companion/catalog`, release files from its `COMPANION_DIR`). Not needed to build: the UI components, styles and
-  API types the companion used from there are **copies** in `src/shared/` (no sync; see its README).
+  API types that came from there are the companion's own now (`docs/companion.md` "Structure"; no sync).
 
 | File | Content |
 |---|---|
 | `docs/companion.md` | everything about the app: Game.log, server/config/releases, window and state, the scan session, warehouse and gear scans, inventory panel, debug window, OCR, refinery, capture, overlay, WebView2, decisions, measurements, open points |
-| `src/shared/README.md` | what was copied from sc-quartermaster and when |
 | `.claude/open-points.md` | open decisions and follow-ups the user schedules (local, not in git) |
 
 ## Commands
@@ -35,7 +34,7 @@ pnpm ocr:models                 # once per checkout: DirectML.dll (GPU OCR on Wi
 pnpm companion:start            # tauri dev (Vite on :1430, UI hot reload, Rust rebuilt when it changed; OCR on the CPU: no DirectML.dll there)
 pnpm companion:fast             # test build for the game: profile `fast` -> src-tauri/target/fast/quartermaster-companion.exe (+ DirectML.dll); close the running exe first
 pnpm companion:build            # release build for this OS (LTO, minutes): build:windows (NSIS setup + .sig, needs TAURI_SIGNING_PRIVATE_KEY, and the bare exe) or build:linux (AppImage)
-pnpm typecheck                  # vue-tsc (src/ incl. src/shared)
+pnpm typecheck                  # vue-tsc over src/
 pnpm test                       # node tests in test/ (pure frontend logic)
 cargo test --release --manifest-path src-tauri/Cargo.toml          # Rust tests (screenshot tests read local/… when present)
 cargo run --release --manifest-path src-tauri/Cargo.toml --example inventory_dump -- <out dir> <dir>... [--threads n] [--gpu]   # warehouse read over screenshots/recordings, overlays per frame

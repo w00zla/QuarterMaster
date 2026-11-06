@@ -11,8 +11,8 @@
 // job of this station not seen during the whole visit (remove it; the terminal scrolls its orders
 // sideways, so only the visit as a whole tells). An order is acted on only once two reads in a row
 // showed it the same (OCR misreads do not book anything).
-import { addName, emptyNames, findMaterial, norm, type MaterialNames } from "./shared/lib/stock/material-names.ts";
-import type { CompanionCatalogResponse, StockBatch } from "./shared/lib/webapp/api-types.ts";
+import { addName, emptyNames, findMaterial, norm, type MaterialNames } from "./materialNames.ts";
+import type { CompanionCatalogResponse, StockBatch } from "./apiTypes.ts";
 import { buildComponentCatalog, statNameKeys, type ComponentCatalog } from "./components.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------

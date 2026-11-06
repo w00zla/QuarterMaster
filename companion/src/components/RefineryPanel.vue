@@ -8,12 +8,12 @@
 // A finished job, registered or not: Store (the terminal's yields). A job no read of the station showed: Remove (after a
 // confirmation) or Keep. Matched running jobs are updated without asking.
 import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
-import ColumnHead from "../shared/ui/adminapp/components/ColumnHead.vue";
-import Icon from "../shared/ui/adminapp/components/Icon.vue";
-import Tooltip from "../shared/ui/adminapp/components/Tooltip.vue";
-import { useTableColumns, type ColumnSpec } from "../shared/ui/adminapp/tableColumns";
-import ColumnsButton from "../shared/ui/webapp/components/ColumnsButton.vue";
-import ConfirmDialog, { type ConfirmButton } from "../shared/ui/webapp/components/ConfirmDialog.vue";
+import ColumnHead from "./ColumnHead.vue";
+import Icon from "./Icon.vue";
+import Tooltip from "./Tooltip.vue";
+import { useTableColumns, type ColumnSpec } from "../tableColumns";
+import ColumnsButton from "./ColumnsButton.vue";
+import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
 import { columnsTexts, langRef, t } from "../i18n";
 import { overlayRows, tabCounts } from "../overlay";
 import { fromMicro, toMicro } from "../inventory";

@@ -8,7 +8,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 // Exact sizes (44 px, 88 px for 2x screens) from assets/logo.png: the webview's own downscaling frays the edge
 import logo from "../assets/logo-44.png";
 import logo2x from "../assets/logo-88.png";
-import Icon from "../shared/ui/adminapp/components/Icon.vue";
+import Icon from "./Icon.vue";
 import { t } from "../i18n";
 
 const emit = defineEmits<{ settings: [] }>();

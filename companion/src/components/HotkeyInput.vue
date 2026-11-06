@@ -5,7 +5,7 @@
 // would be taken from every app), function keys excepted. Shown with the UI language's key names
 // ("Strg+Umschalt+O").
 import { ref } from "vue";
-import Icon from "../shared/ui/adminapp/components/Icon.vue";
+import Icon from "./Icon.vue";
 import { langRef, t } from "../i18n";
 
 const model = defineModel<string>({ required: true });

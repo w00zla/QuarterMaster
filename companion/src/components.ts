@@ -15,8 +15,8 @@
 // the cursor stayed on its tile for a read or had rested when the frame was grabbed (right after a
 // move the game may still show the previous tile's tooltip), and a sighting only once two such reads
 // in a row agree (an OCR glitch in one read books nothing).
-import { norm } from "./shared/lib/stock/material-names.ts";
-import type { CatalogStat, CompanionCatalogResponse, StockAddRequest, StockBatch } from "./shared/lib/webapp/api-types.ts";
+import { norm } from "./materialNames.ts";
+import type { CatalogStat, CompanionCatalogResponse, StockAddRequest, StockBatch } from "./apiTypes.ts";
 
 /** The item types the web app counts as FPS gear (from sc-quartermaster's src/catalog/components.ts), with
  * the sub types that count, null = all: personal weapons, their attachments, mining gadgets and armor incl.

@@ -42,4 +42,4 @@ Everything about how it works: [docs/companion.md](docs/companion.md).
 ## License
 
 Not decided yet; all rights reserved until then. Bundled third-party parts keep their licenses (fonts in
-`src/shared/ui/adminapp/assets/fonts` under the OFL; DirectML.dll is Microsoft's redistributable, MIT).
+`src/assets/fonts` under the OFL; DirectML.dll is Microsoft's redistributable, MIT).

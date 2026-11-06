@@ -3,8 +3,8 @@
 // turned into sightings and into proposals, one per stack.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { addName, emptyNames } from '../src/shared/lib/stock/material-names.ts';
-import type { StockBatch } from '../src/shared/lib/webapp/api-types.ts';
+import { addName, emptyNames } from '../src/materialNames.ts';
+import type { StockBatch } from '../src/apiTypes.ts';
 import {
   addRequest, fromMicro, inStockOf, InventoryScan, proposalsOf, sightingOf, toMicro,
   type InventoryCatalog, type InventoryReadEvent, type Proposal, type ReadTile, type ReadTooltip,

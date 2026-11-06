@@ -2,7 +2,7 @@
 // them (rows as in the user's screenshots of 2026-10-08 at CRU-L1) against the user's running jobs.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CompanionCatalogResponse, StockBatch } from '../src/shared/lib/webapp/api-types.ts';
+import type { CompanionCatalogResponse, StockBatch } from '../src/apiTypes.ts';
 import {
   buildCatalog, cscuToScu, doneRequest, findStation, finishedRequests, gameNameKeys, jobsOf, RefinerySync, removeRequest, resolveOrder, startRequest,
   type Job, type OverviewEvent, type OverviewOrder, type Proposal,

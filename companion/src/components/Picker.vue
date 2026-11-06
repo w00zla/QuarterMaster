@@ -8,8 +8,7 @@ export interface PickerOption {
   hint?: string;
 }
 
-/** The picker's own texts, provided by the app (the web app's from its i18n; the companion app
- * provides its own: this component has no i18n of its own so that both can import it). */
+/** The picker's own texts, provided by the app (App.vue, from i18n.ts): the component has no i18n of its own. */
 export interface PickerLabels {
   clear: string;
   noMatch: string;
@@ -23,7 +22,7 @@ export const PICKER_LABELS: InjectionKey<PickerLabels> = Symbol("pickerLabels");
 // All typed words must match; entries whose label starts with the first word come first, otherwise the
 // caller's order stays. Text that was not picked is dropped on blur: only listed values get through.
 import { computed, inject, nextTick, ref, watch } from "vue";
-import Icon from "../../adminapp/components/Icon.vue";
+import Icon from "./Icon.vue";
 
 const labels = inject(PICKER_LABELS, { clear: "Clear", noMatch: "No match" });
 

@@ -1,18 +1,17 @@
 <script setup lang="ts">
-// Schaltet die Listenansicht einer Tabelle um: Kompakt (kleines Thumbnail neben dem Namen) oder Thumbnails
-// (höhere Zeilen, Thumbnail-Spalte vorn); gespeichert mit den Spalten der Tabelle (tableColumns.ts `view`).
-// Neben dem ColumnsButton; geteilt von Web-App und Companion, die Texte kommen herein.
-import Icon from "../../adminapp/components/Icon.vue";
-import Tooltip from "../../adminapp/components/Tooltip.vue";
-import type { useTableColumns } from "../../adminapp/tableColumns";
+// Switches a table's list view: compact (a small thumbnail next to the name) or thumbnails (taller rows);
+// kept with the table's columns (tableColumns.ts `view`). Next to the ColumnsButton; the texts come in.
+import Icon from "./Icon.vue";
+import Tooltip from "./Tooltip.vue";
+import type { useTableColumns } from "../tableColumns";
 
 export interface ViewTexts {
-  // Tooltip: was ein Klick einschaltet
+  // Tooltip: what a click switches on
   toThumbs: string;
   toCompact: string;
 }
 
-// `size`: Kantenlänge des Buttons in px, wie beim ColumnsButton
+// `size`: the button's edge in px, as for the ColumnsButton
 const props = withDefaults(defineProps<{ table: ReturnType<typeof useTableColumns>; texts: ViewTexts; size?: number }>(), { size: 16 });
 </script>
 

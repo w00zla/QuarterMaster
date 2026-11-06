@@ -9,7 +9,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import Icon from "../shared/ui/adminapp/components/Icon.vue";
+import Icon from "./Icon.vue";
 import { exportLogDebug, logState, type LogState } from "../backend";
 import type { GamelogReport, UnlockState } from "../debugReport";
 import { t } from "../i18n";

@@ -7,9 +7,9 @@
 // (no server or token, or the token is refused). An app the server calls outdated shows only the
 // update hint (no work until updated).
 import { computed, onMounted, provide, ref } from "vue";
-import Icon from "./shared/ui/adminapp/components/Icon.vue";
-import Tooltip from "./shared/ui/adminapp/components/Tooltip.vue";
-import { PICKER_LABELS } from "./shared/ui/webapp/components/Picker.vue";
+import Icon from "./components/Icon.vue";
+import Tooltip from "./components/Tooltip.vue";
+import { PICKER_LABELS } from "./components/Picker.vue";
 import InventoryPanel from "./components/InventoryPanel.vue";
 import ScanBar from "./components/ScanBar.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";

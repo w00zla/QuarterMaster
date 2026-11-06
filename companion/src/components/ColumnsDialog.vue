@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // Which columns a table shows: a switch per column the user may hide (`hideable`), in the table's order;
 // a change applies and is kept right away (useTableColumns). Opened from the icon button in the head of
-// the table's action column (ColumnsButton.vue). Shared by the web app and the companion: texts come in.
+// the table's action column (ColumnsButton.vue); the texts come in.
 import { computed } from "vue";
 import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
-import type { useTableColumns } from "../../adminapp/tableColumns";
+import type { useTableColumns } from "../tableColumns";
 
 export interface ColumnsTexts {
   // Tooltip of the button, dialog title, close button
