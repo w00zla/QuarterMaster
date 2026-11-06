@@ -1,7 +1,7 @@
 # Companion app
 
-A desktop app (Tauri 2, structure after BindSight) that works for the user next to the game, through the
-user web app's API with the user's API token ("Access Key"):
+A desktop app (Tauri 2) that works for the user next to the game, through the Quartermaster web app's API with
+the user's API token ("Access Key"):
 
 - reads blueprint unlocks from `Game.log` and registers them;
 - scans the freight manager's warehouse for material stacks and the character inventory for gear (ship
@@ -13,16 +13,35 @@ user web app's API with the user's API token ("Access Key"):
 
 Linux and Windows; the screen capture and so every scan and the overlay are Windows only so far.
 
-Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `logwatch`, `gamelog`, `server`,
-`ocr` (loads the OCR), `inventory` (warehouse), `components` (character inventory), `refinery` (the three: the
-companion's payloads and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker),
-`capture` (the capture loop on sc-ohseearr's capture crate), `overlay`. The screen readers, the game's texts
-(`Locale`) and the capture itself are sc-ohseearr's (`../sc-ohseearr`, path dependencies; see "OCR"). Vue SPA with three pages (`index.html` → `App.vue`,
-`debug.html` → `DebugApp.vue`, `overlay.html` → `OverlayApp.vue`) importing the shared styles, `Icon.vue`,
-`Tooltip.vue` and the web app's `ConfirmDialog.vue` and `Picker.vue` relatively. Pure logic in
-`src/{match,inventory,components,refinery}.ts`, tested from `test/companion-*.test.ts`.
-
 Commands, the log file and its lines: `CLAUDE.md` "Commands".
+
+## Requirements
+
+Product requirements (moved here from sc-quartermaster's `docs/requirements.md`, "Refinery" in the bot):
+
+- `/qm-refinery time job` (bot) sets or clears the time left of a running job; the companion sets it through the API
+  (`POST /api/refinery/duration`) from the terminal's work order overview.
+- The companion app syncs the jobs of a station from the terminal's work order overview: yield and time left of known
+  jobs are updated by themselves; new jobs, finished ones (to store) and jobs missing at the terminal (to remove) are
+  proposals the user confirms (see "Refinery").
+
+## Structure
+
+- Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `logwatch`, `gamelog`, `server`, `ocr` (loads the
+  OCR), `inventory` (warehouse), `components` (character inventory), `refinery` (the three: the companion's payloads
+  and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker), `capture` (the capture loop on
+  sc-ohseearr's capture crate), `overlay`. The OCR engine and models, the screen readers, the game's texts (`Locale`)
+  and the capture itself are sc-ohseearr's (`../sc-ohseearr`, path dependencies; see "OCR").
+- Vue SPA with three pages (`index.html` → `App.vue`, `debug.html` → `DebugApp.vue`, `overlay.html` →
+  `OverlayApp.vue`), components in `src/components/`, styles in `src/styles/` (`base.css` with tokens, fonts and
+  `ui.css`; `views.css` for forms, fields and table rows), the fonts in `src/assets/fonts/`. Pure logic in
+  `src/{match,inventory,components,refinery}.ts`, tested from `test/companion-*.test.ts`.
+- The window structure and look follow BindSight (title bar, settings, `Dropdown`, `ConfirmDialog`, the icon set,
+  `tableColumns.ts`). The shared UI components (`Icon`, `Tooltip`, `HelpTip`, `Dropdown`, `ColumnHead`,
+  `ColumnsButton`/`ColumnsDialog`, `ConfirmDialog`, `Picker`, `ViewToggle`), `tableColumns.ts`, the styles, the
+  fonts and the pure helpers `apiTypes.ts` (the web app's API types the companion uses), `materialNames.ts`,
+  `quality.ts` and `componentStats.ts` were copied from sc-quartermaster at b58f4d8 on 2026-11-06 and are owned here
+  (no sync).
 
 ## Game.log and blueprint unlocks
 
@@ -58,7 +77,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   unlocks in a real 2026 log history: all matched.
 - No refinery terminal events in `Game.log` (checked): only notifications.
 
-## Server, config and releases
+## Server and config
 
 - `server.rs`, `config.rs`: server origin fixed (`https://quartermaster.w00z.net`; missing or empty in
   the file = that; only a `server` entry in the config file changes it, e.g. `http://localhost:5174` for
@@ -73,11 +92,11 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   ETag in the app cache dir (`%LOCALAPPDATA%\com.w00zla.quartermaster.companion\api\<path>.json`,
   `server::cached_api`) and sent with `If-None-Match`; a 304 answers the kept body (the ETag hashes the
   content: another server or user never gets a wrong one; a broken file only costs the transfer).
-- **Item thumbnails** (2026-10-25; names and sizes in `src/thumbs.ts`, the server side in `docs/webapp.md`
-  "Thumbnails"): only for catalog entries with a hash (`CatalogMaterial.thumb`, `CatalogBlueprint.thumb` of
+- **Item thumbnails** (2026-10-25; the sizes at `ThumbSize` in `backend.ts`, the server side in sc-quartermaster's
+  `docs/webapp.md` "Thumbnails"): only for catalog entries with a hash (`CatalogMaterial.thumb`, `CatalogBlueprint.thumb` of
   its `outputUuid`); without one nothing is asked and the row looks as before. Rust `thumb(size, uuid, hash)`
   (s|m|l, UUID and 8-hex hash checked) answers a `data:image/avif;base64,…` URL (the CSP stays: `img-src`
-  has `data:`, not the server) from `%LOCALAPPDATA%com.w00zla.quartermaster.companion	humbs<size><uuid>.<hash>.avif`,
+  has `data:`, not the server) from `%LOCALAPPDATA%\com.w00zla.quartermaster.companion\thumbs\<size>\<uuid>.<hash>.avif`,
   else fetched from the configured origin's public `/thumbs/…` (no token, the API's client and user agent)
   and kept there for good (temp file, renamed when complete: a URL's content never changes). Frontend
   `thumbs.ts`: one promise per image and window for the session (a failure is asked again by the next
@@ -104,16 +123,26 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   and ends the app; the setup starts the new version. Progress as `download-progress` like the download.
   `dangerousInsecureTransportProtocol` is on because `server::origin` already allows plain http for
   localhost only. Updates come only with the 426 (the manifest's version is required), there is no own check.
-- Release: bump the version in `src-tauri/Cargo.toml` (bundle names and the header use it),
-  build per platform: Windows `build:windows` with the updater's private key **as content** in
-  `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if it has one; the `_PATH`
-  variant is not read by the CLI, see BindSight) gives the setup (with `DirectML.dll` next to the exe,
-  from `ocr:models`) `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and its `.sig`, and
-  `target/release/quartermaster-companion.exe` zipped as `…_x64-standalone.zip`; Linux the AppImage.
-  Copy them and `companion.json` to `COMPANION_DIR` (`docs/deploy.md` § 8; the server side is in
-  `docs/webapp.md` "Companion release"). The key pair comes from `pnpm --filter
-  sc-quartermaster-companion tauri signer generate -w <file>` once; the private key never goes into the
-  repo, losing it means installed apps take no update until reinstalled with a new key.
+
+## Release
+
+- Bump the version in `src-tauri/Cargo.toml` (bundle names and the header use it), build per platform:
+  Windows `pnpm companion:build` (`build:windows`) with the updater's private key **as content** in
+  `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if it has one; the `_PATH` variant is not
+  read by the CLI, see BindSight) gives the setup (with `DirectML.dll` next to the exe, from `pnpm directml`)
+  `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and its `.sig`, and
+  `target/release/quartermaster-companion.exe`; Linux the AppImage.
+- Windows: `scripts/publish-win-companion.ps1 <user@host> [-DeployPath …]` copies the setup, its `.sig` and the exe
+  zipped with `DirectML.dll` (`…_x64-standalone.zip`) into `COMPANION_DIR` (default `local/companion`), writes
+  `companion.json` (version, windows, linux kept, windowsSetup) and pushes. Linux: copy the AppImage there, add it to
+  `companion.json`, then `scripts/push-companion.sh <user@host>`.
+- The push is one implementation, `scripts/push-companion.mjs` (Node and scp, on Windows its OpenSSH scp; the ps1
+  calls it, the .sh is its Linux entry point): the files the manifest names into `<DEPLOY_PATH>/local/companion/` on
+  the VM (default `/opt/sc-quartermaster`), the manifest last (it raises the required version; copied first, it
+  would send outdated apps to downloads that are not there yet). The server side: sc-quartermaster's `docs/deploy.md`
+  and `docs/webapp.md` "Companion release".
+- The key pair comes from `pnpm tauri signer generate -w <file>` once; the private key never goes into the repo,
+  losing it means installed apps take no update until reinstalled with a new key.
 
 ## Window, tabs and state
 
@@ -175,21 +204,21 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   job, dimmed: not yet), the time left and the end, the total yield in SCU at the right; the materials
   as compact rows in the columns of one head above the cards (material, quality, amount; see
   "Tables"), each with the S thumbnail (18 px) in front of the name (no display toggle). German "Eintragen" for registering everywhere.
-- **Tables** (Components, Resources, the refinery's materials, Blueprints; 2026-10-20): the web app's
-  (`useTableColumns` + `ColumnHead` from `adminapp/src`, ui.css `.table`/`.row`/`.cols-head`, the table
+- **Tables** (Components, Resources, the refinery's materials, Blueprints; 2026-10-20): like the web app's
+  (`useTableColumns` in `tableColumns.ts` + `ColumnHead.vue`, ui.css `.table`/`.row`/`.cols-head`, the table
   measured with `observe`: the columns always fit, growing takes the free room and then narrows the
   columns to the right, the fixed action columns stay in view), compact (`.table.compact` in `App.vue`:
   4 px padding for head and rows, so the titles sit in the middle, 8 px gap, 12 px text). One column
   takes the room left (the location, the material, the blueprint: no grip); widths and hidden columns in
   localStorage `qm.companion.{comps,stock,refinery,unlocks}.columns`. A first try with an "Excel" mode
   (only the dragged column changes, sideways scroll) was dropped the same day: the actions scrolled out. The icon button in the
-  panel head left of the filter chips (since 2026-10-25, before in the head of the action column; `ColumnsButton.vue`, its tooltip "Spalten wählen"; both in `webapp/src/components/`
-  since 2026-10-21, shared with the web app, texts via `columnsTexts()`) opens `ColumnsDialog.vue`:
+  panel head left of the filter chips (since 2026-10-25, before in the head of the action column; `ColumnsButton.vue`, its tooltip "Spalten wählen",
+  texts via `columnsTexts()`) opens `ColumnsDialog.vue`:
   a switch per hideable column (all but the name and the actions), applied and kept right away. The
   location in the mono face (like the overlay's). Lists in dialogs scroll inside them (max. 40–50 vh) and
   show the table's shown columns in its order.
-- **Display per table** (Gear, Resources, Blueprints; 2026-10-25): `ViewToggle.vue` (shared with the web
-  app, tooltip "Thumbnails anzeigen" / "Kompakt anzeigen") left of the column chooser, kept with the
+- **Display per table** (Gear, Resources, Blueprints; 2026-10-25): `ViewToggle.vue` (tooltip "Thumbnails
+  anzeigen" / "Kompakt anzeigen") left of the column chooser, kept with the
   table's columns (`useTableColumns` `view`, default compact). Compact: today's rows plus the S thumbnail
   (18 px, the 24 px rows keep their height) in front of the name. No kind or blueprint badges since 2026-10-30 (the thumbnail says it; only the refinery jobs keep theirs).
   Thumbnails: a column first with the M thumbnail (48 px), rows 48 px high, 13 px text. Blueprints show the
@@ -229,7 +258,7 @@ Commands, the log file and its lines: `CLAUDE.md` "Commands".
   pack (`refinerySync.ts` `loadCatalog`: the companion's only catalog fetch, `/api/companion/catalog` de and
   en (since 2026-11-01; before: the web app's `/api/catalog`), once connected, again when the game folder
   changes; kept in memory and on disk (ETag), the unlocks panel uses its responses). It has only what the
-  companion reads (`CompanionCatalogResponse`, `docs/webapp.md`): materials uuid, kind (the unit follows
+  companion reads (`CompanionCatalogResponse` in `apiTypes.ts`, sc-quartermaster's `docs/webapp.md`): materials uuid, kind (the unit follows
   from it), name, nameKey, type, typeLabel, component, label, size, gradeLetter, stats (every
   `CatalogStat` field), thumb; locations uuid, key, label, short, nameKey, refinery; blueprints uuid,
   label, name, size, gradeLetter, isDefault, retired, outputUuid, thumb. Per language ~2.45 MB instead of
@@ -250,111 +279,20 @@ the hovered tile, which opens at the cursor (title; materials also "Capacity: �
 "<quality>" and the SCU; items the title only). The gems (Feynmaline, Hadanite, …) are items in the catalog:
 their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
-### The read (Rust)
+### The read
 
-- **Since 2026-11-06 sc-ohseearr's** `WarehouseReader` (`../sc-ohseearr/usecases/warehouse`, ported 1:1 from
-  this repo's `inventory.rs`, which now only adapts its output to `Grid`: the field mapping in its module
-  docs). It keeps the last strong layout as its prior (`reset` when the warehouse screen is left, a new
-  reader when the scan stops) and reads every tile's badge after `set_diagnostics(true)` (the debug window
-  open). What follows describes its read.
-- Only the pane right of the screen centre is read (the elevator pane is ignored), and only 0.25–0.95 of
-  the height (the grid with room, below it a bottom row's tooltip). **Since 2026-10-31 with the
-  warehouse's own layout detector** (the reader's, see "The layout detector" below): it finds
-  the badges, quality texts, the tooltip's title and its other lines as boxes of their kind, nothing is
-  recognized for the fit. It sees windows of the frame scaled to 720 px height, 480×320 each (720×480
-  frame pixels at 1080p): the first read of a session covers the pane with overlapping windows (40 px,
-  merged by NMS); once a strong layout is known, **one window around the cursor**, its top left 1.6
-  pitches left and up of it (the hovered tile's anchors and its neighbours'), the rest holding the
-  tooltip's window right and below, shifted to stay inside the pane. Then only the tooltip's lines, the
-  hovered tile's quality text and badge are recognized, scaled up as if the frame were 2400 px high
-  (tiny misspells them at native size: "Dalivine"). The debug view's boxes: the anchors as "[badge]"
-  and "[quality]" with the detector's score, the tooltip's lines with their text. Measured on the recordings of 2026-10-30 (165 reads
-  at 3840×1600, 276 at 1080p; every tile's badge read, as with the debug window open): 26 and 25 ms per
-  read on the CPU (3 threads), 24 ms on the GPU (detector ~4 ms, the rest the recognizer). Before:
-  PP-OCRv6 tiny's detector on the area scaled to 2400 px and every box it found recognized, 128 and 139
-  ms (small over the whole pane 373 ms, ~1 s in game). Against that read: the same material tooltips
-  (109/113, 174/174: the four missing at 3840×1600 are frames whose cursor had left the tooltip's tile,
-  no hovered tile either), the hovered tile's quality in 94/84 and 134/118 frames (where both read one
-  and differ, the new one is right: 510 for "518", 310 for "318"), its count in 125/130 and 207/209,
-  misspelt material names in 4 and 3 of ~290 tooltips ("Dalivine", "Silican"); no more tooltips from
-  the category menu's entries ("rdnance") and no body line as the title ("Registered To You" for
-  "Luminalia '5s Coin"). No grid on 82 screenshots of the character inventory and the refinery terminal
-  (the first model fitted one on 21 of 22 of the looting view's: its "0/0" labels as badges and
-  quality texts): trained with such screenshots as negatives, and only boxes scored ≥ 0.55 anchor the fit
-  (`ANCHOR_SCORE`; the inventory's scored up to 0.5, 97 % of the warehouse's above). A pixel-based read of the hovered tile like the gear
-  scan's was tried first and dropped: the terminal's glare washes the lit frame out on whole sides (3 of
-  336 reads found all four edges in one variant, 108 in the best).
-- The terminal is a screen in the world: the grid's pitch changes with the player's position, resolution
-  and FOV (260–290 px at 1600 px height, ~140 px at 1080p 16:9: pitch candidates 0.10–0.20 of the height),
-  so the grid is **fitted per frame** from the detected badges and quality texts (the tooltip chip's
-  bare "526" is a tooltip line to the detector, no anchor; anchors with weights, the pitch and phase most agree on per axis, the four consecutive columns with the
-  most anchors, rows within 0.3–0.84 of the height; at least anchor weight 3). The first strong fit of a
-  session (anchor weight ≥ `STRONG_FIT_WEIGHT` on the weaker axis) is the **last layout**: weaker fits
-  keep its pitch and fit only the phase, from whatever anchors the area around the cursor holds (one
-  suffices, and every anchor anchors both axes; ties between column windows go to the one nearest the
-  last layout's first column). Dropped when the warehouse screen is left or the scan stops. The row pitch is bounded to 0.85–1.05 of the column
-  pitch. Every cell is a tile (unread fields None). The fit can sit up to ~30 px off the tiles.
-- Quality of the hovered tile (every tile's without a cursor: the hovered rule below needs them): the
-  quality text the detector found in its band, a quarter of its height grown, else the whole band (it
-  reached into a tooltip's edge next to it: "37104"), recognized on its own; not read when the tooltip
-  covers over 20 % of it.
-- Badges: only the hovered tile's (every tile's while the debug window is open: the costly part). First the
-  nearest detected badge around the tile's top right corner (`BADGE_SEARCH`), with room on its right
-  (`BADGE_RIGHT_PAD`: a digit at the crop's edge reads as "8"), then the tile's badge
-  area; upscaled 3×, recognized with the badge's characters only (`recognize_images_only`,
-  "Xx× 0123456789": the multi-language model read a "6" as "日" before the cut, see "OCR"); the first read with digits wins, a bare
-  "X" = 1 flagged uncertain (so far always a real X1 whose thin 1 got lost). Not read when the tooltip
-  covers over 5 % of the area: it opens at the cursor, near the tile's top over its own badge. The
-  recordings of 2026-10-19: the hovered tile's count in 115 of 120 and 52 of 55 frames (34 and 69 before).
-- Tooltip (`tooltip_from_boxes`): only a title the detector found (≥ 3 letters) names it, the first whose
-  cursor point lies in a tile or within 0.01 of the height next to one (the gap between two rows: read
-  216 of the 1080p recording); no title, no tooltip (before, text rules picked titles out of every box,
-  and a body line or the capacity line took the title's place when it went unread; an item's name with
-  an amount, "StorAll 2 SCU Self-", fell to them). The tooltip is see-through: a tile's quality behind it shows in the title's row
-  ("Janalite 360" over a 360Q neighbour, at times in the title's own box: "Glacosite 258"), so the
-  quality is the number right of the name's repeat in the chip row, else any number below the title row,
-  never one in it; a trailing bare number leaves the name when the chip row repeats the name without it.
-- The **hovered tile** is the one under the mouse cursor, which the capture passes with every frame
-  (`Frame.cursor`, frame pixels; the duplicated image has no pointer). Screenshots without a cursor fall
-  back to the tile with the chip's quality or whose quality the tooltip hides (near the right edge the
-  tooltip is shifted left over the tile), else the one under the tooltip's cursor point.
-
-### The layout detector
-
-- **Model**: NanoDet-Plus-m (RangiLyu/nanodet, Apache-2.0; ShuffleNetV2 1.0× backbone, GhostPAN, ~1.2 M
-  parameters in the exported graph) with our weights, sc-ohseearr's model package `sc-warehouse-layout`
-  (`../sc-ohseearr/models/sc-warehouse-layout/`, 5.7 MB, in git there; compiled in like the OCR models; the
-  warehouse reader owns it, made on its first read on the `Ocr`'s threads and device, its timings
-  (`take_timings`) counted as the detector's in the read's phases). Input
-  1×3×320×480 BGR, normalized with the training's mean/std; output per prior point (strides 8–64) the four kinds'
-  scores and per side a distribution over 8 bins (sc-ohseearr's `NanoDet`, numbers in the package's `model.toml`:
-  score ≥ 0.35, NMS 0.5 per kind).
-  Kinds: `badge` (the light box "X 14"), `quality` ("526Q"), `title` (the tooltip's first line),
-  `tipline` (its other lines). On the GPU one DirectML session (fixed shape).
-- **Training**: in sc-ohseearr (`training/`, recipe `sc-warehouse-layout`, steps and setup in its
-  `training/README.md`). The data come from this repo's `tools/dataset-export/warehouse_coco.py` (debug
-  recordings → COCO windows): the frames with a
-  strong fit, each scaled to 720 px height and cut into 480×320 windows (the app's window around the
-  recorded cursor and two random ones in the pane); the labels from what the recording knows (the boxes
-  of the read that recorded it, its fitted tiles, its tooltip) by the read's own rules: badges as the
-  light box (`badge_box`) around a box in the tile's badge area, quality texts in a tile's band (the
-  fitted rows extended over the frame: partly visible rows carry them too), the title (the topmost line
-  over the one the read took, when that was the chip's name) and the lines below it within the
-  tooltip's width and three lines (no tile texts). Screenshots without a warehouse (`--neg`: character
-  inventory, refinery terminal) are windows without labels: without them the detector took the
-  character inventory's "0/0" labels for badges and fitted a grid there. The last 20 % of each recording
-  are the validation (frames in a row look alike). Only for recordings of the read before the detector
-  (up to companion 1.3.1: every box with its text); newer ones hold the detector's own boxes ("[badge]",
-  "[quality]", the tooltip's lines), which the exporter does not take yet. The model of 2026-10-31: the recordings of 2026-10-30 (870 windows)
-  and 296 negative windows (`inventory`, `inventory 4`, `refinery flow 1–3`; `inventory 3` held out),
-  the best of 20 epochs (it had converged; the run of 40 was stopped). Validation: recall badge 98.9 %,
-  quality 100 %, title 97.5 %, line 97.4 %, precision 87–94 % (most "misses" are gaps in the labels:
-  badges the old read did not see, tooltips it did not record; the quality texts' include the held-out
-  inventory's "0/0" below the anchor score). An epoch takes ~35 s with 4 data workers on the RTX 5080
-  (the GPU's part ~5 s): NanoDet starts its workers anew every epoch, on Windows ~1 min with 10.
-  Retrained in full from the recipe on 2026-11-06 (seed 1): the same recall per kind.
-- **Retraining**: export the windows with `tools/dataset-export/warehouse_coco.py`, run sc-ohseearr's layout
-  pipeline on the recipe, then `scripts/regression-dumps.sh` here against the read before.
+- sc-ohseearr's `WarehouseReader` (`../sc-ohseearr/usecases/warehouse`: its README is the use case card, the module
+  docs the read; `inventory.rs` adapts its output to `Grid`, the field mapping in its module docs). In short: the
+  reader's own layout detector (`sc-warehouse-layout`, NanoDet-Plus, its card `models/sc-warehouse-layout/MODEL.md`
+  there) finds the badges, quality texts and the tooltip's lines, a grid is fitted to them per frame, and only the
+  tooltip's lines, the hovered tile's quality and badge are recognized (~25 ms per read on the CPU).
+- What the app relies on: the reader keeps the last strong layout as its prior (`reset` when the warehouse screen is
+  left, a new reader when the scan stops) and reads every tile's badge after `set_diagnostics(true)` (the debug window
+  open: the costly part); the **hovered tile** is the one under the mouse cursor, which the capture passes with every
+  frame (`Frame.cursor`; screenshots without a cursor fall back to the tooltip's hints).
+- **Retraining the layout detector**: export windows from debug recordings with `tools/dataset-export/warehouse_coco.py`
+  (strong fits only; screenshots without a warehouse as negatives, `--neg`), run sc-ohseearr's layout pipeline on the
+  recipe (`training/README.md` there), then `scripts/regression-dumps.sh` here against the read before.
 
 ### Sightings and proposals (frontend)
 
@@ -376,61 +314,20 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
 ## Gear scan (character inventory)
 
-Ship components and FPS gear (weapons, attachments, armor, gadgets; since 2026-10-22, checked against
-`local/screenshots/inventory 4`, 3840×1600) (sc-ohseearr's gear-inventory reader, `components.rs` adapts it,
-pure part `components.ts`), read in the character inventory's "Storage Access" screen, because only its
-tooltip shows an item's stats. Since 2026-11-06 the read is sc-ohseearr's `GearInventoryReader`
-(`../sc-ohseearr/usecases/gear-inventory`, ported 1:1 from this repo's `components.rs`, which now only adapts
-its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows describes its read.
+Ship components and FPS gear (weapons, attachments, armor, gadgets; since 2026-10-22), read in the character
+inventory's "Storage Access" screen, because only its tooltip shows an item's stats. The read is sc-ohseearr's
+`GearInventoryReader` (`../sc-ohseearr/usecases/gear-inventory`, its README and module docs: the storage pane, the
+UI scale `k` from the page number's place, the tooltip at its fixed place right of the character, the stack count,
+the hovered tile from the game's lit frame around it, the row in the scrolled content); `components.rs` adapts its
+output to `ComponentRead`, the pure part is `components.ts`. The reader keeps the UI scale until the scan stops; the
+tooltip and the page number go through the OCR only while the cursor is on a lit tile (~57 ms per read on the CPU,
+3 threads).
 
-- The storage pane on the right: a grid 4 units wide, a tile 1 unit (coolers, missiles) or 2 (weapons)
-  wide, rows mixed like 2+2 or 1+2+1, 6 rows in view, scrolled row by row with a green thumb on its right,
-  pages "2/3" below it. The UI is a panel in perspective around the frame's centre: the in-game FOV and the
-  aspect ratio scale it as a whole about the centre. Every position is measured on 3840×1600 (the user's
-  FOV) as a share of the height from the centre and scaled per frame by `k` (sc-ohseearr's `CenterUi`;
-  1080p 16:9: ~1.05), which the page number's place tells (`read_page`: its centre at 0.597/0.340 at k = 1;
-  x and y must agree within 6 %, which a tile's "40/40" elsewhere does not). Probing reads the page over
-  every place k 0.75–1.4 allows, the screen once known only where the last k puts it (cheap); k is kept
-  until the scan stops (the reader is made anew then). The left (personal) pane is not read.
-- The tooltip opens at a **fixed place** right of the character (not at the cursor); only that area (right of
-  the centre, 0.22–0.76 of the height, scaled to 1800 px height: up for the small texts, down on larger
-  frames, 3840×2160 ~8 % faster) and the page
-  number's go through the OCR, ~0.25–0.4 s per read on 3840×1600 (~0.2–0.3 s at 1080p), and only while the
-  cursor is on a lit tile. Measured 2026-10-31 (the recordings of that day): the app's read (page where
-  the known scale puts it, tooltip, stack count) ~57 ms on the CPU (3 threads) at 1080p and 3840×1600,
-  tooltip ~50 of it (tiny's detector ~18, ~18 lines recognized in ~30); in game on the GPU median 55 ms
-  at 1080p, ~195 ms at 3840×1600 (offline the GPU reads in ~45: in game it waits for the GPU the game
-  holds). Tried and dropped (do not re-try): a layout detector of our own for the tooltip (NanoDet,
-  kinds title/field/description, only title and fields recognized): its own boxes for the lines cut
-  letters (edges up to ~13 px off; 93–97 % of the stat lines as before even with the edges widened by
-  the pixels), as a hybrid with tiny's boxes the same texts as before but only ~42 instead of ~50 ms on
-  the CPU, 41 instead of 45 offline on the GPU and in game at 3840×1600 no faster (median 201 ms), for
-  5.7 MB more app, +30–50 MB RAM.
-  A tooltip needs ≥ 4 body lines and 3 letters in the title (real ones have 13–17 lines, stray reads of the
-  scene 1–3); lines above the first with 3 letters are strays of the scene and skipped (a lamp above the
-  panel read as "I", 3840×2160, a user's recording of 2026-10-25); the Rust side emits the title and the
-  body lines as texts (also into the log). It ends at the
-  first gap of 0.038 of the height between two lines (`TIP_GAP`): FPS gear often shows a second tooltip
-  right below (the equipped piece to compare, or the list "1: MaxLift Tractor Beam / 2: CQ7 Rifle"), ≥ 0.041
-  down; within one tooltip the widest gap is 0.035 (above "Registered To You"; 29 FPS and 22 component shots).
-- The **stack count**: stackable items (weapon attachments) show "2x" in the tile's top right corner; with a
-  tooltip and a hovered tile that corner (half the width, 0.35 of the height, scaled 2×) is read too
-  (`read_count`, `Cell.count`; none = one piece). Checked on one shot (the cursor set to the tile's centre).
-- The **hovered tile** (`hovered_tile`, pixel checks, no OCR): the light cyan frame the game draws around
-  it, found from the cursor outwards: left and right the nearest columns with a lit run of ≥ 0.4 of the row
-  pitch in a band of ±0.6 pitches around the cursor's height (the other side at least half a unit away:
-  the cursor may sit on the line), then top and bottom the nearest rows lit over ≥ 0.4 of the tile's width
-  (the corners are rounded; at 1080p the frames sat up to 12 px off the scaled unit edges, the panel's
-  perspective). Units and span rounded on the scaled grid; the row in the page's content = the frame's top
-  plus the pane's scroll, taken from the thumb's place (`scroll_of`: the thumb moves ~61.6 px per 150 px
-  row at 1600 px height, snapped to whole rows within 0.15). The cursor may be 0.3 units outside the
-  scaled grid. Checked against the recording of 2026-10-19 (1080p, 56 frames with the cursor): every tile
-  under a tooltip found where the cursor was on it.
 - Frontend: the title ("Mil/3/A Blizzard", "CQ7 Rifle") against the catalog's gear names in de/en plus the
   language pack, the prefix narrowing size and grade (`findComponents`; among same-name variants the
-  craftable one; the catalog lists only the plain part of a variant group, see `docs/stock.md`); without an
+  craftable one; the catalog lists only the plain part of a variant group, see sc-quartermaster's `docs/stock.md`); without an
   exact match with the OCR's look-alikes folded (l/I and 1, O and 0: "Sion Compensatorl"). Ship component
-  or FPS gear by the item's catalog type (`FPS_TYPES`), which picks the filter that lets it through. Stat lines ("Coolant
+  or FPS gear by the item's catalog type (`FPS_TYPES` in `components.ts`), which picks the filter that lets it through. Stat lines ("Coolant
   Rating:  60.00", the value in a column of its own; a dropped colon is tolerated) against each stat's
   names (`CatalogStat.name` per language, `nameKey` in the pack); the absolute value converted to the stored
   gain with `CatalogStat.base` (`statFromTooltip`; a negative base like armor's minimum temperature divides
@@ -448,10 +345,9 @@ its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows 
   2026-10-27, ≥ 3 before). The stack count is
   not part of the identity: a count that changes on the same tile (two agreeing reads) updates the
   sighting. One proposal per sighting (its pieces, quality 0, the stats if any).
-- Screenshot tests over `local/screenshots/inventory 3` and `inventory 4` (sc-ohseearr's, with the reader);
-  `cargo run --release --example components_dump -- <dir>…` prints page, the tile under the stored cursor,
-  title and lines per image (a recording's frames with their cursor; sc-ohseearr's `read_components`, the
-  stateless read, through the app's adapter).
+- `cargo run --release --example components_dump -- <dir>…` prints page, the tile under the stored cursor, title and
+  lines per image (a recording's frames with their cursor; sc-ohseearr's `read_components`, the stateless read,
+  through the app's adapter). The reader's screenshot tests are sc-ohseearr's.
 
 ## Inventory panel, locations, registering
 
@@ -553,11 +449,9 @@ its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows 
   `inventory-debug` (the window listens to that; the scan gets its `inventory-read` right away, without
   the frame): on the worker, encoding and writing stretched the reads' interval from 1.05 to 1.8 s. The
   hand-over is a queue of 2 reads (`DEBUG_QUEUE`, `try_send`): a read that finds it full is left out of
-  the view and a recording (logged, debug). Until 2026-10-31 the queue was unbounded and the writer
-  emitted the scan's event itself: at ~290 ms per 3840×1600 frame (`image`'s resize 85 ms, the full JPEG
-  ~190 ms) against ~3.6 reads a second it fell behind, 24 s and ~1.5 GB of waiting frames within three
-  minutes of a recording, and the scan's proposals waited with it until a restart. Now ~220 ms (the
-  preview scaled with the OCR's SIMD resize, 30 ms). The refinery's reads go to the writer only (with a
+  the view and a recording (logged, debug): an unbounded queue, with the writer emitting the scan's event too, fell
+  behind at ~3.6 reads a second (24 s and ~1.5 GB of waiting frames within three minutes, the proposals waiting with
+  it). Encoding takes ~220 ms per 3840×1600 frame (the preview scaled with the OCR's SIMD resize). The refinery's reads go to the writer only (with a
   `refinery` part: overview, terminal or nothing).
 - "Record data" asks for a folder and writes a session folder `qm-inventory-debug-<unix s>`: the 3 kept
   reads, then every read while it runs (frame as JPEG quality 90, ~0.6 MB, + JSON with grid, components
@@ -572,81 +466,39 @@ its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows 
 
 ## OCR
 
-- The warehouse's layout detector (our NanoDet-Plus weights, owned by the warehouse reader, made on its
-  first read) runs on the same engine, threads and device as the `Ocr` and counts in the detector's
-  timings: see "The layout detector" under the warehouse scan.
-- **The engine, the models and the readers live in sc-ohseearr** (the engine and models since 2026-11-05, the
-  readers, the game's texts and the capture since 2026-11-06; the sibling checkout `../sc-ohseearr`, path
-  dependencies, so it must sit next to this repo wherever the companion is built; its `docs/adr/` holds the
-  plan, 0006/0007/0010 the readers): `sc-ohseearr-core` (ONNX Runtime sessions, the model families, model
-  packages with a `model.toml` manifest), the packages `paddle-det-tiny`, `sc-rec-latin`, `sc-warehouse-layout`,
-  compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the reader interface `ScreenReader`, the
-  game's texts `Locale`), the use cases `sc-ohseearr-warehouse`, `-gear-inventory`, `-refinery` (the readers)
-  and `sc-ohseearr-capture-win` (the capture, also `Pixels` and the change gate for the worker on every
-  platform). `ocr.rs` only loads the `Ocr` (`ocr::load`; `Model::Tiny` stays for the log and the debug data);
-  `inventory.rs`, `components.rs` and `refinery.rs` keep the companion's serde payloads (frontend, events,
-  recordings) and map the readers' neutral output onto them (`to_legacy`; the readers' fields like
-  `Field::raw`/`ambiguous` and the names' loc keys are not used beyond that yet). The regression check for
-  such moves is `scripts/regression-dumps.sh <out> [repo root]`: `inventory_dump`, `components_dump` and
-  `ocr_dump` over a fixed selection of recordings and screenshots, compared byte for byte (`*.norm.txt`,
-  `overlays.sha256`) against the build before; identical for the readers' move (740 warehouse frames, 444
-  character inventory frames, 62 images; the refinery's overviews over `refinery flow`, `… 2`, `… 3` with the
-  English table identical too).
-- PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
-  and recognizer, dictionary of 6904 characters, mostly CJK; its detector's normalization and DB thresholds
-  from its inference.yml; `scripts/fetch-ocr-models.mjs` still fetches the originals into `resources/ocr/` for
-  sc-ohseearr's training and DirectML.dll) on ONNX Runtime via `ort` (prebuilt, static).
-  The app's recognizer is **ours** (sc-ohseearr's `sc-rec-latin`, 2.3 MB): tiny's recognizer with its
-  output layer **cut to Latin** (2026-10-31, the cut step of sc-ohseearr's training: blank, ASCII, Latin-1, Latin-Ext-A for Polish
-  and Czech packs, μ, ▲▼ and the space, 320 of 6906 classes; its dictionary (the package's `dict.txt`) is the app's
-  charset) and then **fine-tuned on the game's font** (see "The recognizer's fine-tune" below). The CJK classes
-  gave misreads ("日", "团", "物") and on the GPU every recognizer session held outputs over all 6906 (~240 MB VRAM
-  in the gear scan). A Chinese pack is no longer read; Cyrillic never was (the dictionary has none).
-  The cut step writes the dictionary and, to `local/ocr-train/`, the bare cut model (the fine-tune's teacher).
-  Pre/post-processing after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar
-  shape (~8 % faster). History: PP-OCRv6 small (RapidOCR's ONNX, 18708 characters, ~31 MB) replaced v5
-  on 2026-10-18; from 2026-10-27 tiny read the character inventory and the refinery terminal, small the
-  warehouse grid (tiny missed the badges at native size); since 2026-10-31 tiny reads everything, with
-  the warehouse crop scaled up (one model: ~25 MB less exe, on the GPU ~1 GB less VRAM, one detector
-  session per area instead of two models'). Images are scaled with
-  `fast_image_resize` (SIMD, the same kernels as `image`'s; a gear read 447 → 239 ms with small, 299 →
-  92 ms with tiny, 3840×1600, 3 threads); the detector needs its input smoothed by that resize (fed the
-  crop directly at a size of multiples of 32, it lost page numbers).
-  **On the GPU** (since 2026-10-27, Windows, setting "GPU-Beschleunigung aktivieren", config `gpu`, off by
-  default since 2026-10-31 (on before; stored configs keep their value): on a fast CPU the reads are hardly faster (the
-  warehouse 24 vs. 26 ms), and it holds VRAM next to the game): ONNX Runtime's DirectML execution provider (pyke's Windows binaries are its DirectML build
-  anyway; `ort` feature `directml` on Windows only). It needs the redistributable `DirectML.dll` 1.15.4
-  (18.5 MB, Microsoft, MIT) next to the exe: Windows' own (`System32`, 1.0 on Windows 10) refuses the
-  session; `ocr:models` fetches it into `resources/ocr/` (only that file of the 200 MB NuGet package, by
-  HTTP ranges, SHA-256 pinned), `build:windows` bundles it into the setup (`tauri.setup.conf.json`:
-  `$INSTDIR\DirectML.dll`; `publish-win-companion.ps1` puts it next to the exe in the standalone zip too; not in `tauri dev`).
-  DirectML compiles a session's graph for the first input shape it runs, every other shape cost ~20 ms
-  of CPU per run: sc-ohseearr's engine keeps one session per input shape with its dimensions fixed (the
-  detector's shapes are fixed per screen area and resolution; the recognizer's batches are padded to 6
-  lines of a width out of 320–2560). A probe session at load tells whether DirectML works. Each session
-  keeps its largest run's buffers until the scan stops, so the VRAM is the sum over the shapes (2026-10-31,
-  DXGI's per-process usage, `components_dump`/`inventory_dump` flows, no game running): DirectML itself
-  ~100 MB, the gear scan's page probe without a scale (det 896×1600 at 3840×1600, 608×1024 at 1080p)
-  ~315 / ~150 MB, the tooltip's det ~150 MB, each small det ~13 MB. So detector inputs up to 192 px high
-  (`DET_CPU_MAX_HEIGHT`, ~1 ms on the CPU) and the page probe (`Ocr::detect_on_cpu`, ~43 / ~16 ms on 3
-  threads, every frame while no screen is known) run on the CPU in GPU mode too. With the cut recognizer:
-  gear scan 1073 → 446 MB (3840×1600), 852 → 446 MB (1080p); warehouse 238 → 182, 307 → 215 MB. Measured
-  (3840×1600, RTX 5080, whole dump processes incl. JPEG decoding): gear read with tiny 97 → 67 ms, CPU
-  238 → 81 ms per read; warehouse with small 382 → 135 ms, CPU 1093 → 203 ms. The warehouse reads the
-  same on CPU and GPU, tiny's gear tooltips differ in spaces and punctuation of the description (the
-  padded width), every screenshot test passes on both. `ocrwatch::Gpu`: ready (the DLL next to the exe),
-  missing, or failed (any OCR error on the GPU: the models load anew on the CPU from the next frame, for
-  the rest of the run); the settings grey the switch out (off) unless ready (`gpu_status`, event
-  `ocr-gpu`). Not measured: what the GPU load costs the running game's frame time, VRAM next to it. A
-  detected region is kept by the mean probability of its own pixels (like PaddleOCR's polygon score), not
-  of its axis-aligned box: the terminals hang tilted in the world, and the box mean dropped whole tooltips
-  below the threshold (2026-10-19: FE tooltips at 1080p and component stat lines at 3840×1600).
-  `recognize_images_only` restricts the CTC decoding to given characters (the probability taken among
-  them).
-- Frames are scaled by **height** (the game's UI scales with it: 16:9 like ultrawide). Read times on
-  3840×1600: warehouse ~0.7–1.0 s (more with the debug window: every badge), character inventory
-  ~0.25–0.4 s, refinery overview ~0.9 s.
-- **The game's texts** (sc-ohseearr's `Locale`, ADR 0007 there: no game text compiled in): `user.cfg`'s
+- **sc-ohseearr** (the sibling checkout `../sc-ohseearr`, path dependencies, so it must sit next to this repo wherever
+  the companion is built): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
+  `paddle-det-tiny` (PP-OCRv6 tiny's detector), `sc-rec-latin` (our recognizer: tiny's cut to Latin and fine-tuned on
+  the game's font) and `sc-warehouse-layout`, compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the
+  reader interface, the game's texts), the use cases `-warehouse`, `-gear-inventory`, `-refinery` and
+  `sc-ohseearr-capture-win`. How they work, what was tried, the measurements and the model history: its README, the
+  use case READMEs, the model cards (`models/*/MODEL.md`), `training/README.md` and `docs/adr/` (0006/0007/0010 the
+  readers). Changes to the engine, models or readers belong there.
+- `ocr.rs` only loads the `Ocr` (`ocr::load(threads, gpu)`: ONNX Runtime's intra-op threads, 3 in the scan
+  (`OCR_THREADS`, the game runs too)); `ocrwatch` loads it on the first read (well under a second, logged "OCR Tiny
+  loaded in … on the GPU|CPU") and drops it within 5 s of the stop. The debug data name the models "tiny"
+  (`OcrInfo.models`, empty when they did not run) and the log's read phases "tiny: …"; the warehouse reader's layout
+  detector counts in the detector's timings. `inventory.rs`, `components.rs` and `refinery.rs` keep the companion's
+  serde payloads (frontend, events, recordings) and map the readers' neutral output onto them (`to_legacy`; fields
+  like `Field::raw`/`ambiguous` and the names' loc keys are not used beyond that yet).
+- **Regression check** for any change of sc-ohseearr or the adapters: `scripts/regression-dumps.sh <out> [repo root]`
+  runs `inventory_dump`, `components_dump` (this repo) and sc-ohseearr's `ocr_dump` over a fixed selection of
+  recordings and screenshots (740 warehouse frames, 444 character inventory frames, 62 images of the refinery and the
+  freight elevator terminal), compared byte for byte (`*.norm.txt`, `overlays.sha256`) against the build before.
+- **The recognizer's training data from here**: `tools/dataset-export/` exports the real tooltip lines from debug
+  recordings and `components_dump` outputs (its README); the game's font (Blender Pro, taken from `Data.p4k`) is used
+  for local training only and never goes into git or a build.
+- **On the GPU** (Windows; setting "GPU-Beschleunigung aktivieren", config `gpu`, off by default since 2026-10-31: on a
+  fast CPU the reads are hardly faster and it holds VRAM next to the game): ONNX Runtime's DirectML execution provider
+  (`sc-ohseearr-core` feature `directml` on Windows only). It needs the redistributable `DirectML.dll` 1.15.4 (18.5 MB,
+  Microsoft, MIT) next to the exe: Windows' own (`System32`, 1.0 on Windows 10) refuses the session. `pnpm directml`
+  (`scripts/fetch-directml.mjs`) fetches it into `src-tauri/resources/ocr/` (only that file of the 200 MB NuGet package,
+  by HTTP ranges, SHA-256 pinned); `build:windows` and `build:fast:windows` put it next to the exe
+  (`tauri.setup.conf.json`: `$INSTDIR\DirectML.dll`), `publish-win-companion.ps1` into the standalone zip; not in
+  `tauri dev`. `ocrwatch::Gpu`: ready (the DLL next to the exe), missing, or failed (any OCR error on the GPU: the
+  models load anew on the CPU from the next frame, for the rest of the run); the settings grey the switch out (off)
+  unless ready (`gpu_status`, event `ocr-gpu`). Not measured: what the GPU load costs the running game's frame time.
+- **The game's texts** (sc-ohseearr's `Locale`, its ADR 0007: no game text compiled in): `user.cfg`'s
   `g_language` picks `data/Localization/<language>/global.ini` (a language pack, also one replacing the English
   texts like StarStrings; keys case-insensitive, a pack's `key,P=` suffix dropped), and the game's own English
   texts come from **`global-english.ini` in the app's local data folder** (Windows
@@ -660,80 +512,21 @@ its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows 
   per change ("refinery not readable: …", warning; "refinery readable again", info). No UI shows it.
   Rust `game_names(keys)` returns pack texts for loc keys (sc-ohseearr's `LocTable` over the pack).
 
-### The recognizer's fine-tune
-
-Since 2026-10-31 (asked for: fewer misreads, speed no goal). The pipeline lives in sc-ohseearr since 2026-11-06
-(`training/`, recipe `sc-rec-latin`, `training/README.md`); this repo exports the real-line datasets
-(`tools/dataset-export/`: `gear_lines.py`, `teacher_lines.py`, `tooltip_backgrounds.py`, the labeller
-`ocr-eval-label.ts`). All data in `local/` (gitignored). The script names below are the original ones.
-- **Why**: the game draws its UI in **Blender Pro** (Medium in the tooltips; the warehouse and the refinery
-  terminal too), whose "&" looks like an "Ɛ": tiny read "Klaus & Werner" as "Klaus ε/E/6/8 Werner" (0.9 % of
-  the "&" lines right). The font is commercial ("All rights reserved"): it is taken from `Data.p4k`
-  (`Data\UI\fonts\Shared\fonts_en.swf`, a Scaleform library of 29 fonts, converted to TTF into
-  `local/fonts-sc/ttf/`) for local training only and never goes into git or a build.
-- **Model**: PyTorch via Hugging Face Transformers' port (`PPOCRV6TinyRecForTextRecognition`,
-  `PaddlePaddle/PP-OCRv6_tiny_rec_safetensors`): Paddle on Windows has no working training on an RTX 50.
-  Its weights are another snapshot than the ONNX the app had (same architecture and BGR input, 96 % of real
-  lines read the same, as good on the eval set): the fine-tune starts from it, its head cut like
-  the cut step. CTC only, BatchNorm frozen, AdamW 1e-4 cosine, batch 128, 10 epochs (~4 min
-  each on the RTX 5080). `export.py`: ONNX opset 17 with the input's batch and width as **named** dynamic
-  dimensions (sc-ohseearr's engine fixes them by name for DirectML), softmax output like the original; checked
-  against PyTorch (≤ 2e-4).
-- **Data**: 100k synthetic lines (`render.py --mix v2`, needs `--pack` = a `global.ini`): Blender Pro
-  Medium at the measured cap heights (~9 px at 1080p, ~13 at 3840×1600), widths and margins of the
-  detector's boxes, backgrounds from real tooltip and terminal areas (text inpainted), JPEG/blur/noise;
-  texts: the pack's item names (with its prefixes, "Mil/3/A Blizzard") and descriptions word-wrapped,
-  stat lines in the tooltip formats (coloured values, ▲▼ drawn), German pack texts, terminal lines in
-  upper case, ~25 % random strings of the charset, ~5 % "&" lines; 37 % in other game fonts. Plus 2525
-  real warehouse and refinery lines labelled with what the bare cut model reads there with confidence
-  ≥ 0.95 (`teacher_crops.py`, weighted ×10): the first run on synthetic gear lines alone forgot the
-  other screens ("SILIcON", "MiI/3/A", 4 screenshot tests failed).
-- **Evaluation**: 21,881 real gear tooltip lines from the debug recordings (`make_crops.py` from
-  `components_dump` outputs), labelled from independent sources (`label.ts`): the pack's name of the item
-  the title resolves to, the span of the pack's description nearest to a line, stat names from the
-  catalog with the read value (a sample of 36 disputed lines checked by eye: all labels right). Plus the
-  teacher lines of warehouse recording `…6994` and the refinery test frames. The Rust screenshot tests are
-  the gate.
-- **Result** (all real gear lines, bare cut → fine-tune): lines exactly right 90.4 → 99.0 %, character
-  error rate 0.26 → 0.04 %, titles 86.8 → 98.3 %, "&" lines 0.9 → 98.6 %; refinery lines agree with the
-  old reads to 97 % (spaces and punctuation), warehouse lines to 86 % (corrections like "Apharite" →
-  "Aphorite" and new small errors like "Janalita"). What the app makes of it changed little: titles
-  resolving to exactly one item 1571 → 1576 of ~1805 frames (the folding of look-alikes caught most
-  misreads before), crafted stats read 90.2 → 91.0 %, warehouse material names the same. VRAM unchanged.
-- Retrained in full from the recipe on 2026-11-06: 98.8 % exact, CER 0.05 % ("&" lines 98.9 %), within noise
-  of the package. Run: sc-ohseearr's rec pipeline on the recipe (its README); the teacher dumps and the eval
-  crops come from this repo's examples and `tools/dataset-export/`; `scripts/regression-dumps.sh` is the gate.
-  Note: the labeller now works from the catalog export and the global.ini without the database and skips
-  ambiguous variant descriptions (21,277 of the 21,881 labels).
-
 ## Refinery
 
-- Read: since 2026-11-06 sc-ohseearr's `RefineryReader` (`../sc-ohseearr/usecases/refinery`, ported 1:1 from
-  this repo's `refinery.rs`, which now only adapts its output to `Overview`/`Read`). Its anchors (table head,
-  PROCESSING/COMPLETED, time remaining, the columns, "Refinement Center") are 9 loc keys whose texts come from
-  the frame's `Locale`: the pack's wording, then the English table's (before: 9 English labels compiled in plus
-  the pack's; with only a pack the English wording is no longer tried, so the English table belongs next to a
-  pack too). Without either table it is not read (see "OCR"). Over the screenshots below with the English
-  table the overviews read exactly as before. It reads only the terminal's **work order overview**: the station from the title (never a
-  `// …` label like "// REFINERY SYSTEM C47.02": the slanted terminal makes its box as tall), then every
-  work order panel side by side (found by its table head "MATERIALS YIELDED"; header PROCESSING or
-  COMPLETED; columns by the head's words; rows by the names, starting after the material's icon within 0.35
-  of the head's width, ending at the summary lines or a `// …` section label; a row without a quality is
-  dropped; a value cell the full pass missed or read as no number is recognized on its own, upscaled 3×
-  as digits only: a lone thin "1" went missing):
-  processing orders with quality, yield (cSCU) and time remaining, completed ones with quality and yield. A
-  panel cut by the edge is left out (the terminal scrolls sideways). Full read at 800 px height,
-  anchor-first; the reader's `probe` is the cheap check (320 px height, the big titles: 30–110 ms). Checked
-  against the screenshots of 2026-10-07/08 (`local/screenshots/refinery flow`, `… 2`, `… 3`, all tests pass
-  with v6 since 2026-10-19; the tests are sc-ohseearr's now) and the recordings of 2026-10-19 (1080p and 3840×1600: station, rows and time
-  left as the terminal shows them). Names go through `findMaterial`, which also takes a name without its
-  accents (the OCR read "HEPHAESTÁNITE").
+- Read: sc-ohseearr's `RefineryReader` (`../sc-ohseearr/usecases/refinery`, its README; `refinery.rs` adapts its output
+  to `Overview`/`Read`). It reads only the terminal's **work order overview** (the station from the title, every
+  work order panel with its rows: processing orders with quality, yield and time remaining, completed ones with
+  quality and yield; a panel cut by the edge is left out), anchored on 9 loc keys whose texts come from the frame's
+  `Locale`: the pack's wording, then the English table's, so the English table belongs next to a pack too. Without
+  either table it is not read (see "OCR"). The reader's `probe` is the cheap check for the screen (the big titles:
+  30–110 ms).
 - The refinery screen is a **visit** (`refinery-visit` `{atMs, active}`), each overview as
   `refinery-overview`; 3 reads in a row without the terminal or 60 s without frames end it. The panel's
   filter "Jobs" (one chip in the head after the count, the live colour; localStorage `qm.companion.refinery.jobs`, on by
   default) decides whether the scan reads the terminal at all.
-- Sync (`refinery.ts`, store `refinerySync.ts`, `RefineryPanel.vue`): names via `findMaterial` (shared with
-  the bot) over the catalog's de/en names plus the pack texts; the station by its title against refinery
+- Sync (`refinery.ts`, store `refinerySync.ts`, `RefineryPanel.vue`; the requirements: "Requirements"): names via
+  `findMaterial` (`materialNames.ts`, also takes a name without its accents: the OCR read "HEPHAESTÁNITE") over the catalog's de/en names plus the pack texts; the station by its title against refinery
   locations; unresolved rows are skipped. An order counts once read the same twice in a row (time left
   ignored); a running order whose rows are only part of a registered job's or of another new order's at
   that station is no order of its own (right after accepting, "Work Order Accepted" hides rows for a few
@@ -752,32 +545,24 @@ Since 2026-10-31 (asked for: fewer misreads, speed no goal). The pipeline lives 
 
 ## Screen capture (Windows)
 
-`capture.rs`, since 2026-11-06 the loop on sc-ohseearr's `sc-ohseearr-capture-win` (`WindowCapture`: the
-window, in front or not, `is_running`, `grab_window` with the skips counted into the next frame's info; `Rest`;
-everything below about the duplication is that crate's; `capture.rs` keeps the interval, the worker's pull,
-the events and its own `CaptureInfo` with `dropped`/`gated`/`waitMs`; `foreground_game`/`client_rect` for the
-overlay wrap the crate): while a scan session runs and the foreground window belongs to `StarCitizen.exe` (not
-minimized), one frame per second. The game not in front (any other window, the companion's own too):
-no frames, the scan idle (`GameFront`, event `game-front`: the worker leaves its screen within a second,
-the scan row shows "Spiel nicht im Fokus"; with the companion in front and the game window still up the
-game still counts as seen). The capture is of the monitor: frames taken while the companion was in front
-read its own tables as a warehouse grid (2026-10-20), which switched the mode while the user worked in
-the app (while the warehouse or the character inventory is in view the worker pulls the frames,
-`FastCapture`, since 2026-10-27: the next one is grabbed once a read is done and the mouse cursor
-rested 200 ms (polled every 15 ms), so every read sees a fresh frame and none is grabbed while the
-cursor moves or the OCR works; before, a fixed 1.5 × the last read within 0.5–1 s, which on slow
-machines, reads over 1 s, did not hold the worker back but handed it frames up to a second old)
-through DXGI Desktop Duplication (`windows` crate, the version Tauri uses): the game's monitor
-duplicated on the adapter driving it, cut to the window's client area (physical pixels: the process is
-per-monitor DPI aware), with the cursor's position in frame pixels (`GetCursorPos`), into a staging texture
-kept while the size stays, sent as BGRA (converted to RGB only for frames that are read). Chosen over
-Windows.Graphics.Capture for its border-free capture on Windows 10. Frames without a new desktop image are
-skipped (the next try a full interval later; a retry after 100 ms was tried 2026-10-20 and dropped: in a
-warehouse test no frame was skipped at all, the slow reads of the night before stay unexplained, slow
-grabs of up to ~0.9 s under the game's GPU load are the remaining suspect); skips and grabs over 150 ms are
-logged (debug) and go with the read (`capture` in the debug view's events and recordings); any error drops the duplication, reopened next time. HDR untested (the legacy `DuplicateOutput`
-should deliver `B8G8R8A8`; other formats are refused with a warning; `IDXGIOutput5::DuplicateOutput1` with
-FP16 and a tone map would be the fix); rotated monitors untested.
+`capture.rs`, the loop on sc-ohseearr's `sc-ohseearr-capture-win` (`WindowCapture`: the window, in front or not,
+`is_running`, `grab_window` with the skips counted into the next frame's info; `Rest`; how it captures, DXGI Desktop
+Duplication of the game's monitor cut to the window's client area with the cursor's position, and its limits (HDR,
+rotated monitors untested): that crate's README). `capture.rs` keeps the interval, the worker's pull, the events and
+its own `CaptureInfo` with `dropped`/`gated`/`waitMs`; `foreground_game`/`client_rect` for the overlay wrap the crate.
+
+- While a scan runs and the foreground window belongs to `StarCitizen.exe` (not minimized): one frame per second.
+- The game not in front (any other window, the companion's own too): no frames, the scan idle (`GameFront`, event
+  `game-front`: the worker leaves its screen within a second, the scan row shows "Spiel nicht im Fokus"; with the
+  companion in front and the game window still up the game still counts as seen). The capture is of the monitor:
+  frames taken while the companion was in front read its own tables as a warehouse grid (2026-10-20).
+- While the warehouse or the character inventory is in view the worker pulls the frames (`FastCapture`, since
+  2026-10-27): the next one is grabbed once a read is done and the mouse cursor rested 200 ms (polled every 15 ms), so
+  every read sees a fresh frame and none is grabbed while the cursor moves or the OCR works (a fixed interval handed
+  slow machines frames up to a second old).
+- Frames go as BGRA (converted to RGB only for frames that are read). Frames without a new desktop image are skipped
+  (the next try a full interval later); skips and grabs over 150 ms are logged (debug) and go with the read
+  (`capture` in the debug view's events and recordings); any error drops the duplication, reopened next time.
 
 ## Scan overlay (Windows)
 
@@ -851,18 +636,13 @@ GPU process should not compete with the game; not measured yet.
 - **Tooltip-driven**: the user shows every entry's tooltip briefly. Icon matching (DINOv2 ViT-S/14
   embeddings) was tried and dropped: the freight manager's icons look alike, the amount is only in the
   tooltip.
-- **PP-OCRv6 small** replaced v5 (2026-10-18); the refinery read is secondary. **tiny for the character
-  inventory and the refinery, small for the warehouse** (2026-10-27: the scans took 4–8 s on slower CPUs).
-  **tiny alone** (2026-10-31): the warehouse read around the cursor with the last layout as prior, ~3×
-  faster on the CPU, half the time on the GPU, one model's VRAM; chosen over fine-tuning (the data: one
-  player, two resolutions; the cost is the detector's input, not the reading) and over a pixel-based
-  tile finder like the gear scan's (the terminal's glare washes the hovered frame out).
-- **A layout detector of our own for the warehouse** (2026-10-31, the same day): tiny's detector was ~75
-  of the read's ~135 ms and every box it found was recognized (60 lines) only to sort out the few the read
-  needs. A small object detector that names each box's kind needs ~4 ms and leaves ~6–8 lines to read.
-  NanoDet-Plus-m (Apache-2.0) over Ultralytics YOLO (AGPL-3.0, which Ultralytics extends to the weights it
-  trains: the companion is distributed). Unlike fine-tuning tiny it learns the UI's shapes, not one
-  player's texts; still trained on one player's recordings (two resolutions, one other terminal checked).
+- **OCR** (the readers live in sc-ohseearr now; there the details): one model for every screen, PP-OCRv6 tiny
+  (2026-10-31, after small and a tiny/small split: the scans took 4–8 s on slower CPUs); the warehouse read around
+  the cursor with the last layout as prior and **a layout detector of our own** (NanoDet-Plus-m, Apache-2.0, over
+  Ultralytics YOLO, whose AGPL-3.0 covers the weights it trains: the companion is distributed), chosen over
+  fine-tuning tiny's detector on one player's texts and over a pixel-based tile finder (the terminal's glare washes
+  the hovered frame out). Tried and dropped for the gear tooltip (do not re-try): a layout detector of its own (its
+  boxes cut letters; as a hybrid with tiny's boxes hardly faster, 5.7 MB more app).
 - **Manual scanning** (switched on by hand or with the overlay); **one proposal per stack or component**, nothing summed up; registering asks with
   a switch per org.
 - Identity history: per tile first, which double-counted after a scroll; then per column (equal components
@@ -870,18 +650,6 @@ GPU process should not compete with the game; not measured yet.
   inventory). The warehouse keeps the column identity.
 - Wrong hover assignment once made a tile vanish and hit the neighbour: the capture's cursor decides,
   every cell stays a tile.
-
-## Measurements (3840×1600)
-
-- Warehouse grid pitch 260–290 px (rows 0.91–0.98 of that), see the fit.
-- Badge texts: "X1" often "X" (taken as 1, uncertain), "X10" as "X1D" (D/O → 0), "X14"/"X51"/"X63" fine
-  upscaled 3×.
-- Quality texts: "572Q", "5720", "3100Q", "523.0", "371g" all parse; a bare 2-digit number is a cut-off
-  text.
-- Character inventory: tooltip at x = centre + 0.05…0.35 h, y = 0.26…0.6 h; storage grid units at pitch
-  0.098 h from centre + 0.400 h, rows at 0.0938 h from 0.244 h; page "2/3" at centre + 0.56…0.64 h,
-  y 0.83…0.85 h; the scrollbar thumb at centre + 0.802 h, its track 0.235…0.815 h.
-- Read intervals (log of 2026-10-19): ~1.05–1.2 s without the debug recording.
 
 ## Open
 
@@ -897,16 +665,6 @@ GPU process should not compete with the game; not measured yet.
 - How players get the English `global-english.ini` (the game's own texts, needed for the refinery without a
   language pack) without placing it by hand: not decided (the server per build, a download, a p4k reader).
   The readers on sc-ohseearr (2026-11-06) are verified offline only (identical dumps), not yet in game.
-- Not built: the Linux screen capture (xdg portal), the AppImage's updater, CI, tray/autostart, a release script; the API
+- Not built: the Linux screen capture (xdg portal), the AppImage's updater, CI, tray/autostart; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.
-
-## Requirements
-
-Product requirements moved here from the server repo's `docs/requirements.md` (Refinery in the bot).
-
-- `/qm-refinery time job` (bot) sets or clears the time left of a running job; the companion sets it through the API
-  (`POST /api/refinery/duration`) from the terminal's work order overview.
-- The companion app syncs the jobs of a station from the terminal's work order overview: yield and time left of known
-  jobs are updated by themselves; new jobs, finished ones (to store) and jobs missing at the terminal (to remove) are
-  proposals the user confirms.
