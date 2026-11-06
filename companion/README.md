@@ -31,7 +31,7 @@ git clone https://github.com/w00zla/sc-ohseearr
 git clone https://github.com/w00zla/sc-qm-companion
 cd sc-qm-companion
 pnpm install
-pnpm ocr:models          # once: DirectML.dll for the GPU OCR (Windows) and the original OCR models
+pnpm directml            # once on Windows: DirectML.dll for the GPU OCR
 pnpm companion:start     # develop (tauri dev)
 pnpm companion:build     # release build for this OS
 ```

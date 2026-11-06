@@ -55,7 +55,7 @@ tauri-plugin-window-state = "2"
 
 [target.'cfg(windows)'.dependencies]
 # The OCR on the GPU: ONNX Runtime's DirectML API (its Windows binaries have it anyway; the redistributable
-# DirectML.dll comes next to the exe, see scripts/fetch-ocr-models.mjs)
+# DirectML.dll comes next to the exe, see scripts/fetch-directml.mjs)
 sc-ohseearr-core = { path = "../../sc-ohseearr/crates/core", features = ["directml"] }
 # The scan overlay's window (place, DPI, hotkeys); the version Tauri already uses
 windows = { version = "0.62", features = [

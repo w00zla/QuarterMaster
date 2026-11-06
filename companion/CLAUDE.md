@@ -30,7 +30,7 @@ Neighbours (sibling checkouts next to this one):
 
 ```sh
 pnpm install                    # standalone project, own lockfile
-pnpm ocr:models                 # once per checkout: DirectML.dll (GPU OCR on Windows) and the original Paddle models into src-tauri/resources/ocr (not in git)
+pnpm directml                   # once per checkout on Windows: DirectML.dll (GPU OCR) into src-tauri/resources/ocr (not in git)
 pnpm companion:start            # tauri dev (Vite on :1430, UI hot reload, Rust rebuilt when it changed; OCR on the CPU: no DirectML.dll there)
 pnpm companion:fast             # test build for the game: profile `fast` -> src-tauri/target/fast/quartermaster-companion.exe (+ DirectML.dll); close the running exe first
 pnpm companion:build            # release build for this OS (LTO, minutes): build:windows (NSIS setup + .sig, needs TAURI_SIGNING_PRIVATE_KEY, and the bare exe) or build:linux (AppImage)

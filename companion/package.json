@@ -19,7 +19,7 @@
     "build:windows": "tauri build --bundles nsis --config src-tauri/tauri.setup.conf.json",
     "build:fast:linux": "tauri build --no-bundle -- --profile fast",
     "build:fast:windows": "tauri build --no-bundle --config src-tauri/tauri.setup.conf.json -- --profile fast",
-    "ocr:models": "node scripts/fetch-ocr-models.mjs"
+    "directml": "node scripts/fetch-directml.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",
