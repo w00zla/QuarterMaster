@@ -2,7 +2,7 @@
 
 Production runs on a VM with Docker Compose: `db` (Postgres 18), `bot`, `ext` (UEX pull), `webapp` (user web app), `admin` (admin web UI). Caddy on the VM host terminates TLS. Files: `Dockerfile`, `compose.yaml`, `scripts/push-deploy.sh` (local), `scripts/push-thumbs.sh` (local), `scripts/deploy.sh` (VM), `scripts/backup.sh`, `deploy/db-roles.sh`, `deploy/quartermaster-backup.{service,timer}`, `docs/Caddyfile.example`. Background and design decisions: "Design" below.
 
-Paths below assume the checkout in `/opt/sc-quartermaster` and the user `w00zla` on the VM (sudo, member of the `docker` group); adjust as needed.
+Paths below assume the checkout in `/opt/sc-quartermaster` and a user `<user>` on the VM `<vm>` (sudo, member of the `docker` group); `qm.example.com` stands for the domain. Adjust as needed.
 
 There is no git server: the VM's checkout is a plain repo that you push into over SSH from your machine (`receive.denyCurrentBranch updateInstead` updates its working tree on push). The VM never pulls. Only committed files arrive (this file and the Caddyfile example are in `docs/`); `.claude/`, `local/` and `.env` are gitignored and stay local.
 
@@ -11,25 +11,25 @@ There is no git server: the VM's checkout is a plain repo that you push into ove
 - `Dockerfile` (multi-stage): one image for every process, the compose service's `command` picks it. Build stage with all dependencies builds both SPAs; the runtime stage has the backend's production dependencies only (`--filter sc-quartermaster`), `src/`, `drizzle/`, `adminapp/dist`, `webapp/dist`, runs as `node`. `package.json` must be in the image (`"type": "module"`). `.dockerignore` keeps `.env`, `local/` and `node_modules` out.
 - `compose.yaml`: `db` (Postgres 18, no published port), `bot` (no port; `WEBAPP_ORIGIN` optional for its web app links; `local/thumbs/` mounted read-only for which item thumbnails exist, Discord fetches them from `THUMBS_URL`, default `WEBAPP_ORIGIN` + `/thumbs`), `ext` (the third-party pull every 15 minutes, no port), `admin` (published on `127.0.0.1:3001` only, `local/thumbs/` mounted read-only for the thumbnails' coverage and images), `webapp` (as `qm_web`, published on `127.0.0.1:3000` only, `WEBAPP_TRUST_PROXY=1`, the companion release and the item thumbnails mounted read-only from `local/companion/` and `local/thumbs/` of the checkout), `migrate` (profile `tools`, one-off). App containers run read-only, without capabilities, `no-new-privileges`; logs rotate (json-file with `max-size`: the default never rotates). Each service gets only its own variables; `DATABASE_URL` is built from the role passwords (URL-safe characters only).
 - **DB roles** (`deploy/db-roles.sh`, idempotent): superuser `postgres` only for init, roles and dumps; `qm_owner` owns the database and everything the migrations create and is used by `migrate` only; `qm_app` (bot, admin, ext) has DML only, no DDL, `app.stock_journal` and `app.history` only `SELECT`/`INSERT` (append-only enforced by the DB), no access to schema `drizzle`, in schema `web` only column-level `SELECT` on `web.session` (`user_id`, Discord username/global name, `created_at`, `last_seen_at`, `expires_at`) and `web.api_token` (`user_id`, Discord username/global name, `created_at`, `last_used_at`) for the admin's user overview, never the token hashes (bot/admin must not forge web sessions; regranted after the `REVOKE ALL` on every run). `qm_web` (user web app) reads `catalog`, `app` and `ext`, writes `app_user`, `stock_batch`, `stock_journal` and `history` (`INSERT` only), `user_blueprint` and `feature_entry` (privilege features; the key check is the code's), but `app.org`/`app.member` and `app.user_privilege` are read-only (no role IDs, no roster changes, no self-granted privileges), no access to schema `bot`, full DML in `web`; its grants are explicit, reapplied on every run (default privileges cover `qm_app` only). Grants for new tables come from `ALTER DEFAULT PRIVILEGES FOR ROLE qm_owner`, which only covers objects qm_owner creates: never run migrations as the superuser. The script runs on a fresh volume (mounted into `/docker-entrypoint-initdb.d/`) and in `deploy.sh` after every migration, fed via stdin (a single-file bind mount keeps the old inode after a push updated the checkout). Migrations stay free of role names: dev and test DBs run as superuser without these roles. A dump restores into a fresh volume (the init creates the roles first). `scripts/test-roles.sh` runs the DB tests under these roles.
-- Caddy on the VM host terminates TLS: the user web app on 443 (`quartermaster.w00z.net` → `127.0.0.1:3000`, Caddy adds only HSTS: the app sets its own headers), the admin UI on its own port (`:8443` → `127.0.0.1:3001`), example in `docs/Caddyfile.example`.
+- Caddy on the VM host terminates TLS: the user web app on 443 (`qm.example.com` → `127.0.0.1:3000`, Caddy adds only HSTS: the app sets its own headers), the admin UI on its own port (`:8443` → `127.0.0.1:3001`) or only through a VPN (§ 5), example in `docs/Caddyfile.example`.
 - The scripts assume Docker Compose. podman-compose only serves for local tests and behaves differently: it does not wait for `service_healthy`, `run migrate` needs `--profile tools`, `up --wait` waits for every container of the project, and `up -d` does not recreate containers after the image changed.
 
 ## 1. VM prerequisites
 
 - Docker Engine with the compose plugin (`docker compose`, not the old `docker-compose`), git, rsync, Caddy (host package, not a container).
-- `w00zla` is in the `docker` group (`sudo usermod -aG docker w00zla`, then log in again). The group is root-equivalent, which adds nothing for a user with sudo anyway.
+- `<user>` is in the `docker` group (`sudo usermod -aG docker <user>`, then log in again). The group is root-equivalent, which adds nothing for a user with sudo anyway.
 - DNS: the domain points to the VM.
-- Firewall on the VM and port forwards on the router: inbound **80, 443** (ACME challenge, the user web app) and **8443** (admin UI). Nothing else, in particular not 3000, 3001 or 5432.
+- Firewall on the VM and port forwards on the router: inbound **80, 443** (ACME challenge, the user web app) and **8443** (admin UI; not with the VPN variant, § 5). Nothing else, in particular not 3000, 3001 or 5432.
 - **Docker's published ports bypass ufw/firewalld.** `compose.yaml` only publishes `127.0.0.1:3000` (web app) and `127.0.0.1:3001` (admin); never add a port without `127.0.0.1:`.
 - SELinux host (RHEL/Fedora): the bind mounts in `compose.yaml` need `:z` (`…/10-roles.sh:ro,z`, `./local/companion:/companion:ro,z`, `./local/thumbs:/thumbs:ro,z`). Debian/Ubuntu: nothing to do.
 
 ## 2. Checkout and `.env`
 
-On the VM, as `w00zla` (SSH key login from your machine):
+On the VM, as `<user>` (SSH key login from your machine):
 
 ```sh
 sudo mkdir /opt/sc-quartermaster
-sudo chown w00zla:w00zla /opt/sc-quartermaster
+sudo chown <user>:<user> /opt/sc-quartermaster
 git init -b main /opt/sc-quartermaster
 git -C /opt/sc-quartermaster config receive.denyCurrentBranch updateInstead
 ```
@@ -39,7 +39,7 @@ git -C /opt/sc-quartermaster config receive.denyCurrentBranch updateInstead
 From your machine, the first push without deploying (`.env` does not exist yet):
 
 ```sh
-git push w00zla@<vm>:/opt/sc-quartermaster main
+git push <user>@<vm>:/opt/sc-quartermaster main
 ```
 
 On the VM:
@@ -60,7 +60,7 @@ Set in `.env`:
 | `DISCORD_TOKEN`, `DISCORD_APP_ID` | the production application (not the dev one) |
 | `DISCORD_DEV_GUILD_ID` | **empty**: commands are registered globally |
 | `DISCORD_CLIENT_SECRET` | the production application's OAuth2 client secret (not the bot token) |
-| `WEBAPP_ORIGIN` | `https://quartermaster.w00z.net` (no trailing slash; the companion app's fixed server) |
+| `WEBAPP_ORIGIN` | `https://qm.example.com` (no trailing slash; the server the companion app talks to) |
 | `ADMINAPP_USER`, `ADMINAPP_PASSWORD` | basic auth of the admin UI; long random password (it is reachable from the internet) |
 | `UEX_TOKEN` | bearer token of an app on https://uexcorp.space/api/apps (service `ext`) |
 
@@ -74,7 +74,7 @@ openssl rand -hex 32     # one per password
 
 - Bot → Privileged Gateway Intents: **Server Members** on. Nothing else.
 - Bot → **Requires OAuth2 Code Grant: off.** When on, the bot only joins once the invite's code is exchanged, and the invite redirects to the web app's `/auth/callback`, which refuses it (no login state): the authorize page goes through, the web app opens, but no bot on the server. The URL generator asking for a redirect URI with only `bot` + `applications.commands` ticked is the sign that this switch is on.
-- OAuth2 → Redirects: `https://quartermaster.w00z.net/auth/callback` (= `WEBAPP_ORIGIN` + `/auth/callback`, exactly). Client secret from the same page into `.env`.
+- OAuth2 → Redirects: `https://qm.example.com/auth/callback` (= `WEBAPP_ORIGIN` + `/auth/callback`, exactly). Client secret from the same page into `.env`.
 - Invite: `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot+applications.commands&permissions=52224` (no `redirect_uri`, no `response_type`). From the URL generator: scopes `bot` and `applications.commands` only (any other scope turns the invite into a code grant with the same redirect problem), permissions View Channels, Send Messages, Embed Links, Attach Files (= `52224`; nothing ticked = `permissions=0`).
 
 ## 4. First deploy
@@ -82,7 +82,7 @@ openssl rand -hex 32     # one per password
 From your machine (or `scripts/deploy.sh` directly on the VM):
 
 ```sh
-scripts/push-deploy.sh w00zla@<vm>               # creates the DB + roles, migrates, starts everything
+scripts/push-deploy.sh <user>@<vm>               # creates the DB + roles, migrates, starts everything
 ```
 
 On the VM:
@@ -101,10 +101,10 @@ Then:
 
 - Copy the site blocks from `docs/Caddyfile.example` (in the checkout on the VM) into `/etc/caddy/Caddyfile`, set the domain: one for the web app (443 → `127.0.0.1:3000`), one for the admin UI (8443 → `127.0.0.1:3001`). The web app sets its own security headers (CSP etc.); its block only adds HSTS.
 - `remote_ip` allowlist (basic auth has no rate limit or lockout), what Caddy sees as client IP:
-  - From outside: the client's public IP. With a dynamic IP (daily reconnect) an allowlist locks you out after the next change; use it with fixed IPs only, otherwise a VPN (WireGuard on the Fritzbox) is the clean way.
-  - From the LAN via the public DNS name: the Fritzbox reflects the connection (NAT loopback) and rewrites the source to its **public WAN IP**; it cannot be switched off. Its "DNS rebind protection" exceptions do not change that.
-  - To be seen with the LAN IP: the domain must resolve to the VM's LAN IP inside the LAN, e.g. an `/etc/hosts` entry on the client (in use) or a local DNS (Pi-hole etc.). Give the VM a fixed DHCP lease in the Fritzbox; on a laptop, the entry breaks access from outside the LAN (comment it out or use the VPN).
+  - From outside: the client's public IP. With a dynamic IP (daily reconnect) an allowlist locks you out after the next change; use it with fixed IPs only, otherwise a VPN is the clean way.
+  - VM at home, from the LAN via the public DNS name: a router with NAT loopback rewrites the source to its **public WAN IP**. To be seen with the LAN IP, the domain must resolve to the VM's LAN IP inside the LAN (an `/etc/hosts` entry on the client or a local DNS; give the VM a fixed DHCP lease). On a laptop, the entry breaks access from outside the LAN.
   - Requests from `66.102.x.x` (`google-proxy-…`) are Google fetching the URL (link previews, translation), not a person.
+- VPN variant (e.g. Tailscale): no Caddy block for the admin UI and 8443 closed in the firewall; `tailscale serve --bg --https=8443 3001` serves it to the tailnet only, with a certificate from Tailscale. Not on 443: `tailscale serve` binds that port on the tailnet address, and Caddy's `:443` then fails with "address already in use".
 - The web app's block serves `/thumbs/*` itself from `local/thumbs/` of the checkout (`handle_path` with `file_server`, immutable cache), the rest goes to the app: no Node for the images, and they work before the web app is deployed. The `caddy` user must be able to read the directory (`o+rX`, `o+x` on the directories above). The path in the block is the checkout's.
 - The log directory (`/var/log/caddy/`) must exist and be writable by the `caddy` user.
 - `caddy validate --config /etc/caddy/Caddyfile`, then `systemctl reload caddy`.
@@ -120,16 +120,16 @@ Then:
 
 ```sh
 sudo cp deploy/quartermaster-backup.{service,timer} /etc/systemd/system/
-# in the .service: User=w00zla, WorkingDirectory, ExecStart (local only: no target; later e.g. qm-backup:, see below)
+# in the .service: User=<user>, WorkingDirectory, ExecStart (local only: no target; later e.g. qm-backup:, see below)
 sudo systemctl daemon-reload
 sudo systemctl enable --now quartermaster-backup.timer
 ```
 
-- Remote target: the timer runs unattended, so it needs an SSH key **without passphrase**. Use a **separate key** for it, not your normal one (otherwise a passphrase-less key on `w00zla` opens a full shell on the backup host):
+- Remote target: the timer runs unattended, so it needs an SSH key **without passphrase**. Use a **separate key** for it, not your normal one (otherwise a passphrase-less key on `<user>` opens a full shell on the backup host):
   ```sh
   ssh-keygen -t ed25519 -N '' -f ~/.ssh/qm-backup -C qm-backup
   ```
-  `~/.ssh/config` of `w00zla` (`backup.sh` runs plain rsync, the alias picks the key):
+  `~/.ssh/config` of `<user>` (`backup.sh` runs plain rsync, the alias picks the key):
   ```
   Host qm-backup
     HostName backup.example.com
@@ -154,8 +154,8 @@ sudo systemctl enable --now quartermaster-backup.timer
 From your machine, on `main` with everything committed:
 
 ```sh
-scripts/push-deploy.sh w00zla@<vm>
-ssh w00zla@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node src/bot/register.ts'   # only when commands changed
+scripts/push-deploy.sh <user>@<vm>
+ssh <user>@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node src/bot/register.ts'   # only when commands changed
 ```
 
 `push-deploy.sh` refuses changed or untracked files (only commits are pushed: a never added file, e.g. a new migration, would silently be missing on the VM) and any branch but `main`. Then it pushes `main` into the VM's checkout and runs `scripts/deploy.sh` there with live output (`DEPLOY_PATH` for another checkout path).
@@ -172,15 +172,15 @@ ssh w00zla@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node sr
 
 Copy the release files and `companion.json` into `local/companion/` of the VM's checkout; the web app picks a new manifest
 up within seconds, no restart (manifest format and version rules: `docs/webapp.md` "Companion release"). The upload runs from
-`../sc-qm-companion` (`docs/companion.md` "Release": `scripts/publish-win-companion.ps1 w00zla@<vm>` or
-`scripts/push-companion.sh w00zla@<vm>`; the manifest is copied last, `DEPLOY_PATH`/`-DeployPath` for another checkout path).
+`../sc-qm-companion` (`docs/companion.md` "Release": `scripts/publish-win-companion.ps1 <user>@<vm>` or
+`scripts/push-companion.sh <user>@<vm>`; the manifest is copied last, `DEPLOY_PATH`/`-DeployPath` for another checkout path).
 
 ### Item thumbnails
 
 After `pnpm thumbs:build` (`docs/webapp.md` "Thumbnails"), from the local checkout:
 
 ```sh
-scripts/push-thumbs.sh w00zla@<vm>
+scripts/push-thumbs.sh <user>@<vm>
 ```
 
 One tar stream over ssh into the VM's `local/thumbs/` (into the existing directory: the container's bind mount

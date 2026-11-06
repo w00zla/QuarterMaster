@@ -103,5 +103,6 @@ VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; prod
 
 <!-- claude-reflect: learned rules (saved from the band; edit freely) -->
 ## Learned rules
+- No details of the maintainer's own environment in tracked files (the repo will go public): no hosts, IPs, domains, user names, tailnet names or home network setup in docs, examples, comments or scripts. Use placeholders (`<user>@<vm>`, `qm.example.com`); the real values live in Claude's memory, not in git.
 - Buttons keep their size when their state changes (details: `docs/webapp.md` "UI rules").
 <!-- end claude-reflect -->

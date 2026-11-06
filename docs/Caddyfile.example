@@ -1,5 +1,5 @@
 # Example site blocks for the Caddy on the VM host (not part of compose.yaml). Replace qm.example.com
-# (production: quartermaster.w00z.net, the companion app's fixed server).
+# with your domain (the server the companion app talks to).
 # The user web app listens on 127.0.0.1:3000, the admin UI on 127.0.0.1:3001 (compose.yaml); Caddy serves
 # the web app with TLS on 443 and the admin UI on port 8443. Open 80, 443 and 8443 in the VM firewall and
 # forward them on the router, never 3000/3001. The ACME challenge runs over port 80/443.
