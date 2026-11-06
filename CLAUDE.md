@@ -84,7 +84,6 @@ pnpm webapp:build             # vue-tsc + vite build -> webapp/dist (served by p
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)
 pnpm bot:register [--dry-run] # bulk-overwrite slash commands: DISCORD_DEV_GUILD_ID set = that server only, else global
 pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every 15 minutes
-node --env-file-if-exists=.env scripts/ocr-eval-label.ts --pack <global.ini>   # sc-ohseearr's recognizer eval labeller: labels for the real line crops from the catalog + the player's global.ini -> local/ocr-eval/labels.tsv; needs the DB and ../sc-qm-companion
 # The companion app (build, run, tests, OCR, log) is in ../sc-qm-companion, OCR engine/models/training in ../sc-ohseearr: their commands are there.
 ```
 
