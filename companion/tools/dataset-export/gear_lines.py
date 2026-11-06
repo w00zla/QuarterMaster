@@ -3,7 +3,7 @@
 Reads the output of the `components_dump` example (one `components_dump-<set>.txt` per set of debug recordings or
 screenshots) and cuts every tooltip line (title and lines, matched to the detector box with the same text and
 position) from its frame. Writes `<out>/crops/<set>/<frame>_<k>.png` and `<out>/index.tsv` (file, set, frame, k,
-kind, box, score, frame size, the line's text as read). The labels come from elsewhere: `ocrtrain/label.ts`
+kind, box, score, frame size, the line's text as read). The labels come from elsewhere: `ocr-eval-label.ts`
 (Quartermaster's catalog and language pack) turns index.tsv into `labels.tsv` (header: file, set, source, d,
 label, read), the line dataset sc-ohseearr's `training/rec` evaluates on (recipe sc-rec-latin, set `gear`).
 

@@ -331,8 +331,9 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   score ≥ 0.35, NMS 0.5 per kind).
   Kinds: `badge` (the light box "X 14"), `quality` ("526Q"), `title` (the tooltip's first line),
   `tipline` (its other lines). On the GPU one DirectML session (fixed shape).
-- **Training** (`detector/`, Python in a uv venv; the data and the NanoDet checkout in
-  `local/detector/`, not in git): `labels.py` makes the data from debug recordings: the frames with a
+- **Training**: in sc-ohseearr (`training/`, recipe `sc-warehouse-layout`, steps and setup in its
+  `training/README.md`). The data come from this repo's `tools/dataset-export/warehouse_coco.py` (debug
+  recordings → COCO windows): the frames with a
   strong fit, each scaled to 720 px height and cut into 480×320 windows (the app's window around the
   recorded cursor and two random ones in the pane); the labels from what the recording knows (the boxes
   of the read that recorded it, its fitted tiles, its tooltip) by the read's own rules: badges as the
@@ -344,26 +345,16 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   character inventory's "0/0" labels for badges and fitted a grid there. The last 20 % of each recording
   are the validation (frames in a row look alike). Only for recordings of the read before the detector
   (up to companion 1.3.1: every box with its text); newer ones hold the detector's own boxes ("[badge]",
-  "[quality]", the tooltip's lines), which `labels.py` does not take yet. `viz.py` draws the labels, `eval.py` measures an ONNX
-  (recall/precision per kind at IoU 0.5, CPU time), `errors.py` draws its misses, `shots.py` runs it
-  over screenshots without labels. The model of 2026-10-31: the recordings of 2026-10-30 (870 windows)
+  "[quality]", the tooltip's lines), which the exporter does not take yet. The model of 2026-10-31: the recordings of 2026-10-30 (870 windows)
   and 296 negative windows (`inventory`, `inventory 4`, `refinery flow 1–3`; `inventory 3` held out),
   the best of 20 epochs (it had converged; the run of 40 was stopped). Validation: recall badge 98.9 %,
   quality 100 %, title 97.5 %, line 97.4 %, precision 87–94 % (most "misses" are gaps in the labels:
   badges the old read did not see, tooltips it did not record; the quality texts' include the held-out
   inventory's "0/0" below the anchor score). An epoch takes ~35 s with 4 data workers on the RTX 5080
   (the GPU's part ~5 s): NanoDet starts its workers anew every epoch, on Windows ~1 min with 10.
-- **Retraining** (once per checkout: `git clone https://github.com/RangiLyu/nanodet local/detector/nanodet`
-  (be9b4a9), `uv venv --python 3.11 local/detector/.venv`, torch/torchvision from the cu128 index,
-  `pytorch-lightning==1.9.5` and NanoDet's other requirements, `uv pip install --no-deps -e nanodet`;
-  two patches for torch 2: `nanodet/data/collate.py` `string_classes = (str,)` instead of `torch._six`,
-  `tools/export_onnx.py` `dynamo=False`):
-  every script with the venv's own `python.exe` (`-I` for ours; the bare `python3` is the Store stub):
-  `labels.py local/detector/data <recording>... --neg <dir>...`, then in `local/detector/nanodet`
-  `../.venv/Scripts/python.exe tools/train.py ../../../detector/warehouse-480x320.yml` and
-  `tools/export_onnx.py --cfg_path … --model_path ../workspace/warehouse-480x320/model_best/nanodet_model_best.pth
-  --out_path … --input_shape 320,480` (height, width: the script swaps the config's order), `eval.py`
-  against the old model, then `inventory_dump` over the recordings against the read before.
+  Retrained in full from the recipe on 2026-11-06 (seed 1): the same recall per kind.
+- **Retraining**: export the windows with `tools/dataset-export/warehouse_coco.py`, run sc-ohseearr's layout
+  pipeline on the recipe, then `scripts/regression-dumps.sh` here against the read before.
 
 ### Sightings and proposals (frontend)
 
@@ -604,14 +595,14 @@ its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows 
 - PaddleOCR PP-OCRv6 tiny (PaddlePaddle's own ONNX, Apache-2.0; one multi-language detector
   and recognizer, dictionary of 6904 characters, mostly CJK; its detector's normalization and DB thresholds
   from its inference.yml; `scripts/fetch-ocr-models.mjs` still fetches the originals into `resources/ocr/` for
-  `cut-rec.py` and DirectML.dll) on ONNX Runtime via `ort` (prebuilt, static).
+  sc-ohseearr's training and DirectML.dll) on ONNX Runtime via `ort` (prebuilt, static).
   The app's recognizer is **ours** (sc-ohseearr's `sc-rec-latin`, 2.3 MB): tiny's recognizer with its
-  output layer **cut to Latin** (2026-10-31, `scripts/cut-rec.py`: blank, ASCII, Latin-1, Latin-Ext-A for Polish
+  output layer **cut to Latin** (2026-10-31, the cut step of sc-ohseearr's training: blank, ASCII, Latin-1, Latin-Ext-A for Polish
   and Czech packs, μ, ▲▼ and the space, 320 of 6906 classes; its dictionary (the package's `dict.txt`) is the app's
   charset) and then **fine-tuned on the game's font** (see "The recognizer's fine-tune" below). The CJK classes
   gave misreads ("日", "团", "物") and on the GPU every recognizer session held outputs over all 6906 (~240 MB VRAM
   in the gear scan). A Chinese pack is no longer read; Cyrillic never was (the dictionary has none).
-  `cut-rec.py` writes the dictionary and, to `local/ocr-train/`, the bare cut model (the fine-tune's teacher).
+  The cut step writes the dictionary and, to `local/ocr-train/`, the bare cut model (the fine-tune's teacher).
   Pre/post-processing after RapidOCR, boxes axis-aligned, lines recognized in batches of 6 of similar
   shape (~8 % faster). History: PP-OCRv6 small (RapidOCR's ONNX, 18708 characters, ~31 MB) replaced v5
   on 2026-10-18; from 2026-10-27 tiny read the character inventory and the refinery terminal, small the
@@ -671,8 +662,10 @@ its output to `ComponentRead`); the reader keeps the UI scale `k`. What follows 
 
 ### The recognizer's fine-tune
 
-Since 2026-10-31 (asked for: fewer misreads, speed no goal). Scripts in `ocrtrain/` (Python in the
-detector's uv venv, which got `transformers` for it; `label.ts` in Node), all data in `local/` (gitignored).
+Since 2026-10-31 (asked for: fewer misreads, speed no goal). The pipeline lives in sc-ohseearr since 2026-11-06
+(`training/`, recipe `sc-rec-latin`, `training/README.md`); this repo exports the real-line datasets
+(`tools/dataset-export/`: `gear_lines.py`, `teacher_lines.py`, `tooltip_backgrounds.py`, the labeller
+`ocr-eval-label.ts`). All data in `local/` (gitignored). The script names below are the original ones.
 - **Why**: the game draws its UI in **Blender Pro** (Medium in the tooltips; the warehouse and the refinery
   terminal too), whose "&" looks like an "Ɛ": tiny read "Klaus & Werner" as "Klaus ε/E/6/8 Werner" (0.9 % of
   the "&" lines right). The font is commercial ("All rights reserved"): it is taken from `Data.p4k`
@@ -682,7 +675,7 @@ detector's uv venv, which got `transformers` for it; `label.ts` in Node), all da
   `PaddlePaddle/PP-OCRv6_tiny_rec_safetensors`): Paddle on Windows has no working training on an RTX 50.
   Its weights are another snapshot than the ONNX the app had (same architecture and BGR input, 96 % of real
   lines read the same, as good on the eval set): the fine-tune starts from it, its head cut like
-  `cut-rec.py` (`common.py`). CTC only, BatchNorm frozen, AdamW 1e-4 cosine, batch 128, 10 epochs (~4 min
+  the cut step. CTC only, BatchNorm frozen, AdamW 1e-4 cosine, batch 128, 10 epochs (~4 min
   each on the RTX 5080). `export.py`: ONNX opset 17 with the input's batch and width as **named** dynamic
   dimensions (sc-ohseearr's engine fixes them by name for DirectML), softmax output like the original; checked
   against PyTorch (≤ 2e-4).
@@ -707,15 +700,11 @@ detector's uv venv, which got `transformers` for it; `label.ts` in Node), all da
   "Aphorite" and new small errors like "Janalita"). What the app makes of it changed little: titles
   resolving to exactly one item 1571 → 1576 of ~1805 frames (the folding of look-alikes caught most
   misreads before), crafted stats read 90.2 → 91.0 %, warehouse material names the same. VRAM unchanged.
-- Run (repo root; `PY` = `local/detector/.venv/Scripts/python.exe -I`): `PY scripts/cut-rec.py`
-  (the charset, the teacher in `local/ocr-train/`), `PY ocrtrain/render.py --mix v2 --n 100000
-  --out local/ocr-train/synth2 --seed 2 --pack <global.ini>` (and `-val` with 5000), the teacher dumps
-  (`inventory_dump`/`ocr_dump` built with the bare cut model into `local/ocr-teacher/`) then
-  `PY ocrtrain/teacher_crops.py`, `PY ocrtrain/train.py --data synth2 --data teacher
-  ×10 --val synth2-val --out run3` (`last.pt`: the end of the cosine schedule; `best.pt` only when the sum
-  of real and teacher error rates beat the untrained model's), `PY ocrtrain/eval.py
-  onnx:<model>`, `PY ocrtrain/export.py <pt> <onnx>`, copy to `../sc-ohseearr/models/sc-rec-latin/model.onnx`,
-  `cargo test` as the gate.
+- Retrained in full from the recipe on 2026-11-06: 98.8 % exact, CER 0.05 % ("&" lines 98.9 %), within noise
+  of the package. Run: sc-ohseearr's rec pipeline on the recipe (its README); the teacher dumps and the eval
+  crops come from this repo's examples and `tools/dataset-export/`; `scripts/regression-dumps.sh` is the gate.
+  Note: the labeller now works from the catalog export and the global.ini without the database and skips
+  ambiguous variant descriptions (21,277 of the 21,881 labels).
 
 ## Refinery
 
