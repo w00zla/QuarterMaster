@@ -1,5 +1,5 @@
 """Misst einen Erkenner auf den echten, gelabelten Zeilen (local/ocr-eval/labels.tsv).
-local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/eval.py onnx:<model.onnx> | hf | ckpt:<state_dict.pt>  [--limit n] [--errors k]
+local/detector/.venv/Scripts/python.exe -I ocrtrain/eval.py onnx:<model.onnx> | hf | ckpt:<state_dict.pt>  [--limit n] [--errors k]
 Gesamt, je Quelle (title/desc/stat) und für Zeilen mit "&"; μ und µ gelten als gleich."""
 import argparse, os, random, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -11,7 +11,7 @@
 // Off at every start.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, reactive, ref, watch } from "vue";
-import type { IconName } from "../../adminapp/src/components/Icon.vue";
+import type { IconName } from "./shared/ui/adminapp/components/Icon.vue";
 import { setOverlayWindow } from "./backend";
 import { unlockRows } from "./debugReport";
 import { detected, detections } from "./detections";

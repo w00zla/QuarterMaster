@@ -2,7 +2,7 @@
 // data: URLs from the app's cache dir, else fetched from the server's /thumbs/… (the webview's CSP keeps
 // the server out of img-src). Each image crosses the IPC once per window and session; a failed one is
 // asked again by the next element that shows it. Without a hash nothing is asked: no thumbnail.
-import type { ThumbSize } from "../../src/thumbs";
+import type { ThumbSize } from "./shared/lib/thumbs";
 import { thumbData } from "./backend";
 
 /** A catalog item with a thumbnail: its UUID and the thumbnail's hash. */

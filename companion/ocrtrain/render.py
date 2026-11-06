@@ -3,8 +3,8 @@
 Rendert in nativer Pixelgröße (wie der Detektor die Zeile aus dem Frame schneidet), NICHT auf 48 px skaliert:
 das macht der Trainings-Loader wie die App.
 
-  local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/render.py --n 100000 --out local/ocr-train/synth --seed 0 --pack <global.ini> [--mix v2] [--workers 14]
-  local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/render.py --compare local/ocr-train/compare_synth.png --out local/ocr-train/synth   (Vergleichsbild synth vs. echt)
+  local/detector/.venv/Scripts/python.exe -I ocrtrain/render.py --n 100000 --out local/ocr-train/synth --seed 0 --pack <global.ini> [--mix v2] [--workers 14]
+  local/detector/.venv/Scripts/python.exe -I ocrtrain/render.py --compare local/ocr-train/compare_synth.png --out local/ocr-train/synth   (Vergleichsbild synth vs. echt)
 
 Nur lokal: Font (kommerziell) und Spieltexte bleiben in local/.
 """
@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).replace("\\", "/")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
 LOCAL = ROOT + "/local"
 FONT = LOCAL + "/fonts-sc/ttf/BlenderProMedium-Regular.ttf"
 DICT = ROOT + "/../sc-ohseearr/models/sc-rec-latin/dict.txt"

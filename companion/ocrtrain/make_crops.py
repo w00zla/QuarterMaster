@@ -1,10 +1,10 @@
-# Aufruf vom Repo-Root: local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/make_crops.py --dumps <Ordner mit components_dump-<Set>.txt>
+# Aufruf vom Repo-Root: local/detector/.venv/Scripts/python.exe -I ocrtrain/make_crops.py --dumps <Ordner mit components_dump-<Set>.txt>
 import re, os, math, statistics, sys, argparse
 import cv2, numpy as np
 ap = argparse.ArgumentParser()
 ap.add_argument("--dumps", required=True, help="Ordner mit components_dump-<Set>.txt")
 D = ap.parse_args().dumps
-R = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "local")
+R = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "local")
 S = R + r"\stock_scan_debug\qm-inventory-debug-"
 SETS = {"2503": S+"1793452503", "4173": S+"1793454173", "8932": S+"1793448932",
         "inv1": R+r"\screenshots\inventory", "inv3": R+r"\screenshots\inventory 3", "inv4": R+r"\screenshots\inventory 4"}

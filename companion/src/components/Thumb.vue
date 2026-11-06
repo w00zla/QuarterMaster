@@ -2,7 +2,7 @@
 // An item thumbnail (thumbs.ts) in a fixed square of `px` CSS px: the place stays while it loads and
 // stays empty when there is none (no hash, a failed load), so nothing moves.
 import { computed, ref, watch } from "vue";
-import type { ThumbSize } from "../../../src/thumbs";
+import type { ThumbSize } from "../shared/lib/thumbs";
 import { loadThumb, type ThumbRef } from "../thumbs";
 
 const props = defineProps<{ item: ThumbRef | null | undefined; size: ThumbSize; px: number }>();

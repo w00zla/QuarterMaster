@@ -1,9 +1,9 @@
 """Echte Lager- und Raffinerie-Zeilen mit dem, was das heutige Modell (geschnitten, ohne Fine-Tuning) dort sicher
 liest (Konfidenz >= 0.95): gegen das Vergessen beim Fine-Tuning. Training: Lager-Aufnahme …6676 und die Raffinerie-
 Screenshots außer den Frames der Rust-Tests; Eval (local/ocr-eval-teacher): Lager …6994 und die Test-Frames.
-local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/teacher_crops.py (vom Repo-Root)"""
+local/detector/.venv/Scripts/python.exe -I ocrtrain/teacher_crops.py (vom Repo-Root)"""
 import os, re
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).replace("\\", "/")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
 import cv2
 
 L = f"{ROOT}/local"

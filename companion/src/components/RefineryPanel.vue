@@ -8,12 +8,12 @@
 // A finished job, registered or not: Store (the terminal's yields). A job no read of the station showed: Remove (after a
 // confirmation) or Keep. Matched running jobs are updated without asking.
 import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
-import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
-import Icon from "../../../adminapp/src/components/Icon.vue";
-import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
-import { useTableColumns, type ColumnSpec } from "../../../adminapp/src/tableColumns";
-import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
-import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
+import ColumnHead from "../shared/ui/adminapp/components/ColumnHead.vue";
+import Icon from "../shared/ui/adminapp/components/Icon.vue";
+import Tooltip from "../shared/ui/adminapp/components/Tooltip.vue";
+import { useTableColumns, type ColumnSpec } from "../shared/ui/adminapp/tableColumns";
+import ColumnsButton from "../shared/ui/webapp/components/ColumnsButton.vue";
+import ConfirmDialog, { type ConfirmButton } from "../shared/ui/webapp/components/ConfirmDialog.vue";
 import { columnsTexts, langRef, t } from "../i18n";
 import { overlayRows, tabCounts } from "../overlay";
 import { fromMicro, toMicro } from "../inventory";

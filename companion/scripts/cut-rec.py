@@ -4,9 +4,9 @@ letzte MatMul (80 × Klassen) und ihr Bias verlieren die übrigen Spalten; das S
 über die verbliebenen Klassen, ihre Reihenfolge (argmax) bleibt. Auf der GPU hielt jede Breiten-Session
 die Ausgaben über alle 6906 Klassen (~240 MB VRAM beim Gear-Scan, 2026-10-31). Eingabe ist der Download von
 fetch-ocr-models.mjs. Das Wörterbuch geht nach ../sc-ohseearr/models/sc-rec-latin/dict.txt (in git dort, der Zeichensatz der App); das geschnittene
-Modell nach local/ocr-train/: die App liest dort das Fine-Tuning auf der Spielschrift (companion/ocrtrain/), das
+Modell nach local/ocr-train/: die App liest dort das Fine-Tuning auf der Spielschrift (ocrtrain/), das
 geschnittene Modell ist dessen Lehrer (teacher_crops.py) und Vergleich.
-Aufruf (Python nur über die venv): local/detector/.venv/Scripts/python.exe -I companion/scripts/cut-rec.py
+Aufruf (Python nur über die venv): local/detector/.venv/Scripts/python.exe -I scripts/cut-rec.py
 """
 import os
 import numpy as np
@@ -16,8 +16,8 @@ from onnx import numpy_helper
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "../src-tauri/resources/ocr")
-DST = os.path.join(HERE, "../../../sc-ohseearr/models/sc-rec-latin")
-MODEL_DST = os.path.join(HERE, "../../local/ocr-train")
+DST = os.path.join(HERE, "../../sc-ohseearr/models/sc-rec-latin")
+MODEL_DST = os.path.join(HERE, "../local/ocr-train")
 
 
 def kept(ch):

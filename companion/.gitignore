@@ -1,1 +1,9 @@
 dist/
+node_modules/
+*.tsbuildinfo
+__pycache__/
+
+# Local data (screenshots, recordings, models, release files); a junction/symlink to a shared folder is fine
+/local/
+.claude/
+.env

@@ -15,9 +15,9 @@
 // the cursor stayed on its tile for a read or had rested when the frame was grabbed (right after a
 // move the game may still show the previous tile's tooltip), and a sighting only once two such reads
 // in a row agree (an OCR glitch in one read books nothing).
-import { FPS_TYPES } from "../../src/catalog/components.ts";
-import { norm } from "../../src/stock/material-names.ts";
-import type { CatalogStat, CompanionCatalogResponse, StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
+import { FPS_TYPES } from "./shared/lib/catalog/components.ts";
+import { norm } from "./shared/lib/stock/material-names.ts";
+import type { CatalogStat, CompanionCatalogResponse, StockAddRequest, StockBatch } from "./shared/lib/webapp/api-types.ts";
 
 // --- what the OCR sends ------------------------------------------------------------------------------
 

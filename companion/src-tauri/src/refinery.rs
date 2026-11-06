@@ -395,7 +395,7 @@ mod tests {
         const STATION: &str = "CRU-L1 AMBITIOUS DREAM STATION";
 
         fn setup(folder: &str) -> Option<(Ocr, std::path::PathBuf)> {
-            let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/screenshots").join(folder);
+            let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../local/screenshots").join(folder);
             if !shots.is_dir() {
                 eprintln!("screenshots missing, skipped");
                 return None;

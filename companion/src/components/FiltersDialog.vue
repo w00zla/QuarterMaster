@@ -4,10 +4,10 @@
 // a filter matches makes no proposal. In the head the switch for all of them: off until it is turned on
 // again or the app restarts. Every change applies right away.
 import { computed, ref } from "vue";
-import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
-import Icon from "../../../adminapp/src/components/Icon.vue";
-import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
-import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
+import Dropdown from "../shared/ui/adminapp/components/Dropdown.vue";
+import Icon from "../shared/ui/adminapp/components/Icon.vue";
+import Tooltip from "../shared/ui/adminapp/components/Tooltip.vue";
+import ConfirmDialog, { type ConfirmButton } from "../shared/ui/webapp/components/ConfirmDialog.vue";
 import { t } from "../i18n";
 import { filtersOn, KIND_CLASS, KIND_ICON, setUserFilters, userFilters } from "../inventorySync";
 import { FILTER_KINDS, type FilterKind } from "../userFilters";

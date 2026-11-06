@@ -1,6 +1,6 @@
 """Exportiert ein Fine-Tuning (state_dict) nach ONNX wie das Original: Eingang x [N, 3, 48, W] mit benannten
 dynamischen Dimensionen (die App fixiert sie für DirectML über diese Namen), Ausgang Wahrscheinlichkeiten [N, T, 320].
-local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/export.py <best.pt> <out.onnx>; prüft die Ausgabe gegen PyTorch."""
+local/detector/.venv/Scripts/python.exe -I ocrtrain/export.py <best.pt> <out.onnx>; prüft die Ausgabe gegen PyTorch."""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np

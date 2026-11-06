@@ -981,7 +981,7 @@ mod tests {
         use std::path::{Path, PathBuf};
 
         fn shots(dir: &str) -> Vec<PathBuf> {
-            let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/screenshots").join(dir);
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../local/screenshots").join(dir);
             let mut files: Vec<PathBuf> = std::fs::read_dir(dir).map(|d| d.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jpg")).collect()).unwrap_or_default();
             files.sort();
             files

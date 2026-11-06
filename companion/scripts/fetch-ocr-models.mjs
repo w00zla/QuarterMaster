@@ -5,12 +5,12 @@
 // (PP-OCRv6 "small" from RapidOCR read the warehouse until 2026-10-31). The app's models come from
 // ../sc-ohseearr since 2026-11-05 (the detector there is this one); the recognizer and its dictionary here are
 // the input of cut-rec.py (the Latin dictionary in ../sc-ohseearr/models/sc-rec-latin/, in git there; the
-// app's recognizer is our fine-tune, companion/ocrtrain/).
+// app's recognizer is our fine-tune, ocrtrain/).
 // On Windows also DirectML.dll 1.15.4 (Microsoft's redistributable, MIT; ONNX Runtime's GPU
 // acceleration needs it next to the exe, Windows' own is too old; the setup bundles it): out of the
 // NuGet package Microsoft.AI.DirectML (200 MB) only that one file, by HTTP ranges, checked against
 // its pinned SHA-256. The files stay out of git; run this once per checkout (and after a change):
-// pnpm --filter sc-quartermaster-companion ocr:models
+// pnpm ocr:models
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

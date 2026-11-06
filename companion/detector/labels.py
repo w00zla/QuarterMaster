@@ -1,7 +1,7 @@
 """Trainingsdaten für den Layout-Detektor aus den Debug-Aufnahmen des Warehouse-Scans.
 
 Labels aus dem, was die Aufnahme schon weiß (Boxen des damaligen small-Detektors, die gefitteten
-Kacheln, der Tooltip), mit den Regeln aus companion/src-tauri/src/inventory.rs:
+Kacheln, der Tooltip), mit den Regeln aus src-tauri/src/inventory.rs:
   badge   – die helle Box "X 2" oben rechts in der Kachel (Pixel, wie badge_box)
   quality – der Qualitätstext "526Q" unten links in der Kachel
   title   – die Titelzeile des Tooltips

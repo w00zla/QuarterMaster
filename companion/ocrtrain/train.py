@@ -1,5 +1,5 @@
 """Fine-Tuning des HF-Ports von PP-OCRv6 tiny rec (320 Klassen) mit CTC auf synthetischen Zeilen.
-local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/train.py --data synth [--data more] --out run1 [--epochs 10] [--lr 1e-4] [--bs 128] [--train-bn]
+local/detector/.venv/Scripts/python.exe -I ocrtrain/train.py --data synth [--data more] --out run1 [--epochs 10] [--lr 1e-4] [--bs 128] [--train-bn]
 Nach jeder Epoche: synth-val und eine feste Stichprobe der echten Zeilen (eval.py); das beste Modell
 nach der echten Zeichenfehlerrate wird als <out>/best.pt gespeichert, jede Epoche als <out>/last.pt."""
 import argparse, json, math, os, sys, time

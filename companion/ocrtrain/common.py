@@ -10,11 +10,11 @@ import torch.nn.functional as F
 from transformers import PPOCRV6TinyRecForTextRecognition
 from transformers.models.pp_ocrv6_tiny_rec import modeling_pp_ocrv6_tiny_rec as hf
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).replace("\\", "/")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
 HF_REPO = "PaddlePaddle/PP-OCRv6_tiny_rec_safetensors"
 H, MIN_W, MAX_W = 48, 320, 1920
 
-_full = [l.rstrip("\r\n") for l in open(f"{ROOT}/companion/src-tauri/resources/ocr/rec_dict-tiny.txt", encoding="utf-8")]
+_full = [l.rstrip("\r\n") for l in open(f"{ROOT}/src-tauri/resources/ocr/rec_dict-tiny.txt", encoding="utf-8")]
 LATIN = [l.rstrip("\r\n") for l in open(f"{ROOT}/../sc-ohseearr/models/sc-rec-latin/dict.txt", encoding="utf-8")]
 # Klassen: 0 = Blank, die Zeichen, zuletzt das Leerzeichen (wie die App)
 CHARS = [""] + LATIN + [" "]

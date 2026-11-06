@@ -1,14 +1,14 @@
 // Experiment (lokal): Labels für die echten Zeilen-Crops (index.tsv) aus unabhängigen Quellen: der Titel
 // = englischer Katalogname des eindeutig erkannten Items, eine Beschreibungszeile = der nächste Wortbereich
 // der englischen Beschreibung (global.ini), eine Stat-Zeile = Stat-Name aus dem Katalog + gelesener Wert.
-// node --env-file-if-exists=.env companion/ocrtrain/label.ts --pack <global.ini des Spielers>  ->  local/ocr-eval/labels.tsv
+// node --env-file-if-exists=.env ocrtrain/label.ts --pack <global.ini des Spielers>  ->  local/ocr-eval/labels.tsv
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { connect } from '../../src/db/client.ts';
 import { materialCatalog } from '../../src/stock/lookup.ts';
 import { getItems } from '../../src/adminapp/queries.ts';
-import { buildComponentCatalog, findComponents, parseField } from '../../companion/src/components.ts';
+import { buildComponentCatalog, findComponents, parseField } from '../src/components.ts';
 import { norm } from '../../src/stock/material-names.ts';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));

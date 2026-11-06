@@ -673,7 +673,7 @@ mod tests {
         use std::path::Path;
 
         fn setup(dir: &str) -> Option<(Ocr, std::path::PathBuf)> {
-            let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/screenshots").join(dir);
+            let shots = Path::new(env!("CARGO_MANIFEST_DIR")).join("../local/screenshots").join(dir);
             if !shots.is_dir() {
                 eprintln!("screenshots missing, skipped");
                 return None;

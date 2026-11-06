@@ -11,10 +11,10 @@
 import { computed, onMounted, reactive, ref, shallowRef } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import Icon from "../../../adminapp/src/components/Icon.vue";
+import Icon from "../shared/ui/adminapp/components/Icon.vue";
 import { getScan, setDebug, startDebugRecording, stopDebugRecording, type ScanScreen } from "../backend";
 import { t } from "../i18n";
-import { norm } from "../../../src/stock/material-names.ts";
+import { norm } from "../shared/lib/stock/material-names.ts";
 import { parseField, type ComponentSighting } from "../components";
 import type { InventoryReadEvent, ReadRect, Sighting } from "../inventory";
 import type { Kind, SightingsReport } from "../inventorySync";
