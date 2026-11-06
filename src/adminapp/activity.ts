@@ -123,10 +123,10 @@ export async function getActivity(db: Db, lang: string, filter: ActivityFilter):
 
 export const DASHBOARD_DAYS = [7, 30, 90] as const;
 // Days of the KPI sparklines
-export const SERIES_DAYS = 30;
+const SERIES_DAYS = 30;
 const LATEST_ROWS = 12;
 // Reach: a web login or companion use within this many days counts
-export const REACH_DAYS = 30;
+const REACH_DAYS = 30;
 
 const RANK: Record<Health, number> = { ok: 0, warn: 1, err: 2 };
 const worst = (states: Health[]): Health | null => (states.length ? states.reduce((a, b) => (RANK[b] > RANK[a] ? b : a)) : null);

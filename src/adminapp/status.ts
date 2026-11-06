@@ -11,11 +11,11 @@ import type { Health, StatusBotLogs, StatusResponse } from './api-types.ts';
 
 const MINUTE = 60_000;
 // The pull runs every 15 minutes (src/ext/main.ts): one missed pull is a warning, several an error
-export const UEX_WARN_MINUTES = 35;
-export const UEX_ERR_MINUTES = 120;
+const UEX_WARN_MINUTES = 35;
+const UEX_ERR_MINUTES = 120;
 // The logs poster runs every 30 seconds (src/bot/logs.ts)
-export const LOGS_WARN_MINUTES = 2;
-export const LOGS_ERR_MINUTES = 10;
+const LOGS_WARN_MINUTES = 2;
+const LOGS_ERR_MINUTES = 10;
 // Pending logs rows counted at most
 const PENDING_LIMIT = 100;
 

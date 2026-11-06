@@ -9,7 +9,6 @@ import { status } from "./session";
 
 const cache = new Map<Lang, CatalogResponse>();
 export const catalog = ref<CatalogResponse | null>(null);
-export const catalogFailed = ref(false);
 
 let seq = 0;
 const RETRY_MS = 5000;
@@ -25,10 +24,8 @@ async function load(l: Lang, force = false) {
     cache.set(l, data);
     // A newer request (language switched meanwhile) wins
     if (mine === seq) catalog.value = data;
-    catalogFailed.value = false;
   } catch {
     if (mine !== seq) return;
-    catalogFailed.value = true;
     // E.g. the server restarting after an update: try again instead of staying without names until a reload
     setTimeout(() => {
       if (mine === seq && status.value === "in") void load(lang.value, true);

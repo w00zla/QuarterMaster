@@ -8,7 +8,7 @@
 // heads): their base stays null and such components are to be registered without stats only when
 // the tooltip shows none. Properties the tooltip shows as a change in percent (`tooltipForm`) need none.
 
-export interface BasePath {
+interface BasePath {
   // A Postgres jsonpath into the record (lax mode: the first match counts)
   path: string;
   // A jsonpath to a link ("file://…/libs/foundry/records/…json") in the item's record: `path` is then
@@ -28,7 +28,7 @@ const GENERATION = (resource: string) =>
   `${COMPONENT('ItemResourceComponentParams')}.states[*].deltas[*].generation ? (@.resource == "${resource}").resourceAmountPerSecond`;
 
 /** Crafted property key -> where its base value is. */
-export const BASE_PATHS: Record<string, BasePath> = {
+const BASE_PATHS: Record<string, BasePath> = {
   GPP_Health_MaxHealth: { path: `${COMPONENT('SHealthComponentParams')}.Health`, scale: 1 },
   GPP_ItemResource_CoolantGeneration: { path: `${GENERATION('Coolant')}.standardResourceUnits`, scale: 1 },
   GPP_ItemResource_PowerGeneration: { path: `${GENERATION('Power')}.units`, scale: 1 },

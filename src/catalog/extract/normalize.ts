@@ -14,7 +14,7 @@ import {
   type QualityQuantization, type RawRecord, type Resource, type Snapshot,
 } from '../snapshot.ts';
 
-export const PATHS = {
+const PATHS = {
   crafting: 'libs/foundry/records/crafting/',
   blueprints: 'libs/foundry/records/crafting/blueprints/crafting/',
   categories: 'libs/foundry/records/crafting/blueprintcategories/blueprintcategorydatabase.json',

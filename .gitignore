@@ -6,9 +6,6 @@
 # Node
 node_modules/
 
-# Python
-__pycache__/
-
 # Local environment
 .env
 

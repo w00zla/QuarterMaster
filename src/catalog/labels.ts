@@ -24,7 +24,7 @@ export const blueprintCategoryLocKey = (group: string): string => `${BLUEPRINT_C
  * Loc key of an item class's name (app text; the game only states classes inside descriptions):
  * "Energy (Laser)" -> qm_item_class_energy_laser. Keep in sync with itemClassKeySql.
  */
-export const ITEM_CLASS_KEY_PREFIX = `${APP_KEY_PREFIX}item_class_`;
+const ITEM_CLASS_KEY_PREFIX = `${APP_KEY_PREFIX}item_class_`;
 export const itemClassLocKey = (itemClass: string): string =>
   `${ITEM_CLASS_KEY_PREFIX}${itemClass.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
 export const itemClassKeySql = (column: string): string =>

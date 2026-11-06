@@ -22,7 +22,7 @@ export function panel(container: ContainerBuilder) {
 }
 
 /** Where the user web app is (unset: panels show no link). Read per call: tests may change the env. */
-export const webAppOrigin = () => process.env.WEBAPP_ORIGIN?.replace(/\/+$/, '') || null;
+const webAppOrigin = () => process.env.WEBAPP_ORIGIN?.replace(/\/+$/, '') || null;
 
 /**
  * Deep link paths into the web app's views; `scope` is `personal`, `all` or a guild ID. The SPA reads the

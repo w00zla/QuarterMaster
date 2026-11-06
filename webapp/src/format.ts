@@ -109,9 +109,6 @@ export function statsText(subjectUuid: string, stats: Record<string, string> | n
 
 export { statValueText };
 
-/** "Quantanium · ★★★★ 820 · Area18 · Pers." */
-export const batchText = (b: StockBatch) => `${b.material} · ${qText(b.quality)} · ${b.location} · ${ownerText(b)}`;
-
 /** Within a material: best quality first, then the larger batch, then by location. */
 export function compareBatches(a: StockBatch, b: StockBatch) {
   return b.quality - a.quality || Number(b.quantity) - Number(a.quantity) || a.location.localeCompare(b.location);

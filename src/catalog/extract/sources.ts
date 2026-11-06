@@ -6,7 +6,7 @@ import { locKey } from './localization.ts';
 import { isObj, recordKey, refPath, type Obj, type RecordStore } from './records.ts';
 import type { BlueprintSource } from '../snapshot.ts';
 
-export const SOURCE_PATHS = {
+const SOURCE_PATHS = {
   pools: 'libs/foundry/records/crafting/blueprintrewards/',
   generators: 'libs/foundry/records/contracts/contractgenerator/',
   scenarioProgress: 'libs/foundry/records/contracts/contractscenarios/',

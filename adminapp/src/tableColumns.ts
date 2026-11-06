@@ -44,7 +44,7 @@ export const THUMB_COLUMN: ColumnSpec = { key: "thumb", label: "", width: 48, so
 const MIN_WIDTH = 40;
 
 // Natural ordering: "button2" < "button10", case-insensitive.
-export const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 interface Stored {
   widths?: Record<string, number>;

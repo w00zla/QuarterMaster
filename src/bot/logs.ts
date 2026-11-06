@@ -111,7 +111,7 @@ export function logLine(r: LogRow, guildId: string, names: LogNames, lang: Lang)
 }
 
 /** Lines joined into as few messages as Discord takes; `lastId` is the last history row a message covers. */
-export function packRows(items: { id: number; line: string }[]): { text: string; lastId: number }[] {
+function packRows(items: { id: number; line: string }[]): { text: string; lastId: number }[] {
   const messages: { text: string; lastId: number }[] = [];
   let current = '';
   let lastId = 0;

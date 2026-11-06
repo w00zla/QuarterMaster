@@ -29,7 +29,7 @@ const isGear = sql.raw(`coalesce(i.type IN (${COMPONENT_TYPES.map((t) => `'${t}'
 // The StockGroup of batch `b`
 const stockGroup = sql`CASE WHEN b.kind = 'resource' THEN 'resource' WHEN ${isGear} THEN 'gear' ELSE 'harvestable' END`;
 // How far back the channels (sources) of a user's own actions count
-export const CHANNEL_DAYS = 30;
+const CHANNEL_DAYS = 30;
 const recent = sql`h.created_at > now() - ${`${CHANNEL_DAYS} days`}::interval`;
 
 /**

@@ -77,7 +77,7 @@ function qualityDirection(modifier: PlannerModifier): number {
 // --- plan ------------------------------------------------------------------------------
 
 /** Slot indexes used for a recipe: the chosen ones when valid, otherwise the first N. */
-export function selectedSlots(recipe: PlannerRecipe, chosen: number[] | undefined, warnings: PlanWarning[]): Set<number> {
+function selectedSlots(recipe: PlannerRecipe, chosen: number[] | undefined, warnings: PlanWarning[]): Set<number> {
   const all = recipe.slots.map((s) => s.index);
   if (recipe.requiredSlots >= all.length) return new Set(all);
   if (chosen) {

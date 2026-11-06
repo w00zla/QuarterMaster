@@ -4,8 +4,8 @@ import { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { storeSnapshot } from './store.ts';
 
-export const UEX_SOURCE = 'uex';
-export const UEX_API = 'https://api.uexcorp.uk/2.0';
+const UEX_SOURCE = 'uex';
+const UEX_API = 'https://api.uexcorp.uk/2.0';
 export const UEX_ENDPOINTS = [
   'refineries_yields', 'refineries_methods', 'terminals', 'commodities',
   'commodities_prices_all', 'commodities_raw_prices_all', 'items_prices_all',

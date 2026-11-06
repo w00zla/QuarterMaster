@@ -67,7 +67,7 @@ export interface LocImportResult {
   warnings: string[];
 }
 
-export function validateSourceAndLang(source: string, lang: string): string[] {
+function validateSourceAndLang(source: string, lang: string): string[] {
   const errors: string[] = [];
   if (source === GAME_SOURCE) errors.push(`source "${GAME_SOURCE}" is reserved for the catalog import`);
   else if (source === APP_SOURCE) errors.push(`source "${APP_SOURCE}" is reserved for the app's own texts`);

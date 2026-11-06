@@ -3,7 +3,7 @@ import { reactive, ref } from "vue";
 import type { MiningMethod, MiningQuality, MiningRow } from "../../src/webapp/api-types";
 import { t, type Key } from "./i18n";
 
-export const MINING_SYSTEMS = ["Stanton", "Pyro", "Nyx"] as const;
+const MINING_SYSTEMS = ["Stanton", "Pyro", "Nyx"] as const;
 export const MINING_METHODS: MiningMethod[] = ["ship", "roc", "fps"];
 
 // The Bergbau view's pick (a mined resource), kept for the session
@@ -36,7 +36,7 @@ export const rangeText = (min: number, max: number) => `${percent(min)}–${perc
 const chanceText = (c: number) => (c < 0.01 ? "<1 %" : `${Math.round(c * 100)} %`);
 
 // A lean part's quality factor: "×0,49"
-export const scaleText = (scale: number) => `×${scale.toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
+const scaleText = (scale: number) => `×${scale.toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
 export const partLabel = (scale: number) => (scale >= 1 ? t("mining.part.rich") : t("mining.part.lean", { f: scaleText(scale) }));
 
 // --- the quality card: the quality once per part and system (it differs only by system) -------------

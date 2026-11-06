@@ -150,7 +150,7 @@ export function boardMessage(d: BoardData, guildId: string, lang: Lang, updatedA
 }
 
 /** What the board of `guildId` shows (names in `lang`, retired materials too). */
-export async function boardData(db: Db, guildId: string, orgName: string, lang: Lang, subtitle: string | null = null): Promise<BoardData> {
+async function boardData(db: Db, guildId: string, orgName: string, lang: Lang, subtitle: string | null = null): Promise<BoardData> {
   const metrics = (await orgMetrics(db, [guildId])).get(guildId)!;
   const found = await orgMaterials(db, guildId);
   const catalog = await materialCatalog(db, lang);

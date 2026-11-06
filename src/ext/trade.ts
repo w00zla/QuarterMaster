@@ -13,7 +13,7 @@ import { importCache } from '../db/import-cache.ts';
 import { locText, one, rows } from '../db/query.ts';
 import type { PriceRange, PriceSummary } from '../webapp/api-types.ts';
 
-export const TRADE_ENDPOINTS = ['terminals', 'commodities', 'commodities_prices_all', 'items_prices_all'] as const;
+const TRADE_ENDPOINTS = ['terminals', 'commodities', 'commodities_prices_all', 'items_prices_all'] as const;
 type Endpoint = (typeof TRADE_ENDPOINTS)[number];
 type Row = Record<string, unknown>;
 

@@ -28,7 +28,7 @@ export function visibleCommands(list: BotCommand[], perms: Readonly<PermissionsB
     && (!d.default_member_permissions || !!perms?.has(BigInt(d.default_member_permissions))));
 }
 
-export function helpPanel(lang: Lang, list: RESTPostAPIChatInputApplicationCommandsJSONBody[]) {
+function helpPanel(lang: Lang, list: RESTPostAPIChatInputApplicationCommandsJSONBody[]) {
   const container = new ContainerBuilder()
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(t(lang, 'help.title')))
     .addSeparatorComponents(new SeparatorBuilder())
