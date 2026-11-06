@@ -667,7 +667,6 @@ pub fn run() {
                 .target(Target::new(TargetKind::LogDir { file_name: Some("companion".into()) }))
                 .level(log::LevelFilter::Warn)
                 .level_for("companion_lib", log::LevelFilter::Debug)
-                .level_for(tauri_plugin_log::WEBVIEW_TARGET, log::LevelFilter::Debug)
                 .max_file_size(2_000_000)
                 .rotation_strategy(RotationStrategy::KeepSome(3))
                 .timezone_strategy(TimezoneStrategy::UseLocal)
