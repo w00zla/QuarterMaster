@@ -900,3 +900,13 @@ GPU process should not compete with the game; not measured yet.
 - Not built: the Linux screen capture (xdg portal), the AppImage's updater, CI, tray/autostart, a release script; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.
+
+## Requirements
+
+Product requirements moved here from the server repo's `docs/requirements.md` (Refinery in the bot).
+
+- `/qm-refinery time job` (bot) sets or clears the time left of a running job; the companion sets it through the API
+  (`POST /api/refinery/duration`) from the terminal's work order overview.
+- The companion app syncs the jobs of a station from the terminal's work order overview: yield and time left of known
+  jobs are updated by themselves; new jobs, finished ones (to store) and jobs missing at the terminal (to remove) are
+  proposals the user confirms.
