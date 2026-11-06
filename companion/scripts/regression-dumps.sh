@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
-# Runs the OCR examples (inventory_dump, components_dump, ocr_dump) over a fixed selection of
-# screenshots and debug recordings in <repo>/local/ and writes raw and normalized outputs, to compare
-# two builds of the companion byte for byte (diff the *.norm.txt files and overlays.sha256).
+# Runs the OCR examples (the companion's inventory_dump and components_dump, sc-ohseearr's ocr_dump) over a
+# fixed selection of screenshots and debug recordings in <repo>/local/ and writes raw and normalized outputs,
+# to compare two builds of the companion byte for byte (diff the *.norm.txt files and overlays.sha256).
 #
 #   scripts/regression-dumps.sh <out dir> [repo root]
 #
-# The repo root defaults to the one this script lives in; its data is read from <root>/local/.
+# The repo root defaults to the one this script lives in; its data is read from <root>/local/, sc-ohseearr
+# from the sibling checkout <root>/../sc-ohseearr (the one the companion builds against).
 set -euo pipefail
 
 out=${1:?usage: regression-dumps.sh <out dir> [repo root]}
 root=${2:-$(cd "$(dirname "$0")/.." && pwd)}
 data=$root/local
 manifest=$root/src-tauri/Cargo.toml
+ocr_manifest=$root/../sc-ohseearr/Cargo.toml
 
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 start=$(date +%s)
 
+target_dir() {
+  cargo metadata --manifest-path "$1" --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'
+}
 cargo build --release --manifest-path "$manifest" --examples
-tdir=$(cargo metadata --manifest-path "$manifest" --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
-ex="$tdir/release/examples"
+cargo build --release --manifest-path "$ocr_manifest" --example ocr_dump
+ex="$(target_dir "$manifest")/release/examples"
 [ -x "$ex/inventory_dump.exe" ] && sfx=.exe || sfx=
+ocr_dump="$(target_dir "$ocr_manifest")/release/examples/ocr_dump$sfx"
 
 # Fixed selection. Warehouse recordings (grid): 165 + 276 + 211 = 652 frames.
 wh=(
@@ -47,7 +53,7 @@ rm -rf "$out/inventory-overlays"
 : > "$out/ocr.txt"
 while IFS= read -r img; do
   echo "### $img" >> "$out/ocr.txt"
-  "$ex/ocr_dump$sfx" "$img" 800 3 >> "$out/ocr.txt" 2>/dev/null
+  "$ocr_dump" "$img" 800 3 >> "$out/ocr.txt" 2>/dev/null
 done < <(find "$data/screenshots/fe terminal 1" "$data/screenshots/refinery flow" "$data/screenshots/refinery flow 2" "$data/screenshots/refinery flow 3" -type f \( -iname '*.jpg' -o -iname '*.png' \) | LC_ALL=C sort)
 
 # Overlay and OCR-box files are part of the output: record their hashes.

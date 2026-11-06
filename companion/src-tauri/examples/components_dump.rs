@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use companion_lib::components::to_legacy;
-use companion_lib::ocr::{self, Model};
+use companion_lib::ocr;
 use sc_ohseearr_gear_inventory::read_components;
 
 fn main() {
@@ -18,7 +18,7 @@ fn main() {
     let threads = take_threads(&mut args);
     // --gpu: on DirectML (DirectML.dll 1.15 next to this exe, e.g. copied from resources/ocr)
     let gpu = args.iter().position(|a| a == "--gpu").map(|i| args.remove(i)).is_some();
-    let mut ocr = ocr::load(threads, Model::Tiny, gpu).expect("ocr models");
+    let mut ocr = ocr::load(threads, gpu).expect("ocr models");
     let (mut frames, mut total_ms, mut model_ms) = (0u128, 0u128, 0u128);
     for dir in args {
         for path in sorted(Path::new(&dir), "jpg").into_iter().chain(sorted(Path::new(&dir), "png")) {

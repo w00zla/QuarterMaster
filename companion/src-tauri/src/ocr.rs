@@ -7,17 +7,10 @@
 
 pub use sc_ohseearr_core::{resize, FilterType, Ocr, Rect, TextBox, Timings};
 
-/// The compiled-in models (one tier since 2026-10-31; the enum stays for the log and the debug data, "tiny").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Model {
-    Tiny,
-}
-
 /// The compiled-in detector and recognizer, on the CPU or the GPU (an error when DirectML does not work).
 /// `threads`: ONNX Runtime's intra-op threads on the CPU (the game runs at the same time, so few). ONNX Runtime's
 /// memory arena keeps the largest run's memory (without it the reads took 30 % longer): `ocrwatch` drops the
 /// `Ocr` and the readers when the scan stops.
-pub fn load(threads: usize, model: Model, gpu: bool) -> Result<Ocr, String> {
-    let Model::Tiny = model;
+pub fn load(threads: usize, gpu: bool) -> Result<Ocr, String> {
     Ok(Ocr::new(&sc_ohseearr_model_paddle_det_tiny::package(), &sc_ohseearr_model_sc_rec_latin::package(), threads, gpu)?)
 }

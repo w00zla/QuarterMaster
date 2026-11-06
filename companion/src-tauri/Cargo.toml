@@ -7,9 +7,9 @@ edition = "2021"
 
 [lib]
 # The `_lib` suffix keeps the lib name apart from the bin name (a Windows issue,
-# https://github.com/rust-lang/cargo/issues/8519)
+# https://github.com/rust-lang/cargo/issues/8519); an rlib only: the bin and the examples link it (no mobile build)
 name = "companion_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -47,7 +47,7 @@ pub use sc_ohseearr_capture_win::{Gate, Pixels, PULL_TIMEOUT_MS};
 
 use crate::components::ComponentRead;
 use crate::inventory::Grid;
-use crate::ocr::{Model, Ocr, TextBox};
+use crate::ocr::{Ocr, TextBox};
 use crate::refinery::{Overview, Read};
 
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
@@ -164,7 +164,7 @@ struct InventoryEvent {
     ocr: OcrInfo,
 }
 
-/// The OCR of a read (debug view, recordings): the models that ran ("tiny"), on the GPU or
+/// The OCR of a read (debug view, recordings): the models that ran ([`MODELS`] or none), on the GPU or
 /// the CPU and why (the setting, the GPU's state), and their time (preparation, runs, post-processing;
 /// the rest of the read is its own work).
 #[derive(Serialize, Clone)]
@@ -608,7 +608,7 @@ struct Worker {
     /// The game in front (else no frames come, and the screen is left)
     front: GameFront,
     /// The OCR (`ensure_ocr`), loaded once needed, on the GPU (`on_gpu`) or the CPU
-    tiny: Option<Ocr>,
+    ocr: Option<Ocr>,
     gpu: Gpu,
     on_gpu: bool,
     gate: Gate,
@@ -635,13 +635,16 @@ pub(crate) fn unix_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
-/// The OCR with `model`, loaded on first use (tiny for every screen since 2026-10-31; the warehouse
-/// read small before, at ~3× the time: tiny needs its crops scaled up for the badges).
-fn ensure_ocr(slot: &mut Option<Ocr>, model: Model, gpu: bool) -> Result<&mut Ocr, String> {
+/// The name of the compiled-in models in the debug data (`OcrInfo::models`) and the log ("tiny": PP-OCRv6
+/// tiny's detector, our recognizer).
+const MODELS: &str = "tiny";
+
+/// The OCR, loaded on first use.
+fn ensure_ocr(slot: &mut Option<Ocr>, gpu: bool) -> Result<&mut Ocr, String> {
     if slot.is_none() {
         let started = Instant::now();
-        *slot = Some(crate::ocr::load(OCR_THREADS, model, gpu).map_err(|e| format!("models: {e}"))?);
-        log::info!("OCR {model:?} loaded in {:?} on the {}", started.elapsed(), if gpu { "GPU" } else { "CPU" });
+        *slot = Some(crate::ocr::load(OCR_THREADS, gpu).map_err(|e| format!("models: {e}"))?);
+        log::info!("OCR Tiny loaded in {:?} on the {}", started.elapsed(), if gpu { "GPU" } else { "CPU" });
     }
     Ok(slot.as_mut().expect("loaded above"))
 }
@@ -657,7 +660,7 @@ impl Worker {
             fast,
             front,
             debug_tx,
-            tiny: None,
+            ocr: None,
             gpu,
             on_gpu: false,
             gate: Gate::default(),
@@ -691,7 +694,7 @@ impl Worker {
                 self.locale = LocaleSource::default();
                 // Off: the OCR's memory goes right away (the next start loads it again in well under a
                 // second); while the scan runs it stays, read or not
-                if self.tiny.take().is_some() {
+                if self.ocr.take().is_some() {
                     log::info!("OCR unloaded (scan stopped)");
                 }
                 continue;
@@ -759,27 +762,25 @@ impl Worker {
         let want = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu && self.gpu.state() == GpuState::Ready;
         if want != self.on_gpu {
             self.on_gpu = want;
-            if self.tiny.take().is_some() {
+            if self.ocr.take().is_some() {
                 log::info!("OCR unloaded (now on the {})", if want { "GPU" } else { "CPU" });
             }
         }
     }
 
-    /// The models' phases since the last call (for the log, per model that ran) and what ran.
+    /// The models' phases since the last call (for the log; empty when they did not run) and what ran.
     fn take_phases(&mut self) -> (String, OcrInfo) {
         let setting = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu;
-        let (mut parts, mut info) = (Vec::new(), OcrInfo { models: Vec::new(), gpu: self.on_gpu, setting, status: self.gpu.state(), ms: 0 });
-        for (name, slot) in [("tiny", &mut self.tiny)] {
-            let Some(mut t) = slot.as_mut().map(Ocr::take_timings) else { continue };
-            // The warehouse reader's layout detector counts as the detector's
-            t += self.readers.warehouse.take_timings();
-            if t.det_runs + t.rec_runs > 0 {
-                parts.push(format!("{name}: {t}"));
-                info.models.push(name);
-                info.ms += t.total().as_millis() as u64;
-            }
+        let mut info = OcrInfo { models: Vec::new(), gpu: self.on_gpu, setting, status: self.gpu.state(), ms: 0 };
+        let Some(mut t) = self.ocr.as_mut().map(Ocr::take_timings) else { return (String::new(), info) };
+        // The warehouse reader's layout detector counts as the detector's
+        t += self.readers.warehouse.take_timings();
+        if t.det_runs + t.rec_runs == 0 {
+            return (String::new(), info);
         }
-        (parts.join(", "), info)
+        info.models.push(MODELS);
+        info.ms = t.total().as_millis() as u64;
+        (format!("{MODELS}: {t}"), info)
     }
 
     /// Switches the screen: the refinery's starts or ends a visit; the frontend hears of every change.
@@ -819,7 +820,7 @@ impl Worker {
         if scope.refinery {
             let found = match locale_of(&mut self.locale, &self.app, &mut self.locale_missing) {
                 Some(locale) => {
-                    let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
+                    let ocr = ensure_ocr(&mut self.ocr, self.on_gpu)?;
                     let started = Instant::now();
                     let frame = sc_ohseearr_sc::Frame { id: self.frame_id, image: &image, cursor, locale: Some(locale) };
                     let found = self.readers.refinery.probe(ocr, &frame)?;
@@ -862,7 +863,7 @@ impl Worker {
         let mut found = false;
         // Applied once the OCR is done (set_screen needs the whole worker)
         let mut screen = self.screen;
-        let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
+        let ocr = ensure_ocr(&mut self.ocr, self.on_gpu)?;
         let readers = &mut self.readers;
         if screen != Screen::Inventory {
             // Probing: the page number over every place it can have (a kept scale is not trusted yet; the
@@ -944,7 +945,7 @@ impl Worker {
     fn look_refinery(&mut self, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
         // Only this read's phases (a probe's terminal check came before)
         self.take_phases();
-        let ocr = ensure_ocr(&mut self.tiny, Model::Tiny, self.on_gpu)?;
+        let ocr = ensure_ocr(&mut self.ocr, self.on_gpu)?;
         let started = Instant::now();
         let read = match locale_of(&mut self.locale, &self.app, &mut self.locale_missing) {
             Some(locale) => {

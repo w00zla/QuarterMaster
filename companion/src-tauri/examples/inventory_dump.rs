@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use companion_lib::inventory::to_legacy;
-use companion_lib::ocr::{self, Model, Rect};
+use companion_lib::ocr::{self, Rect};
 use image::{Rgb, RgbImage};
 use sc_ohseearr_sc::{Frame, ScreenReader};
 use sc_ohseearr_warehouse::WarehouseReader;
@@ -25,7 +25,7 @@ fn main() {
     let threads = take_threads(&mut args);
     // --gpu: on DirectML (DirectML.dll 1.15 next to this exe, e.g. copied from resources/ocr)
     let gpu = args.iter().position(|a| a == "--gpu").map(|i| args.remove(i)).is_some();
-    let mut ocr = ocr::load(threads, Model::Tiny, gpu).expect("ocr models");
+    let mut ocr = ocr::load(threads, gpu).expect("ocr models");
     let mut reader = WarehouseReader::new();
     reader.set_diagnostics(true);
     let (mut frames, mut total_ms, mut model_ms) = (0u128, 0u128, 0u128);
