@@ -1,11 +1,11 @@
 // Where a component's unmodified stat values sit in its DataCore record (`catalog.raw_record`),
 // per crafted property: the game's tooltip shows these absolute values ("Coolant Rating: 60.00"), the
 // stock stores a crafted component's gain over them in percent or steps (`component-stats.ts`). The
-// companion app reads the tooltip and needs the base to tell the gain. Checked 2026-10-18 against the
+// API consumers that read the tooltip need the base to tell the gain. Checked 2026-10-18 against the
 // user's inventory screenshots (HeatSafe 22 / 110, Blizzard 60 / 1800, Atlas 259.05 / 200, CoverAll
 // 10560 / 660), the FPS gear 2026-10-22 (Gallant 900 RPM, CQ7 650 -> 713.49 crafted, Artimex Canuto
 // 0.30 / -61 / +91 / 145.80). Properties missing here have no known tooltip format (tractor, salvage
-// heads): their base stays null and the companion registers such components without stats only when
+// heads): their base stays null and such components are to be registered without stats only when
 // the tooltip shows none. Properties the tooltip shows as a change in percent (`tooltipForm`) need none.
 
 export interface BasePath {

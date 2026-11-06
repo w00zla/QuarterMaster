@@ -42,7 +42,7 @@ export interface CatalogMaterial {
   uuid: string;
   kind: 'resource' | 'item';
   name: string;
-  // The game's localization key of the name (lower case): the companion app looks it up in the player's language pack
+  // The game's localization key of the name (lower case): API consumers look it up in the player's language pack
   nameKey: string | null;
   // SCU for resources, pieces for items
   unit: 'SCU' | 'pcs';
@@ -70,7 +70,7 @@ export interface CatalogStat {
   uuid: string;
   // As the game names it ("Coolant Rating")
   name: string;
-  // The game's localization key of that name (lower case): the companion looks it up in the player's language pack
+  // The game's localization key of that name (lower case): API consumers look it up in the player's language pack
   nameKey: string | null;
   // What the blueprint can make of it, like the crafting check shows it: a multiplier as its change in
   // percent (min/max e.g. -19.3/20.8, one decimal), additive steps as whole numbers (power pips, e.g. -2/2)
@@ -78,7 +78,7 @@ export interface CatalogStat {
   min: number;
   max: number;
   // The unmodified value as the game's tooltip shows it ("Coolant Rating: 60.00" -> 60); null when the
-  // app does not know where the record keeps it (the companion then reads no stats off such a tooltip)
+  // app does not know where the record keeps it (consumers then read no stats off such a tooltip)
   base: number | null;
   // How the tooltip shows it: its value (converted with `base`) or its change in percent, negated for
   // some ("Recoil Smoothness: +28.44 %" for a stored -28.4; src/stock/component-base.ts)
@@ -87,7 +87,7 @@ export interface CatalogStat {
 
 export interface CatalogLocation {
   uuid: string;
-  // The star map record's key ("RR_CRU_LEO"), as Game.log names the player's location (the companion)
+  // The star map record's key ("RR_CRU_LEO"), as Game.log names the player's location
   key: string;
   // "Area18 · ArcCorp · Stanton"
   label: string;

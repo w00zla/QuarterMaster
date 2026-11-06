@@ -1,8 +1,7 @@
 // Material names as people and the refinery terminal write them ("TITANIUM", "quanta") resolved against
-// the catalog's names of bookable resources. Pure: shared by the bot and the companion app (no server
-// imports here).
+// the catalog's names of bookable resources. Pure: no server imports here.
 
-/** Letters and digits only, upper case (as the companion's Rust side compares texts). */
+/** Letters and digits only, upper case. */
 export const norm = (text: string) => text.normalize("NFC").replace(/[^\p{L}\p{N}]/gu, "").toUpperCase();
 
 export interface MaterialNames {
@@ -17,7 +16,7 @@ export function addName(cat: MaterialNames, name: string, uuid: string): void {
   cat.names.set(norm(name), uuid);
 }
 
-// Without accents: the OCR reads an "A" as "Á" now and then ("HEPHAESTÁNITE")
+// Without accents: pasted terminal texts carry stray accents now and then ("HEPHAESTÁNITE")
 const fold = (key: string) => key.normalize("NFD").replace(/\p{M}/gu, "");
 
 /** The material a name means: the exact name, else the one material whose name is it without

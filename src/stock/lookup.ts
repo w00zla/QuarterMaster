@@ -82,7 +82,7 @@ export interface ComponentStat extends StatBounds {
   uuid: string;
   // As the game names it ("Coolant Rating")
   name: string;
-  // The game's localization key of that name (lower case): the companion looks it up in the player's language pack
+  // The game's localization key of that name (lower case): API consumers look it up in the player's language pack
   nameKey: string | null;
   // The unmodified value as the game's tooltip shows it (from the item's raw record, `component-base.ts`); null when unknown
   base: number | null;

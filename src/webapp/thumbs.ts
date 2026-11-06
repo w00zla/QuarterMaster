@@ -1,6 +1,6 @@
-// Die Thumbnails, die der Server ausliefert: THUMBS_DIR hält s/, m/, l/ und thumbs.json {uuid: hash}
-// (tools/thumbs, auf die VM mit scripts/push-thumbs.sh). Das Manifest wird wie das des Companions
-// neu gelesen, wenn es sich ändert; ein kaputtes behält das vorige (das Hochladen ersetzt es atomar).
+// The thumbnails the server serves: THUMBS_DIR holds s/, m/, l/ and thumbs.json {uuid: hash}
+// (tools/thumbs, to the VM with scripts/push-thumbs.sh). The manifest is re-read when it changes;
+// a broken one keeps the previous index (the upload replaces it atomically).
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { THUMB_HASH } from '../thumbs.ts';
