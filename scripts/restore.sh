@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restore a dump into a fresh database volume (run on the VM, from the checkout; docs/deploy.md § 10).
 # DELETES the current database: stop bot/admin/ext/webapp -> remove db and its volume -> fresh db
-# (the init creates the roles) -> pg_restore -> DB roles -> migrate -> start everything.
+# (the init creates the roles) -> pg_restore -> migrate -> DB roles -> start everything.
 #
 #   scripts/restore.sh backups/<dump>
 set -euo pipefail
@@ -32,11 +32,12 @@ docker compose up -d --wait db
 echo "==> Restore $dump"
 docker compose exec -T db pg_restore -U postgres -d quartermaster --exit-on-error < "$dump"
 
-echo "==> DB roles"
-docker compose exec -T db bash -s < deploy/db-roles.sh
-
 echo "==> Migrate"
 docker compose run --rm migrate
+
+# After the migration, as in deploy.sh: qm_web's grants are explicit and miss what the migration created
+echo "==> DB roles"
+docker compose exec -T db bash -s < deploy/db-roles.sh
 
 echo "==> Start"
 docker compose up -d
