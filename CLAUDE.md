@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Discord bot and user web app (plus the server side of the companion desktop app) for Star Citizen players and orgs to manage materials
 (stock), ship components, refinery jobs and blueprints. Multi-guild (one Discord server = one org),
-German/English.
+German/English. GitHub: `w00zla/QuarterMaster` (private; remote over SSH like all sibling repos, the folder keeps its
+name `sc-quartermaster`).
 
 Where things are described (read the matching file before working in an area):
 
