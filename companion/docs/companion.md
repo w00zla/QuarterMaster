@@ -40,7 +40,7 @@ Product requirements (moved here from sc-quartermaster's `docs/requirements.md`,
   `tableColumns.ts`). The shared UI components (`Icon`, `Tooltip`, `HelpTip`, `Dropdown`, `ColumnHead`,
   `ColumnsButton`/`ColumnsDialog`, `ConfirmDialog`, `Picker`, `ViewToggle`), `tableColumns.ts`, the styles, the
   fonts and the pure helpers `apiTypes.ts` (the web app's API types the companion uses), `materialNames.ts`,
-  `quality.ts` and `componentStats.ts` were copied from sc-quartermaster at b58f4d8 on 2026-11-06 and are owned here
+  `quality.ts` and `componentStats.ts` were copied from sc-quartermaster at 92d89c2 on 2026-11-06 and are owned here
   (no sync).
 
 ## Game.log and blueprint unlocks
