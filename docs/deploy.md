@@ -1,6 +1,6 @@
 # Deployment
 
-Production runs on a VM with Docker Compose: `db` (Postgres 18), `bot`, `ext` (UEX pull), `webapp` (user web app), `admin` (admin web UI). Caddy on the VM host terminates TLS. Files: `Dockerfile`, `compose.yaml`, `scripts/push-deploy.sh` (local), `scripts/push-companion.sh` (local), `scripts/push-thumbs.sh` (local), `scripts/deploy.sh` (VM), `scripts/backup.sh`, `deploy/db-roles.sh`, `deploy/quartermaster-backup.{service,timer}`, `docs/Caddyfile.example`. Background and design decisions: "Design" below.
+Production runs on a VM with Docker Compose: `db` (Postgres 18), `bot`, `ext` (UEX pull), `webapp` (user web app), `admin` (admin web UI). Caddy on the VM host terminates TLS. Files: `Dockerfile`, `compose.yaml`, `scripts/push-deploy.sh` (local), `scripts/push-thumbs.sh` (local), `scripts/deploy.sh` (VM), `scripts/backup.sh`, `deploy/db-roles.sh`, `deploy/quartermaster-backup.{service,timer}`, `docs/Caddyfile.example`. Background and design decisions: "Design" below.
 
 Paths below assume the checkout in `/opt/sc-quartermaster` and the user `w00zla` on the VM (sudo, member of the `docker` group); adjust as needed.
 
@@ -170,21 +170,9 @@ ssh w00zla@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node sr
 
 ## 8. Companion app release
 
-Copy the builds (`…_x64-standalone.zip`, the AppImage, the Windows setup with its `.sig` next to it) and `companion.json` (`{"version":"x.y.z","windows":"<zip>","linux":"<AppImage>","windowsSetup":"<setup.exe>"}`) into `local/companion/` of the VM's checkout; the web app picks a new manifest up within seconds, no restart. Its version is the one it requires: older apps get the update panel, the installed one installs the setup itself. No manifest = no downloads and no version check; a setup without its `.sig` = the manifest is ignored. Building the setup: `docs/companion.md` "Release".
+Copy the builds (`…_x64-standalone.zip`, the AppImage, the Windows setup with its `.sig` next to it) and `companion.json` (`{"version":"x.y.z","windows":"<zip>","linux":"<AppImage>","windowsSetup":"<setup.exe>"}`) into `local/companion/` of the VM's checkout; the web app picks a new manifest up within seconds, no restart. Its version is the one it requires: older apps get the update panel, the installed one installs the setup itself. No manifest = no downloads and no version check; a setup without its `.sig` = the manifest is ignored. Building the setup and the release scripts live in the companion repo (`../sc-qm-companion`, `docs/companion.md` "Release").
 
-Windows, after `pnpm companion:build` (PowerShell 7): setup + `.sig` + standalone zip from the build into `local/companion/` under the version from `Cargo.toml`, `companion.json` updated (a `linux` entry stays), then uploaded like below:
-
-```powershell
-scripts/publish-win-companion.ps1 w00zla@<vm>   # -DeployPath for another checkout path
-```
-
-From the local checkout, with the release files and `companion.json` in `local/companion/`:
-
-```sh
-scripts/push-companion.sh w00zla@<vm>
-```
-
-It copies the files the manifest names, then the manifest (`DEPLOY_PATH` for another checkout path). The manifest goes last: copied first, it would already send outdated apps to downloads that are not there yet. By hand:
+The upload runs from `../sc-qm-companion` against its own `local/companion/` (the release files and `companion.json`): `scripts/publish-win-companion.ps1 w00zla@<vm>` (Windows: collects the build into that folder, then uploads) or `scripts/push-companion.sh w00zla@<vm>` (just the upload; `DEPLOY_PATH`/`-DeployPath` for another checkout path on the VM). It copies the files the manifest names, then the manifest. The manifest goes last: copied first, it would already send outdated apps to downloads that are not there yet. By hand (from the companion repo):
 
 ```sh
 scp local/companion/<zip> local/companion/<AppImage> local/companion/<setup.exe> local/companion/<setup.exe>.sig w00zla@<vm>:/opt/sc-quartermaster/local/companion/

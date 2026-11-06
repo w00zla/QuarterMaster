@@ -19,7 +19,7 @@ removing imported text sources), the bot's status texts and assigning privileges
   qm_app (never token hashes).
 - **SPA** (`adminapp/`): look and building blocks taken from BindSight (design tokens, fonts, `Dropdown`,
   `ColumnHead` + `tableColumns.ts` resizable/sortable grid tables), shared classes in
-  `adminapp/src/styles/ui.css` (the user web app and the companion import them too, as `Icon`, `DataTable`,
+  `adminapp/src/styles/ui.css` (the user web app imports them too, as `Icon`, `DataTable`,
   `Tooltip`, `Dropdown`: change those only compatibly). Layout: a left sidebar (`SideNav.vue`; groups
   Operations, Community, Stock, Catalog, Sources, Apps; folds to its icons, remembered per browser; Status
   carries the number of check hits) and a top bar with the page's name, the imported game build (links to

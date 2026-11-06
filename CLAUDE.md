@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Discord bot, user web app and companion desktop app for Star Citizen players and orgs to manage materials
+Discord bot and user web app (plus the server side of the companion desktop app) for Star Citizen players and orgs to manage materials
 (stock), ship components, refinery jobs and blueprints. Multi-guild (one Discord server = one org),
 German/English.
 
@@ -18,18 +18,16 @@ Where things are described (read the matching file before working in an area):
 | `docs/bot.md` | schemas `app`/`bot`/`web`, the bot's structure, commands, roster, logs channel, board |
 | `docs/webapp.md` | user web app: backend, login, sessions, API, realtime, SPA views and building blocks, security measures |
 | `docs/adminapp.md` | admin web UI |
-| `docs/companion.md` | companion app: Game.log, scan session, warehouse and character inventory scans, OCR, refinery sync, capture, overlay, decisions, measurements |
 | `docs/ext.md` | third-party data (UEX refineries, refining methods) |
 | `docs/deploy.md` | production design (image, compose, DB roles, Caddy) and the step-by-step deploy, backups, updates, rollback, restore |
+| `../sc-qm-companion` | the companion desktop app (own repo since 2026-11-06; its `docs/companion.md`: Game.log, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, release) |
+| `../sc-ohseearr` | OCR engine, models and training (own repo; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
 | `.claude/open-points.md` | open decisions and follow-ups the user schedules (local, not in git) |
 
 **Status:** catalog pipeline, admin web UI, the bot with all its commands, logs channel and org board, the
 stock service, UEX pull and the user web app are built. In production since 2026-10-05 (Docker Compose on a
 VM behind Caddy), not live for users yet: the production DB holds no real data, the user web app is not
-deployed, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6). In progress: the companion app
-(Windows capture only): blueprint unlocks from `Game.log`; warehouse and character inventory scans and the
-scan overlay, used in game since 2026-10-18; since 2026-10-19 one scan for every screen (refinery included);
-the refinery read is checked against screenshots and recordings (1080p and 3840×1600), its sync untested in game.
+deployed, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6). The companion app (blueprint unlocks, warehouse/character inventory/refinery scans; Windows capture) lives in `../sc-qm-companion`, the OCR in `../sc-ohseearr`; this repo serves their API (`docs/webapp.md`).
 
 ## Commands
 
@@ -86,28 +84,8 @@ pnpm webapp:build             # vue-tsc + vite build -> webapp/dist (served by p
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)
 pnpm bot:register [--dry-run] # bulk-overwrite slash commands: DISCORD_DEV_GUILD_ID set = that server only, else global
 pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every 15 minutes
-pnpm companion:start          # companion app: tauri dev (Vite on :1430): UI changes live via hot reload, Rust rebuilt only when it changed; profile.dev optimizes the dependencies (OCR ~15 % slower than release: 104 vs 90 ms per read, 2026-10-31); no DirectML.dll there (OCR on the CPU)
-pnpm companion:fast           # test build for the game: profile `fast` (release without LTO, incremental) -> target/fast/quartermaster-companion.exe (+ DirectML.dll on Windows), no setup; ~8 s after a UI change instead of ~3 min (release); close the running exe first
-pnpm companion:build          # release build for this OS: build:linux (AppImage) or build:windows (setup + bare exe); only for releases (LTO, minutes), the running exe must be closed first
-pnpm --filter sc-quartermaster-companion build:linux      # standalone AppImage (no installer, like BindSight)
-pnpm --filter sc-quartermaster-companion build:windows    # NSIS setup (DirectML.dll next to the exe, tauri.setup.conf.json) + .sig (self-updating; needs TAURI_SIGNING_PRIVATE_KEY = the key's content) and the bare exe (zip it as …_x64-standalone.zip)
-pnpm --filter sc-quartermaster-companion typecheck        # companion SPA typecheck
-pnpm --filter sc-quartermaster-companion ocr:models      # once per checkout: OCR models (PP-OCRv6 tiny; on Windows also DirectML.dll for the GPU, bundled by build:windows) into companion/src-tauri/resources/ocr (not in git; cut-rec.py and build:windows need them; the app's models come from ../sc-ohseearr)
-cargo test --release --manifest-path companion/src-tauri/Cargo.toml # its Rust tests (the OCR tests read local/screenshots/… if present)
-cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]   # what the OCR reads in an image
-cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example inventory_dump -- <out dir> <screenshots dir>... [--threads n] [--gpu]   # the warehouse read over screenshot folders or debug recordings (around the cursor once a frame gave a strong layout, as in the app), with its phases (models vs. rest)
-cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example components_dump -- <dir>... [--threads n] [--gpu]   # the character inventory's tooltip title and lines per image, with its phases; --gpu needs DirectML.dll copied next to the example exe
-# Warehouse layout detector (NanoDet, sc-ohseearr's package models/sc-warehouse-layout): training scripts in companion/detector/, Python only via local/detector/.venv
-#   (setup, NanoDet checkout and retraining: docs/companion.md "The layout detector")
-local/detector/.venv/Scripts/python.exe -I companion/detector/labels.py local/detector/data <recording>... --neg <dir>...   # training data from debug recordings (before the detector), screenshots without a warehouse as negatives
-local/detector/.venv/Scripts/python.exe -I companion/detector/eval.py <model.onnx> local/detector/data                     # recall/precision per kind, CPU time
-# Text recognizer (sc-ohseearr's package models/sc-rec-latin: cut to Latin, fine-tuned on the game's font Blender Pro): scripts in companion/ocrtrain/
-#   (same venv, needs transformers; the font from Data.p4k stays in local/fonts-sc/, never in git; steps and numbers: docs/companion.md "The recognizer's fine-tune")
-local/detector/.venv/Scripts/python.exe -I companion/ocrtrain/eval.py onnx:<model.onnx>      # exact lines / character error rate on the labelled real tooltip lines (local/ocr-eval/)
-# Companion log: %LOCALAPPDATA%\com.w00zla.quartermaster.companion\logs\companion.log (Linux: ~/.local/share/…/logs; 2 MB, 3 old files kept); every OCR read is logged
-#   ("scan on/off", "scan screen none|warehouse|inventory|refinery (<why>)", "inventory read in … ms: 4×3 tiles at pitch …, cursor …, tooltip …, hovered …", "components read in … ms: page …, cursor … in tile (row, col, span), tooltip "<title>" with n lines: …", "refinery visit started/ended", "refinery overview read in …", "read phases: rgb …, tiny: det prep+run+post …, rec prep+run+post …, rest …" (debug), "overlay on/off", "OCR GPU: Ready|Missing", "OCR Tiny loaded in … on the GPU|CPU", "OCR GPU failed, on the CPU from now on: …", "screen capture: …"):
-#   no read lines during a scan = the capture (game not in front) or the gate, reads without tiles = the layout, a tooltip without a hovered tile = the hover rule.
-#   Debug recordings (the debug window's "Record data", e.g. into local/stock_scan_debug/) hold every read's frame + JSON; check a series with a temporary example over the folder (keep it out of git).
+node --env-file-if-exists=.env scripts/ocr-eval-label.ts --pack <global.ini>   # sc-ohseearr's recognizer eval labeller: labels for the real line crops from the catalog + the player's global.ini -> local/ocr-eval/labels.tsv; needs the DB and ../sc-qm-companion
+# The companion app (build, run, tests, OCR, log) is in ../sc-qm-companion, OCR engine/models/training in ../sc-ohseearr: their commands are there.
 ```
 
 VS Code task `adminapp: dev` starts `adminapp: backend` (`pnpm adminapp:watch`) and `adminapp: frontend` (`pnpm adminapp:dev`) side by side. `webapp: dev` runs `db: up` (`pnpm db:up`), then `webapp: backend` (`pnpm webapp:watch`), `webapp: frontend` (`pnpm webapp:dev`) and `bot` (`pnpm bot`) side by side. `all: dev` runs `db: up`, then all of them plus `ext` (`pnpm ext`, needs `UEX_TOKEN`) side by side. On Windows `db: up` only checks that the Postgres service runs.
@@ -126,11 +104,11 @@ docker compose run --rm bot node src/bot/register.ts    # after command changes
 ## Runtime conventions
 
 - Backend: no build step. Node ≥ 22.18 runs `.ts` files directly via type stripping. Relative imports must use the `.ts` extension, and only erasable TypeScript is allowed (`erasableSyntaxOnly`: no enums, namespaces, parameter properties). TypeScript 7 for the backend.
-- SPAs (`adminapp/`, `webapp/`, `companion/`): Vue 3 + Vite, own packages with TypeScript 6 (`vue-tsc` needs the JS API that the Go-based TS 7 lacks). They import shared pure code from `src/` (listed in their `tsconfig.json` and Vite `fs.allow`); such files must not import server dependencies. The web app and the companion import the admin's styles and components relatively from `adminapp/src/` (no copies).
+- SPAs (`adminapp/`, `webapp/`): Vue 3 + Vite, own packages with TypeScript 6 (`vue-tsc` needs the JS API that the Go-based TS 7 lacks). They import shared pure code from `src/` (listed in their `tsconfig.json` and Vite `fs.allow`); such files must not import server dependencies. The web app imports the admin's styles and components relatively from `adminapp/src/` (no copies) (the companion keeps its own copies in `../sc-qm-companion/src/shared`).
 - DB sessions run with JIT off (`src/db/client.ts`): JIT compiled short list queries for ~450 ms each.
-- `local/` is gitignored and holds the StarBreaker binary of our fork (`local/starbreaker-qm/`, built from the repo `../starbreaker-qm` = github.com/w00zla/starbreaker-qm; `docs/catalog-sources.md` "Icons"), snapshots, external `global.ini` files (`local/localization/<source>/`), the extractor's working directory, screenshots and debug recordings. Game data does not go into the repo. `assets/logo.png` is the app/bot logo (web copies: `adminapp/src/assets/logo-128.png`, `adminapp/public/favicon.png`, `webapp/src/assets/logo-256.png` for the user web app's login page, `webapp/src/assets/logo-{72,144}.png` for its Companion dialog, `webapp/public/favicon.png`, `companion/src/assets/logo-{44,88}.png` for the companion's title bar (exact sizes, Lanczos: the webview's own downscaling frays the edge); regenerate when it changes).
+- `local/` is gitignored and holds the StarBreaker binary of our fork (`local/starbreaker-qm/`, built from the repo `../starbreaker-qm` = github.com/w00zla/starbreaker-qm; `docs/catalog-sources.md` "Icons"), snapshots, external `global.ini` files (`local/localization/<source>/`), the extractor's working directory, screenshots. Game data does not go into the repo. `assets/logo.png` is the app/bot logo (web copies: `adminapp/src/assets/logo-128.png`, `adminapp/public/favicon.png`, `webapp/src/assets/logo-256.png` for the user web app's login page, `webapp/src/assets/logo-{72,144}.png` for its Companion dialog, `webapp/public/favicon.png`; regenerate when it changes).
 - Shell scripts must pass `shellcheck`.
-- The checkout is shared by Linux and Windows (NTFS): `.gitattributes` keeps every text file LF in the working tree (`* text=auto eol=lf`: Windows git has `autocrlf`), `core.filemode` is false (NTFS loses the executable bit), `node_modules` and `companion/src-tauri/target` are per platform (`pnpm install --config.confirmModulesPurge=false` after switching, full Rust rebuilds). File paths from module URLs only via `fileURLToPath` (`URL.pathname` is `/D:/…` on Windows).
+- The checkout is shared by Linux and Windows (NTFS): `.gitattributes` keeps every text file LF in the working tree (`* text=auto eol=lf`: Windows git has `autocrlf`), `core.filemode` is false (NTFS loses the executable bit), `node_modules` is per platform (`pnpm install --config.confirmModulesPurge=false` after switching). File paths from module URLs only via `fileURLToPath` (`URL.pathname` is `/D:/…` on Windows).
 - Ideas adopted from another bot (fg-sc-org-inventory-bot) are concepts only: that repo has no license, never copy its code.
 
 ## Rules that must not break
@@ -151,10 +129,10 @@ docker compose run --rm bot node src/bot/register.ts    # after command changes
 - **Bot** (`docs/bot.md`): discord.js, options search, modals ask, panels show (Components V2, ephemeral); roster from member roles; logs channel from `app.history`; one board message per org kept current via `LISTEN qm_changes`.
 - **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth (PKCE), hashed session cookies, a strict CSP and same-origin checks, role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket messages that only say what changed; the companion authenticates with a per-user API token (`Bearer qmt_…`) and a version header; features (`app.feature`) beyond the roles are used through their privileges (`app.privilege`, `<feature>.<right>`, assigned per user in the admin); their data goes into `app.feature_entry` (feature, user, subject, JSON payload, optional image; which privilege reads and writes is the code's, `src/webapp/features.ts`).
 - **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth; a control room (dashboard, status, activity), read-only user data (orgs, users, stock, refinery), catalog browser, imports, UEX, bot status texts, features with their privileges (assigned per user) and the export of their data.
-- **Companion** (`docs/companion.md`): Tauri 2 (Rust + Vue); `Game.log` unlocks; scan sessions that capture the game window (DXGI, Windows), read tooltips with PP-OCRv6 (ONNX, compiled in; the warehouse's layout with a NanoDet detector of our own) and turn them into proposals the user registers through the web app's API; a click-through overlay over the game.
+- **Companion** (own repo `../sc-qm-companion`, OCR in `../sc-ohseearr`): Tauri 2 desktop app that reads `Game.log` and the game window and registers blueprints, stock and refinery jobs through the web app's API. Here: the API with its per-user token and version header (`docs/webapp.md`), `GET /api/companion/catalog`, the release files served from `COMPANION_DIR` (`src/webapp/companion.ts`, `docs/deploy.md` § 8) and the web app's Companion dialog.
 - **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext` (refinery terminals and yield bonuses, refining methods; terminals, commodities, commodity and item prices, not used yet).
 
-**Tests** (`test/`): `fixtures.ts` builds synthetic DataCore records (no real game data) and runs them through the real normalizer; the resulting snapshot feeds both the pure tests and the DB integration tests. Pure companion logic is tested from `test/companion-*.test.ts`, its Rust side with `cargo test`.
+**Tests** (`test/`): `fixtures.ts` builds synthetic DataCore records (no real game data) and runs them through the real normalizer; the resulting snapshot feeds both the pure tests and the DB integration tests. The companion's own tests are in `../sc-qm-companion`; the API side is covered by `test/webapp*.test.ts`.
 
 <!-- claude-reflect: learned rules (saved from the band; edit freely) -->
 ## Learned rules

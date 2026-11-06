@@ -154,6 +154,8 @@ item class label. The SPA view: "Views".
 
 ### Companion release (`companion.ts`)
 
+The companion app itself (code, build, release scripts) is in `../sc-qm-companion`; this is the server side.
+
 `COMPANION_DIR` (default `local/companion`) holds the built app files and `companion.json`
 `{"version":"x.y.z","windows":"<…_x64-standalone.zip>","linux":"<.AppImage>","windowsSetup":"<…_x64-setup.exe>"}`
 (re-read when it changes; the setup's updater signature is read from `<setup>.sig` next to it, missing =
@@ -206,7 +208,7 @@ blocks".
 
 - Vue 3 + Vite like `adminapp/`, imports the admin's styles and components relatively from `adminapp/src/`
   (no copies; `Icon.vue` is the only `v-html`, constants only, `test/spa-sources.test.ts` enforces it).
-  `Picker.vue` has no i18n of its own (the companion imports it): its two texts come via
+  `Picker.vue` has no i18n of its own (the companion app has its own copy): its two texts come via
   `provide(PICKER_LABELS)` in each app's `App.vue`. Shared pure code from `src/` is listed in
   `webapp/tsconfig.json` and Vite `fs.allow` (`src/stock/amount.ts`, `quality.ts`, `src/planner/stock.ts`, …).
 - UI texts de/en in `webapp/src/i18n.ts` (same keys enforced by type); language `me.langOverride ??
@@ -259,8 +261,7 @@ blocks".
   Its Adjust button (the stats) is disabled for a component without stats, not left out. A Class column
   (`itemClass`, "Military", …) is hidden until switched on.
 - Ressourcen, Ausrüstung and Blueprints: every column but the name and the actions may be hidden (`hideable`);
-  the small eye button right of the filter chips (`ColumnsButton.vue` → `ColumnsDialog.vue`, shared with
-  the companion, which keeps it in a column head; texts via
+  the small eye button right of the filter chips (`ColumnsButton.vue` → `ColumnsDialog.vue`, texts via
   `columnsTexts()`) switches them, kept with the widths in localStorage
   (`qm.webapp.columns.{stock,components,stock-org,components-org,bp-mine,bp-org}`; `hiddenByDefault` columns start hidden, the ones the
   user switched on are kept as `shown`). The org scopes of Ressourcen/Ausrüstung keep their own columns: a
