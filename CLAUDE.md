@@ -27,32 +27,29 @@ Where things are described (read the matching file before working in an area):
 **Status:** catalog pipeline, admin web UI, the bot with all its commands, logs channel and org board, the
 stock service, UEX pull and the user web app are built. In production since 2026-10-05 (Docker Compose on a
 VM behind Caddy), not live for users yet: the production DB holds no real data, the user web app is not
-deployed, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6). The companion app (blueprint unlocks, warehouse/character inventory/refinery scans; Windows capture) lives in `../sc-qm-companion`, the OCR in `../sc-ohseearr`; this repo serves their API (`docs/webapp.md`).
+deployed, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6).
 
 ## Commands
 
 pnpm workspace: the root package (backend, CLIs), `adminapp/` (the admin SPA) and `webapp/` (the user web app SPA). Run everything from the root; pass CLI arguments directly (`pnpm x --flag`, no `--`, it would reach the CLI as a positional).
 
 ```sh
-pnpm db:up | db:down | db:psql      # local Postgres 18 via Podman (scripts/dev-db.sh, Linux); creates quartermaster + quartermaster_test
-                                    # Windows: Postgres 18 runs as the service postgresql-x64-18 (role quartermaster/quartermaster, superuser, both DBs), no db:* scripts;
-                                    #   psql at "C:\Program Files\PostgreSQL\18\bin\psql.exe" (not on PATH); the postgres superuser password is the user's: ask, never store
+pnpm db:up | db:down | db:psql      # local Postgres 18 via Podman (Linux; creates quartermaster + quartermaster_test)
+                                    # Windows: no db:* scripts, the service postgresql-x64-18 (role quartermaster, both DBs); psql in "C:/Program Files/PostgreSQL/18/bin/" (not on PATH); the postgres superuser password is the user's: ask, never store
 pnpm db:migrate                     # apply drizzle/ migrations to $DATABASE_URL
 pnpm db:generate --name <name>      # generate a migration from src/db/schema/*.ts (drizzle-kit)
 pnpm typecheck                      # backend: tsc, no emit
 pnpm test                           # all tests, one file at a time (DB test files reset the same DB); DB tests only run when TEST_DATABASE_URL is set
-scripts/test-roles.sh [files]       # the same DB tests under the production roles (migrate as qm_owner, deploy/db-roles.sh, code as qm_app/qm_web via SET ROLE; needs the dev container); password login/pg_hba not covered
+scripts/test-roles.sh [files]       # the same DB tests under the production roles (needs the dev container; docs/deploy.md)
 node --env-file-if-exists=.env --test test/plan.test.ts                                   # single file
 node --env-file-if-exists=.env --test --test-name-pattern="diffTexts" "test/**/*.test.ts"   # single test
 
-pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k"                  # -> local/snapshots/catalog-<channel>-<build>.json.gz (does not load .env: pass --p4k)
+pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k"   # -> local/snapshots/ (does not load .env: pass --p4k); StarBreaker fork ../starbreaker-ps via $STARBREAKER_BIN, else local/starbreaker-ps/ (build: ../sc-packshot/scripts/starbreaker-build.{sh,ps1})
 pnpm catalog:import <snapshot.json.gz> --label 4.10.2 [--dry-run] [--force] [--allow-downgrade] [--json]
 pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry-run] [--force]
 pnpm loc:import --remove --source <name> --lang <code>
-pnpm packshot:targets [--out <f>]     # the target list for packshot from the DB (gear, shop items for the item finder, ore chunks): ../sc-packshot/local/packshot/targets.json
-# The icons are rendered by packshot in ../sc-packshot (own repo since 2026-11-05: its CLAUDE.md, docs/pipeline.md, ADRs; Blender, store and bundles live there); this repo only writes its target list and reads its set live
-# StarBreaker fork (../starbreaker-ps) for catalog:extract: $STARBREAKER_BIN, else local/starbreaker-ps/; build it with ../sc-packshot/scripts/starbreaker-build.{sh,ps1} or the fork's own build
-pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]                # tools/thumbs (Rust, ravif): the PNGs of packshot's set live (../sc-packshot/local/packshot/sets/live) -> local/thumbs/{s,m,l}/<uuid>.<hash>.avif + thumbs.json (the apps' thumbnails, src/thumbs.ts)
+pnpm packshot:targets [--out <f>]    # the target list for packshot (../sc-packshot renders the icons) from the DB
+pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]   # packshot's set live -> local/thumbs/ (AVIFs + thumbs.json; docs/webapp.md "Thumbnails")
 
 pnpm adminapp            # admin API + built UI on 127.0.0.1:3000 (basic auth from .env)
 pnpm adminapp:watch      # the same, restarting on source changes
@@ -66,28 +63,16 @@ pnpm webapp:build             # vue-tsc + vite build -> webapp/dist (served by p
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)
 pnpm bot:register [--dry-run] # bulk-overwrite slash commands: DISCORD_DEV_GUILD_ID set = that server only, else global
 pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every 15 minutes
-# The companion app (build, run, tests, OCR, log) is in ../sc-qm-companion, OCR engine/models/training in ../sc-ohseearr: their commands are there.
 ```
 
-VS Code task `adminapp: dev` starts `adminapp: backend` (`pnpm adminapp:watch`) and `adminapp: frontend` (`pnpm adminapp:dev`) side by side. `webapp: dev` runs `db: up` (`pnpm db:up`), then `webapp: backend` (`pnpm webapp:watch`), `webapp: frontend` (`pnpm webapp:dev`) and `bot` (`pnpm bot`) side by side. `all: dev` runs `db: up`, then all of them plus `ext` (`pnpm ext`, needs `UEX_TOKEN`) side by side. On Windows `db: up` only checks that the Postgres service runs.
-
-Deployment (`compose.yaml`, run on the VM from the checkout; `.env` there holds the production values incl. `POSTGRES_PASSWORD`, `QM_OWNER_PASSWORD`, `QM_APP_PASSWORD`, `QM_WEB_PASSWORD`):
-
-```sh
-scripts/deploy.sh                                       # on the VM, after a push (scripts/push-deploy.sh runs it): pg_dump to backups/ -> tag :previous -> build --pull, pull db -> stop bot/admin/ext/webapp -> migrate (fails: back to :previous) -> DB roles -> up
-scripts/push-thumbs.sh <user@host>                      # local: local/thumbs/ into the VM's checkout (tar over ssh, manifest last, stale files deleted)
-scripts/backup.sh [rsync target]                        # pg_dump to backups/, copy to the target if given, delete local dumps > KEEP_DAYS (14); daily via deploy/quartermaster-backup.{service,timer}
-docker compose run --rm bot node src/bot/register.ts    # after command changes
-```
-
-`.env` (from `.env.example`) holds `DATABASE_URL`, `TEST_DATABASE_URL`, `ADMINAPP_USER`, `ADMINAPP_PASSWORD`, `ADMINAPP_HOST`, `ADMINAPP_PORT`, `DISCORD_TOKEN`, `DISCORD_APP_ID`, `DISCORD_DEV_GUILD_ID`, `DISCORD_CLIENT_SECRET`, `WEBAPP_ORIGIN`, `WEBAPP_HOST`, `WEBAPP_PORT`, `WEBAPP_TRUST_PROXY`, `COMPANION_DIR`, `THUMBS_DIR`, `UEX_TOKEN`. The DB integration tests **drop and recreate** the `ext`, `web`, `bot`, `app`, `catalog` and `drizzle` schemas in `TEST_DATABASE_URL` — never point it at a real database.
+VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; production deploy, backups and updates: `docs/deploy.md`. `.env`: see `.env.example`. The DB integration tests **drop and recreate** the `ext`, `web`, `bot`, `app`, `catalog` and `drizzle` schemas in `TEST_DATABASE_URL` — never point it at a real database.
 
 ## Runtime conventions
 
 - Backend: no build step. Node ≥ 22.18 runs `.ts` files directly via type stripping. Relative imports must use the `.ts` extension, and only erasable TypeScript is allowed (`erasableSyntaxOnly`: no enums, namespaces, parameter properties). TypeScript 7 for the backend.
 - SPAs (`adminapp/`, `webapp/`): Vue 3 + Vite, own packages with TypeScript 6 (`vue-tsc` needs the JS API that the Go-based TS 7 lacks). They import shared pure code from `src/` (listed in their `tsconfig.json` and Vite `fs.allow`); such files must not import server dependencies. The web app imports the admin's styles and components relatively from `adminapp/src/` (no copies) (the companion keeps its own copies in `../sc-qm-companion/src/shared`).
 - DB sessions run with JIT off (`src/db/client.ts`): JIT compiled short list queries for ~450 ms each.
-- `local/` is gitignored and holds the StarBreaker binary of our fork (`local/starbreaker-ps/`, built from the repo `../starbreaker-ps`, public at github.com/w00zla/starbreaker-ps (GitHub fork of diogotr7/StarBreaker); `docs/catalog-sources.md` "Icons"), snapshots, external `global.ini` files (`local/localization/<source>/`), the extractor's working directory, screenshots. Game data does not go into the repo. `assets/logo.png` is the app/bot logo (web copies: `adminapp/src/assets/logo-128.png`, `adminapp/public/favicon.png`, `webapp/src/assets/logo-256.png` for the user web app's login page, `webapp/src/assets/logo-{72,144}.png` for its Companion dialog, `webapp/public/favicon.png`; regenerate when it changes).
+- `local/` is gitignored and holds the StarBreaker binary of our fork (`local/starbreaker-ps/`, built from `../starbreaker-ps`), snapshots, external `global.ini` files (`local/localization/<source>/`), the extractor's working directory, screenshots. Game data does not go into the repo. Logo copies in the apps: `docs/webapp.md` "UI rules".
 - Shell scripts must pass `shellcheck`.
 - The checkout is shared by Linux and Windows (NTFS): `.gitattributes` keeps every text file LF in the working tree (`* text=auto eol=lf`: Windows git has `autocrlf`), `core.filemode` is false (NTFS loses the executable bit), `node_modules` is per platform (`pnpm install --config.confirmModulesPurge=false` after switching). File paths from module URLs only via `fileURLToPath` (`URL.pathname` is `/D:/…` on Windows).
 - Ideas adopted from another bot (fg-sc-org-inventory-bot) are concepts only: that repo has no license, never copy its code.
@@ -105,17 +90,17 @@ docker compose run --rm bot node src/bot/register.ts    # after command changes
 
 ## Architecture in brief
 
-- **Catalog** (`docs/catalog-sources.md`): StarBreaker extracts DataCore records from `Data.p4k`, `normalize.ts` turns them into a versioned snapshot (`src/catalog/snapshot.ts`, the contract; blueprint sources from the contract records via `sources.ts`; where ores are mined from the harvestable providers and the object containers (socpaks) via `mining.ts`/`socpak.ts`), `catalog:import` writes schema `catalog` in one transaction under an advisory lock (dry run = rollback); `loc:import` adds community `global.ini` texts by priority; app texts with the reserved prefix `qm_`.
-- **Stock** (`docs/stock.md`): every batch belongs to one user, shared into orgs per batch (`stock_share`); refinery jobs are personal work orders holding refined materials (no ores); ship components are items with quality 0 and optional stat gains; `app.history` records every stock, refinery and blueprint action in the same transaction.
-- **Bot** (`docs/bot.md`): discord.js, options search, modals ask, panels show (Components V2, ephemeral); roster from member roles; logs channel from `app.history`; one board message per org kept current via `LISTEN qm_changes`.
-- **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth (PKCE), hashed session cookies, a strict CSP and same-origin checks, role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket messages that only say what changed; the companion authenticates with a per-user API token (`Bearer qmt_…`) and a version header; features (`app.feature`) beyond the roles are used through their privileges (`app.privilege`, `<feature>.<right>`, assigned per user in the admin); their data goes into `app.feature_entry` (feature, user, subject, JSON payload, optional image; which privilege reads and writes is the code's, `src/webapp/features.ts`).
-- **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth; a control room (dashboard, status, activity), read-only user data (orgs, users, stock, refinery), catalog browser, imports, UEX, bot status texts, features with their privileges (assigned per user) and the export of their data.
-- **Companion** (own repo `../sc-qm-companion`, OCR in `../sc-ohseearr`): Tauri 2 desktop app that reads `Game.log` and the game window and registers blueprints, stock and refinery jobs through the web app's API. Here: the API with its per-user token and version header (`docs/webapp.md`), `GET /api/companion/catalog`, the release files served from `COMPANION_DIR` (`src/webapp/companion.ts`, `docs/deploy.md` § 8) and the web app's Companion dialog.
-- **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext` (refinery terminals and yield bonuses, refining methods; terminals, commodities, commodity and item prices, not used yet).
+- **Catalog** (`docs/catalog-sources.md`): StarBreaker extracts DataCore records from `Data.p4k` → `normalize.ts` → a versioned snapshot (`src/catalog/snapshot.ts`, the contract) → `catalog:import` writes schema `catalog` in one transaction; `loc:import` adds community `global.ini` texts.
+- **Stock** (`docs/stock.md`): every batch belongs to one user, shared into orgs per batch; refinery jobs are personal work orders; `app.history` records every action in the same transaction.
+- **Bot** (`docs/bot.md`): discord.js; roster from member roles; logs channel from `app.history`; one board message per org via `LISTEN qm_changes`.
+- **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth, role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket; features and privileges (`src/webapp/features.ts`).
+- **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth; control room, read-only user data, catalog browser, imports, UEX, features.
+- **Companion / OCR** (own repos `../sc-qm-companion` Tauri desktop app, `../sc-ohseearr` OCR): they register blueprints, stock and refinery jobs through the web app's API (per-user token, version header); here only that API, `GET /api/companion/catalog` and the release files (`docs/webapp.md` "Companion release"). Their tests live there; the API side is covered by `test/webapp*.test.ts`.
+- **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext`.
 
-**Tests** (`test/`): `fixtures.ts` builds synthetic DataCore records (no real game data) and runs them through the real normalizer; the resulting snapshot feeds both the pure tests and the DB integration tests. The companion's own tests are in `../sc-qm-companion`; the API side is covered by `test/webapp*.test.ts`.
+**Tests** (`test/`): `fixtures.ts` builds synthetic DataCore records (no real game data) and runs them through the real normalizer; the resulting snapshot feeds both the pure tests and the DB integration tests.
 
 <!-- claude-reflect: learned rules (saved from the band; edit freely) -->
 ## Learned rules
-- Ensure buttons keep the same size when their state changes; state switches must not alter button dimensions anywhere in the UI.
+- Buttons keep their size when their state changes (details: `docs/webapp.md` "UI rules").
 <!-- end claude-reflect -->

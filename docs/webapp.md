@@ -429,6 +429,14 @@ blocks".
   group rows only, Raffinerie on material rows only). Kept per table with its columns (`useTableColumns`
   `view`); `DataTable` adds the column with `thumbs` (cells from `#cell-thumb`).
 
+### UI rules
+
+- Buttons, chips and toggles keep their size when their state changes: state switches must not alter button dimensions
+  anywhere in the UI (texts via a swap, equal variant borders).
+- `assets/logo.png` is the app/bot logo. Its web copies (regenerate when it changes): `adminapp/src/assets/logo-128.png`,
+  `adminapp/public/favicon.png`, `webapp/src/assets/logo-256.png` (login page), `webapp/src/assets/logo-{72,144}.png` (Companion
+  dialog), `webapp/public/favicon.png`.
+
 ## Security measures
 
 | Vector | Measure |
