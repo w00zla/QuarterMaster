@@ -28,8 +28,8 @@ The Rust side uses [sc-ohseearr](https://github.com/w00zla/sc-ohseearr) as path 
 
 ```sh
 git clone https://github.com/w00zla/sc-ohseearr
-git clone https://github.com/w00zla/sc-qm-companion
-cd sc-qm-companion
+git clone https://github.com/w00zla/QuarterMasterCompanion
+cd QuarterMasterCompanion
 pnpm install
 pnpm directml            # once on Windows: DirectML.dll for the GPU OCR
 pnpm companion:start     # develop (tauri dev)
