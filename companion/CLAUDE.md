@@ -10,7 +10,8 @@ freight manager's warehouse grid, the character inventory and the refinery termi
 proposals the user registers through the Quartermaster web app's API, and draws a click-through overlay over the game.
 German/English UI.
 
-Own repository since 2026-11-06 (history imported from `sc-quartermaster/companion`). The goal is an (optionally)
+Own repository since 2026-11-06 (history imported from `sc-quartermaster/companion`); GitHub `w00zla/QuarterMasterCompanion`
+(private, SSH remote; the local folder is `sc-qm-companion`). The goal is an (optionally)
 standalone tool that can also work without the web app; that mode is not specified or built yet.
 
 Neighbours (sibling checkouts next to this one):
