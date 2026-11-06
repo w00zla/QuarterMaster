@@ -406,42 +406,19 @@ Throwaway script, not in the repo. Result:
 
 ## Icons
 
-Inventory-style icons for everything the app books: the gear items (`componentItemSql`, ship components and FPS
-gear, no consumables), the harvestables (items used as recipe inputs, the stock service's bookable rule: 11
-`Misc/Harvestable`, e.g. Hadanite) and the ore chunks (`catalog.resource.data.rttThumbnailEntityClass`: 25 thumbnail
-entities, an ore and its refined material share one); since 2026-11-01 also the shop items (`shopItemSql`: clothing,
-food, consumables, …, 2941), whose thumbnails the item finder shows; clothing renders worn like armour. 6734
-entities in all. `Data.p4k` holds no 2D item images (`displayIcon` is empty or a generic loadout icon; the commodity
-logos under `ui/sharedassets/commoditylogos/` are category pictures with gaps), so the icons are rendered from the
-models.
+`Data.p4k` holds no 2D item images, so the icons are rendered from the models by **packshot** (`../sc-packshot`, with the
+StarBreaker fork `../starbreaker-ps`; pipeline, runs and look: its `docs/pipeline.md` and `docs/adr/`). This repo only feeds it
+and consumes its output:
 
-The renderer is **packshot**, its own repository `../sc-packshot` since 2026-11-05 (export with the StarBreaker fork
-`../starbreaker-ps`, render in Blender, runs and sets, cluster, look and measurements: its `docs/pipeline.md`, its
-decisions in `docs/adr/`). This repo only feeds it and consumes its output:
+1. **Targets:** `pnpm packshot:targets` (`src/catalog/thumb-targets-cli.ts`, the list itself `src/catalog/thumb-targets.ts`) writes
+   `../sc-packshot/local/packshot/targets.json` from the DB: one entry per entity with `uuids`, `names` (English), `entity`
+   (class name), `type`, `subType`, `worn`. Ore thumbnail entities carry `type: "Thumbnail"`.
+2. **Pack:** `pnpm thumbs:build [--in <packshot live set>] [--out local/thumbs] [--force]` (`tools/thumbs`) turns packshot's
+   set `live` (`<uuid>.png`) into `local/thumbs/{s,m,l}/<uuid>.<hash>.avif` plus `thumbs.json`.
+3. **Serve:** upload with `scripts/push-thumbs.sh` (`docs/deploy.md` § 8); sizes, hashes and the route: `docs/webapp.md`
+   "Thumbnails". Review of wrong thumbnails: `docs/webapp.md` "Features and privileges".
 
-1. **Targets:** `pnpm packshot:targets` (`src/icons/cli.ts`) writes the list from the DB to
-   `../sc-packshot/local/packshot/targets.json`, one entry per entity: `uuids` (catalog UUIDs sharing the entity),
-   `names` (English, parallel to `uuids`), `entity` (class name), `type`, `subType`, `worn` (`Char_Armor_*`,
-   `Char_Clothing_*`). Ore thumbnail entities carry `type: "Thumbnail"`. packshot derives pose and light from the
-   DataCore itself.
-2. **Render:** in packshot (see there). Its set `live` holds the current image of every entity as
-   `<Name> (<class>) <uuid>.png` (256 px, transparent), one file per catalog UUID.
-3. **Pack:** `pnpm thumbs:build [--in ../sc-packshot/local/packshot/sets/live] [--out local/thumbs] [--force]`
-   (`tools/thumbs`, Rust with ravif/rav1e; cargo builds it on first use) turns every `<uuid>.png` into three AVIFs
-   (`src/thumbs.ts`: s 40, m 96, l 256 px; 8-bit, quality 45, speed 6, trimmed to the content with a small transparent
-   border, resized premultiplied) named `<uuid>.<hash>.avif` (hash: SHA-256 of the PNG, 8 hex) plus `thumbs.json`
-   `{uuid: hash}`; unchanged ones are skipped, stale files deleted. A sample of 304 icons: 3 s, the full set (6704):
-   78 s, ~38 MB (S ~0.9 KB, M ~1.6 KB, L ~3.5 KB each, the PNGs average 50 KB). Measured against PNG, 8-bit PNG and
-   WebP: AVIF is the smallest from 96 px up and even with WebP at 40 px. Upload: `scripts/push-thumbs.sh`
-   (`docs/deploy.md` § 8), served by the web app (`docs/webapp.md` "Thumbnails").
-4. **Review:** holders of the privilege `thumb-review.mark` mark wrong thumbnails in the web app and cut a reference out
-   of a screenshot (`docs/webapp.md` "Features and privileges"); the admin's ZIP export of those rows (`docs/adminapp.md`
-   "Features") is the input for fixing pose, light or material in packshot (into an experiment set first). Further
-   references: the companion's debug recordings (`local/stock_scan_debug/*/read-N.{jpg,json}`) hold the game's own
-   inventory and warehouse tiles.
-
-Fan content of this kind is fine (the Star Citizen wiki renders its thumbnails the same way). Ship-only parts
-(turrets, mounts, thrusters, Javelin/890J parts) are out of scope: they are neither bought nor kept in an inventory.
+Ship-only parts (turrets, mounts, thrusters, Javelin/890J parts) are out of scope: neither bought nor kept in an inventory.
 
 ## Open points
 
@@ -452,6 +429,5 @@ Fan content of this kind is fine (the Star Citizen wiki renders its thumbnails t
 - How fast scunpacked-data follows a patch (4.10.2 expected ~2026-10-07/08).
 - Priorities per key pattern (e.g. item names from the game, rest from the community file), if wanted.
 - Raw record history per build (currently only the latest state is kept).
-- Item icons: the game renders item icons live from the 3D models (records say `Icon: Default.bmp`); commodity icons (SVG/DDS) and manufacturer logos exist in `Data.p4k` but are not extracted (decided: not now).
 - 3 blueprints looked mis-assigned by CIG in 4.10.1 (key says DayBreak/Goliath/Polaris, output is FullForce/FoxFire/890J); in 4.10.2 only Polaris is left (output "Glacis", the 890J's, but the Polaris entity is called "Glacis" too). 3 blueprints have implausible modifiers (×9 instead of ×0.9, `thp_light_legs_01_01_{01,03,12}`). Shown as in the data.
 - Location names: the unfinished refinery template is called "WIP Refinery_0001" with a **no-break space** (U+00A0) after "WIP"; jump points are `StarMapObject`s with nav icon Station but type `Anomaly`/`PointOfInterest`.

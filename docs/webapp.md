@@ -169,8 +169,10 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
 
 ### Thumbnails (`thumbs.ts`, `src/thumbs.ts`)
 
-`THUMBS_DIR` (default `local/thumbs`) holds the item thumbnails from `pnpm thumbs:build`
-(`docs/catalog-sources.md` "Icons"): `s/`, `m/`, `l/` (40, 96, 256 px AVIF, shown at 20, 48, 128 CSS px) with
+Item icons are rendered by packshot from the game models (`docs/catalog-sources.md` "Icons"; the targets: `src/catalog/thumb-targets.ts`);
+`pnpm thumbs:build [--in <packshot live set>] [--out <dir>] [--force]` (`tools/thumbs`, Rust with ravif) packs them: 8-bit AVIF,
+quality 45, trimmed to the content, resized premultiplied, unchanged ones skipped, stale files deleted. A full set (~6700) takes
+~80 s and ~38 MB. `THUMBS_DIR` (default `local/thumbs`) holds the result: `s/`, `m/`, `l/` (40, 96, 256 px AVIF, shown at 20, 48, 128 CSS px) with
 `<uuid>.<hash>.avif` each and `thumbs.json` `{uuid: hash}` (re-read when it changes; a broken one keeps the
 previous). The hash is the first 8 hex of the source PNG's SHA-256: a URL never changes its content.
 `GET /thumbs/<s|m|l>/<uuid>.<hash>.avif` serves only what the manifest names, without login (game renders,
@@ -179,10 +181,10 @@ the line once per device. The catalog carries the hash (`CatalogMaterial.thumb`;
 and `thumb` for the crafted item): no hash = no request (the type icon stays), so no 404s. Mining rows carry
 the ore's (`MiningRow.oreUuid`, `thumb`: ores are no catalog materials), history entries their `targetUuid`
 (the SPA looks it up in the catalog). Clients build the
-path with `thumbPath(size, uuid, hash)` from `src/thumbs.ts` (the companion prefixes its server). Same
+path with `thumbPath(size, uuid, hash)` from `src/thumbs.ts` (API consumers prefix their server). Same
 origin: the CSP is unchanged; Vite proxies `/thumbs` in dev. In production Caddy serves `/thumbs/*` straight from
 the same directory (`docs/Caddyfile.example`, without the manifest check); the route is what dev and a setup
-without that block use. Where the SPA shows them: "Layout and building
+without that block use. Upload to the VM: `docs/deploy.md` § 8. Where the SPA shows them: "Layout and building
 blocks".
 
 ### Realtime (`realtime.ts`)
@@ -208,8 +210,7 @@ blocks".
 
 - Vue 3 + Vite like `adminapp/`, imports the admin's styles and components relatively from `adminapp/src/`
   (no copies; `Icon.vue` is the only `v-html`, constants only, `test/spa-sources.test.ts` enforces it).
-  `Picker.vue` has no i18n of its own (the companion app has its own copy): its two texts come via
-  `provide(PICKER_LABELS)` in each app's `App.vue`. Shared pure code from `src/` is listed in
+  `Picker.vue` has no i18n of its own: its two texts come via `provide(PICKER_LABELS)` in `App.vue`. Shared pure code from `src/` is listed in
   `webapp/tsconfig.json` and Vite `fs.allow` (`src/stock/amount.ts`, `quality.ts`, `src/planner/stock.ts`, …).
 - UI texts de/en in `webapp/src/i18n.ts` (same keys enforced by type); language `me.langOverride ??
   navigator.language`, saved via `/api/profile`. `session.ts` holds `/api/me` (401 = login screen); login is

@@ -88,7 +88,7 @@ whole `app`/`bot`/`web` split).
   first actions unchecked against a tooltip; places tried in order, `BasePath.fallbacks`), armor temperatures and radiation dissipation, armor damage mitigation (1 − the multiplier in
   the linked damage record, a second `raw_record` found by its path); null for the rest; `tooltip` =
   `value`, or `change`/`negatedChange` where the tooltip shows the change in percent (from the property's
-  display transformation: impact force, recoil; no base needed); the companion converts the tooltip's
+  display transformation: impact force, recoil; no base needed); API consumers convert the tooltip's
   values with them) and marks them `component` with a
   unique `label` ("Name · Cooler · S3 · B Industrial": the type instead of a manufacturer, the class name
   where that still collides; FPS gear with its sub type and without a size but on attachments, personal weapons without their
@@ -107,8 +107,8 @@ whole `app`/`bot`/`web` split).
   descending); `searchWords`. `src/bot/pickers.ts` builds the Discord autocomplete choices from these.
 - `src/stock/amount.ts`: `parseAmount` (SCU with point or comma, up to 6 decimals; items whole pieces;
   validated as text, never as float), `formatAmount` (NUMERIC text without trailing zeros).
-- `src/stock/material-names.ts`: `findMaterial` (exact name, else a unique prefix; shared by the bot's
-  refinery lines and the companion).
+- `src/stock/material-names.ts`: `findMaterial` (exact name, else a unique prefix; used by the bot's
+  refinery lines).
 
 ## History
 

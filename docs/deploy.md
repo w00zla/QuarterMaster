@@ -170,18 +170,14 @@ ssh w00zla@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node sr
 
 ## 8. Companion app release
 
-Copy the builds (`…_x64-standalone.zip`, the AppImage, the Windows setup with its `.sig` next to it) and `companion.json` (`{"version":"x.y.z","windows":"<zip>","linux":"<AppImage>","windowsSetup":"<setup.exe>"}`) into `local/companion/` of the VM's checkout; the web app picks a new manifest up within seconds, no restart. Its version is the one it requires: older apps get the update panel, the installed one installs the setup itself. No manifest = no downloads and no version check; a setup without its `.sig` = the manifest is ignored. Building the setup and the release scripts live in the companion repo (`../sc-qm-companion`, `docs/companion.md` "Release").
-
-The upload runs from `../sc-qm-companion` against its own `local/companion/` (the release files and `companion.json`): `scripts/publish-win-companion.ps1 w00zla@<vm>` (Windows: collects the build into that folder, then uploads) or `scripts/push-companion.sh w00zla@<vm>` (just the upload; `DEPLOY_PATH`/`-DeployPath` for another checkout path on the VM). It copies the files the manifest names, then the manifest. The manifest goes last: copied first, it would already send outdated apps to downloads that are not there yet. By hand (from the companion repo):
-
-```sh
-scp local/companion/<zip> local/companion/<AppImage> local/companion/<setup.exe> local/companion/<setup.exe>.sig w00zla@<vm>:/opt/sc-quartermaster/local/companion/
-scp local/companion/companion.json w00zla@<vm>:/opt/sc-quartermaster/local/companion/
-```
+Copy the release files and `companion.json` into `local/companion/` of the VM's checkout; the web app picks a new manifest
+up within seconds, no restart (manifest format and version rules: `docs/webapp.md` "Companion release"). The upload runs from
+`../sc-qm-companion` (`docs/companion.md` "Release": `scripts/publish-win-companion.ps1 w00zla@<vm>` or
+`scripts/push-companion.sh w00zla@<vm>`; the manifest is copied last, `DEPLOY_PATH`/`-DeployPath` for another checkout path).
 
 ### Item thumbnails
 
-After `pnpm thumbs:build` (`local/thumbs/`: `s/`, `m/`, `l/`, `thumbs.json`), from the local checkout:
+After `pnpm thumbs:build` (`docs/webapp.md` "Thumbnails"), from the local checkout:
 
 ```sh
 scripts/push-thumbs.sh w00zla@<vm>

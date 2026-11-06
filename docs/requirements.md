@@ -55,11 +55,11 @@ Only the structure is fixed for now; individual settings are added when a featur
 
 - `/qm-refinery create station` opens a modal: duration (optional, as on the terminal: "2h 30m", "45m", minutes; empty = open) and the refined materials as text, **one line per material**: `<name> <quality> <expected yield SCU>` (numbers read from the right, names may be abbreviated as long as they are unique, both languages; up to 30 lines). No ores, no refining method, no estimates: the yield is what the terminal shows (decided 2026-10-10).
 - Submitting shows a **preview** (recognized rows, faulty lines with the reason); **Register** books the work order exactly as previewed, **Edit** reopens the modal with the text, **Cancel** drops it. The draft lives in memory (`state.ts`, 10 min).
-- `/qm-refinery time job` sets or clears the time left of a running job (end = now + time left; no journal, no history: no stock changes). The web app and the companion's API (`POST /api/refinery/duration`) do the same; the companion sets it from the terminal's work order overview.
+- `/qm-refinery time job` sets or clears the time left of a running job (end = now + time left; no journal, no history: no stock changes). The web app and the API (`POST /api/refinery/duration`) do the same.
 - `/qm-refinery done job` opens a modal prefilled with one line per material and its expected yield ("Quantainium 820: 5.69"); only the numbers are the user's, the lines are checked in order; submitting stores them.
 - `/qm-refinery remove job` drops a job that will not come out (cancelled, lost to a game patch): a panel names it, **Remove** confirms.
 - `/qm-refinery list` shows your running jobs (station, countdown, "ready" or "duration open", materials with their yields).
-- The companion app syncs the jobs of a station from the terminal's work order overview: yield and time left of known jobs are updated by themselves; new jobs, finished ones (to store) and jobs missing at the terminal (to remove) are proposals the user confirms.
+- The companion app (sc-qm-companion) syncs the jobs of a station from the terminal's work order overview: its requirements are in `../sc-qm-companion/docs/companion.md` "Requirements".
 
 ## Stock
 
