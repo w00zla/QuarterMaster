@@ -156,7 +156,8 @@ item class label. The SPA view: "Views".
 
 The companion app itself (code, build, release scripts) is in `../sc-qm-companion`; this is the server side.
 
-`COMPANION_DIR` (default `local/companion`) holds the built app files and `companion.json`
+`COMPANION_DIR` (default `local/companion`; locally `../sc-qm-companion/local/companion`, where the companion's
+publish script writes) holds the built app files and `companion.json`
 `{"version":"x.y.z","windows":"<…_x64-standalone.zip>","linux":"<.AppImage>","windowsSetup":"<…_x64-setup.exe>"}`
 (re-read when it changes; the setup's updater signature is read from `<setup>.sig` next to it, missing =
 manifest ignored). `GET /api/companion` lists version and downloads (the setup first, `kind` setup or
