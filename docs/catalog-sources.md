@@ -411,7 +411,7 @@ StarBreaker fork `../starbreaker-ps`; pipeline, runs and look: its `docs/pipelin
 and consumes its output:
 
 1. **Targets:** `pnpm packshot:targets` (`src/catalog/thumb-targets-cli.ts`, the list itself `src/catalog/thumb-targets.ts`) writes
-   `../sc-packshot/local/packshot/targets.json` from the DB: one entry per entity with `uuids`, `names` (English), `entity`
+   `local/packshot-targets.json` from the DB (copy it into packshot's `targets/` folder by hand): one entry per entity with `uuids`, `names` (English), `entity`
    (class name), `type`, `subType`, `worn`. Ore thumbnail entities carry `type: "Thumbnail"`.
 2. **Pack:** `pnpm thumbs:build [--in <packshot main set>] [--out local/thumbs] [--force]` (`tools/thumbs`) turns packshot's
    set `main` (`<uuid>.png`) into `local/thumbs/{s,m,l}/<uuid>.<hash>.avif` plus `thumbs.json`.
