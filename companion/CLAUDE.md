@@ -39,7 +39,7 @@ pnpm typecheck                  # vue-tsc over src/
 pnpm test                       # node tests in test/ (pure frontend logic)
 cargo test --release --manifest-path src-tauri/Cargo.toml          # Rust tests (pure: no local data; the readers' screenshot tests are sc-ohseearr's)
 cargo run --release --manifest-path src-tauri/Cargo.toml --example inventory_dump -- <out dir> <dir>... [--threads n] [--gpu]   # warehouse read over screenshots/recordings, overlays per frame
-cargo run --release --manifest-path src-tauri/Cargo.toml --example components_dump -- <dir>... [--threads n] [--gpu]            # character inventory read
+cargo run --release --manifest-path src-tauri/Cargo.toml --example components_dump -- <[set=]dir>... [--threads n] [--gpu] [--dataset <out dir>]   # character inventory read; --dataset: the tooltip lines as a line-crop dataset (tools/dataset-export/README.md)
 cargo run --release --manifest-path ../sc-ohseearr/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]                # raw OCR of an image (sc-ohseearr's)
 scripts/regression-dumps.sh <out dir> [repo root]   # the three dumps (inventory_dump, components_dump, sc-ohseearr's ocr_dump) over the fixed recordings/screenshots, normalized: compare with a baseline before and after any OCR/reader change (byte-identical is the bar)
 scripts/publish-win-companion.ps1 <user@host>       # Windows release: setup + .sig + standalone zip into $COMPANION_DIR (default local/companion), companion.json updated, then pushed by push-companion.mjs
@@ -59,7 +59,7 @@ Debug recordings (the debug window's "Record data") hold every read's frame + JS
 - The refinery read needs the game's texts: the active language pack's `global.ini`, else an English table at
   `<app local data>/global-english.ini` (made with sc-ohseearr's `scripts/extract-global-ini.*`). No game texts are
   compiled in.
-- `local/` is gitignored: `logo.png`, scratch examples, and junctions to the data in `../sc-ohseearr/local` (screenshots, debug recordings, OCR data, the training venv `detector/.venv`) and to `../sc-quartermaster/local/companion` (the release files the server serves).
+- `local/` is gitignored: `logo.png`, scratch examples, and `companion/`, the release files (`publish-win-companion.ps1` writes them; a local Quartermaster web app serves them with `COMPANION_DIR=../sc-qm-companion/local/companion` in its `.env`). Screenshots, debug recordings and OCR datasets live in sc-ohseearr's data root (`$SC_OHSEEARR_DATA`, else `../sc-ohseearr/local`); the tools take it as an argument or from that default (ADR 0011 there).
 - Text files are LF (`.gitattributes`), `core.filemode` false (the checkout may be shared by Windows and Linux);
   `node_modules` and `src-tauri/target` are per platform.
 

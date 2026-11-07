@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Runs the OCR examples (the companion's inventory_dump and components_dump, sc-ohseearr's ocr_dump) over a
-# fixed selection of screenshots and debug recordings in <repo>/local/ and writes raw and normalized outputs,
-# to compare two builds of the companion byte for byte (diff the *.norm.txt files and overlays.sha256).
+# fixed selection of screenshots and debug recordings in sc-ohseearr's data root and writes raw and normalized
+# outputs, to compare two builds of the companion byte for byte (diff the *.norm.txt files and overlays.sha256).
 #
 #   scripts/regression-dumps.sh <out dir> [repo root]
 #
-# The repo root defaults to the one this script lives in; its data is read from <root>/local/, sc-ohseearr
-# from the sibling checkout <root>/../sc-ohseearr (the one the companion builds against).
+# The repo root defaults to the one this script lives in; sc-ohseearr is the sibling checkout
+# <root>/../sc-ohseearr (the one the companion builds against), the data is read from its data root
+# ($SC_OHSEEARR_DATA, else <root>/../sc-ohseearr/local).
 set -euo pipefail
 
 out=${1:?usage: regression-dumps.sh <out dir> [repo root]}
 root=${2:-$(cd "$(dirname "$0")/.." && pwd)}
-data=$root/local
+data=${SC_OHSEEARR_DATA:-$root/../sc-ohseearr/local}
 manifest=$root/src-tauri/Cargo.toml
 ocr_manifest=$root/../sc-ohseearr/Cargo.toml
 

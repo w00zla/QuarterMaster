@@ -4,7 +4,7 @@
 // = the stat name from the catalog + the value read.
 //
 // node tools/dataset-export/ocr-eval-label.ts --catalog <en.json> [--catalog <de.json> ...] --pack <global.ini>
-//     [--dir local/ocr-eval] [--out <labels.tsv>]
+//     [--dir <data root>/ocr-eval] [--out <labels.tsv>]
 //
 // --catalog  the web app's GET /api/companion/catalog response of one language, or the companion's kept copy of it
 //            (app data folder, api/_api_catalog_lang_en.json: { etag, body }). Repeat it for more languages; the
@@ -15,7 +15,8 @@
 //            carry arbitrary description keys; for those the pack's nearby entries are compared and the item's
 //            description lines are labelled only when one entry clearly contains the most of its reads. Ambiguous
 //            variants are skipped (a missing label is fine in an eval set, a wrong one is not).
-// --dir      holds index.tsv (default: local/ocr-eval of this checkout)
+// --dir      holds index.tsv (default: ocr-eval in sc-ohseearr's data root: $SC_OHSEEARR_DATA, else the sibling
+//            checkout's ../sc-ohseearr/local)
 // --out      default: <dir>/labels.tsv
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +27,8 @@ import type { CompanionCatalogResponse } from '../../src/apiTypes.ts';
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const args = process.argv.slice(2);
 const opts = (name: string) => args.flatMap((a, i) => (a === name && args[i + 1] ? [args[i + 1]!] : []));
-const DIR = opts('--dir')[0] ?? `${ROOT}local/ocr-eval`;
+const DATA_ROOT = process.env.SC_OHSEEARR_DATA || `${ROOT}../sc-ohseearr/local`;
+const DIR = opts('--dir')[0] ?? `${DATA_ROOT}/ocr-eval`;
 const OUT = opts('--out')[0] ?? `${DIR}/labels.tsv`;
 const PACK = opts('--pack')[0];
 const catalogFiles = opts('--catalog');

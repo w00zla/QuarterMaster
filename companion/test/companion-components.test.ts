@@ -234,7 +234,7 @@ describe('proposals', () => {
   });
 });
 
-// FPS gear as the user's screenshots of 2026-10-22 show it (local/screenshots/inventory 4)
+// FPS gear as the user's screenshots of 2026-10-22 show it (sc-ohseearr's data root, screenshots/inventory 4)
 describe('FPS gear', () => {
   const CQ7 = '00000000-0000-4000-8000-000000000011';
   const CANUTO = '00000000-0000-4000-8000-000000000012';

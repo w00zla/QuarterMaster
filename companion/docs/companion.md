@@ -290,9 +290,10 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   left, a new reader when the scan stops) and reads every tile's badge after `set_diagnostics(true)` (the debug window
   open: the costly part); the **hovered tile** is the one under the mouse cursor, which the capture passes with every
   frame (`Frame.cursor`; screenshots without a cursor fall back to the tooltip's hints).
-- **Retraining the layout detector**: export windows from debug recordings with `tools/dataset-export/warehouse_coco.py`
-  (strong fits only; screenshots without a warehouse as negatives, `--neg`), run sc-ohseearr's layout pipeline on the
-  recipe (`training/README.md` there), then `scripts/regression-dumps.sh` here against the read before.
+- **Retraining the layout detector**: its COCO set exists (exported from recordings up to 1.3.1 by the former
+  `warehouse_coco.py`); an export of the current recording format into `inventory_dump` is not built yet. Run
+  sc-ohseearr's layout pipeline on the recipe (`training/README.md` there), then `scripts/regression-dumps.sh` here
+  against the read before.
 
 ### Sightings and proposals (frontend)
 
@@ -485,8 +486,8 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   runs `inventory_dump`, `components_dump` (this repo) and sc-ohseearr's `ocr_dump` over a fixed selection of
   recordings and screenshots (740 warehouse frames, 444 character inventory frames, 62 images of the refinery and the
   freight elevator terminal), compared byte for byte (`*.norm.txt`, `overlays.sha256`) against the build before.
-- **The recognizer's training data from here**: `tools/dataset-export/` exports the real tooltip lines from debug
-  recordings and `components_dump` outputs (its README); the game's font (Blender Pro, taken from `Data.p4k`) is used
+- **The recognizer's training data from here**: `components_dump --dataset` exports the real tooltip lines from debug
+  recordings as line crops, `tools/dataset-export/ocr-eval-label.ts` labels them (its README); the game's font (Blender Pro, taken from `Data.p4k`) is used
   for local training only and never goes into git or a build.
 - **On the GPU** (Windows; setting "GPU-Beschleunigung aktivieren", config `gpu`, off by default since 2026-10-31: on a
   fast CPU the reads are hardly faster and it holds VRAM next to the game): ONNX Runtime's DirectML execution provider
