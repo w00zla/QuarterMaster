@@ -171,7 +171,7 @@ the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no m
 ### Thumbnails (`thumbs.ts`, `src/thumbs.ts`)
 
 Item icons are rendered by packshot from the game models (`docs/catalog-sources.md` "Icons"; the targets: `src/catalog/thumb-targets.ts`);
-`pnpm thumbs:build [--in <packshot live set>] [--out <dir>] [--force]` (`tools/thumbs`, Rust with ravif) packs them: 8-bit AVIF,
+`pnpm thumbs:build [--in <packshot main set>] [--out <dir>] [--force]` (`tools/thumbs`, Rust with ravif) packs them: 8-bit AVIF,
 quality 45, trimmed to the content, resized premultiplied, unchanged ones skipped, stale files deleted. A full set (~6700) takes
 ~80 s and ~38 MB. `THUMBS_DIR` (default `local/thumbs`) holds the result: `s/`, `m/`, `l/` (40, 96, 256 px AVIF, shown at 20, 48, 128 CSS px) with
 `<uuid>.<hash>.avif` each and `thumbs.json` `{uuid: hash}` (re-read when it changes; a broken one keeps the

@@ -50,7 +50,7 @@ pnpm catalog:import <snapshot.json.gz> --label 4.10.2 [--dry-run] [--force] [--a
 pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry-run] [--force]
 pnpm loc:import --remove --source <name> --lang <code>
 pnpm packshot:targets [--out <f>]    # the target list for packshot (../sc-packshot renders the icons) from the DB
-pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]   # packshot's set live -> local/thumbs/ (AVIFs + thumbs.json; docs/webapp.md "Thumbnails")
+pnpm thumbs:build [--in <dir>] [--out <dir>] [--force]   # packshot's set main -> local/thumbs/ (AVIFs + thumbs.json; docs/webapp.md "Thumbnails")
 
 pnpm adminapp            # admin API + built UI on 127.0.0.1:3000 (basic auth from .env)
 pnpm adminapp:watch      # the same, restarting on source changes
