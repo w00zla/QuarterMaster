@@ -27,8 +27,8 @@ Where things are described (read the matching file before working in an area):
 
 **Status:** catalog pipeline, admin web UI, the bot with all its commands, logs channel and org board, the
 stock service, UEX pull and the user web app are built. In production since 2026-10-05 (Docker Compose on a
-VM behind Caddy), not live for users yet: the production DB holds no real data, the user web app is not
-deployed, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6).
+VM behind Caddy). The bot has its first real users (two as of 2026-11-08), so the production DB holds real data;
+the user web app is deployed but not public yet, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6).
 
 ## Commands
 
