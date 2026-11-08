@@ -22,7 +22,13 @@ export interface OverviewRow {
   name: string;
   quality: number | null;
   yieldCscu: number | null;
+  // The OCR's confidence in the numbers, 0–1 (recordings before 2.1.1 lack it)
+  score?: number;
 }
+
+// Below this a row's numbers are not trusted: on the recordings of 2026-11-08 every misread (1080p "782" as 762)
+// scored 0.87–0.90, 607 of 614 right rows 0.97 or more
+const MIN_ROW_SCORE = 0.95;
 
 export interface OverviewOrder {
   status: "processing" | "completed";
@@ -136,8 +142,8 @@ export interface Order {
   seconds: number | null;
   // Merged per material and quality, sorted
   rows: OrderRow[];
-  // A message over the panel: rows may be missing or misread
-  covered: boolean;
+  // Not to be taken as read: a message over the panel (rows may be missing or misread) or a row the OCR is unsure of
+  unsure: boolean;
 }
 
 const rowKey = (resourceUuid: string, quality: number) => `${resourceUuid}:${quality}`;
@@ -169,7 +175,8 @@ export function resolveOrder(o: OverviewOrder, cat: SyncCatalog): Order | null {
     const uuid = findMaterial(cat.materials, r.name);
     if (uuid) rows.push({ resourceUuid: uuid, quality: r.quality, yieldCscu: r.yieldCscu });
   }
-  return rows.length ? { status: o.status, seconds: o.seconds, rows: merged(rows), covered: o.covered ?? false } : null;
+  const lowScore = o.rows.some((r) => r.quality !== null && r.yieldCscu !== null && (r.score ?? 1) < MIN_ROW_SCORE);
+  return rows.length ? { status: o.status, seconds: o.seconds, rows: merged(rows), unsure: (o.covered ?? false) || lowScore } : null;
 }
 
 /** Which job an order may be: its materials and qualities. */
@@ -265,8 +272,8 @@ export class RefinerySync {
     const here = jobs.filter((j) => j.locationUuid === locationUuid);
     const orders = e.overview.orders.map((o) => resolveOrder(o, cat)).filter((o): o is Order => o !== null);
     const before = this.lastRead.get(locationUuid) ?? new Set<string>();
-    // A covered order never counts as read (a later read agreeing with it would pass)
-    this.lastRead.set(locationUuid, new Set(orders.filter((o) => !o.covered).map(content)));
+    // An unsure order never counts as read (a later read agreeing with it would pass)
+    this.lastRead.set(locationUuid, new Set(orders.filter((o) => !o.unsure).map(content)));
 
     const updates: Update[] = [];
     const used = new Set<string>();
@@ -278,8 +285,8 @@ export class RefinerySync {
         this.seenJobs.add(job.jobId);
         this.drop(`missing:${job.jobId}`);
       }
-      // A message over the panel ("Work Order Accepted"): rows may be missing or misread
-      if (o.covered) continue;
+      // A message over the panel ("Work Order Accepted") or numbers the OCR is unsure of: not taken as read
+      if (o.unsure) continue;
       // Only what two reads in a row showed the same
       if (!before.has(content(o))) continue;
       if (o.status === "processing" && job) updates.push(...jobUpdates(job, o, endsAtMs, nowMs));

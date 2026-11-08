@@ -135,6 +135,26 @@ describe('companion refinery sync', () => {
     assert.deepEqual(second.updates, []);
   });
 
+  it('a row the OCR is unsure of keeps its order from counting', () => {
+    // 2026-11-08, 1080p: "782" read as 762 twice in a row, both times with a score of 0.87–0.90
+    const misread = completed([['HEPHAESTANITE', 572, 91], ['SILICON', 310, 540], ['SILICON', 762, 105]]);
+    misread.rows[2]!.score = 0.887;
+    const sync = new RefinerySync();
+    twice(sync, read(T0, misread), []);
+    assert.equal(sync.proposals.length, 0);
+    // Sure reads (and older recordings without a score) count as before
+    const sure = completed(ORDER2);
+    sure.rows.forEach((r) => (r.score = 0.99));
+    twice(sync, read(T0 + 6000, sure), []);
+    assert.equal(sync.proposals.length, 1);
+    // A row without a number (left out anyway, its score 0) does not count against its order
+    const withStray = completed(ORDER2);
+    withStray.rows.push({ name: 'c Irol', quality: 702, yieldCscu: null, score: 0 });
+    const other = new RefinerySync();
+    twice(other, read(T0, withStray), []);
+    assert.equal(other.proposals.length, 1);
+  });
+
   it('a finished order with rows hidden is no order of its own', () => {
     // Read short first, then whole: one proposal, the fuller one
     const sync = new RefinerySync();
