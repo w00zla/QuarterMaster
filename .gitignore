@@ -11,3 +11,10 @@ node_modules/
 
 # Database dumps from scripts/deploy.sh
 /backups/
+
+# Build output and TypeScript build info (companion; adminapp and webapp have their own)
+dist/
+*.tsbuildinfo
+
+# Python
+__pycache__/

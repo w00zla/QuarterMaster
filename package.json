@@ -29,7 +29,11 @@
     "webapp:build": "pnpm --filter sc-quartermaster-webapp build",
     "bot": "node --env-file-if-exists=.env src/bot/main.ts",
     "bot:register": "node --env-file-if-exists=.env src/bot/register.ts",
-    "ext": "node --env-file-if-exists=.env src/ext/main.ts"
+    "ext": "node --env-file-if-exists=.env src/ext/main.ts",
+    "companion:start": "pnpm --filter sc-quartermaster-companion tauri dev",
+    "companion:build": "pnpm --filter sc-quartermaster-companion exec node scripts/by-platform.mjs build:",
+    "companion:fast": "pnpm --filter sc-quartermaster-companion exec node scripts/by-platform.mjs build:fast:",
+    "companion:directml": "pnpm --filter sc-quartermaster-companion directml"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",
