@@ -30,7 +30,7 @@ Product requirements (moved here from sc-quartermaster's `docs/requirements.md`,
 - Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `logwatch`, `gamelog`, `server`, `ocr` (loads the
   OCR), `inventory` (warehouse), `components` (character inventory), `refinery` (the three: the companion's payloads
   and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker), `capture` (the capture loop on
-  sc-ohseearr's capture crate), `overlay`. The OCR engine and models, the screen readers, the game's texts (`Locale`)
+  sc-ohseearr's capture crate), `overlay`. The OCR engine and models, the readers, the game's texts (`Locale`)
   and the capture itself are sc-ohseearr's (`../sc-ohseearr`, path dependencies; see "OCR").
 - Vue SPA with three pages (`index.html` → `App.vue`, `debug.html` → `DebugApp.vue`, `overlay.html` →
   `OverlayApp.vue`), components in `src/components/`, styles in `src/styles/` (`base.css` with tokens, fonts and
@@ -281,7 +281,7 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
 ### The read
 
-- sc-ohseearr's `WarehouseReader` (`../sc-ohseearr/usecases/warehouse`: its README is the use case card, the module
+- sc-ohseearr's `WarehouseReader` (`../sc-ohseearr/readers/warehouse`: its README is the reader card, the module
   docs the read; `inventory.rs` adapts its output to `Grid`, the field mapping in its module docs). In short: the
   reader's own layout detector (`sc-warehouse-layout`, NanoDet-Plus, its card `models/sc-warehouse-layout/MODEL.md`
   there) finds the badges, quality texts and the tooltip's lines, a grid is fitted to them per frame, and only the
@@ -317,7 +317,7 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
 Ship components and FPS gear (weapons, attachments, armor, gadgets; since 2026-10-22), read in the character
 inventory's "Storage Access" screen, because only its tooltip shows an item's stats. The read is sc-ohseearr's
-`GearInventoryReader` (`../sc-ohseearr/usecases/gear-inventory`, its README and module docs: the storage pane, the
+`GearInventoryReader` (`../sc-ohseearr/readers/gear-inventory`, its README and module docs: the storage pane, the
 UI scale `k` from the page number's place, the tooltip at its fixed place right of the character, the stack count,
 the hovered tile from the game's lit frame around it, the row in the scrolled content); `components.rs` adapts its
 output to `ComponentRead`, the pure part is `components.ts`. The reader keeps the UI scale until the scan stops; the
@@ -471,9 +471,9 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   the companion is built): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
   `paddle-det-tiny` (PP-OCRv6 tiny's detector), `sc-rec-latin` (our recognizer: tiny's cut to Latin and fine-tuned on
   the game's font) and `sc-warehouse-layout`, compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the
-  reader interface, the game's texts), the use cases `-warehouse`, `-gear-inventory`, `-refinery` and
+  reader interface, the game's texts), the readers `-warehouse`, `-gear-inventory`, `-refinery` and
   `sc-ohseearr-capture-win`. How they work, what was tried, the measurements and the model history: its README, the
-  use case READMEs, the model cards (`models/*/MODEL.md`), `training/README.md` and `docs/adr/` (0006/0007/0010 the
+  reader READMEs, the model cards (`models/*/MODEL.md`), `training/README.md` and `docs/adr/` (0006/0007/0010 the
   readers). Changes to the engine, models or readers belong there.
 - `ocr.rs` only loads the `Ocr` (`ocr::load(threads, gpu)`: ONNX Runtime's intra-op threads, 3 in the scan
   (`OCR_THREADS`, the game runs too)); `ocrwatch` loads it on the first read (well under a second, logged "OCR Tiny
@@ -516,7 +516,7 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
 
 ## Refinery
 
-- Read: sc-ohseearr's `RefineryReader` (`../sc-ohseearr/usecases/refinery`, its README; `refinery.rs` adapts its output
+- Read: sc-ohseearr's `RefineryReader` (`../sc-ohseearr/readers/refinery`, its README; `refinery.rs` adapts its output
   to `Overview`/`Read`). It reads only the terminal's **work order overview** (the station from the title, every
   work order panel with its rows: processing orders with quality, yield and time remaining, completed ones with
   quality and yield; a panel cut by the edge is left out), anchored on 9 loc keys whose texts come from the frame's

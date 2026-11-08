@@ -12,7 +12,7 @@ reads what the game shows and turns it into stock, blueprint and refinery entrie
 - **Overlay**: what the scan sees, drawn click-through over the game.
 - German and English; follows the game's language pack.
 
-The OCR, the screen readers, the game's language tables and the window capture come from
+The OCR, the readers, the game's language tables and the window capture come from
 [sc-ohseearr](https://github.com/w00zla/sc-ohseearr), a separate repository for OCR of Star Citizen screens (engine,
 models, readers, training).
 

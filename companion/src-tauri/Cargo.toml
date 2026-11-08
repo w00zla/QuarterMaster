@@ -39,9 +39,9 @@ sc-ohseearr-model-sc-rec-latin = { path = "../../sc-ohseearr/models/sc-rec-latin
 # The screen readers: sc-ohseearr's Star Citizen layer (reader interface, the game's texts from global.ini) and its
 # use cases (the warehouse reader brings its layout detector, `sc-warehouse-layout`, compiled in)
 sc-ohseearr-sc = { path = "../../sc-ohseearr/crates/sc" }
-sc-ohseearr-warehouse = { path = "../../sc-ohseearr/usecases/warehouse" }
-sc-ohseearr-gear-inventory = { path = "../../sc-ohseearr/usecases/gear-inventory" }
-sc-ohseearr-refinery = { path = "../../sc-ohseearr/usecases/refinery" }
+sc-ohseearr-warehouse = { path = "../../sc-ohseearr/readers/warehouse" }
+sc-ohseearr-gear-inventory = { path = "../../sc-ohseearr/readers/gear-inventory" }
+sc-ohseearr-refinery = { path = "../../sc-ohseearr/readers/refinery" }
 # Screen capture of the game window (DXGI Desktop Duplication, cursor, rest; Windows only) and the parts the
 # platform independent worker uses too (`Pixels`, the change gate `Gate`), which build everywhere
 sc-ohseearr-capture-win = { path = "../../sc-ohseearr/crates/capture-win" }

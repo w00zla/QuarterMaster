@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use companion_lib::inventory::to_legacy;
 use companion_lib::ocr::{self, Rect};
 use image::{Rgb, RgbImage};
-use sc_ohseearr_sc::{Frame, ScreenReader};
+use sc_ohseearr_sc::{Frame, Reader};
 use sc_ohseearr_warehouse::WarehouseReader;
 
 fn main() {

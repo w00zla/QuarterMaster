@@ -38,7 +38,7 @@ use base64::Engine;
 use image::{ImageFormat, RgbImage};
 use sc_ohseearr_gear_inventory::GearInventoryReader;
 use sc_ohseearr_refinery::RefineryReader;
-use sc_ohseearr_sc::{Locale, LocaleSource, ScreenReader};
+use sc_ohseearr_sc::{Locale, LocaleSource, Reader};
 use sc_ohseearr_warehouse::WarehouseReader;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -561,7 +561,7 @@ struct Visit {
     last_frame: Instant,
 }
 
-/// The screen readers (sc-ohseearr's), each with what it keeps across frames: the warehouse reader its last
+/// The readers (sc-ohseearr's), each with what it keeps across frames: the warehouse reader its last
 /// strong layout (the next read's prior: its area around the cursor, its pitch, its columns for ties; dropped when
 /// the screen is left) and its layout detector, the character inventory reader its UI scale (from the last page
 /// number read), the refinery reader its labels. Made anew when the scan stops: their memory goes, and the next

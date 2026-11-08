@@ -16,7 +16,7 @@ the web app soon, with a standalone version (no web app, no account) next to the
 built yet; what ties it to the web app today is listed in `.claude/open-points.md` "Standalone version".
 
 Neighbours (sibling checkouts next to this one):
-- `../sc-ohseearr`: OCR engine, model packages, the screen readers (`usecases/warehouse`, `gear-inventory`,
+- `../sc-ohseearr`: OCR engine, model packages, the readers (`readers/warehouse`, `gear-inventory`,
   `refinery`), the language tables (`sc` crate) and the window capture (`capture-win`), as Rust path dependencies.
   **Required to build.** Its `docs/adr/` holds the OCR decisions.
 - `../sc-quartermaster`: the web app/bot whose API the companion talks to (token `qmt_…`, version header,
