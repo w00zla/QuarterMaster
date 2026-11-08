@@ -36,8 +36,9 @@ memchr = "2"
 sc-ohseearr-core = { path = "../../sc-ohseearr/crates/core" }
 sc-ohseearr-model-paddle-det-tiny = { path = "../../sc-ohseearr/models/paddle-det-tiny" }
 sc-ohseearr-model-sc-rec-latin = { path = "../../sc-ohseearr/models/sc-rec-latin" }
-# The screen readers: sc-ohseearr's Star Citizen layer (reader interface, the game's texts from global.ini) and its
-# use cases (the warehouse reader brings its layout detector, `sc-warehouse-layout`, compiled in)
+sc-ohseearr-model-sc-warehouse-layout = { path = "../../sc-ohseearr/models/sc-warehouse-layout" }
+# The readers: sc-ohseearr's Star Citizen layer (reader interface, the game's texts from global.ini) and its
+# readers (the warehouse reader gets its layout detector, `sc-warehouse-layout`, from `ocr::warehouse_reader`)
 sc-ohseearr-sc = { path = "../../sc-ohseearr/crates/sc" }
 sc-ohseearr-warehouse = { path = "../../sc-ohseearr/readers/warehouse" }
 sc-ohseearr-gear-inventory = { path = "../../sc-ohseearr/readers/gear-inventory" }

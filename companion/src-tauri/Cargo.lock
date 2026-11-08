@@ -3168,6 +3168,7 @@ dependencies = [
  "sc-ohseearr-gear-inventory",
  "sc-ohseearr-model-paddle-det-tiny",
  "sc-ohseearr-model-sc-rec-latin",
+ "sc-ohseearr-model-sc-warehouse-layout",
  "sc-ohseearr-refinery",
  "sc-ohseearr-sc",
  "sc-ohseearr-warehouse",
@@ -3690,7 +3691,6 @@ version = "0.1.0"
 dependencies = [
  "image",
  "sc-ohseearr-core",
- "sc-ohseearr-model-sc-warehouse-layout",
  "sc-ohseearr-sc",
  "serde",
 ]

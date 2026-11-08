@@ -561,14 +561,12 @@ struct Visit {
     last_frame: Instant,
 }
 
-/// The readers (sc-ohseearr's), each with what it keeps across frames: the warehouse reader its last
-/// strong layout (the next read's prior: its area around the cursor, its pitch, its columns for ties; dropped when
-/// the screen is left) and its layout detector, the character inventory reader its UI scale (from the last page
-/// number read), the refinery reader its labels. Made anew when the scan stops: their memory goes, and the next
-/// start may see the screens from elsewhere.
+/// The readers without a model of their own (sc-ohseearr's; the warehouse reader is part of `Models`), each with
+/// what it keeps across frames: the character inventory reader its UI scale (from the last page number read), the
+/// refinery reader its labels. Made anew when the scan stops: their memory goes, and the next start may see the
+/// screens from elsewhere.
 #[derive(Default)]
 struct Readers {
-    warehouse: WarehouseReader,
     gear: GearInventoryReader,
     refinery: RefineryReader,
 }
@@ -607,8 +605,8 @@ struct Worker {
     fast: FastCapture,
     /// The game in front (else no frames come, and the screen is left)
     front: GameFront,
-    /// The OCR (`ensure_ocr`), loaded once needed, on the GPU (`on_gpu`) or the CPU
-    ocr: Option<Ocr>,
+    /// The models (`ensure_models`), loaded once needed, on the GPU (`on_gpu`) or the CPU
+    models: Option<Models>,
     gpu: Gpu,
     on_gpu: bool,
     gate: Gate,
@@ -639,11 +637,22 @@ pub(crate) fn unix_ms(t: SystemTime) -> u64 {
 /// tiny's detector, our recognizer).
 const MODELS: &str = "tiny";
 
-/// The OCR, loaded on first use.
-fn ensure_ocr(slot: &mut Option<Ocr>, gpu: bool) -> Result<&mut Ocr, String> {
+/// The models of a scan, all on one device: the OCR (detector, recognizer) and the warehouse reader with its layout
+/// detector (the reader owns it). Loaded together, dropped together: on a switch of the device and when the scan
+/// stops. The warehouse reader keeps its last strong layout across frames (the next read's prior: its area around
+/// the cursor, its pitch, its columns for ties; dropped when the screen is left), so it goes with them.
+struct Models {
+    ocr: Ocr,
+    warehouse: WarehouseReader,
+}
+
+/// The models, loaded on first use.
+fn ensure_models(slot: &mut Option<Models>, gpu: bool) -> Result<&mut Models, String> {
     if slot.is_none() {
         let started = Instant::now();
-        *slot = Some(crate::ocr::load(OCR_THREADS, gpu).map_err(|e| format!("models: {e}"))?);
+        let ocr = crate::ocr::load(OCR_THREADS, gpu).map_err(|e| format!("models: {e}"))?;
+        let warehouse = crate::ocr::warehouse_reader(OCR_THREADS, gpu).map_err(|e| format!("layout model: {e}"))?;
+        *slot = Some(Models { ocr, warehouse });
         log::info!("OCR Tiny loaded in {:?} on the {}", started.elapsed(), if gpu { "GPU" } else { "CPU" });
     }
     Ok(slot.as_mut().expect("loaded above"))
@@ -660,7 +669,7 @@ impl Worker {
             fast,
             front,
             debug_tx,
-            ocr: None,
+            models: None,
             gpu,
             on_gpu: false,
             gate: Gate::default(),
@@ -694,7 +703,7 @@ impl Worker {
                 self.locale = LocaleSource::default();
                 // Off: the OCR's memory goes right away (the next start loads it again in well under a
                 // second); while the scan runs it stays, read or not
-                if self.ocr.take().is_some() {
+                if self.models.take().is_some() {
                     log::info!("OCR unloaded (scan stopped)");
                 }
                 continue;
@@ -762,7 +771,7 @@ impl Worker {
         let want = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu && self.gpu.state() == GpuState::Ready;
         if want != self.on_gpu {
             self.on_gpu = want;
-            if self.ocr.take().is_some() {
+            if self.models.take().is_some() {
                 log::info!("OCR unloaded (now on the {})", if want { "GPU" } else { "CPU" });
             }
         }
@@ -772,9 +781,10 @@ impl Worker {
     fn take_phases(&mut self) -> (String, OcrInfo) {
         let setting = self.app.state::<Mutex<crate::AppData>>().lock().unwrap().config.gpu;
         let mut info = OcrInfo { models: Vec::new(), gpu: self.on_gpu, setting, status: self.gpu.state(), ms: 0 };
-        let Some(mut t) = self.ocr.as_mut().map(Ocr::take_timings) else { return (String::new(), info) };
+        let Some(models) = self.models.as_mut() else { return (String::new(), info) };
+        let mut t = models.ocr.take_timings();
         // The warehouse reader's layout detector counts as the detector's
-        t += self.readers.warehouse.take_timings();
+        t += models.warehouse.take_timings();
         if t.det_runs + t.rec_runs == 0 {
             return (String::new(), info);
         }
@@ -791,7 +801,9 @@ impl Worker {
         let at_ms = unix_ms(SystemTime::now());
         if self.screen == Screen::Warehouse {
             // The next warehouse may be seen from elsewhere: its first read fits the whole pane again
-            self.readers.warehouse.reset();
+            if let Some(models) = &mut self.models {
+                models.warehouse.reset();
+            }
         }
         if self.screen == Screen::Refinery {
             self.visit = None;
@@ -820,7 +832,7 @@ impl Worker {
         if scope.refinery {
             let found = match locale_of(&mut self.locale, &self.app, &mut self.locale_missing) {
                 Some(locale) => {
-                    let ocr = ensure_ocr(&mut self.ocr, self.on_gpu)?;
+                    let ocr = &mut ensure_models(&mut self.models, self.on_gpu)?.ocr;
                     let started = Instant::now();
                     let frame = sc_ohseearr_sc::Frame { id: self.frame_id, image: &image, cursor, locale: Some(locale) };
                     let found = self.readers.refinery.probe(ocr, &frame)?;
@@ -863,7 +875,7 @@ impl Worker {
         let mut found = false;
         // Applied once the OCR is done (set_screen needs the whole worker)
         let mut screen = self.screen;
-        let ocr = ensure_ocr(&mut self.ocr, self.on_gpu)?;
+        let Models { ocr, warehouse } = ensure_models(&mut self.models, self.on_gpu)?;
         let readers = &mut self.readers;
         if screen != Screen::Inventory {
             // Probing: the page number over every place it can have (a kept scale is not trusted yet; the
@@ -872,8 +884,8 @@ impl Worker {
             if !page && scope.warehouse {
                 // Every tile's badge only while debugging. A strong fit becomes the reader's prior: the next
                 // reads look around the cursor, weaker fits keep its pitch
-                readers.warehouse.set_diagnostics(debug);
-                let (g, grid_boxes) = crate::inventory::to_legacy(readers.warehouse.read(ocr, &frame)?);
+                warehouse.set_diagnostics(debug);
+                let (g, grid_boxes) = crate::inventory::to_legacy(warehouse.read(ocr, &frame)?);
                 boxes.extend(grid_boxes);
                 if g.is_some() {
                     found = true;
@@ -945,7 +957,7 @@ impl Worker {
     fn look_refinery(&mut self, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
         // Only this read's phases (a probe's terminal check came before)
         self.take_phases();
-        let ocr = ensure_ocr(&mut self.ocr, self.on_gpu)?;
+        let ocr = &mut ensure_models(&mut self.models, self.on_gpu)?.ocr;
         let started = Instant::now();
         let read = match locale_of(&mut self.locale, &self.app, &mut self.locale_missing) {
             Some(locale) => {

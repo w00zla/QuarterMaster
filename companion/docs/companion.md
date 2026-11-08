@@ -251,9 +251,10 @@ Product requirements (moved here from sc-quartermaster's `docs/requirements.md`,
   ~5 % CPU in the verse).
   Warehouse and inventory read every delivered frame (1/s, the character inventory up to 2/s, paced by the read time) without the gate: the world behind the
   translucent inventory screen never comes to rest (the gate delayed reads by 3–6 s in the first test).
-- The worker reads the newest frame when it falls behind. The `Ocr` is loaded by the first read
+- The worker reads the newest frame when it falls behind. The models (`Models`: the `Ocr` and the warehouse reader with its
+  layout detector, on one device) are loaded by the first read
   (well under a second) and dropped within 5 s of the stop (memory back; the memory arena stays on:
-  off made reads 30 % slower), the readers (the warehouse's layout detector with them) and the game's
+  off made reads 30 % slower), the other readers and the game's
   texts too. "Preparing…" while the sync loads the catalog and the player's language
   pack (`refinerySync.ts` `loadCatalog`: the companion's only catalog fetch, `/api/companion/catalog` de and
   en (since 2026-11-01; before: the web app's `/api/catalog`), once connected, again when the game folder
@@ -283,11 +284,12 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
 
 - sc-ohseearr's `WarehouseReader` (`../sc-ohseearr/readers/warehouse`: its README is the reader card, the module
   docs the read; `inventory.rs` adapts its output to `Grid`, the field mapping in its module docs). In short: the
-  reader's own layout detector (`sc-warehouse-layout`, NanoDet-Plus, its card `models/sc-warehouse-layout/MODEL.md`
+  layout detector the reader is given (`sc-warehouse-layout`, NanoDet-Plus, made by `ocr::warehouse_reader` like the
+  `Ocr`, on the same device; its card `models/sc-warehouse-layout/MODEL.md`
   there) finds the badges, quality texts and the tooltip's lines, a grid is fitted to them per frame, and only the
   tooltip's lines, the hovered tile's quality and badge are recognized (~25 ms per read on the CPU).
 - What the app relies on: the reader keeps the last strong layout as its prior (`reset` when the warehouse screen is
-  left, a new reader when the scan stops) and reads every tile's badge after `set_diagnostics(true)` (the debug window
+  left, a new reader with the models when the scan stops or the device changes) and reads every tile's badge after `set_diagnostics(true)` (the debug window
   open: the costly part); the **hovered tile** is the one under the mouse cursor, which the capture passes with every
   frame (`Frame.cursor`; screenshots without a cursor fall back to the tooltip's hints).
 - **Retraining the layout detector**: its COCO set exists (exported from recordings up to 1.3.1 by the former
