@@ -121,4 +121,5 @@ VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; prod
 - Companion: OCR results must not change silently (`companion/scripts/regression-dumps.sh` before and after an OCR/reader change, byte-identical is the bar); changes to the engine, models or readers belong in `../sc-ohseearr`. The companion's UI follows the same UI rules as the apps (buttons keep their size, no hint texts, no layout jumps); a text change in German always changes English too.
 - No details of the maintainer's own environment in tracked files (the repo is public): no hosts, IPs, domains, user names, tailnet names or home network setup in docs, examples, comments or scripts. Use placeholders (`<user>@<vm>`, `qm.example.com`); the real values live in Claude's memory, not in git.
 - Buttons keep their size when their state changes (details: `docs/webapp.md` "UI rules").
+- READMEs describe the current state only: no ADR numbers or links, no plans, open points or "not decided yet"; plans live in `.claude/open-points.md`.
 <!-- end claude-reflect -->
