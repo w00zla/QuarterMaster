@@ -69,6 +69,8 @@ Debug recordings (the debug window's "Record data") hold every read's frame + JS
 
 - **Language:** identifiers, comments, docs and commit messages English; UI texts German and English with real umlauts,
   a change in one language always changes the other.
+- **READMEs describe the current state only**: no ADR numbers or links, no plans, open points or "not decided yet";
+  plans live in `.claude/open-points.md`.
 - **UI:** buttons, chips, toggles and tabs never change size with their state; no hint texts; no layout jumps.
 - **OCR results must not change silently:** run `scripts/regression-dumps.sh` before and after; changes to the engine,
   models or readers belong in `../sc-ohseearr`.

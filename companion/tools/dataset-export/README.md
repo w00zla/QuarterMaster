@@ -1,6 +1,6 @@
 # dataset-export
 
-Training and evaluation data for sc-ohseearr's `training/` from this app's debug recordings (its ADR 0011). The
+Training and evaluation data for sc-ohseearr's `training/` from this app's debug recordings. The
 data stay in sc-ohseearr's data root (`$SC_OHSEEARR_DATA`, else `../sc-ohseearr/local`); nothing here needs Python.
 
 - **Gear tooltip lines** (the recognizer's evaluation set `ocr-eval`): `components_dump --dataset <out>` writes the

@@ -45,5 +45,5 @@ Quartermaster Companion is an unofficial Star Citizen fan project, not endorsed 
 
 ## License
 
-Not decided yet; all rights reserved until then. Bundled third-party parts keep their licenses (fonts in
+All rights reserved. Bundled third-party parts keep their licenses (fonts in
 `src/assets/fonts` under the OFL; DirectML.dll is Microsoft's redistributable, MIT).
