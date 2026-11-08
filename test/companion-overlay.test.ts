@@ -2,7 +2,7 @@
 // the heights in overlay.rs).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { overlayLayout } from '../src/overlayLayout.ts';
+import { overlayLayout } from '../companion/src/overlayLayout.ts';
 
 describe('companion overlay layout', () => {
   it('compact: 5 rows in every mode, no top row', () => {

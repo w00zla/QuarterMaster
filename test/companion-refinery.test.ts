@@ -2,11 +2,11 @@
 // them (rows as in the user's screenshots of 2026-10-08 at CRU-L1) against the user's running jobs.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CompanionCatalogResponse, StockBatch } from '../src/apiTypes.ts';
+import type { CompanionCatalogResponse, StockBatch } from '../src/webapp/api-types.ts';
 import {
   buildCatalog, cscuToScu, doneRequest, findStation, finishedRequests, gameNameKeys, jobsOf, RefinerySync, removeRequest, resolveOrder, startRequest,
   type Job, type OverviewEvent, type OverviewOrder, type Proposal,
-} from '../src/refinery.ts';
+} from '../companion/src/refinery.ts';
 
 const HEPH = '00000000-0000-4000-8000-000000000001';
 const SILICON = '00000000-0000-4000-8000-000000000002';

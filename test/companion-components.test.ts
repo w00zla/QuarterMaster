@@ -3,11 +3,11 @@
 // sightings with converted stats and into proposals, one per tile; FPS gear and stacks as of 2026-10-22.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CatalogStat, CompanionCatalogResponse, StockBatch } from '../src/apiTypes.ts';
+import type { CatalogStat, CompanionCatalogResponse, StockBatch } from '../src/webapp/api-types.ts';
 import {
   addRequest, buildComponentCatalog, ComponentScan, findComponents, inStockOf, parseField, parseNumber, proposalsOf, SETTLED_MS, sightingOf, statFromTooltip, statNameKeys, statsOf,
   type ComponentCatalog, type ComponentProposal, type ComponentRead,
-} from '../src/components.ts';
+} from '../companion/src/components.ts';
 
 const BLIZZARD = '00000000-0000-4000-8000-000000000001';
 const BLIZZARD_S2 = '00000000-0000-4000-8000-000000000002';

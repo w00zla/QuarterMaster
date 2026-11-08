@@ -22,14 +22,14 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
-$cargo = Get-Content src-tauri/Cargo.toml -Raw
-if ($cargo -notmatch '(?m)^version = "(\d+\.\d+\.\d+)"') { throw 'No version in src-tauri/Cargo.toml' }
+$cargo = Get-Content companion/src-tauri/Cargo.toml -Raw
+if ($cargo -notmatch '(?m)^version = "(\d+\.\d+\.\d+)"') { throw 'No version in companion/src-tauri/Cargo.toml' }
 $version = $Matches[1]
 
-$release = 'src-tauri/target/release'
+$release = 'companion/src-tauri/target/release'
 $setup = "$release/bundle/nsis/Quartermaster Companion_${version}_x64-setup.exe"
 # The one the setup bundles too (pnpm directml)
-$dml = 'src-tauri/resources/ocr/DirectML.dll'
+$dml = 'companion/src-tauri/resources/ocr/DirectML.dll'
 foreach ($f in $setup, "$setup.sig", "$release/quartermaster-companion.exe", $dml) {
   if (-not (Test-Path -LiteralPath $f)) { throw "Missing build output: $f (pnpm companion:build first)" }
 }

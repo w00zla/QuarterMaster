@@ -1,7 +1,7 @@
 // The companion app's matching of Game.log blueprint names to the catalog (src/match.ts).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildIndex, matchUnlock, type CatalogEntry } from '../src/match.ts';
+import { buildIndex, matchUnlock, type CatalogEntry } from '../companion/src/match.ts';
 
 const bp = (uuid: string, name: string, extra: Partial<CatalogEntry> = {}): CatalogEntry =>
   ({ uuid, name, size: null, gradeLetter: null, isDefault: false, retired: false, ...extra });

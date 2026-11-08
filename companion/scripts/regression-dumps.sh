@@ -6,8 +6,8 @@
 #   scripts/regression-dumps.sh <out dir> [repo root]
 #
 # The repo root defaults to the one this script lives in; sc-ohseearr is the sibling checkout
-# <root>/../sc-ohseearr (the one the companion builds against), the data is read from its data root
-# ($SC_OHSEEARR_DATA, else <root>/../sc-ohseearr/local). The sets are the folders each reader's
+# <root>/../../sc-ohseearr (the one the companion builds against), the data is read from its data root
+# ($SC_OHSEEARR_DATA, else <root>/../../sc-ohseearr/local). The sets are the folders each reader's
 # `regression.toml` lists (only `regression/<reader>/`, sc-ohseearr ADR 0014).
 #
 # The refinery reader needs the game's English texts: $REFINERY_ENGLISH (default: the companion's
@@ -17,9 +17,9 @@ set -euo pipefail
 
 out=${1:?usage: regression-dumps.sh <out dir> [repo root]}
 root=${2:-$(cd "$(dirname "$0")/.." && pwd)}
-data=${SC_OHSEEARR_DATA:-$root/../sc-ohseearr/local}
+data=${SC_OHSEEARR_DATA:-$root/../../sc-ohseearr/local}
 manifest=$root/src-tauri/Cargo.toml
-ocr_root=$root/../sc-ohseearr
+ocr_root=$root/../../sc-ohseearr
 ocr_manifest=$ocr_root/Cargo.toml
 english=${REFINERY_ENGLISH:-${LOCALAPPDATA:-$HOME/.local/share}/com.w00zla.quartermaster.companion/global-english.ini}
 

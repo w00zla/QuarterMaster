@@ -3,12 +3,12 @@
 // turned into sightings and into proposals, one per stack.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { addName, emptyNames } from '../src/materialNames.ts';
-import type { StockBatch } from '../src/apiTypes.ts';
+import { addName, emptyNames } from '../src/stock/material-names.ts';
+import type { StockBatch } from '../src/webapp/api-types.ts';
 import {
   addRequest, fromMicro, inStockOf, InventoryScan, proposalsOf, sightingOf, toMicro,
   type InventoryCatalog, type InventoryReadEvent, type Proposal, type ReadTile, type ReadTooltip,
-} from '../src/inventory.ts';
+} from '../companion/src/inventory.ts';
 
 const APHORITE = '00000000-0000-4000-8000-000000000001';
 const SILICON = '00000000-0000-4000-8000-000000000002';

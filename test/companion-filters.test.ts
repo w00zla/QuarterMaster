@@ -2,7 +2,7 @@
 // item's names.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { filteredBy, parseFilters, wildcard, type UserFilter } from '../src/userFilters.ts';
+import { filteredBy, parseFilters, wildcard, type UserFilter } from '../companion/src/userFilters.ts';
 
 describe('wildcard', () => {
   it('matches the whole name, case aside', () => {

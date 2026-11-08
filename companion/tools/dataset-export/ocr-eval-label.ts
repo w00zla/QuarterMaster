@@ -21,13 +21,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { buildComponentCatalog, findComponents, parseField } from '../../src/components.ts';
-import { norm } from '../../src/materialNames.ts';
-import type { CompanionCatalogResponse } from '../../src/apiTypes.ts';
+import { norm } from '../../../src/stock/material-names.ts';
+import type { CompanionCatalogResponse } from '../../../src/webapp/api-types.ts';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const args = process.argv.slice(2);
 const opts = (name: string) => args.flatMap((a, i) => (a === name && args[i + 1] ? [args[i + 1]!] : []));
-const DATA_ROOT = process.env.SC_OHSEEARR_DATA || `${ROOT}../sc-ohseearr/local`;
+const DATA_ROOT = process.env.SC_OHSEEARR_DATA || `${ROOT}../../sc-ohseearr/local`;
 const DIR = opts('--dir')[0] ?? `${DATA_ROOT}/ocr-eval`;
 const OUT = opts('--out')[0] ?? `${DIR}/labels.tsv`;
 const PACK = opts('--pack')[0];

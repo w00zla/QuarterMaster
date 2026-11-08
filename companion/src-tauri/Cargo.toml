@@ -33,19 +33,19 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 memchr = "2"
 # The OCR: sc-ohseearr's engine (ONNX Runtime, prebuilt and linked statically) and its model packages, compiled
 # in; the sibling checkout ../sc-ohseearr
-sc-ohseearr-core = { path = "../../sc-ohseearr/crates/core" }
-sc-ohseearr-model-paddle-det-tiny = { path = "../../sc-ohseearr/models/paddle-det-tiny" }
-sc-ohseearr-model-sc-rec-latin = { path = "../../sc-ohseearr/models/sc-rec-latin" }
-sc-ohseearr-model-sc-warehouse-layout = { path = "../../sc-ohseearr/models/sc-warehouse-layout" }
+sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core" }
+sc-ohseearr-model-paddle-det-tiny = { path = "../../../sc-ohseearr/models/paddle-det-tiny" }
+sc-ohseearr-model-sc-rec-latin = { path = "../../../sc-ohseearr/models/sc-rec-latin" }
+sc-ohseearr-model-sc-warehouse-layout = { path = "../../../sc-ohseearr/models/sc-warehouse-layout" }
 # The readers: sc-ohseearr's Star Citizen layer (reader interface, the game's texts from global.ini) and its
 # readers (the warehouse reader gets its layout detector, `sc-warehouse-layout`, from `ocr::warehouse_reader`)
-sc-ohseearr-sc = { path = "../../sc-ohseearr/crates/sc" }
-sc-ohseearr-warehouse = { path = "../../sc-ohseearr/readers/warehouse" }
-sc-ohseearr-gear-inventory = { path = "../../sc-ohseearr/readers/gear-inventory" }
-sc-ohseearr-refinery = { path = "../../sc-ohseearr/readers/refinery" }
+sc-ohseearr-sc = { path = "../../../sc-ohseearr/crates/sc" }
+sc-ohseearr-warehouse = { path = "../../../sc-ohseearr/readers/warehouse" }
+sc-ohseearr-gear-inventory = { path = "../../../sc-ohseearr/readers/gear-inventory" }
+sc-ohseearr-refinery = { path = "../../../sc-ohseearr/readers/refinery" }
 # Screen capture of the game window (DXGI Desktop Duplication, cursor, rest; Windows only) and the parts the
 # platform independent worker uses too (`Pixels`, the change gate `Gate`), which build everywhere
-sc-ohseearr-capture-win = { path = "../../sc-ohseearr/crates/capture-win" }
+sc-ohseearr-capture-win = { path = "../../../sc-ohseearr/crates/capture-win" }
 # Decoding screenshots (tests, test frames); live frames come as raw pixels; encoding the debug
 # view's frames (JPEG for the event, PNG for the export)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -57,7 +57,7 @@ tauri-plugin-window-state = "2"
 [target.'cfg(windows)'.dependencies]
 # The OCR on the GPU: ONNX Runtime's DirectML API (its Windows binaries have it anyway; the redistributable
 # DirectML.dll comes next to the exe, see scripts/fetch-directml.mjs)
-sc-ohseearr-core = { path = "../../sc-ohseearr/crates/core", features = ["directml"] }
+sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core", features = ["directml"] }
 # The scan overlay's window (place, DPI, hotkeys); the version Tauri already uses
 windows = { version = "0.62", features = [
     "Win32_Foundation",
