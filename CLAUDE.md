@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Discord bot, user web app and companion desktop app for Star Citizen players and orgs to manage materials
 (stock), ship components, refinery jobs and blueprints. Multi-guild (one Discord server = one org),
-German/English. GitHub: `w00zla/QuarterMaster` (private; remote over SSH like all sibling repos, the folder keeps its
+German/English. GitHub: `w00zla/QuarterMaster` (public, MIT; remote over SSH like all sibling repos, the folder keeps its
 name `sc-quartermaster`).
 
 Where things are described (read the matching file before working in an area):
@@ -119,6 +119,6 @@ VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; prod
 <!-- claude-reflect: learned rules (saved from the band; edit freely) -->
 ## Learned rules
 - Companion: OCR results must not change silently (`companion/scripts/regression-dumps.sh` before and after an OCR/reader change, byte-identical is the bar); changes to the engine, models or readers belong in `../sc-ohseearr`. The companion's UI follows the same UI rules as the apps (buttons keep their size, no hint texts, no layout jumps); a text change in German always changes English too.
-- No details of the maintainer's own environment in tracked files (the repo will go public): no hosts, IPs, domains, user names, tailnet names or home network setup in docs, examples, comments or scripts. Use placeholders (`<user>@<vm>`, `qm.example.com`); the real values live in Claude's memory, not in git.
+- No details of the maintainer's own environment in tracked files (the repo is public): no hosts, IPs, domains, user names, tailnet names or home network setup in docs, examples, comments or scripts. Use placeholders (`<user>@<vm>`, `qm.example.com`); the real values live in Claude's memory, not in git.
 - Buttons keep their size when their state changes (details: `docs/webapp.md` "UI rules").
 <!-- end claude-reflect -->
