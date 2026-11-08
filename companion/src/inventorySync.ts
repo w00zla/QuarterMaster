@@ -17,7 +17,7 @@
 // the debug window, and come back as proposals once the filter goes.
 import { emit, listen } from "@tauri-apps/api/event";
 import { computed, ref, watch } from "vue";
-import type { OkResponse, StockBatch, StockListResponse } from "./apiTypes";
+import type { OkResponse, StockBatch, StockListResponse } from "../../src/webapp/api-types";
 import {
   addRequest as componentRequest, ComponentScan, inStockOf as componentsInStock, proposalsOf as componentProposalsOf, type ComponentProposal, type ComponentSighting,
 } from "./components";

@@ -7,7 +7,7 @@
 // reads the terminal at all; the scan itself is in scan.ts.
 import { listen } from "@tauri-apps/api/event";
 import { computed, ref, shallowRef, watch } from "vue";
-import type { CompanionCatalogResponse, OkResponse, StockListResponse } from "./apiTypes";
+import type { CompanionCatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
 import { gameNames } from "./backend";
 import { detected } from "./detections";
 import { t } from "./i18n";

@@ -13,8 +13,8 @@
 // the same hovered tile produced the same key (an OCR glitch in one read, "56" for "561", books
 // nothing; right after a move the game may still show the previous tile's tooltip, for one read so
 // far: that read disagrees with the next).
-import { findMaterial, type MaterialNames } from "./materialNames.ts";
-import type { StockAddRequest, StockBatch } from "./apiTypes.ts";
+import { findMaterial, type MaterialNames } from "../../src/stock/material-names.ts";
+import type { StockAddRequest, StockBatch } from "../../src/webapp/api-types.ts";
 import type { GpuStatus } from "./backend.ts";
 import type { ComponentRead } from "./components.ts";
 import type { Overview } from "./refinery.ts";

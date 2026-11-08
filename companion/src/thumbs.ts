@@ -1,8 +1,9 @@
-// Item thumbnails in the companion (named as in sc-quartermaster's src/thumbs.ts): the Rust command `thumb` answers them as
+// Item thumbnails in the companion (src/thumbs.ts names them): the Rust command `thumb` answers them as
 // data: URLs from the app's cache dir, else fetched from the server's /thumbs/… (the webview's CSP keeps
 // the server out of img-src). Each image crosses the IPC once per window and session; a failed one is
 // asked again by the next element that shows it. Without a hash nothing is asked: no thumbnail.
-import { thumbData, type ThumbSize } from "./backend";
+import type { ThumbSize } from "../../src/thumbs";
+import { thumbData } from "./backend";
 
 /** A catalog item with a thumbnail: its UUID and the thumbnail's hash. */
 export interface ThumbRef {

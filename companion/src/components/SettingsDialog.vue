@@ -10,10 +10,10 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import Dropdown from "./Dropdown.vue";
-import Icon from "./Icon.vue";
-import Tooltip from "./Tooltip.vue";
-import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
+import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { appInfo, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "../backend";
 import type { OverlayDisplay } from "../overlayLayout";
 import { t } from "../i18n";

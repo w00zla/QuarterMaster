@@ -6,9 +6,9 @@
 // blueprints and the auto location need the log), the auto location toggle and the location picker
 // (where warehouse and inventory reads are booked; kept, changeable while scanning).
 import { computed } from "vue";
-import Icon from "./Icon.vue";
-import Tooltip from "./Tooltip.vue";
-import Picker from "./Picker.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import Picker from "../../../webapp/src/components/Picker.vue";
 import { t } from "../i18n";
 import { autoLocation, locationUuid, loggedLocation, loggedLocationUuid, setLocation, toggleAutoLocation } from "../inventorySync";
 import { overlayOn, setOverlay } from "../overlay";

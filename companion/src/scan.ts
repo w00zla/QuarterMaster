@@ -6,7 +6,7 @@
 // whether the game runs (event "game-seen"). Off at every start.
 import { listen } from "@tauri-apps/api/event";
 import { computed, ref, watch } from "vue";
-import type { IconName } from "./components/Icon.vue";
+import type { IconName } from "../../adminapp/src/components/Icon.vue";
 import { getGameFront, getGameSeen, getScan, setScan, type ScanScope, type ScanScreen } from "./backend";
 import { t } from "./i18n";
 import { kinds, loadStock, locationUuid, resetSightings } from "./inventorySync";

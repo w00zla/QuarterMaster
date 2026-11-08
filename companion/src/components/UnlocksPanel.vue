@@ -9,14 +9,14 @@
 // The log itself is followed in state.ts (the top bar shows whether it is found).
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { BlueprintListResponse, OkResponse } from "../apiTypes";
-import ColumnHead from "./ColumnHead.vue";
-import Icon from "./Icon.vue";
-import Tooltip from "./Tooltip.vue";
-import { useTableColumns, type ColumnSpec, type TableView } from "../tableColumns";
-import ColumnsButton from "./ColumnsButton.vue";
-import ViewToggle from "./ViewToggle.vue";
-import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
+import type { BlueprintListResponse, OkResponse } from "../../../src/webapp/api-types";
+import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import { useTableColumns, type ColumnSpec, type TableView } from "../../../adminapp/src/tableColumns";
+import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
+import ViewToggle from "../../../webapp/src/components/ViewToggle.vue";
+import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import { scanBackups } from "../backend";
 import { unlockRows, type UnlockState } from "../debugReport";
 import { columnsTexts, langRef, t, viewTexts, type Key } from "../i18n";

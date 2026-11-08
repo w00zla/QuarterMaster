@@ -13,16 +13,16 @@
 // current location's only. The sightings behind the proposals, also the incomplete ones, are in the
 // debug window (settings). Without proposals: one line, how to get them as a quiet hint below.
 import { computed, ref, watch, watchEffect } from "vue";
-import ColumnHead from "./ColumnHead.vue";
-import Icon from "./Icon.vue";
-import Tooltip from "./Tooltip.vue";
-import { useTableColumns, type ColumnSpec, type TableView } from "../tableColumns";
-import { statValueText } from "../componentStats";
-import { qMark } from "../quality";
-import ConfirmDialog, { type ConfirmButton } from "./ConfirmDialog.vue";
+import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
+import Icon from "../../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
+import { useTableColumns, type ColumnSpec, type TableView } from "../../../adminapp/src/tableColumns";
+import { statValueText } from "../../../src/stock/component-stats";
+import { qMark } from "../../../src/stock/quality";
+import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
 import type { ComponentProposal } from "../components";
-import ColumnsButton from "./ColumnsButton.vue";
-import ViewToggle from "./ViewToggle.vue";
+import ColumnsButton from "../../../webapp/src/components/ColumnsButton.vue";
+import ViewToggle from "../../../webapp/src/components/ViewToggle.vue";
 import { columnsTexts, langRef, t, viewTexts } from "../i18n";
 import type { Proposal } from "../inventory";
 import {
