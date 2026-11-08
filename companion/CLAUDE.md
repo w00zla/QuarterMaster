@@ -42,7 +42,7 @@ cargo test --release --manifest-path src-tauri/Cargo.toml          # Rust tests 
 cargo run --release --manifest-path src-tauri/Cargo.toml --example inventory_dump -- <out dir> <dir>... [--threads n] [--gpu]   # warehouse read over screenshots/recordings, overlays per frame
 cargo run --release --manifest-path src-tauri/Cargo.toml --example components_dump -- <[set=]dir>... [--threads n] [--gpu] [--dataset <out dir>]   # character inventory read; --dataset: the tooltip lines as a line-crop dataset (tools/dataset-export/README.md)
 cargo run --release --manifest-path ../sc-ohseearr/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]                # raw OCR of an image (sc-ohseearr's)
-scripts/regression-dumps.sh <out dir> [repo root]   # the three dumps (inventory_dump, components_dump, sc-ohseearr's ocr_dump) over the fixed recordings/screenshots, normalized: compare with a baseline before and after any OCR/reader change (byte-identical is the bar)
+scripts/regression-dumps.sh <out dir> [repo root]   # inventory_dump, components_dump and sc-ohseearr's regress-refinery over the readers' regression sets (recordings in its data root's regression/<reader>/, ADR 0014 there), normalized: compare with a baseline before and after any OCR/reader change (byte-identical is the bar)
 scripts/publish-win-companion.ps1 <user@host>       # Windows release: setup + .sig + standalone zip into $COMPANION_DIR (default local/companion), companion.json updated, then pushed by push-companion.mjs
 scripts/push-companion.sh <user@host>               # the push alone (Linux entry point of scripts/push-companion.mjs): the manifest's files, then companion.json, to the server's DEPLOY_PATH
 ```

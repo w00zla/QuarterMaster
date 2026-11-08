@@ -483,9 +483,11 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   serde payloads (frontend, events, recordings) and map the readers' neutral output onto them (`to_legacy`; fields
   like `Field::raw`/`ambiguous` and the names' loc keys are not used beyond that yet).
 - **Regression check** for any change of sc-ohseearr or the adapters: `scripts/regression-dumps.sh <out> [repo root]`
-  runs `inventory_dump`, `components_dump` (this repo) and sc-ohseearr's `ocr_dump` over a fixed selection of
-  recordings and screenshots (740 warehouse frames, 444 character inventory frames, 62 images of the refinery and the
-  freight elevator terminal), compared byte for byte (`*.norm.txt`, `overlays.sha256`) against the build before.
+  runs `inventory_dump`, `components_dump` (this repo) and sc-ohseearr's `regress-refinery` over the regression sets
+  each reader's `regression.toml` lists (debug recordings in `regression/<reader>/` of sc-ohseearr's data root, no
+  screenshots: its ADR 0014; 652 warehouse frames, 444 character inventory frames, the refinery's set pending; the
+  refinery needs the English table, `REFINERY_ENGLISH`, default the app's `global-english.ini`), compared byte for
+  byte (`*.norm.txt`, `overlays.sha256`) against the build before.
 - **The recognizer's training data from here**: `components_dump --dataset` exports the real tooltip lines from debug
   recordings as line crops, `tools/dataset-export/ocr-eval-label.ts` labels them (its README); the game's font (Blender Pro, taken from `Data.p4k`) is used
   for local training only and never goes into git or a build.
