@@ -1,7 +1,8 @@
 # One image for the bot, both web apps and the one-off tasks (migrations, command
 # registration); the compose service's command picks the process. No build step for the
 # backend: Node runs the .ts files directly. Only the SPAs are built.
-ARG NODE_IMAGE=docker.io/library/node:26-slim
+# The base pinned to a minor: patch releases come with a rebuild, a newer minor only by a commit
+ARG NODE_IMAGE=docker.io/library/node:26.13-slim
 
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
