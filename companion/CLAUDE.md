@@ -11,8 +11,9 @@ proposals the user registers through the Quartermaster web app's API, and draws 
 German/English UI.
 
 Own repository since 2026-11-06 (history imported from `sc-quartermaster/companion`); GitHub `w00zla/QuarterMasterCompanion`
-(private, SSH remote; the local folder is `sc-qm-companion`). The goal is an (optionally)
-standalone tool that can also work without the web app; that mode is not specified or built yet.
+(private, SSH remote; the local folder is `sc-qm-companion`). **Planned (2026-11-08): the companion is decoupled from
+the web app soon, with a standalone version (no web app, no account) next to the connected one.** Not specified or
+built yet; what ties it to the web app today is listed in `.claude/open-points.md` "Standalone version".
 
 Neighbours (sibling checkouts next to this one):
 - `../sc-ohseearr`: OCR engine, model packages, the screen readers (`usecases/warehouse`, `gear-inventory`,
@@ -58,7 +59,8 @@ Debug recordings (the debug window's "Record data") hold every read's frame + JS
   (`src/components/`, `src/styles/`, pure modules flat in `src/`; the parts copied from sc-quartermaster are owned here).
 - The refinery read needs the game's texts: the active language pack's `global.ini`, else an English table at
   `<app local data>/global-english.ini` (made with sc-ohseearr's `scripts/extract-global-ini.*`). No game texts are
-  compiled in.
+  compiled in. How players get that file without placing it by hand is an open decision here (sc-ohseearr ADR 0012:
+  the app's call).
 - `local/` is gitignored: `logo.png`, scratch examples, and `companion/`, the release files (`publish-win-companion.ps1` writes them; a local Quartermaster web app serves them with `COMPANION_DIR=../sc-qm-companion/local/companion` in its `.env`). Screenshots, debug recordings and OCR datasets live in sc-ohseearr's data root (`$SC_OHSEEARR_DATA`, else `../sc-ohseearr/local`); the tools take it as an argument or from that default (ADR 0011 there).
 - Text files are LF (`.gitattributes`), `core.filemode` false (the checkout may be shared by Windows and Linux);
   `node_modules` and `src-tauri/target` are per platform.

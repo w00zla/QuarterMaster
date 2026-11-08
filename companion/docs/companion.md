@@ -504,8 +504,9 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   texts like StarStrings; keys case-insensitive, a pack's `key,P=` suffix dropped), and the game's own English
   texts come from **`global-english.ini` in the app's local data folder** (Windows
   `%LOCALAPPDATA%\com.w00zla.quartermaster.companion\global-english.ini`): the game keeps them inside
-  `Data.p4k`, sc-ohseearr's `scripts/extract-global-ini.{ps1,sh}` extracts them per game build. How players get
-  that file without placing it by hand is open (see "Open"). `ocrwatch` keeps a `LocaleSource` (re-read when
+  `Data.p4k`, sc-ohseearr's `scripts/extract-global-ini.{ps1,sh}` extracts them per game build. How
+  players get that file without placing it by hand is open (the companion's call, sc-ohseearr ADR 0012; see
+  "Open"); until then it is placed by hand. `ocrwatch` keeps a `LocaleSource` (re-read when
   `user.cfg`, the pack or the English table change, checked every 10 s; dropped when the scan stops) and
   passes the locale into every reader's frame: the refinery reader anchors on loc keys (below), the others
   only resolve names to loc keys (not used yet). With neither a pack nor the English table the refinery is
@@ -654,18 +655,19 @@ GPU process should not compete with the game; not measured yet.
 
 ## Open
 
-- 16:9 / 1080p never verified (no screenshots; the fit is position-independent in principle, the character
-  inventory's constants are shares of the height).
+- Resolutions: 3840×1600 verified in game, 1920×1080 (16:9) on debug recordings from the game (full-resolution
+  grabs, JPEG q90); others (2560×1440, 3840×2160, other ultrawides) not verified (the fit is position-independent
+  in principle, the character inventory's constants are shares of the height).
 - The refinery read with v6 and its manual scan; the refinery sync is untested in game (language packs,
   16:9, sideways scrolled orders, HDR, rotated monitors, angled views).
 - Faster warehouse counting: a stack could count after one read when the chip's quality matches the tile's
   own and the count is certain (proposed 2026-10-19, not decided).
 - "[CS2] StrikeForce Missile" stays unknown (the catalog says "StrikeForce II Missile"); which tooltips show
   stats at all; Quantum Fuel Burn (a lower value is the improvement, the bounds run 0…+20 %).
-- `--disable-gpu` and the RAM with the OCR running are not measured in game.
-- How players get the English `global-english.ini` (the game's own texts, needed for the refinery without a
-  language pack) without placing it by hand: not decided (the server per build, a download, a p4k reader).
-  The readers on sc-ohseearr (2026-11-06) are verified offline only (identical dumps), not yet in game.
+- Not decided: how players get the English `global-english.ini` (the game's own texts, needed for the refinery
+  without a language pack) without placing it by hand; it must work for the planned standalone version too (no
+  web app), so a server alone does not do.
+- Planned: decoupling from the web app, with a standalone version next to the connected one (not specified). The readers on sc-ohseearr (2026-11-06) are verified in game (2026-11-08) except the refinery.
 - Not built: the Linux screen capture (xdg portal), the AppImage's updater, CI, tray/autostart; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.
