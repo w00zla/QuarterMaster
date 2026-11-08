@@ -1,0 +1,90 @@
+[package]
+name = "quartermaster-companion"
+version = "2.0.1"
+description = "Quartermaster Companion: reads Star Citizen's Game.log for the Quartermaster web app"
+authors = ["w00zla"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name apart from the bin name (a Windows issue,
+# https://github.com/rust-lang/cargo/issues/8519)
+name = "companion_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# image-ico/png: without them the bundle icons are not decoded and the windows get no icon (taskbar, Alt-Tab)
+tauri = { version = "2", features = ["image-ico", "image-png"] }
+# File dialogs via xdg-desktop-portal on Linux (the host's native dialog; the
+# plugin's default is rfd's own GTK3 dialog). Windows is unaffected.
+tauri-plugin-dialog = { version = "2.7.3", default-features = false, features = ["xdg-portal"] }
+tauri-plugin-log = "2"
+# The download link of a newer release, opened in the browser
+tauri-plugin-opener = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The web app API; rustls like BindSight, no native-tls; gzip: the server gzips the companion's catalog
+# (reqwest asks for it and unpacks it)
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "gzip"] }
+# Finding the blueprint lines in GBs of old logs
+memchr = "2"
+# The OCR: sc-ohseearr's engine (ONNX Runtime, prebuilt and linked statically) and its model packages, compiled
+# in; the sibling checkout ../sc-ohseearr
+sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core" }
+sc-ohseearr-model-paddle-det-tiny = { path = "../../../sc-ohseearr/models/paddle-det-tiny" }
+sc-ohseearr-model-sc-rec-latin = { path = "../../../sc-ohseearr/models/sc-rec-latin" }
+sc-ohseearr-model-sc-warehouse-layout = { path = "../../../sc-ohseearr/models/sc-warehouse-layout" }
+# Decoding screenshots (tests, test frames); live frames come as raw pixels; encoding the debug
+# view's frames (JPEG for the event, PNG for the export)
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# The debug view's frame in the event (already a dependency of others)
+base64 = "0.21"
+# The main and the debug window come back where they were (place, size, monitor)
+tauri-plugin-window-state = "2"
+
+# Screen capture for the refinery OCR (DXGI Desktop Duplication); the version Tauri already uses
+[target.'cfg(windows)'.dependencies]
+# The OCR on the GPU: ONNX Runtime's DirectML API (its Windows binaries have it anyway; the redistributable
+# DirectML.dll comes next to the exe, see scripts/fetch-ocr-models.mjs)
+sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core", features = ["directml"] }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# Updates of the installed app (NSIS setup from the own server, signed with the updater key); Windows only
+tauri-plugin-updater = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+# `tauri dev` (UI changes through Vite's hot reload, no Rust build): the dependencies optimized once and
+# kept (image, resizing, ONNX Runtime's wrapper: the OCR's hot paths), the app's own code quick to rebuild
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# A test build for the game (`build:fast`): release speed without LTO, incremental, many codegen units;
+# minutes less per change. Releases stay on `release`
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
