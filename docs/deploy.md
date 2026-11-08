@@ -114,7 +114,7 @@ Then:
 
 ## 6. Backups
 
-> **⚠️ Local only for now (open TODO).** The daily dumps stay on the VM (`backups/`): they cover Docker mishaps (a deleted volume, a broken migration), but losing the VM or its host loses the data. A remote target is still to be prepared (NAS via SSH/rsync, a mounted share as a plain path, or an external Storage Box on SSH port 23); never on the same hardware as the VM, ideally with a copy outside the house.
+> **⚠️ Local only for now (open TODO).** The daily dumps stay on the VM (`backups/`): they cover Docker mishaps (a deleted volume, a broken migration), but losing the VM or its host loses the data, real users' data included. A remote target is still to be prepared (NAS via SSH/rsync, a mounted share as a plain path, or an external Storage Box on SSH port 23); never on the same hardware as the VM, ideally with a copy outside the house.
 
 `scripts/backup.sh [target]` dumps into `backups/`, copies to the target if one is given (anything rsync accepts, e.g. `backup@host:quartermaster/`) and then deletes local dumps older than `KEEP_DAYS` (14). Nothing is deleted on the target.
 

@@ -27,8 +27,10 @@ Where things are described (read the matching file before working in an area):
 
 **Status:** catalog pipeline, admin web UI, the bot with all its commands, logs channel and org board, the
 stock service, UEX pull and the user web app are built. In production since 2026-10-05 (Docker Compose on a
-VM behind Caddy). The bot has its first real users (two as of 2026-11-08), so the production DB holds real data;
-the user web app is deployed but not public yet, **daily backups stay on the VM only** (since 2026-10-20, no remote target yet: `docs/deploy.md` § 6).
+VPS behind Caddy); live with real users and data since 2026-11-08 (bot and user web app), so the production DB
+is not disposable. Backup and restore are tested on production; **the daily backups stay on the server only** (no
+remote target yet: `docs/deploy.md` § 6). The companion is to become independent of the web app (a standalone
+version is planned; `../sc-qm-companion`).
 
 ## Commands
 
