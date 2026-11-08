@@ -13,11 +13,13 @@ the user's API token ("Access Key"):
 
 Linux and Windows; the screen capture and so every scan and the overlay are Windows only so far.
 
-Commands, the log file and its lines: `CLAUDE.md` "Commands".
+Commands, the log file and its lines: `CLAUDE.md` "Commands". The app lives in `companion/` (a pnpm workspace
+package); paths here without a prefix (`src/`, `src-tauri/`, `scripts/fetch-directml.mjs`) are relative to it, the
+release scripts are the root `scripts/`.
 
 ## Requirements
 
-Product requirements (moved here from sc-quartermaster's `docs/requirements.md`, "Refinery" in the bot):
+Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 
 - `/qm-refinery time job` (bot) sets or clears the time left of a running job; the companion sets it through the API
   (`POST /api/refinery/duration`) from the terminal's work order overview.
@@ -31,17 +33,17 @@ Product requirements (moved here from sc-quartermaster's `docs/requirements.md`,
   OCR), `inventory` (warehouse), `components` (character inventory), `refinery` (the three: the companion's payloads
   and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker), `capture` (the capture loop on
   sc-ohseearr's capture crate), `overlay`. The OCR engine and models, the readers, the game's texts (`Locale`)
-  and the capture itself are sc-ohseearr's (`../sc-ohseearr`, path dependencies; see "OCR").
+  and the capture itself are sc-ohseearr's (the sibling repo `../sc-ohseearr`, path dependencies; see "OCR").
 - Vue SPA with three pages (`index.html` → `App.vue`, `debug.html` → `DebugApp.vue`, `overlay.html` →
   `OverlayApp.vue`), components in `src/components/`, styles in `src/styles/` (`base.css` with tokens, fonts and
   `ui.css`; `views.css` for forms, fields and table rows), the fonts in `src/assets/fonts/`. Pure logic in
-  `src/{match,inventory,components,refinery}.ts`, tested from `test/companion-*.test.ts`.
+  `src/{match,inventory,components,refinery}.ts`, tested from the root `test/companion-*.test.ts` (`pnpm test`).
 - The window structure and look follow BindSight (title bar, settings, `Dropdown`, `ConfirmDialog`, the icon set,
-  `tableColumns.ts`). The shared UI components (`Icon`, `Tooltip`, `HelpTip`, `Dropdown`, `ColumnHead`,
-  `ColumnsButton`/`ColumnsDialog`, `ConfirmDialog`, `Picker`, `ViewToggle`), `tableColumns.ts`, the styles, the
-  fonts and the pure helpers `apiTypes.ts` (the web app's API types the companion uses), `materialNames.ts`,
-  `quality.ts` and `componentStats.ts` were copied from sc-quartermaster at 92d89c2 on 2026-11-06 and are owned here
-  (no sync).
+  `tableColumns.ts`). The shared UI components, `tableColumns.ts` and the styles come from `adminapp/src/` and
+  `webapp/src/` by relative import, the pure helpers (`api-types.ts` with the web app's API types, `thumbs.ts`,
+  `material-names.ts`, `quality.ts`, `component-stats.ts`, `catalog/components.ts`) from the backend's `src/`; no
+  copies (the files are listed in `tsconfig.json` and Vite's `fs.allow`). The fonts are the companion's own
+  (`src/assets/fonts/`).
 
 ## Game.log and blueprint unlocks
 
@@ -92,8 +94,8 @@ Product requirements (moved here from sc-quartermaster's `docs/requirements.md`,
   ETag in the app cache dir (`%LOCALAPPDATA%\com.w00zla.quartermaster.companion\api\<path>.json`,
   `server::cached_api`) and sent with `If-None-Match`; a 304 answers the kept body (the ETag hashes the
   content: another server or user never gets a wrong one; a broken file only costs the transfer).
-- **Item thumbnails** (2026-10-25; the sizes at `ThumbSize` in `backend.ts`, the server side in sc-quartermaster's
-  `docs/webapp.md` "Thumbnails"): only for catalog entries with a hash (`CatalogMaterial.thumb`, `CatalogBlueprint.thumb` of
+- **Item thumbnails** (2026-10-25; the sizes at `ThumbSize` in `backend.ts`, the server side in `docs/webapp.md`
+  "Thumbnails"): only for catalog entries with a hash (`CatalogMaterial.thumb`, `CatalogBlueprint.thumb` of
   its `outputUuid`); without one nothing is asked and the row looks as before. Rust `thumb(size, uuid, hash)`
   (s|m|l, UUID and 8-hex hash checked) answers a `data:image/avif;base64,…` URL (the CSP stays: `img-src`
   has `data:`, not the server) from `%LOCALAPPDATA%\com.w00zla.quartermaster.companion\thumbs\<size>\<uuid>.<hash>.avif`,
@@ -139,7 +141,7 @@ Product requirements (moved here from sc-quartermaster's `docs/requirements.md`,
 - The push is one implementation, `scripts/push-companion.mjs` (Node and scp, on Windows its OpenSSH scp; the ps1
   calls it, the .sh is its Linux entry point): the files the manifest names into `<DEPLOY_PATH>/local/companion/` on
   the VM (default `/opt/sc-quartermaster`), the manifest last (it raises the required version; copied first, it
-  would send outdated apps to downloads that are not there yet). The server side: sc-quartermaster's `docs/deploy.md`
+  would send outdated apps to downloads that are not there yet). The server side: `docs/deploy.md`
   and `docs/webapp.md` "Companion release".
 - The key pair comes from `pnpm tauri signer generate -w <file>` once; the private key never goes into the repo,
   losing it means installed apps take no update until reinstalled with a new key.
@@ -259,7 +261,7 @@ Product requirements (moved here from sc-quartermaster's `docs/requirements.md`,
   pack (`refinerySync.ts` `loadCatalog`: the companion's only catalog fetch, `/api/companion/catalog` de and
   en (since 2026-11-01; before: the web app's `/api/catalog`), once connected, again when the game folder
   changes; kept in memory and on disk (ETag), the unlocks panel uses its responses). It has only what the
-  companion reads (`CompanionCatalogResponse` in `apiTypes.ts`, sc-quartermaster's `docs/webapp.md`): materials uuid, kind (the unit follows
+  companion reads (`CompanionCatalogResponse` in `apiTypes.ts`, `docs/webapp.md`): materials uuid, kind (the unit follows
   from it), name, nameKey, type, typeLabel, component, label, size, gradeLetter, stats (every
   `CatalogStat` field), thumb; locations uuid, key, label, short, nameKey, refinery; blueprints uuid,
   label, name, size, gradeLetter, isDefault, retired, outputUuid, thumb. Per language ~2.45 MB instead of
@@ -294,7 +296,7 @@ their amount is the badge's count, the tooltip's "0.001 SCU" is per piece.
   frame (`Frame.cursor`; screenshots without a cursor fall back to the tooltip's hints).
 - **Retraining the layout detector**: its COCO set exists (exported from recordings up to 1.3.1 by the former
   `warehouse_coco.py`); an export of the current recording format into `inventory_dump` is not built yet. Run
-  sc-ohseearr's layout pipeline on the recipe (`training/README.md` there), then `scripts/regression-dumps.sh` here
+  sc-ohseearr's layout pipeline on the recipe (`training/README.md` there), then `companion/scripts/regression-dumps.sh`
   against the read before.
 
 ### Sightings and proposals (frontend)
@@ -328,7 +330,7 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
 
 - Frontend: the title ("Mil/3/A Blizzard", "CQ7 Rifle") against the catalog's gear names in de/en plus the
   language pack, the prefix narrowing size and grade (`findComponents`; among same-name variants the
-  craftable one; the catalog lists only the plain part of a variant group, see sc-quartermaster's `docs/stock.md`); without an
+  craftable one; the catalog lists only the plain part of a variant group, see `docs/stock.md`); without an
   exact match with the OCR's look-alikes folded (l/I and 1, O and 0: "Sion Compensatorl"). Ship component
   or FPS gear by the item's catalog type (`FPS_TYPES` in `components.ts`), which picks the filter that lets it through. Stat lines ("Coolant
   Rating:  60.00", the value in a column of its own; a dropped colon is tolerated) against each stat's
@@ -469,8 +471,8 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
 
 ## OCR
 
-- **sc-ohseearr** (the sibling checkout `../sc-ohseearr`, path dependencies, so it must sit next to this repo wherever
-  the companion is built): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
+- **sc-ohseearr** (the sibling checkout `../sc-ohseearr`, path dependencies from `src-tauri/Cargo.toml`, so it must sit next to
+  this repo wherever the companion is built): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
   `paddle-det-tiny` (PP-OCRv6 tiny's detector), `sc-rec-latin` (our recognizer: tiny's cut to Latin and fine-tuned on
   the game's font) and `sc-warehouse-layout`, compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the
   reader interface, the game's texts), the readers `-warehouse`, `-gear-inventory`, `-refinery` and
@@ -484,7 +486,7 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   detector counts in the detector's timings. `inventory.rs`, `components.rs` and `refinery.rs` keep the companion's
   serde payloads (frontend, events, recordings) and map the readers' neutral output onto them (`to_legacy`; fields
   like `Field::raw`/`ambiguous` and the names' loc keys are not used beyond that yet).
-- **Regression check** for any change of sc-ohseearr or the adapters: `scripts/regression-dumps.sh <out> [repo root]`
+- **Regression check** for any change of sc-ohseearr or the adapters: `companion/scripts/regression-dumps.sh <out> [repo root]`
   runs `inventory_dump`, `components_dump` (this repo) and sc-ohseearr's `regress-refinery` over the regression sets
   each reader's `regression.toml` lists (debug recordings in `regression/<reader>/` of sc-ohseearr's data root, no
   screenshots: its ADR 0014; 652 warehouse frames, 444 character inventory frames, the refinery's set pending; the

@@ -154,10 +154,9 @@ item class label. The SPA view: "Views".
 
 ### Companion release (`companion.ts`)
 
-The companion app itself (code, build, release scripts) is in `../sc-qm-companion`; this is the server side.
+The companion app itself (code, build, release scripts) is described in `docs/companion.md`; this is the server side.
 
-`COMPANION_DIR` (default `local/companion`; locally `../sc-qm-companion/local/companion`, where the companion's
-publish script writes) holds the built app files and `companion.json`
+`COMPANION_DIR` (default `local/companion`; where the companion's publish script writes) holds the built app files and `companion.json`
 `{"version":"x.y.z","windows":"<…_x64-standalone.zip>","linux":"<.AppImage>","windowsSetup":"<…_x64-setup.exe>"}`
 (re-read when it changes; the setup's updater signature is read from `<setup>.sig` next to it, missing =
 manifest ignored). `GET /api/companion` lists version and downloads (the setup first, `kind` setup or
@@ -436,7 +435,7 @@ blocks".
   anywhere in the UI (texts via a swap, equal variant borders).
 - `assets/logo.png` is the app/bot logo. Its web copies (regenerate when it changes): `adminapp/src/assets/logo-128.png`,
   `adminapp/public/favicon.png`, `webapp/src/assets/logo-256.png` (login page), `webapp/src/assets/logo-{72,144}.png` (Companion
-  dialog), `webapp/public/favicon.png`.
+  dialog), `webapp/public/favicon.png`, `companion/src/assets/logo-{44,88}.png` (the companion's title bar; exact sizes, Lanczos: the webview's own downscaling frays the edge).
 
 ## Security measures
 

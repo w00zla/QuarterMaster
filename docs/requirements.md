@@ -59,7 +59,7 @@ Only the structure is fixed for now; individual settings are added when a featur
 - `/qm-refinery done job` opens a modal prefilled with one line per material and its expected yield ("Quantainium 820: 5.69"); only the numbers are the user's, the lines are checked in order; submitting stores them.
 - `/qm-refinery remove job` drops a job that will not come out (cancelled, lost to a game patch): a panel names it, **Remove** confirms.
 - `/qm-refinery list` shows your running jobs (station, countdown, "ready" or "duration open", materials with their yields).
-- The companion app (sc-qm-companion) syncs the jobs of a station from the terminal's work order overview: its requirements are in `../sc-qm-companion/docs/companion.md` "Requirements".
+- The companion app syncs the jobs of a station from the terminal's work order overview: its requirements are in `docs/companion.md` "Requirements".
 
 ## Stock
 

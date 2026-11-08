@@ -1,4 +1,4 @@
-// Item thumbnails (pure, shared with the SPAs and API consumers such as sc-qm-companion): precomputed AVIFs in three
+// Item thumbnails (pure, shared with the SPAs and API consumers such as the companion): precomputed AVIFs in three
 // sizes, named by catalog UUID and content hash; a URL never changes its content (cacheable forever). The catalog
 // says which UUIDs have one (CatalogMaterial.thumb, CatalogBlueprint.thumb); without a hash nothing is requested.
 // Packed by tools/thumbs, served by the web app under /thumbs (docs/webapp.md "Thumbnails").

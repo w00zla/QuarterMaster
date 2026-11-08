@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Discord bot and user web app (plus the server side of the companion desktop app) for Star Citizen players and orgs to manage materials
+Discord bot, user web app and companion desktop app for Star Citizen players and orgs to manage materials
 (stock), ship components, refinery jobs and blueprints. Multi-guild (one Discord server = one org),
 German/English. GitHub: `w00zla/QuarterMaster` (private; remote over SSH like all sibling repos, the folder keeps its
 name `sc-quartermaster`).
@@ -19,22 +19,21 @@ Where things are described (read the matching file before working in an area):
 | `docs/bot.md` | schemas `app`/`bot`/`web`, the bot's structure, commands, roster, logs channel, board |
 | `docs/webapp.md` | user web app: backend, login, sessions, API, realtime, SPA views and building blocks, security measures |
 | `docs/adminapp.md` | admin web UI |
+| `docs/companion.md` | companion app (`companion/`): requirements, structure, Game.log, server/config, release, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, OCR adapters (pointers into sc-ohseearr), decisions |
 | `docs/ext.md` | third-party data (UEX refineries, refining methods) |
 | `docs/deploy.md` | production design (image, compose, DB roles, Caddy) and the step-by-step deploy, backups, updates, rollback, restore |
-| `../sc-qm-companion` | the companion desktop app (own repo since 2026-11-06; its `docs/companion.md`: Game.log, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, release) |
-| `../sc-ohseearr` | OCR engine, models and training (own repo; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
+| `../sc-ohseearr` | OCR engine, models, readers and training (own repo; the companion's Rust path dependencies; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
 | `.claude/open-points.md` | open decisions and follow-ups the user schedules (local, not in git) |
 
 **Status:** catalog pipeline, admin web UI, the bot with all its commands, logs channel and org board, the
 stock service, UEX pull and the user web app are built. In production since 2026-10-05 (Docker Compose on a
 VPS behind Caddy); live with real users and data since 2026-11-08 (bot and user web app), so the production DB
 is not disposable. Backup and restore are tested on production; **the daily backups stay on the server only** (no
-remote target yet: `docs/deploy.md` § 6). The companion is to become independent of the web app (a standalone
-version is planned; `../sc-qm-companion`).
+remote target yet: `docs/deploy.md` § 6). The companion (Game.log blueprints, warehouse and character inventory scans, scan overlay, refinery sync) is in use; it is to become independent of the web app (a standalone version is planned).
 
 ## Commands
 
-pnpm workspace: the root package (backend, CLIs), `adminapp/` (the admin SPA) and `webapp/` (the user web app SPA). Run everything from the root; pass CLI arguments directly (`pnpm x --flag`, no `--`, it would reach the CLI as a positional).
+pnpm workspace: the root package (backend, CLIs), `adminapp/` (the admin SPA), `webapp/` (the user web app SPA) and `companion/` (the companion app: Tauri 2, Rust + Vue SPA). Run everything from the root (the companion's cargo commands use `--manifest-path`); pass CLI arguments directly (`pnpm x --flag`, no `--`, it would reach the CLI as a positional).
 
 ```sh
 pnpm db:up | db:down | db:psql      # local Postgres 18 via Podman (Linux; creates quartermaster + quartermaster_test)
@@ -66,6 +65,19 @@ pnpm webapp:build             # vue-tsc + vite build -> webapp/dist (served by p
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)
 pnpm bot:register [--dry-run] # bulk-overwrite slash commands: DISCORD_DEV_GUILD_ID set = that server only, else global
 pnpm ext                      # third-party pull (UEX, needs UEX_TOKEN): at start, then every 15 minutes
+
+pnpm companion:directml       # once per checkout on Windows: DirectML.dll (GPU OCR) into companion/src-tauri/resources/ocr (not in git)
+pnpm companion:start          # companion: tauri dev (Vite on :1430, UI hot reload, Rust rebuilt when it changed; OCR on the CPU: no DirectML.dll there)
+pnpm companion:fast           # test build for the game: profile `fast` -> companion/src-tauri/target/fast/quartermaster-companion.exe (+ DirectML.dll); close the running exe first
+pnpm companion:build          # release build for this OS (LTO, minutes): build:windows (NSIS setup + .sig, needs TAURI_SIGNING_PRIVATE_KEY, and the bare exe) or build:linux (AppImage)
+pnpm --filter sc-quartermaster-companion typecheck   # companion SPA typecheck (vue-tsc)
+cargo test --release --manifest-path companion/src-tauri/Cargo.toml   # Rust tests (pure: no local data; the readers' screenshot tests are sc-ohseearr's); the JS tests are test/companion-*.test.ts (pnpm test)
+cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example inventory_dump -- <out dir> <dir>... [--threads n] [--gpu]   # warehouse read over screenshots/recordings, overlays per frame
+cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example components_dump -- <[set=]dir>... [--threads n] [--gpu] [--dataset <out dir>]   # character inventory read; --dataset: the tooltip lines as a line-crop dataset (companion/tools/dataset-export/README.md)
+cargo run --release --manifest-path ../sc-ohseearr/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]   # raw OCR of an image (sc-ohseearr's)
+companion/scripts/regression-dumps.sh <out dir> [repo root]   # inventory_dump, components_dump and sc-ohseearr's regress-refinery over the readers' regression sets (recordings in its data root's regression/<reader>/), normalized: compare with a baseline before and after any OCR/reader change (byte-identical is the bar)
+scripts/publish-win-companion.ps1 <user@host>   # Windows release: setup + .sig + standalone zip into $COMPANION_DIR (default local/companion), companion.json updated, then pushed by push-companion.mjs
+scripts/push-companion.sh <user@host>           # the push alone (Linux entry point of scripts/push-companion.mjs): the manifest's files, then companion.json, to the server's DEPLOY_PATH
 ```
 
 VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; production deploy, backups and updates: `docs/deploy.md`. `.env`: see `.env.example`. The DB integration tests **drop and recreate** the `ext`, `web`, `bot`, `app`, `catalog` and `drizzle` schemas in `TEST_DATABASE_URL` — never point it at a real database.
@@ -73,11 +85,12 @@ VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; prod
 ## Runtime conventions
 
 - Backend: no build step. Node ≥ 22.18 runs `.ts` files directly via type stripping. Relative imports must use the `.ts` extension, and only erasable TypeScript is allowed (`erasableSyntaxOnly`: no enums, namespaces, parameter properties). TypeScript 7 for the backend.
-- SPAs (`adminapp/`, `webapp/`): Vue 3 + Vite, own packages with TypeScript 6 (`vue-tsc` needs the JS API that the Go-based TS 7 lacks). They import shared pure code from `src/` (listed in their `tsconfig.json` and Vite `fs.allow`); such files must not import server dependencies. The web app imports the admin's styles and components relatively from `adminapp/src/` (no copies) (the companion keeps its own copies in `../sc-qm-companion/src/shared`).
+- SPAs (`adminapp/`, `webapp/`, `companion/`): Vue 3 + Vite, own packages with TypeScript 6 (`vue-tsc` needs the JS API that the Go-based TS 7 lacks). They (the companion too) import shared pure code from `src/` (listed in their `tsconfig.json` and Vite `fs.allow`); such files must not import server dependencies. The web app imports the admin's styles and components relatively from `adminapp/src/` (no copies); the companion imports from `src/`, `adminapp/src/` and `webapp/src/` the same way (no copies, no mirrored API types).
 - DB sessions run with JIT off (`src/db/client.ts`): JIT compiled short list queries for ~450 ms each.
-- `local/` is gitignored and holds the StarBreaker binary of our fork (`local/starbreaker-ps/`, built from `../starbreaker-ps`), snapshots, external `global.ini` files (`local/localization/<source>/`), the extractor's working directory, screenshots. Game data does not go into the repo. Logo copies in the apps: `docs/webapp.md` "UI rules".
+- `local/` is gitignored and holds `local/companion/` (the companion's release files, `COMPANION_DIR`), the StarBreaker binary of our fork (`local/starbreaker-ps/`, built from `../starbreaker-ps`), snapshots, external `global.ini` files (`local/localization/<source>/`), the extractor's working directory, screenshots. Game data does not go into the repo. Logo copies in the apps: `docs/webapp.md` "UI rules".
 - Shell scripts must pass `shellcheck`.
-- The checkout is shared by Linux and Windows (NTFS): `.gitattributes` keeps every text file LF in the working tree (`* text=auto eol=lf`: Windows git has `autocrlf`), `core.filemode` is false (NTFS loses the executable bit), `node_modules` is per platform (`pnpm install --config.confirmModulesPurge=false` after switching). File paths from module URLs only via `fileURLToPath` (`URL.pathname` is `/D:/…` on Windows).
+- The checkout is shared by Linux and Windows (NTFS): `.gitattributes` keeps every text file LF in the working tree (`* text=auto eol=lf`: Windows git has `autocrlf`), `core.filemode` is false (NTFS loses the executable bit), `node_modules` and `companion/src-tauri/target` are per platform (`pnpm install --config.confirmModulesPurge=false` after switching). File paths from module URLs only via `fileURLToPath` (`URL.pathname` is `/D:/…` on Windows).
+- **Companion:** the refinery read needs the game's texts (the language pack's `global.ini`, else an English table at `<app local data>/global-english.ini`; no game texts compiled in). Companion log: `%LOCALAPPDATA%com.w00zla.quartermaster.companionlogscompanion.log` (Linux: `~/.local/share/…/logs`; 2 MB, 3 old files), every OCR read is logged (`docs/companion.md` "Debug window", "OCR"); debug recordings (the debug window's "Record data") hold every read's frame + JSON. Screenshots, recordings and OCR datasets live in sc-ohseearr's data root (`$SC_OHSEEARR_DATA`, else `../sc-ohseearr/local`).
 - Ideas adopted from another bot (fg-sc-org-inventory-bot) are concepts only: that repo has no license, never copy its code.
 
 ## Rules that must not break
@@ -98,13 +111,14 @@ VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; prod
 - **Bot** (`docs/bot.md`): discord.js; roster from member roles; logs channel from `app.history`; one board message per org via `LISTEN qm_changes`.
 - **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth, role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket; features and privileges (`src/webapp/features.ts`).
 - **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth; control room, read-only user data, catalog browser, imports, UEX, features.
-- **Companion / OCR** (own repos `../sc-qm-companion` Tauri desktop app, `../sc-ohseearr` OCR): they register blueprints, stock and refinery jobs through the web app's API (per-user token, version header); here only that API, `GET /api/companion/catalog` and the release files (`docs/webapp.md` "Companion release"). Their tests live there; the API side is covered by `test/webapp*.test.ts`.
+- **Companion** (`docs/companion.md`, `companion/`): Tauri 2 desktop app (Rust + Vue). Reads `Game.log` and, in a scan session, the game window (OCR from `../sc-ohseearr`, path dependencies; the Rust adapters in `companion/src-tauri/`), and registers blueprints, stock and refinery jobs through the web app's API (per-user token `qmt_…`, version header); server side: that API, `GET /api/companion/catalog` and the release files (`docs/webapp.md` "Companion release"). Tests: `test/companion-*.test.ts` (pure frontend logic, root `pnpm test`), Rust tests in `companion/src-tauri`; the API side is covered by `test/webapp*.test.ts`. OCR engine, models, readers and training: `../sc-ohseearr` (own repo, required next to this one to build the companion).
 - **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext`.
 
 **Tests** (`test/`): `fixtures.ts` builds synthetic DataCore records (no real game data) and runs them through the real normalizer; the resulting snapshot feeds both the pure tests and the DB integration tests.
 
 <!-- claude-reflect: learned rules (saved from the band; edit freely) -->
 ## Learned rules
+- Companion: OCR results must not change silently (`companion/scripts/regression-dumps.sh` before and after an OCR/reader change, byte-identical is the bar); changes to the engine, models or readers belong in `../sc-ohseearr`. The companion's UI follows the same UI rules as the apps (buttons keep their size, no hint texts, no layout jumps); a text change in German always changes English too.
 - No details of the maintainer's own environment in tracked files (the repo will go public): no hosts, IPs, domains, user names, tailnet names or home network setup in docs, examples, comments or scripts. Use placeholders (`<user>@<vm>`, `qm.example.com`); the real values live in Claude's memory, not in git.
 - Buttons keep their size when their state changes (details: `docs/webapp.md` "UI rules").
 <!-- end claude-reflect -->

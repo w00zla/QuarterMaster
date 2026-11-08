@@ -9,7 +9,7 @@ data stay in sc-ohseearr's data root (`$SC_OHSEEARR_DATA`, else `../sc-ohseearr/
   (data root `D`):
 
   ```sh
-  cargo run --release --manifest-path src-tauri/Cargo.toml --example components_dump -- --dataset D/ocr-eval \
+  cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example components_dump -- --dataset D/ocr-eval \
     2503=D/stock_scan_debug/qm-inventory-debug-1793452503 4173=D/stock_scan_debug/qm-inventory-debug-1793454173 \
     8932=D/stock_scan_debug/qm-inventory-debug-1793448932 inv1=D/screenshots/inventory \
     "inv3=D/screenshots/inventory 3" "inv4=D/screenshots/inventory 4"
@@ -28,7 +28,7 @@ independent of the OCR: a title = the catalog's English item name, a stat line =
 description line = the nearest word span of the item's description in the player's `global.ini`.
 
 ```sh
-node tools/dataset-export/ocr-eval-label.ts \
+node companion/tools/dataset-export/ocr-eval-label.ts \
   --catalog <en.json> [--catalog <de.json> ...] --pack <global.ini> [--dir <data root>/ocr-eval] [--out <labels.tsv>]
 ```
 

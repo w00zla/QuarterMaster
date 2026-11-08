@@ -172,7 +172,7 @@ ssh <user>@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node sr
 
 Copy the release files and `companion.json` into `local/companion/` of the VM's checkout; the web app picks a new manifest
 up within seconds, no restart (manifest format and version rules: `docs/webapp.md` "Companion release"). The upload runs from
-`../sc-qm-companion` (`docs/companion.md` "Release": `scripts/publish-win-companion.ps1 <user>@<vm>` or
+this checkout (`docs/companion.md` "Release": `scripts/publish-win-companion.ps1 <user>@<vm>` or
 `scripts/push-companion.sh <user>@<vm>`; the manifest is copied last, `DEPLOY_PATH`/`-DeployPath` for another checkout path).
 
 ### Item thumbnails
