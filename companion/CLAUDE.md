@@ -72,5 +72,7 @@ Debug recordings (the debug window's "Record data") hold every read's frame + JS
 - **UI:** buttons, chips, toggles and tabs never change size with their state; no hint texts; no layout jumps.
 - **OCR results must not change silently:** run `scripts/regression-dumps.sh` before and after; changes to the engine,
   models or readers belong in `../sc-ohseearr`.
+- **Game data in git only as small excerpts** a test concretely needs (a few loc keys, single crops or frames, the
+  source noted), never whole files (`global.ini`, fonts, recordings); the rule is sc-ohseearr's ADR 0015.
 - **Commit after the real test:** features the user checks in the running app or in game are committed after that check.
 - The user starts the app and does the in-game checks himself.
