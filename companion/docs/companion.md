@@ -535,7 +535,9 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   `findMaterial` (`materialNames.ts`, also takes a name without its accents: the OCR read "HEPHAESTÁNITE") over the catalog's de/en names plus the pack texts; the station by its title against refinery
   locations; unresolved rows are skipped. An order the reader marks `covered` (the "Work Order Accepted" message
   over its panel, a few seconds after accepting: rows missing or misread, 2026-11-08 in two reads in a row) is
-  ignored and does not count as read. An order counts once read the same twice in a row (time left
+  ignored and does not count as read, and so is an order with a row the OCR is unsure of (`score`, the lower of
+  quality's and yield's, below 0.95: every 1080p misread "782" → 762 scored 0.85–0.92, 607 of 614 right rows 0.97 or
+  more; sc-ohseearr's ADR 0018). An order counts once read the same twice in a row (time left
   ignored); an order, running or completed, whose rows are only part of a registered job's or of another
   proposal's of the same kind at that station is no order of its own (rows hidden by a message the reader did
   not see; the fuller order replaces the short one); it matches a running job at that station by the set of (material, quality) (several: the
