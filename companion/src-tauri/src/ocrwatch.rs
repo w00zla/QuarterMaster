@@ -961,7 +961,11 @@ impl Worker {
         let debug = match read {
             Read::Overview(overview) => {
                 self.screen_misses = 0;
-                let orders: Vec<String> = overview.orders.iter().map(|o| format!("{:?} {} rows", o.status, o.rows.len())).collect();
+                let orders: Vec<String> = overview
+                    .orders
+                    .iter()
+                    .map(|o| format!("{:?} {} rows{}", o.status, o.rows.len(), if o.covered { " (covered)" } else { "" }))
+                    .collect();
                 log::info!("refinery overview read in {ms} ms: {}", orders.join(", "));
                 let debug = RefineryRead { kind: "overview", overview: Some(overview.clone()) };
                 let _ = self.app.emit(REFINERY_OVERVIEW, OverviewEvent { at_ms, overview });

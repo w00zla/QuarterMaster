@@ -6,7 +6,8 @@
 //!
 //! Mapping (reader → companion): `Refinery::screen` → `Read` (`Overview` with the orders, `Terminal`, `Nothing`);
 //! `station.text` → `station`; per work order `status`, `time_remaining.value` → `seconds`; per row
-//! `material.text` → `name`, `quality.value`, `yield_cscu.value`. The loc keys of the names are not used yet.
+//! `material.text` → `name`, `quality.value`, `yield_cscu.value`; `covered` as is. The loc keys of the names are not
+//! used yet.
 
 use serde::Serialize;
 
@@ -31,6 +32,8 @@ pub struct Order {
     /// Processing: the time remaining
     pub seconds: Option<u32>,
     pub rows: Vec<Row>,
+    /// The "Work Order Accepted" message lies over the panel: rows may be missing or misread
+    pub covered: bool,
 }
 
 /// One table row. Quality 0–1000, yield in cSCU; `None` where nothing could be read.
@@ -63,6 +66,7 @@ pub fn to_legacy(refinery: Refinery) -> Read {
                     status: o.status,
                     seconds: o.time_remaining.value,
                     rows: o.rows.into_iter().map(|r| Row { name: r.material.text, quality: r.quality.value, yield_cscu: r.yield_cscu.value }).collect(),
+                    covered: o.covered,
                 })
                 .collect(),
         }),

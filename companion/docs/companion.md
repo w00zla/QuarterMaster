@@ -531,10 +531,12 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   default) decides whether the scan reads the terminal at all.
 - Sync (`refinery.ts`, store `refinerySync.ts`, `RefineryPanel.vue`; the requirements: "Requirements"): names via
   `findMaterial` (`materialNames.ts`, also takes a name without its accents: the OCR read "HEPHAESTÁNITE") over the catalog's de/en names plus the pack texts; the station by its title against refinery
-  locations; unresolved rows are skipped. An order counts once read the same twice in a row (time left
-  ignored); a running order whose rows are only part of a registered job's or of another new order's at
-  that station is no order of its own (right after accepting, "Work Order Accepted" hides rows for a few
-  reads; the fuller order replaces the short one); it matches a running job at that station by the set of (material, quality) (several: the
+  locations; unresolved rows are skipped. An order the reader marks `covered` (the "Work Order Accepted" message
+  over its panel, a few seconds after accepting: rows missing or misread, 2026-11-08 in two reads in a row) is
+  ignored and does not count as read. An order counts once read the same twice in a row (time left
+  ignored); an order, running or completed, whose rows are only part of a registered job's or of another
+  proposal's of the same kind at that station is no order of its own (rows hidden by a message the reader did
+  not see; the fuller order replaces the short one); it matches a running job at that station by the set of (material, quality) (several: the
   closest end). Matched processing orders update the job **by themselves** (yield per row via
   `/api/stock/adjust`, time left via `/api/refinery/duration` when off by over 120 s; a toast says so).
   Proposals, nothing booked without a click: unmatched processing order = new job, matched completed order =

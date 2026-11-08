@@ -29,6 +29,9 @@ export interface OverviewOrder {
   // Processing: the time remaining
   seconds: number | null;
   rows: OverviewRow[];
+  // The "Work Order Accepted" message lies over the panel: rows may be missing or misread (recordings before 2.1.1
+  // lack it)
+  covered?: boolean;
 }
 
 export interface Overview {
@@ -133,6 +136,8 @@ export interface Order {
   seconds: number | null;
   // Merged per material and quality, sorted
   rows: OrderRow[];
+  // A message over the panel: rows may be missing or misread
+  covered: boolean;
 }
 
 const rowKey = (resourceUuid: string, quality: number) => `${resourceUuid}:${quality}`;
@@ -164,7 +169,7 @@ export function resolveOrder(o: OverviewOrder, cat: SyncCatalog): Order | null {
     const uuid = findMaterial(cat.materials, r.name);
     if (uuid) rows.push({ resourceUuid: uuid, quality: r.quality, yieldCscu: r.yieldCscu });
   }
-  return rows.length ? { status: o.status, seconds: o.seconds, rows: merged(rows) } : null;
+  return rows.length ? { status: o.status, seconds: o.seconds, rows: merged(rows), covered: o.covered ?? false } : null;
 }
 
 /** Which job an order may be: its materials and qualities. */
@@ -260,7 +265,8 @@ export class RefinerySync {
     const here = jobs.filter((j) => j.locationUuid === locationUuid);
     const orders = e.overview.orders.map((o) => resolveOrder(o, cat)).filter((o): o is Order => o !== null);
     const before = this.lastRead.get(locationUuid) ?? new Set<string>();
-    this.lastRead.set(locationUuid, new Set(orders.map(content)));
+    // A covered order never counts as read (a later read agreeing with it would pass)
+    this.lastRead.set(locationUuid, new Set(orders.filter((o) => !o.covered).map(content)));
 
     const updates: Update[] = [];
     const used = new Set<string>();
@@ -272,13 +278,14 @@ export class RefinerySync {
         this.seenJobs.add(job.jobId);
         this.drop(`missing:${job.jobId}`);
       }
+      // A message over the panel ("Work Order Accepted"): rows may be missing or misread
+      if (o.covered) continue;
       // Only what two reads in a row showed the same
       if (!before.has(content(o))) continue;
       if (o.status === "processing" && job) updates.push(...jobUpdates(job, o, endsAtMs, nowMs));
-      else if (o.status === "processing") {
-        // Part of a registered job: rows hidden, not a new order
-        if (!here.some((j) => partOf(o.rows, j.batches))) this.propose({ kind: "new", id: `new:${locationUuid}:${signature(o.rows)}`, locationUuid, endsAtMs, rows: o.rows });
-      }
+      // Part of a registered job: rows hidden, not an order of its own (running or finished)
+      else if (!job && here.some((j) => partOf(o.rows, j.batches))) continue;
+      else if (o.status === "processing") this.propose({ kind: "new", id: `new:${locationUuid}:${signature(o.rows)}`, locationUuid, endsAtMs, rows: o.rows });
       else if (this.stored.has(completedKey(locationUuid, o.rows))) continue;
       else if (job) this.propose({ kind: "store", id: `store:${job.jobId}`, locationUuid, job, rows: o.rows });
       else this.propose({ kind: "finished", id: `finished:${completedKey(locationUuid, o.rows)}`, locationUuid, rows: o.rows });
@@ -328,9 +335,10 @@ export class RefinerySync {
 
   private propose(p: Proposal) {
     if (this.dismissed.has(p.id)) return;
-    if (p.kind === "new") {
-      // A read with rows hidden: the fuller order of the same station wins, also when read later
-      const sameStation = (x: Proposal): x is Extract<Proposal, { kind: "new" }> => x.kind === "new" && x.locationUuid === p.locationUuid;
+    if (p.kind === "new" || p.kind === "finished") {
+      // A read with rows hidden: the fuller order of the same kind and station wins, also when read later
+      const kind = p.kind;
+      const sameStation = (x: Proposal): x is Extract<Proposal, { kind: "new" | "finished" }> => x.kind === kind && x.locationUuid === p.locationUuid;
       if (this.proposals.some((x) => sameStation(x) && partOf(p.rows, x.rows))) return;
       for (const x of this.proposals.filter((x) => sameStation(x) && partOf(x.rows, p.rows))) this.drop(x.id);
     }

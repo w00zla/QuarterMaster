@@ -121,6 +121,35 @@ describe('companion refinery sync', () => {
     assert.equal(other.proposals.length, 0);
   });
 
+  it('an order the reader marks covered is left alone, however often it is read', () => {
+    // 2026-11-08: "Work Order Accepted" hid the last row of a finished order in two reads in a row
+    const sync = new RefinerySync();
+    const hidden = { ...completed(ORDER2.slice(0, 2)), covered: true };
+    twice(sync, read(T0, hidden), []);
+    assert.equal(sync.proposals.length, 0);
+    // Nor does it make the next uncovered read stable on its own
+    sync.feed(read(T0 + 4000, completed(ORDER2.slice(0, 2))), CAT, [], T0 + 4000);
+    assert.equal(sync.proposals.length, 0);
+    // A running order of a job: no updates from a covered read
+    const { second } = twice(new RefinerySync(), read(T0, { ...processing(3600, ORDER2), covered: true }), [JOB2(null, '0.8')]);
+    assert.deepEqual(second.updates, []);
+  });
+
+  it('a finished order with rows hidden is no order of its own', () => {
+    // Read short first, then whole: one proposal, the fuller one
+    const sync = new RefinerySync();
+    twice(sync, read(T0, completed(ORDER2.slice(0, 2))), []);
+    twice(sync, read(T0 + 6000, completed(ORDER2)), []);
+    assert.deepEqual(sync.proposals.map((p) => p.kind === 'finished' && p.rows.length), [3]);
+    // Whole first, then short: still one
+    twice(sync, read(T0 + 12000, completed(ORDER2.slice(1))), []);
+    assert.equal(sync.proposals.length, 1);
+    // Short rows of a registered job: neither stored nor proposed without it
+    const other = new RefinerySync();
+    twice(other, read(T0, completed(ORDER2.slice(0, 2))), [JOB2(null)]);
+    assert.equal(other.proposals.length, 0);
+  });
+
   it('one read alone or two different reads do nothing', () => {
     const sync = new RefinerySync();
     sync.feed(read(T0, processing(3600, ORDER2)), CAT, [], T0);
