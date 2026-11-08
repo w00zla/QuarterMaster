@@ -84,7 +84,7 @@ VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; prod
 
 ## Runtime conventions
 
-- Backend: no build step. Node ≥ 22.18 runs `.ts` files directly via type stripping. Relative imports must use the `.ts` extension, and only erasable TypeScript is allowed (`erasableSyntaxOnly`: no enums, namespaces, parameter properties). TypeScript 7 for the backend.
+- Backend: no build step. Node ≥ 26 runs `.ts` files directly via type stripping. Relative imports must use the `.ts` extension, and only erasable TypeScript is allowed (`erasableSyntaxOnly`: no enums, namespaces, parameter properties). TypeScript 7 for the backend.
 - SPAs (`adminapp/`, `webapp/`, `companion/`): Vue 3 + Vite, own packages with TypeScript 6 (`vue-tsc` needs the JS API that the Go-based TS 7 lacks). They (the companion too) import shared pure code from `src/` (listed in their `tsconfig.json` and Vite `fs.allow`); such files must not import server dependencies. The web app imports the admin's styles and components relatively from `adminapp/src/` (no copies); the companion imports from `src/`, `adminapp/src/` and `webapp/src/` the same way (no copies, no mirrored API types).
 - DB sessions run with JIT off (`src/db/client.ts`): JIT compiled short list queries for ~450 ms each.
 - `local/` is gitignored and holds `local/companion/` (the companion's release files, `COMPANION_DIR`), the StarBreaker binary of our fork (`local/starbreaker-ps/`, built from `../starbreaker-ps`), snapshots, external `global.ini` files (`local/localization/<source>/`), the extractor's working directory, screenshots. Game data does not go into the repo. Logo copies in the apps: `docs/webapp.md` "UI rules".
