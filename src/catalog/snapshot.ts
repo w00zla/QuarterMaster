@@ -67,7 +67,8 @@ export const itemSchema = z.object({
   shop: z.boolean(),
   // Harvestables: SCU one piece takes in an inventory (null: none or not a harvestable)
   scuPerPiece: z.number().nullable(),
-  // Crafted property key -> the unmodified base value (not filled yet: empty)
+  // Crafted property key -> the unmodified value as the game's tooltip shows it, for every property the
+  // item's record holds one for (src/stock/component-base.ts)
   baseStats: z.record(z.string(), z.number()),
 });
 

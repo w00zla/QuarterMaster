@@ -639,7 +639,7 @@ GPU process should not compete with the game; not measured yet.
   dropped: SCU materials are visible only in the freight manager). Components are not booked from it.
 - **Components in the character inventory, strictly apart** (2026-10-18): only that tooltip shows stats
   (absolute values). The stock keeps gains, so the server delivers each stat's base value from the item's
-  `raw_record` (`CatalogStat.base`; chosen over storing absolute values or scanning without stats).
+  `base_stats` (`CatalogStat.base`; chosen over storing absolute values or scanning without stats).
 - **One scan for every screen** (2026-10-19; before: one inventory scan, and a refinery session of its
   own): the worker tells warehouse, inventory and refinery terminal apart; the filters set its scope; the
   overlay runs it in every tab; Scan and location in one row above the tabs.

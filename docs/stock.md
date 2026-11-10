@@ -81,19 +81,20 @@ whole `app`/`bot`/`web` split).
   keeps its shares, or a new one, which takes this one's; history adjust with `details.statsFrom`);
   move/split/merge carry them with the key.
 - `materialCatalog` lists each component's `stats` (`{uuid, name, nameKey, kind, min, max, base, tooltip}`,
-  Integrity last; `base` = the unmodified value as the game's tooltip shows it, read from the item's
-  `raw_record` by the jsonpaths in `src/stock/component-base.ts`: Integrity, Coolant Rating, Power Pips,
+  Integrity last; `base` = the unmodified value as the game's tooltip shows it, from the item's
+  `base_stats` (crafted property key → value), which the extractor reads from the item's DataCore record by the
+  jsonpaths in `src/stock/component-base.ts` (evaluated in TypeScript, `src/stock/jsonpath.ts`): Integrity, Coolant Rating, Power Pips,
   Max. Shield Strength, Quantum Speed (× 1e-6), Quantum Fuel Burn (× 1000), the radar assist distances, FPS
   fire rate (a looping fire sequence's pace where the first fire mode has no rate; charged and parallel
   first actions unchecked against a tooltip; places tried in order, `BasePath.fallbacks`), armor temperatures and radiation dissipation, armor damage mitigation (1 − the multiplier in
-  the linked damage record, a second `raw_record` found by its path); null for the rest; `tooltip` =
+  the linked damage record, a second record found by its path); null for the rest; `tooltip` =
   `value`, or `change`/`negatedChange` where the tooltip shows the change in percent (from the property's
   display transformation: impact force, recoil; no base needed); API consumers convert the tooltip's
   values with them) and marks them `component` with a
   unique `label` ("Name · Cooler · S3 · B Industrial": the type instead of a manufacturer, the class name
   where that still collides; FPS gear with its sub type and without a size but on attachments, personal weapons without their
-  class: "Name · Helmets · Light", "Name · Attachment · Barrel · S1"). The bases are read only for the stats an item's
-  blueprints change (the jsonpaths over every gear record took 1.3 s). `loadBatches` marks their batches (`PickableBatch.component`), the summary
+  class: "Name · Helmets · Light", "Name · Attachment · Barrel · S1"). `base_stats` holds every base an item's record
+  has; `componentBaseValues` reads only those of the stats the item's blueprints change. `loadBatches` marks their batches (`PickableBatch.component`), the summary
   metrics (`stockMetricsSql` in `org-summary.ts`) count them as `components` apart from `items`. The bot does
   not tell them apart yet.
 

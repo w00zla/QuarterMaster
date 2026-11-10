@@ -178,7 +178,7 @@ export const RECORDS: Record<string, unknown> = {
     Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: {
       Type: 'Cooler', SubType: 'UNDEFINED', Size: 2, Grade: 3, Manufacturer: ref('scitemmanufacturer/scitemmanufacturer.test.json'),
       Localization: { Name: '@item_NameTEST_Output', Description: '@item_DescTEST_Output' },
-    } }],
+    } }, { _Type_: 'SHealthComponentParams', Health: 110 }],
   }),
   'entities/scitem/carryables/test_gem.json': rec('EntityClassDefinition.TEST_Gem', U.gem, {
     _Type_: 'EntityClassDefinition',
@@ -354,7 +354,12 @@ export const FPS = {
  * nameless records, clothing (the stackables and clothing are shop items, see SHOP_RECORDS). Kept apart from RECORDS: only the tests that need FPS gear add them. */
 export const FPS_RECORDS: Record<string, unknown> = {
   'entities/scitem/weapons/fps_weapons/test_rifle.json': gearItem('test_rifle', FPS.rifle,
-    { Type: 'WeaponPersonal', SubType: 'Medium', Size: 3, Localization: { Name: '@item_Nametest_rifle' } }),
+    { Type: 'WeaponPersonal', SubType: 'Medium', Size: 3, Localization: { Name: '@item_Nametest_rifle' } },
+    // A looping sequence: no rate on the fire mode itself, its first entry's pace is 1.2 seconds per shot
+    [{ _Type_: 'SCItemWeaponComponentParams', fireActions: [
+      { _Type_: 'SWeaponActionSequenceParams', sequenceEntries: [{ _Type_: 'SWeaponSequenceEntryParams', delay: 1.2, unit: 'Seconds' }] },
+      { _Type_: 'SWeaponActionFireSingleParams', fireRate: 300 },
+    ] }]),
   'entities/scitem/characters/human/armor/test_helmet.json': gearItem('test_helmet', FPS.helmet,
     { Type: 'Char_Armor_Helmet', SubType: 'Light', Localization: { Name: '@item_Nametest_helmet' } },
     [{ _Type_: 'SCItemSuitArmorParams', damageResistance: 'file://./../../../../../libs/foundry/records/damage/lightarmor.json' }]),

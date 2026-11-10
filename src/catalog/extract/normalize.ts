@@ -7,6 +7,7 @@ import { isObj, recordKey, refPath, type DcbRecord, type Obj, type RecordStore }
 import { mining } from './mining.ts';
 import type { ContainerScan } from './socpak.ts';
 import { blueprintSources } from './sources.ts';
+import { baseStats } from '../../stock/component-base.ts';
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type Anomaly, type Blueprint, type BlueprintCategory, type BlueprintInput, type BlueprintSlot,
@@ -409,7 +410,7 @@ export function normalize(input: NormalizeInput): Snapshot {
       descriptionKey: locKey(loc.Description),
       shop: shopPaths.has(path),
       scuPerPiece: def.SubType === 'Harvestable' ? scuPerPiece(def) : null,
-      baseStats: {},
+      baseStats: baseStats(r._RecordValue_, (p) => store.get(p)?._RecordValue_),
     };
   });
 

@@ -56,7 +56,8 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('location', 'has_refinery'), 0);
     assert.deepEqual((await db.execute<{ uuid: string }>(sql`SELECT uuid FROM catalog.blueprint WHERE in_reward_pool`)).map((r) => r.uuid), [U.blueprint2]);
     assert.equal(await count('item', 'is_shop'), 0);
-    assert.equal(await count('item', `base_stats = '{}'::jsonb`), base.items.length);
+    assert.deepEqual((await db.execute<{ uuid: string; stats: unknown }>(sql`SELECT uuid, base_stats AS stats FROM catalog.item WHERE base_stats <> '{}'::jsonb`)).map((r) => [r.uuid, r.stats]),
+      [[U.output, { GPP_Health_MaxHealth: 110 }]]);
     assert.deepEqual((await db.execute<{ uuid: string; scu: number }>(sql`SELECT uuid, scu_per_piece AS scu FROM catalog.item WHERE scu_per_piece IS NOT NULL`)).map((r) => [r.uuid, r.scu]), [[U.gem, 0.001]]);
     const [station] = await db.execute<{ parent: string; nav: string }>(
       sql`SELECT parent_uuid AS parent, nav_icon AS nav FROM catalog.location WHERE uuid = ${U.station}`);

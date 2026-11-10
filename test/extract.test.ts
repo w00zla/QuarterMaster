@@ -136,7 +136,24 @@ describe('normalize', () => {
 
   it('leaves the plumbing fields empty', () => {
     assert.ok(s.locations.every((l) => l.refinery === false));
-    assert.ok(s.items.every((i) => Object.keys(i.baseStats).length === 0));
+  });
+
+  it('reads the base values of the crafted stats from the records', () => {
+    const fps = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS });
+    const bases = (u: string) => fps.items.find((i) => i.uuid === u)!.baseStats;
+    // Directly in the record: the health component
+    assert.deepEqual(bases(U.output), { GPP_Health_MaxHealth: 110 });
+    // A fallback with a reciprocal: the first fire mode has no rate, its sequence's first entry takes 1.2 seconds = 50 RPM
+    assert.deepEqual(bases(FPS.rifle), { GPP_Weapon_FireRate: 50 });
+    // In a linked record: 1 - the physical damage multiplier (0.8) of the armor's damage resistance
+    assert.deepEqual(bases(FPS.helmet), { GPP_Armor_DamageMitigation: 0.2 });
+    // No number anywhere: absent
+    assert.deepEqual(bases(FPS.optic), {});
+    assert.deepEqual(bases(U.gem), {});
+    // A link to a record that is not there: absent
+    const records = structuredClone({ ...RECORDS, ...FPS_RECORDS }) as Record<string, any>;
+    delete records['damage/lightarmor.json'];
+    assert.deepEqual(fixtureSnapshot(records).items.find((i) => i.uuid === FPS.helmet)!.baseStats, {});
   });
 
   it('takes the sold non-gear items (SHOP_TYPES), but no Misc outside the carryables, no Cargo, templates or nameless records', () => {

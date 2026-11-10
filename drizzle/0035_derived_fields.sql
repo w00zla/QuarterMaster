@@ -8,6 +8,8 @@ ALTER TABLE "catalog"."location" ADD COLUMN "has_refinery" boolean DEFAULT false
 --> statement-breakpoint
 -- Fill the new columns of the rows imported so far from their raw records (what the app read there before);
 -- the next import from a v7 snapshot sets them from the snapshot.
+-- "item"."base_stats" is not filled here: the extractor evaluates the base paths (src/stock/component-base.ts),
+-- so it stays '{}' (no base values, the stats' "base" is null) until the next import from a v7 snapshot.
 UPDATE "catalog"."location" l SET "has_freight_elevator" = true
 	WHERE EXISTS (SELECT 1 FROM "catalog"."raw_record" r WHERE r."uuid" = l."uuid"
 		AND r."data" -> 'amenities' @> '[{"_RecordId_": "a783bfb9-0f0a-491f-864b-945a49ef5da4"}]');--> statement-breakpoint
