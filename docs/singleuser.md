@@ -1,7 +1,7 @@
 # Singleuser variant
 
 Four parts are described here: the process (how it starts and what it keeps), the database (PGlite), the data pack (how
-game data gets into the app) and who the user is (the local identity).
+game data gets into the app, and how the app fetches it) and who the user is (the local identity).
 
 # The process
 
@@ -24,11 +24,14 @@ through `installPack`; anything else is a snapshot for `catalog:import`), then r
 | `QM_DATA_DIR` | the data folder; else `%LOCALAPPDATA%QuarterMastersingleuser` (Windows) or `${XDG_DATA_HOME:-~/.local/share}/quartermaster/singleuser`; created if missing |
 | `QM_PORT` | exactly this port, or the start fails; else the first free one of 28460-28469 (tried by listening on 127.0.0.1) |
 | `QM_THUMBS_DIR` | the thumbnails folder (`s/`, `m/`, `l/`, `thumbs.json`); else `<data folder>/thumbs`, which may be missing (no thumbnails then) |
+| `QM_AUTO_UPDATE` | `0` = no automatic data update (no request at start); anything else or unset = on. An interim switch for app and data until the settings UI has it; a check asked for through the API still runs |
+| `QM_DATA_FEED` | a folder (`channels.json`, `<tag>/<asset>`) the data update reads instead of GitHub; for development and tests |
 
 (`src/singleuser/paths.ts`, `port.ts`: pure, passed the environment; tested in `test/singleuser-helpers.test.ts`.)
 
 **Data folder:** `db/` (the PGlite database, with its `pg_wal/`), `thumbs/` (`s/`, `m/`, `l/`, `thumbs.json`) and `data-pack.json`
-(the manifest of the installed data pack); the last two are written by the data pack's install. Nothing else.
+(the manifest of the installed data pack); the last two are written by the data pack's install. `downloads/` exists only
+while the data update downloads (deleted afterwards and at the next start). Nothing else.
 
 **Start:** the server binds to `127.0.0.1` only; its origin is `http://127.0.0.1:<port>`. It logs one line per loading
 step with its duration (`open database`, `migrations`, `checkpoint`, `listen`) and then
@@ -53,6 +56,12 @@ hosts. Tests: `test/webapp-host.test.ts`.
 
 **Companion label:** a request with the companion's `X-QM-Companion` header is booked as `companion` in the history,
 any other as `webapp`. It is a label, not a security decision: the local API is open anyway.
+
+**Network:** the data update ("Updating the data") is the only thing in this process that makes a request, and only to GitHub (or
+to `QM_DATA_FEED`, a folder). After "listening" a check starts in the background when the automatic update is on; the start
+never waits for it. Its steps are logged one line each with their duration (`data update: check`, `plan`, `download <MB>`,
+`install`, the outcome). At SIGINT or SIGTERM a download is aborted (its partial file deleted) and an install in progress is
+waited for (up to 120 s instead of 10).
 
 **What the variant does not have:** orgs (no org routes, no membership), login and sessions, API tokens, the Discord bot,
 the admin UI, the UEX pull.
@@ -129,7 +138,7 @@ in the report: the second-connection test of `test/bot-roster.db.test.ts`. `TEST
 
 The variant ships without game data. Game data comes as a **data pack**: the catalog snapshot (without its raw records)
 and the item thumbnails, published as a GitHub release of this repository and installed into the data folder
-(`src/datapack/`; the network side that fetches releases is not part of it).
+(`src/datapack/`; the app fetches releases itself: "Updating the data").
 
 ## The release
 
@@ -204,6 +213,69 @@ archive; the writer and the reader fail with a clear message beyond that (`src/z
 
 **Where it lives:** `<data folder>/thumbs/` and `<data folder>/data-pack.json`; the server serves `/thumbs` from `QM_THUMBS_DIR`
 if set, else from there. `singleuser:import` always installs into `<data folder>/thumbs`. Tests: `test/datapack.test.ts` (no Postgres).
+
+The pictures are written in a loop that lets the event loop run every 200 files. The catalog import is one stretch of
+synchronous work (a few seconds for the real catalog): while it runs, nothing in the process answers, the state endpoint
+included.
+
+## Updating the data
+
+`src/datapack/plan.ts` (the plan, pure), `feed.ts` (where releases come from), `updater.ts` (the operations and the state);
+`src/singleuser/data-routes.ts` (the endpoints); `main.ts` builds the feed and the updater. Dependencies are passed in: the
+updater gets the connection, the folders, the feed, the app's schema version and a log function.
+
+**The feed.** `channels.json` on the repository's `main` branch holds, per product, the stable tag; the data entry is
+`"data": { "stable": "<tag>" }` (other entries are ignored). A missing file or entry is "no data channel", not an error. The
+repository is the constant `DATA_REPO` in `feed.ts` (`w00zla/quartermaster`). What is fetched, and nothing else:
+
+- `https://raw.githubusercontent.com/<owner>/<repo>/main/channels.json`
+- `https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>` for the `manifest.json` of a release and the assets the plan
+  needs (the full pack, `catalog.json.gz`, `thumbs-update.zip`)
+
+Tags must be data tags (`parseTag`) and asset names plain file names, else the feed refuses before any request or path is
+built. Redirects are followed by `fetch`; one that ends outside GitHub's hosts (`github.com`, `*.githubusercontent.com`) is
+refused. Every downloaded file is checked for size and sha256 against its manifest while it streams (more bytes than the manifest
+says stop it; a failure deletes the partial file); the intermediate thumbs updates against their own manifests. No signature. A
+connection that does not answer in 20 s or stalls for 30 s counts as offline. `QM_DATA_FEED=<dir>` replaces GitHub by a folder
+(`<dir>/channels.json`, `<dir>/<tag>/<asset>`) with the same checks.
+
+**The plan** (`planUpdate`): always the feed's newest (no matching to the game version). The same tag as installed: up to
+date (no manifest is fetched). The newest manifest's `schemaVersion` is not the app's: `appTooOld` (`pack`: newer or older), nothing
+is installed, the app keeps its data. Nothing installed: the full pack. Otherwise the planner walks back from the newest
+manifest through `previous` to the installed tag: a **chain** is the newest `catalog.json.gz` and the `thumbs-update.zip` of every
+release since the installed one (installed oldest first). It is the **full pack** instead when the walk needs more than 10 steps,
+a manifest is missing or is another release's, `previous` is null before the installed tag is reached (this includes an installed
+tag that is not in the newest release's history), or catalog size plus the sum of the thumbs updates' sizes is not smaller than the
+full pack's size. The import guards do not apply (as for every pack install).
+
+**The state** (`DataUpdateState`, `src/webapp/api-types.ts`), in memory, never read from the database: `phase` (`idle`,
+`checking`, `downloading`, `installing`), `installed` (`{ tag, gameLabel }` or null; read from `data-pack.json` at start and
+after an install), `progress` (`{ done, total }` bytes while downloading, else null) and `last` (`{ at, outcome }` of the last
+finished operation, null since the start): `upToDate`, `noChannel`, `offline` (no network or an error status: nothing changes,
+the installed data stays usable), `installed` (+ `tag`), `appTooOld` (+ `tag`, `pack`), `failed` (+ `reason`: `corrupt` = a
+checksum or size did not match, `invalid`, `unsupported` = unknown manifest format, `fileMissing`, `internal`; details only in the
+log). An aborted run (shutdown) sets no outcome. A failed run installs nothing; its downloads are deleted.
+
+**Operations** (`createDataUpdater`): `check()` (feed, plan, download into `<data>/downloads/`, `installPack` from the parts or the
+full pack, clean up) and `importFile(path)` (a full pack the user picked; the path must be an existing file, anything else is what
+`installPack` validates). One at a time: a call while one runs returns the running state at once. Both resolve with the final
+state and never reject; `stop()` aborts a download and waits for the running operation. A downloads folder left by a crash is removed
+when the updater is made.
+
+**Endpoints** (singleuser only, mounted through `WebappConfig.mountApi`; writes are JSON only like the whole API, send `{}`):
+
+| Request | Answer |
+|---|---|
+| `GET /api/local/data` | the state |
+| `POST /api/local/data/check` | starts a check, answers the state at once |
+| `POST /api/local/data/import` `{ "path": "<absolute file>" }` | starts the import, answers the state at once; 400 for no or a relative path, 404 `file not found` |
+
+The browser is not told when a catalog changed: the triggers notify user data only (`ServerMessage` has no catalog message), and
+the thumbnail index is re-read at most every 10 s.
+
+Tests: `test/datapack-plan.test.ts` (every branch of the plan), `test/datapack-update.test.ts` (feeds with an injected `fetch`, the
+updater on a folder feed built with `buildRelease`), the update in `test/singleuser.test.ts` (the real process). None needs the
+network or Postgres.
 
 # Identity
 

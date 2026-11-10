@@ -39,6 +39,10 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   origin's to the origin (307). Unset (online) = no check, Caddy matches the host. The WebSocket handshake takes the
   same list through `RealtimeOptions.allowedHosts` (421). Used by the singleuser variant (`docs/singleuser.md`
   "Host guard").
+- `WebappConfig.mountApi` (optional): `(api: ApiApp) => void`, called with the API router after the regular routes and the
+  identity's API routes and before the 404 catch-all, so the routes stay behind the identity check, the JSON-only rule for
+  writes and the body limit. Online passes none; the singleuser variant mounts its data update routes
+  (`src/singleuser/data-routes.ts`, `docs/singleuser.md` "Updating the data").
 - Client IP: socket address, or the last `X-Forwarded-For` entry with `WEBAPP_TRUST_PROXY=1` (Caddy drops
   the client's own header).
 

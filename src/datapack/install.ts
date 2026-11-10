@@ -134,12 +134,18 @@ function missingPictures(thumbsDir: string, index: ThumbIndex, zips: ThumbsZip[]
   return pictureNames(index).filter((name) => !existsSync(join(thumbsDir, name)) && !zips.some((z) => z.zip.has(name)));
 }
 
+/** Lets the event loop run (the sync file work of tens of thousands of pictures would block the server's answers for seconds). */
+const breathe = () => new Promise<void>((resolve) => setImmediate(resolve));
+const BREATHE_EVERY = 200;
+
 /** Pictures into the folder, thumbs.json replaced, unreferenced pictures deleted. Counts in picture files. */
-function installThumbs(thumbsDir: string, index: ThumbIndex, bytes: Uint8Array, zips: ThumbsZip[]) {
+async function installThumbs(thumbsDir: string, index: ThumbIndex, bytes: Uint8Array, zips: ThumbsZip[]) {
   for (const size of SIZES) mkdirSync(join(thumbsDir, size), { recursive: true });
   const wanted = new Set(pictureNames(index));
   let written = 0;
+  let handled = 0;
   for (const name of [...wanted].sort()) {
+    if (++handled % BREATHE_EVERY === 0) await breathe();
     const path = join(thumbsDir, name);
     // Same name = same content (the name carries the hash): an existing file stays
     if (existsSync(path)) continue;
@@ -152,6 +158,7 @@ function installThumbs(thumbsDir: string, index: ThumbIndex, bytes: Uint8Array, 
   for (const size of SIZES) {
     const dir = join(thumbsDir, size);
     for (const file of readdirSync(dir)) {
+      if (++handled % BREATHE_EVERY === 0) await breathe();
       const stale = THUMB_FILE.test(file) && !wanted.has(`${size}/${file}`);
       // A temp file of an interrupted write
       if (stale || file.endsWith('.tmp')) {
@@ -195,7 +202,7 @@ export async function installPack(options: InstallOptions): Promise<InstallResul
     if (imported.status !== 'imported' && imported.status !== 'noop') throw new Error(`The catalog import ended as ${imported.status}`);
 
     // --- the pictures, then the manifest last ---
-    const thumbs = installThumbs(thumbsDir, last.index, last.bytes, zips);
+    const thumbs = await installThumbs(thumbsDir, last.index, last.bytes, zips);
     mkdirSync(dataDir, { recursive: true });
     writeAtomic(join(dataDir, INSTALLED_FILE), Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8'));
     await connection.maintain();

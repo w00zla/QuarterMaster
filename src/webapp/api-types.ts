@@ -847,3 +847,31 @@ export type ServerMessage =
   | { type: 'pong' };
 
 export type ClientMessage = { type: 'ping' };
+
+// --- singleuser: the game data update (GET /api/local/data, docs/singleuser.md "Updating the data") ---
+
+/** Why an update failed, in a few classes; the details are in the log. */
+export type DataUpdateFailure = 'corrupt' | 'invalid' | 'unsupported' | 'fileMissing' | 'internal';
+
+export type DataUpdateOutcome =
+  | { outcome: 'upToDate' | 'noChannel' | 'offline' }
+  | { outcome: 'installed'; tag: string }
+  // The pack's catalog format is not the app's: nothing was installed, the app must be updated (`pack`: the pack is newer or older)
+  | { outcome: 'appTooOld'; tag: string; pack: 'newer' | 'older' }
+  | { outcome: 'failed'; reason: DataUpdateFailure };
+
+/** The state of the data update, kept in memory: reading it never touches the database. */
+export interface DataUpdateState {
+  phase: 'idle' | 'checking' | 'downloading' | 'installing';
+  /** The installed data pack; null = none. */
+  installed: { tag: string; gameLabel: string } | null;
+  /** Bytes of the files being downloaded; null when nothing is downloading. */
+  progress: { done: number; total: number } | null;
+  /** The last finished operation; null = none since the start. `at` is an ISO time. */
+  last: ({ at: string } & DataUpdateOutcome) | null;
+}
+
+/** POST /api/local/data/import: a full data pack file on this machine. */
+export interface DataImportRequest {
+  path: string;
+}

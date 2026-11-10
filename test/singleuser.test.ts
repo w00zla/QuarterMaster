@@ -2,7 +2,7 @@
 // product range. Needs no Postgres. Every wait has a hard limit; the child is killed in `finally`.
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -11,9 +11,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
+import { buildRelease, gzipStable } from '../src/datapack/build.ts';
 import { connectPglite } from '../src/db/pglite.ts';
 import { dbDir } from '../src/singleuser/paths.ts';
-import type { Capabilities, MeResponse, StockListResponse } from '../src/webapp/api-types.ts';
+import type { Capabilities, DataUpdateState, MeResponse, StockListResponse } from '../src/webapp/api-types.ts';
 import { LOCAL_USER_ID } from '../src/webapp/identity-local.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
@@ -62,7 +63,8 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
   it('starts, serves the fixed user, takes a write, refuses a second start, ends on request', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'qm-singleuser-'));
     const port = await freePort();
-    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_THUMBS_DIR: join(dir, 'no-thumbs') };
+    // QM_AUTO_UPDATE=0: no feed is asked (this test must not touch the network)
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_THUMBS_DIR: join(dir, 'no-thumbs'), QM_AUTO_UPDATE: '0' };
     const base = `http://127.0.0.1:${port}`;
     let child: Child | undefined;
     try {
@@ -87,6 +89,8 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
         return { status: res.status, body: (await res.json()) as T };
       };
       assert.deepEqual(await json<Capabilities>('/api/capabilities'), { status: 200, body: { login: 'none', orgs: false, uex: false } });
+      // The data update is off: nothing installed, nothing asked
+      assert.deepEqual(await json<DataUpdateState>('/api/local/data'), { status: 200, body: { phase: 'idle', installed: null, progress: null, last: null } });
       const me = await json<MeResponse>('/api/me');
       assert.equal(me.status, 200);
       assert.equal(me.body.userId, LOCAL_USER_ID);
@@ -119,6 +123,87 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
       child?.proc.kill();
       await new Promise((r) => setTimeout(r, 200));
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('updates itself from a feed folder: first install at start, then a chain on request; serves the catalog and a picture', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'qm-singleuser-feed-'));
+    const dir = join(root, 'data');
+    const feed = join(root, 'feed');
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_DATA_FEED: feed };
+    let child: Child | undefined;
+    try {
+      // Two releases of the fixtures' catalog; release 2 adds one picture
+      const uuid = (i: number) => `20000000-0000-0000-0000-${i.toString(16).padStart(12, '0')}`;
+      const snapshot = fixtureSnapshot();
+      snapshot.game.label = '1.0.1000';
+      const snapshotFile = join(root, 'snapshot.json.gz');
+      writeFileSync(snapshotFile, gzipStable(Buffer.from(JSON.stringify(snapshot))));
+      const thumbs = (items: number[]) => {
+        const out = join(root, `thumbs-${items.length}`);
+        const index: Record<string, string> = {};
+        for (const i of items) {
+          index[uuid(i)] = 'aaaaaaaa';
+          for (const size of ['s', 'm', 'l']) {
+            mkdirSync(join(out, size), { recursive: true });
+            writeFileSync(join(out, size, `${uuid(i)}.aaaaaaaa.avif`), `fake ${size} ${i}`);
+          }
+        }
+        writeFileSync(join(out, 'thumbs.json'), JSON.stringify(index));
+        return out;
+      };
+      buildRelease({ snapshotFile, thumbsDir: thumbs([1]), n: 1, outDir: join(feed, 'data-1.0.1000-1') });
+      buildRelease({ snapshotFile, thumbsDir: thumbs([1, 2]), n: 2, previousDir: join(feed, 'data-1.0.1000-1'), outDir: join(feed, 'data-1.0.1000-2') });
+      const channel = (n: number) => writeFileSync(join(feed, 'channels.json'), JSON.stringify({ data: { stable: `data-1.0.1000-${n}` } }));
+      channel(1);
+
+      child = start(RUNNER, env);
+      const c = child;
+      await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+      const state = async () => (await (await fetch(`${base}/api/local/data`, { signal: AbortSignal.timeout(10_000) })).json()) as DataUpdateState;
+      // Polls the state endpoint (it answers while an install holds the database)
+      const installed = async (tag: string) => {
+        const end = Date.now() + 60_000;
+        for (;;) {
+          const s = await state();
+          if (s.installed?.tag === tag && s.phase === 'idle') return s;
+          if (Date.now() > end) throw new Error(`timeout: installed ${tag}, state ${JSON.stringify(s)}, output: ${c.out()}`);
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      };
+      await installed('data-1.0.1000-1');
+      assert.match(c.out(), /data update: plan full \(nothingInstalled\)/);
+
+      const catalog = (await (await fetch(`${base}/api/catalog`, { signal: AbortSignal.timeout(10_000) })).json()) as { materials: unknown[] };
+      assert.ok(catalog.materials.length > 0);
+      assert.equal((await fetch(`${base}/thumbs/s/${uuid(1)}.aaaaaaaa.avif`, { signal: AbortSignal.timeout(10_000) })).status, 200);
+      assert.equal((await fetch(`${base}/thumbs/s/${uuid(2)}.aaaaaaaa.avif`, { signal: AbortSignal.timeout(10_000) })).status, 404);
+
+      // The feed moves on; the check is asked for (JSON only, like every write) and answers at once
+      channel(2);
+      const res = await fetch(`${base}/api/local/data/check`, { method: 'POST', headers: JSON_TYPE, body: '{}', signal: AbortSignal.timeout(10_000) });
+      assert.equal(res.status, 200);
+      assert.ok(['checking', 'downloading', 'installing', 'idle'].includes(((await res.json()) as DataUpdateState).phase));
+      await installed('data-1.0.1000-2');
+      assert.match(c.out(), /data update: plan chain/);
+      // The server re-reads thumbs.json at most every 10 s (src/thumbs-index.ts): the new picture shows up within that
+      const end = Date.now() + 25_000;
+      let status = 0;
+      while (status !== 200 && Date.now() < end) {
+        status = (await fetch(`${base}/thumbs/s/${uuid(2)}.aaaaaaaa.avif`, { signal: AbortSignal.timeout(10_000) })).status;
+        if (status !== 200) await new Promise((r) => setTimeout(r, 500));
+      }
+      assert.equal(status, 200);
+
+      c.proc.stdin!.write('stop\n');
+      assert.equal(await within(8_000, 'the process ends', c.exited), 0);
+      assert.equal(existsSync(join(dir, 'downloads')), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 });

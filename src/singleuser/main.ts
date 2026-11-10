@@ -3,13 +3,17 @@
 import { mkdirSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { sql } from 'drizzle-orm';
 import { connectPglite } from '../db/pglite.ts';
+import { folderFeed, githubFeed } from '../datapack/feed.ts';
+import { createDataUpdater } from '../datapack/updater.ts';
 import { createApp } from '../webapp/app.ts';
 import { localIdentity } from '../webapp/identity-local.ts';
 import { RealtimeHub, listenForChanges } from '../webapp/realtime.ts';
+import { mountDataRoutes } from './data-routes.ts';
 import { dataDir, dbDir, thumbsDir } from './paths.ts';
 import { choosePort } from './port.ts';
 
@@ -34,13 +38,20 @@ async function main() {
   const origin = `http://${HOST}:${port}`;
   console.log(`data folder: ${data}`);
 
-  const { db, client, migrate, close } = connectPglite(dbDir(data));
+  const connection = connectPglite(dbDir(data));
+  const { db, client, migrate, close } = connection;
   try {
     // PGlite opens lazily: the first query is the open
     await step('open database', () => db.execute(sql`SELECT 1`));
     await step('migrations', () => migrate(fileURLToPath(new URL('../../drizzle', import.meta.url))));
     await step('checkpoint', () => db.execute(sql`CHECKPOINT`));
     const identity = await localIdentity(db);
+
+    // The data update: the only thing in this process that uses the network (the GitHub feed, or QM_DATA_FEED: a folder)
+    const feed = process.env.QM_DATA_FEED ? folderFeed(process.env.QM_DATA_FEED) : githubFeed({ fetch });
+    const updater = createDataUpdater({ connection, dataDir: data, thumbsDir: join(data, 'thumbs'), feed, log: (m) => log(m) });
+    // Interim switch for the automatic update (app and data) until the settings UI has it: on unless QM_AUTO_UPDATE=0
+    const autoUpdate = process.env.QM_AUTO_UPDATE !== '0';
 
     // The Host guard (DNS rebinding): only the names of this machine, with the port
     const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
@@ -53,6 +64,7 @@ async function main() {
       // One local user: the limits must never bite (the mechanism stays)
       rateLimit: { windowMs: 60_000, auth: 100_000, apiIp: 100_000, apiUser: 100_000 },
       allowedHosts,
+      mountApi: mountDataRoutes(updater),
     });
     const realtime = new RealtimeHub(db, identity, { origin, trustProxy: false, allowedHosts }, log);
     await listenForChanges(client, realtime, log);
@@ -65,19 +77,23 @@ async function main() {
       server.once('error', reject);
     }));
     console.log(`listening on ${origin} (started in ${Math.round(performance.now() - started)} ms)`);
+    // In the background: the start never waits for the network
+    if (autoUpdate) void updater.check();
+    else console.log('automatic update: off (QM_AUTO_UPDATE=0)');
 
     let stopping = false;
     const shutdown = (signal: string) => {
       if (stopping) return;
       stopping = true;
       console.log(`${signal}: shutting down`);
-      // Never hang: if closing takes longer than this, leave anyway
-      setTimeout(() => process.exit(1), 10_000).unref();
+      // Never hang: if closing takes longer than this, leave anyway (an install in progress gets its time: it is finished, not cut)
+      setTimeout(() => process.exit(1), updater.state().phase === 'installing' ? 120_000 : 10_000).unref();
       realtime.close();
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       // Keep-alive connections would hold the server open
       server.closeAllConnections();
-      closed.then(() => close()).then(() => {
+      // A download is aborted (its partial file deleted), an install is waited for
+      closed.then(() => updater.stop()).then(() => close()).then(() => {
         console.log('stopped');
         process.exit(0);
       }, (err: unknown) => {

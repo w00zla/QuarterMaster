@@ -43,10 +43,15 @@ export interface WebappConfig {
   // the list that is not the origin's own is sent to the origin (GET pages only). Unset = no check (online: Caddy
   // matches the host).
   allowedHosts?: string[];
+  // Routes only one variant has (singleuser: the data update): called with the API router after the regular routes and
+  // the identity's, before the 404 catch-all. Online passes none.
+  mountApi?: (api: ApiApp) => void;
 }
 
 // apiToken: the request authenticated with the user's API token (companion app), not a session
 type Env = { Variables: { session: Session; token: string; apiToken?: boolean } };
+/** The API router (everything under /api, after the identity check and the JSON-only rule for writes). */
+export type ApiApp = Hono<Env>;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const DEFAULT_LIMITS = { windowMs: 15 * 60_000, auth: 30, apiIp: 3000, apiUser: 1500 };
@@ -173,6 +178,7 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
 
   // The routes that only exist with accounts (online: the API token)
   identity.mountApiRoutes(api, host);
+  config.mountApi?.(api);
 
   // Last: a sub-app's notFound does not apply once mounted, and the SPA fallback must never answer /api
   api.all('*', (c) => c.json({ error: 'not found' }, 404));
