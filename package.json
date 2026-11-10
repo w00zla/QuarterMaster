@@ -9,6 +9,7 @@
   "scripts": {
     "typecheck": "tsc",
     "test": "node --env-file-if-exists=.env --test --test-concurrency=1 \"test/**/*.test.ts\"",
+    "test:pglite": "node --env-file-if-exists=.env --env-file=test/pglite.env --test --test-concurrency=1 --test-timeout=120000 \"test/**/*.test.ts\"",
     "db:up": "scripts/dev-db.sh up",
     "db:down": "scripts/dev-db.sh down",
     "db:psql": "scripts/dev-db.sh psql",
@@ -36,6 +37,7 @@
     "companion:directml": "pnpm --filter sc-quartermaster-companion directml"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.15",
     "@hono/node-server": "^2.1.3",
     "discord.js": "^14.27.0",
     "drizzle-orm": "^0.45.3",

@@ -20,6 +20,7 @@ Where things are described (read the matching file before working in an area):
 | `docs/webapp.md` | user web app: backend, login, sessions, API, realtime, SPA views and building blocks, security measures |
 | `docs/adminapp.md` | admin web UI |
 | `docs/companion.md` | companion app (`companion/`): requirements, structure, Game.log, server/config, release, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, OCR adapters (pointers into sc-ohseearr), decisions |
+| `docs/singleuser.md` | singleuser variant, DB part: PGlite in the process, `connectUrl`, settings, `maintain()`, the one-connection rule |
 | `docs/ext.md` | third-party data (UEX trading) |
 | `docs/deploy.md` | production design (image, compose, DB roles, Caddy) and the step-by-step deploy, backups, updates, rollback, restore |
 | `../sc-ohseearr` | OCR engine, models, readers and training (own repo; the companion's Rust path dependencies; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
@@ -42,6 +43,7 @@ pnpm db:migrate                     # apply drizzle/ migrations to $DATABASE_URL
 pnpm db:generate --name <name>      # generate a migration from src/db/schema/*.ts (drizzle-kit)
 pnpm typecheck                      # backend: tsc, no emit
 pnpm test                           # all tests, one file at a time (DB test files reset the same DB); DB tests only run when TEST_DATABASE_URL is set
+pnpm test:pglite                    # the same suite on PGlite in the process (TEST_DATABASE_URL=pglite:memory from test/pglite.env, one memory DB per test file); docs/singleuser.md
 scripts/test-roles.sh [files]       # the same DB tests under the production roles (needs the dev container; docs/deploy.md)
 node --env-file-if-exists=.env --test test/plan.test.ts                                   # single file
 node --env-file-if-exists=.env --test --test-name-pattern="diffTexts" "test/**/*.test.ts"   # single test

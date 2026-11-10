@@ -3,7 +3,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { connect } from '../../db/client.ts';
+import { connectUrl } from '../../db/connect-url.ts';
 import { textDiffCounts } from './apply.ts';
 import { parseIniFile, runLocImport, runLocRemove } from './loc-import.ts';
 import { sha256 } from './plan.ts';
@@ -56,7 +56,7 @@ async function main(): Promise<number> {
     if (!Number.isInteger(priority)) throw new Error('--priority must be an integer');
   }
   const log = args.json ? () => {} : (msg = '') => console.log(msg);
-  const { db, close } = connect(process.env.DATABASE_URL);
+  const { db, close } = connectUrl(process.env.DATABASE_URL);
   try {
     if (args.remove) {
       const removed = await runLocRemove(db, args.source, args.lang, args['dry-run']);

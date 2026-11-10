@@ -3,7 +3,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { sql } from 'drizzle-orm';
-import { connect } from '../../db/client.ts';
+import { connectUrl } from '../../db/connect-url.ts';
 import { runImport, summarize } from './apply.ts';
 import { loadSnapshot } from './load.ts';
 import { ENTITY_NAMES } from './plan.ts';
@@ -62,7 +62,7 @@ async function main(): Promise<number> {
   log(`          ${file} (${(statSync(file).size / 1024 / 1024).toFixed(1)} MB, sha256 ${hash.slice(0, 12)}…, ${snapshot.anomalies.length} extractor anomalies)`);
 
   // --- import ---
-  const { db, close } = connect(process.env.DATABASE_URL);
+  const { db, close } = connectUrl(process.env.DATABASE_URL);
   try {
     const result = await runImport(db, snapshot, hash, options);
     let catalogBytes: number | null = null;

@@ -8,8 +8,7 @@ import {
   SeparatorSpacingSize, TextDisplayBuilder, ThumbnailBuilder, type Client,
 } from 'discord.js';
 import { sql } from 'drizzle-orm';
-import type postgres from 'postgres';
-import type { Db } from '../db/client.ts';
+import type { ChangeSource, Db } from '../db/client.ts';
 import { rows } from '../db/query.ts';
 import { materialCatalog, missingNames } from '../stock/lookup.ts';
 import { obtainableBlueprints, orgMaterials, orgMetrics, type OrgMaterial, type OrgMetrics } from '../stock/org-summary.ts';
@@ -324,6 +323,6 @@ export class BoardPoster {
 }
 
 /** Feeds the database's change announcements into the poster; every (re)connect marks all boards. */
-export function listenForBoardChanges(client: postgres.Sql, poster: BoardPoster) {
+export function listenForBoardChanges(client: ChangeSource, poster: BoardPoster) {
   return client.listen('qm_changes', (payload) => poster.onChange(payload), () => poster.markAll());
 }

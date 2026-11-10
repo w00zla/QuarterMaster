@@ -7,10 +7,9 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { sql } from 'drizzle-orm';
 import { parse as parseCookies } from 'hono/utils/cookie';
-import type postgres from 'postgres';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { z } from 'zod';
-import type { Db } from '../db/client.ts';
+import type { ChangeSource, Db } from '../db/client.ts';
 import type { ServerMessage } from './api-types.ts';
 import { FEATURES, holdersOf } from './features.ts';
 import { clientAddress, rateKey } from './ip.ts';
@@ -236,7 +235,7 @@ export class RealtimeHub {
 }
 
 /** Feeds the database's change announcements into the hub; after a reconnect of the listener, a resync. */
-export async function listenForChanges(client: postgres.Sql, hub: RealtimeHub, log: Log) {
+export async function listenForChanges(client: ChangeSource, hub: RealtimeHub, log: Log) {
   let connected = false;
   // One after another, in the order the database announced them
   let queue = Promise.resolve();
