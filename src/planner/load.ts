@@ -11,7 +11,7 @@ const FALLBACK_DEFAULT_QUALITY = 500;
 /** Recipes of the given blueprints (first tier) with names in the language. Unknown UUIDs are skipped. */
 export async function loadPlannerData(db: Db, uuids: string[], lang: string): Promise<PlannerData> {
   const params = await one<{ q: number | null }>(db, sql`
-    SELECT (data->>'defaultCompositionQuality')::int AS q FROM catalog.raw_record WHERE type = 'CraftingGlobalParams' LIMIT 1`);
+    SELECT default_composition_quality AS q FROM catalog.import ORDER BY id DESC LIMIT 1`);
   const defaultQuality = params?.q ?? FALLBACK_DEFAULT_QUALITY;
   if (uuids.length === 0) return { defaultQuality, recipes: [] };
   const ids = sql.join(uuids.map((u) => sql`${u}::uuid`), sql`, `);

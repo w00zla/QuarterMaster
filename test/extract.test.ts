@@ -5,7 +5,7 @@ import { partQuality } from '../src/catalog/extract/mining.ts';
 import { refPath } from '../src/catalog/extract/records.ts';
 import { snapshotSchema } from '../src/catalog/snapshot.ts';
 import { isShopItem } from '../src/catalog/components.ts';
-import { FPS, FPS_RECORDS, RECORDS, SHOP, SHOP_RECORDS, U, fixtureSnapshot } from './fixtures.ts';
+import { AMENITY, FPS, FPS_RECORDS, RECORDS, SHOP, SHOP_RECORDS, U, fixtureSnapshot } from './fixtures.ts';
 
 describe('localization', () => {
   it('parses global.ini with BOM, CRLF, suffixes and "=" in values', () => {
@@ -104,6 +104,41 @@ describe('normalize', () => {
     assert.ok(!s.rawRecords.some((r) => r.uuid === FPS.damage), 'no armor, no damage record');
   });
 
+  it('flags the shop items', () => {
+    const snap = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS, ...SHOP_RECORDS });
+    const shop = (u: string) => snap.items.find((i) => i.uuid === u)!.shop;
+    for (const u of [SHOP.food, SHOP.miscCarry, SHOP.blade, FPS.jacket, FPS.magazine, FPS.grenade]) assert.equal(shop(u), true, u);
+    for (const u of [U.output, U.gem, FPS.rifle, FPS.helmet, FPS.optic]) assert.equal(shop(u), false, u);
+    // Exactly the items without a raw record
+    const raw = new Set(snap.rawRecords.map((r) => r.uuid));
+    assert.deepEqual(snap.items.filter((i) => i.shop).map((i) => i.uuid).sort(), snap.items.filter((i) => !raw.has(i.uuid)).map((i) => i.uuid).sort());
+  });
+
+  it('derives the freight elevator, the reward pool, the crafting default and the volume of harvestables', () => {
+    // The amenity is listed by the orphan only (the station has another one, the star none)
+    assert.deepEqual(s.locations.filter((l) => l.freightElevator).map((l) => l.uuid), [U.orphan]);
+    assert.ok(AMENITY.freightElevator !== AMENITY.other);
+    // Blueprint 2 is in the pool, blueprint 1 is not
+    assert.deepEqual(s.blueprints.map((b) => [b.uuid, b.inRewardPool]), [[U.blueprint, false], [U.blueprint2, true]]);
+    assert.deepEqual(s.crafting, { defaultCompositionQuality: 500 });
+    const gem = s.items.find((i) => i.uuid === U.gem)!;
+    assert.deepEqual([gem.subType, gem.scuPerPiece], ['Harvestable', 0.001]);
+    assert.equal(s.items.find((i) => i.uuid === U.output)!.scuPerPiece, null);
+    // A harvestable without a positive volume has none
+    const records = structuredClone(RECORDS) as Record<string, any>;
+    records['entities/scitem/carryables/test_gem.json']._RecordValue_.Components[0].AttachDef.inventoryOccupancyVolume.microSCU = 0;
+    assert.equal(fixtureSnapshot(records).items.find((i) => i.uuid === U.gem)!.scuPerPiece, null);
+    // A game without the crafting record
+    const without = { ...RECORDS };
+    delete without['crafting/globalparams/craftingglobalparams.json'];
+    assert.deepEqual(fixtureSnapshot(without).crafting, { defaultCompositionQuality: null });
+  });
+
+  it('leaves the plumbing fields empty', () => {
+    assert.ok(s.locations.every((l) => l.refinery === false));
+    assert.ok(s.items.every((i) => Object.keys(i.baseStats).length === 0));
+  });
+
   it('takes the sold non-gear items (SHOP_TYPES), but no Misc outside the carryables, no Cargo, templates or nameless records', () => {
     const snap = fixtureSnapshot({ ...RECORDS, ...FPS_RECORDS, ...SHOP_RECORDS });
     const uuids = snap.items.map((i) => i.uuid);
@@ -147,7 +182,7 @@ describe('normalize', () => {
     assert.deepEqual(s.locations.map((l) => l.uuid).sort(), [U.star, U.station, U.orphan, U.solarSystem].sort());
     assert.deepEqual(s.locations.find((l) => l.uuid === U.station), {
       uuid: U.station, key: 'Test_Station', nameKey: 'test_station', descriptionKey: 'test_station_desc', parentUuid: U.star,
-      type: 'Manmade', navIcon: 'Station', hideInStarmap: false, respawnLocationType: 'Hospital',
+      type: 'Manmade', navIcon: 'Station', hideInStarmap: false, respawnLocationType: 'Hospital', freightElevator: false, refinery: false,
     });
     const star = s.locations.find((l) => l.uuid === U.star)!;
     assert.deepEqual([star.parentUuid, star.type, star.descriptionKey], [null, 'Star', null]);

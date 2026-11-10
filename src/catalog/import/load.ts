@@ -1,7 +1,7 @@
 // Reads and checks a snapshot (plain or gzipped JSON): shared by the import CLI and the web API.
 import { gunzipSync } from 'node:zlib';
 import { gameLabel } from '../game-label.ts';
-import { snapshotSchema, type Snapshot } from '../snapshot.ts';
+import { SNAPSHOT_SCHEMA_VERSION, snapshotSchema, type Snapshot } from '../snapshot.ts';
 import { checkIntegrity, sha256 } from './plan.ts';
 
 export interface LoadedSnapshot {
@@ -28,6 +28,10 @@ export function loadSnapshot(bytes: Uint8Array): LoadedSnapshot {
     json = JSON.parse(text);
   } catch {
     throw new Error('Not a snapshot: the file is no JSON (plain or gzipped)');
+  }
+  const version = (json as { schemaVersion?: unknown } | null)?.schemaVersion;
+  if (typeof version === 'number' && version !== SNAPSHOT_SCHEMA_VERSION) {
+    throw new Error(`Snapshot schema version ${version} is not supported (this import reads ${SNAPSHOT_SCHEMA_VERSION}): re-extract the snapshot`);
   }
   const parsed = timed('validate', () => snapshotSchema.safeParse(json));
   if (!parsed.success) throw new Error(`Snapshot failed validation:\n${parsed.error.message}`);

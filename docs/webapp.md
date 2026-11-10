@@ -225,7 +225,7 @@ blocks".
 - **Übersicht**: KPI tiles from `GET /api/summary`, each with a detail line below (`StatTile`: unit after
   the value, the line as tall as a `.tag`): a personal panel with Materials (SCU materials only; SCU; kinds ·
   locations), Harvestables/Sammelobjekte (until 2026-10-20 "Items"; pieces; kinds · locations), Gear/Ausrüstung (the same), Blueprints "X / Y" (Y = obtainable:
-  not retired, not default, in a reward pool of the game data, cached per import; X = every registered one
+  not retired, not default, in a reward pool of the game data (`blueprint.in_reward_pool`), cached per import; X = every registered one
   and may exceed Y: then the game data misses a source, listed in the admin overview), Refinery jobs (sum of
   the expected yields · stations) and Next job ready (countdown, a "n ready" tag); "Your orgs" with one
   sub-tile per org (name, state, "Members: n", Resources/Items/Blueprints). Reloads on every realtime message.

@@ -87,9 +87,8 @@ export class StockError extends Error {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// The star map amenity "Commodity Trading - Freight Elevator" (starmapamenitytypes.json): the place has a
-// freight elevator, so a location inventory; read from the record's `amenities` in catalog.raw_record
-const FREIGHT_ELEVATOR_AMENITY = 'a783bfb9-0f0a-491f-864b-945a49ef5da4';
+// Places whose star map record lists the amenity "Commodity Trading - Freight Elevator" have a freight elevator,
+// so a location inventory (catalog.location.has_freight_elevator, set by the extractor)
 // Places with a freight elevator whose record lacks the amenity: the freight manager's Warehouse was opened
 // there per Game.log (checked 2026-10-19); keys lower case. Nyx_Kaboos is hidden in the starmap.
 const FREIGHT_ELEVATOR_KEYS = [
@@ -106,7 +105,7 @@ const FREIGHT_ELEVATOR_KEYS = [
  * boundary `\M` instead of a plain space).
  */
 export const selectableLocationSql = (l = 'l') => sql.raw(`((NOT ${l}.hide_in_starmap AND (${l}.nav_icon IN ('Station', 'LandingZone')
-    OR EXISTS (SELECT 1 FROM catalog.raw_record r WHERE r.uuid = ${l}.uuid AND r.data -> 'amenities' @> '[{"_RecordId_": "${FREIGHT_ELEVATOR_AMENITY}"}]'))
+    OR ${l}.has_freight_elevator)
     OR lower(${l}.key) IN (${FREIGHT_ELEVATOR_KEYS.map((k) => `'${k}'`).join(', ')}))
   AND coalesce(${l}.type, '') NOT IN ('Anomaly', 'PointOfInterest')
   AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);

@@ -44,3 +44,10 @@ describe('loadSnapshot label', () => {
     assert.throws(() => load(null, {}), /none can be derived.*Branch and RequestedP4ChangeNum/);
   });
 });
+
+describe('loadSnapshot version', () => {
+  it('asks for a re-extract on an older schema version', () => {
+    const old = { ...fixtureSnapshot(), schemaVersion: 6 };
+    assert.throws(() => loadSnapshot(new TextEncoder().encode(JSON.stringify(old))), /schema version 6 is not supported.*re-extract/);
+  });
+});

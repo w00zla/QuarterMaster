@@ -356,13 +356,13 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     const n = (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM app.user_blueprint WHERE blueprint_uuid = ${U.blueprint2}`))[0]!.n;
     assert.ok(n > 0);
     // Without the pool it has no known source, but users registered it
-    await db.execute(sql`UPDATE catalog.raw_record SET retired_at = now() WHERE type = 'BlueprintPoolRecord'`);
+    await db.execute(sql`UPDATE catalog.blueprint SET in_reward_pool = false WHERE uuid = ${U.blueprint2}`);
     try {
       const gaps = (await getOverview(db, 'en')).gaps;
       assert.equal(gaps.noSourceBlueprints, 1);
       assert.deepEqual(gaps.registeredNoSource.map((b) => [b.uuid, b.users]), [[U.blueprint2, n]]);
     } finally {
-      await db.execute(sql`UPDATE catalog.raw_record SET retired_at = NULL WHERE type = 'BlueprintPoolRecord'`);
+      await db.execute(sql`UPDATE catalog.blueprint SET in_reward_pool = true WHERE uuid = ${U.blueprint2}`);
     }
   });
 

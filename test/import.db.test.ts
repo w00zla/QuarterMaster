@@ -50,6 +50,14 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     assert.equal(await count('localization', `source = 'game' AND lang = 'de'`), 1);
     assert.equal(await count('localization', `source = 'game' AND lang = 'en'`), 7);
     assert.equal(await count('location'), 4);
+    // The derived fields
+    assert.equal(await count('import', 'default_composition_quality = 500'), 1);
+    assert.deepEqual((await db.execute<{ uuid: string }>(sql`SELECT uuid FROM catalog.location WHERE has_freight_elevator`)).map((r) => r.uuid), [U.orphan]);
+    assert.equal(await count('location', 'has_refinery'), 0);
+    assert.deepEqual((await db.execute<{ uuid: string }>(sql`SELECT uuid FROM catalog.blueprint WHERE in_reward_pool`)).map((r) => r.uuid), [U.blueprint2]);
+    assert.equal(await count('item', 'is_shop'), 0);
+    assert.equal(await count('item', `base_stats = '{}'::jsonb`), base.items.length);
+    assert.deepEqual((await db.execute<{ uuid: string; scu: number }>(sql`SELECT uuid, scu_per_piece AS scu FROM catalog.item WHERE scu_per_piece IS NOT NULL`)).map((r) => [r.uuid, r.scu]), [[U.gem, 0.001]]);
     const [station] = await db.execute<{ parent: string; nav: string }>(
       sql`SELECT parent_uuid AS parent, nav_icon AS nav FROM catalog.location WHERE uuid = ${U.station}`);
     assert.deepEqual([station!.parent, station!.nav], [U.star, 'Station']);
@@ -142,6 +150,13 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
   it('loads planner recipes with names, inputs and modifiers', async () => {
     const data = await loadPlannerData(db, [U.blueprint, '00000000-0000-0000-0000-000000000000'], 'en');
     assert.equal(data.defaultQuality, 500);
+    // The latest import's value; none (an import from before the column): the built-in default
+    const set = (q: number | null) => db.execute(sql`UPDATE catalog.import SET default_composition_quality = ${q}`);
+    await set(650);
+    assert.equal((await loadPlannerData(db, [], 'en')).defaultQuality, 650);
+    await set(null);
+    assert.equal((await loadPlannerData(db, [], 'en')).defaultQuality, 500);
+    await set(500);
     assert.equal(data.recipes.length, 1);
     const r = data.recipes[0]!;
     assert.deepEqual([r.name, r.craftSeconds, r.requiredSlots], ['Test Cooler', 150, 2]);

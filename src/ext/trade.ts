@@ -164,11 +164,8 @@ export function buildTrade(
 const resourceNames = importCache(async (db): Promise<ResourceName[]> => rows<{ uuid: string; nameEn: string; scu: number | null }>(db, sql`
   SELECT r.uuid, coalesce(${locText('en', sql`r.name_key`)}, r.key) AS "nameEn", NULL::float8 AS scu FROM catalog.resource r WHERE r.retired_at IS NULL
   UNION ALL
-  SELECT i.uuid, coalesce(${locText('en', sql`i.name_key`)}, i.class_name), v.micro / 1e6
-  FROM catalog.item i JOIN catalog.raw_record rr ON rr.uuid = i.uuid
-  CROSS JOIN LATERAL (SELECT (jsonb_path_query_first(rr.data,
-    '$.Components[*] ? (@._Type_ == "SAttachableComponentParams").AttachDef.inventoryOccupancyVolume.microSCU'))::float8 AS micro) v
-  WHERE i.retired_at IS NULL AND i.sub_type = 'Harvestable' AND v.micro > 0`)
+  SELECT i.uuid, coalesce(${locText('en', sql`i.name_key`)}, i.class_name), i.scu_per_piece
+  FROM catalog.item i WHERE i.retired_at IS NULL AND i.sub_type = 'Harvestable' AND NOT i.is_shop AND i.scu_per_piece IS NOT NULL`)
   .then((found) => found.map(({ scu, ...r }) => (scu === null ? r : { ...r, scu }))));
 
 /** Every item not retired, by English name (the fallback for UEX item rows without a UUID), reloaded with the catalog. */

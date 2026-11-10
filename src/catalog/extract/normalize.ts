@@ -31,6 +31,9 @@ const PATHS = {
   starmapTypes: 'libs/foundry/records/starmap/starmapobjecttypes.json',
 };
 
+// The star map amenity "Commodity Trading - Freight Elevator" (starmapamenitytypes.json): the place has a freight elevator
+const FREIGHT_ELEVATOR_AMENITY = 'a783bfb9-0f0a-491f-864b-945a49ef5da4';
+
 // SResourceTypeDefaultCargoContainers field -> box size in SCU
 const CARGO_BOX_SIZES: Record<string, number> = {
   one_eighthSCU: 0.125, one_quarterSCU: 0.25, one_halfSCU: 0.5, oneSCU: 1, twoSCU: 2,
@@ -194,6 +197,18 @@ export function normalize(input: NormalizeInput): Snapshot {
     anomaly('unknown_type', PATHS.globalParams, `default blueprint selection ${String(type(selection))}`);
   }
   const defaultPaths = new Set(arr(isObj(selection) ? selection.blueprintRecords : null).map(refPath));
+  const defaultCompositionQuality = int(globalParams?._RecordValue_.defaultCompositionQuality);
+
+  // Record paths of the blueprints some reward pool hands out (the reference from "libs/foundry/" on, lower case)
+  const poolPaths = new Set<string>();
+  for (const path of store.list(PATHS.crafting)) {
+    const pool = store.get(path)!._RecordValue_;
+    if (pool._Type_ !== 'BlueprintPoolRecord') continue;
+    for (const reward of arr(pool.blueprintRewards)) {
+      const target = isObj(reward) && typeof reward.blueprintRecord === 'string' ? /libs\/foundry\/[\s\S]*/.exec(reward.blueprintRecord)?.[0] : undefined;
+      if (target) poolPaths.add(target.toLowerCase());
+    }
+  }
 
   const entityPaths = new Set<string>();
   const entityUuid = (ref: unknown, from: string, what: string): string | null => {
@@ -313,6 +328,7 @@ export function normalize(input: NormalizeInput): Snapshot {
       categoryUuid: category && categories.some((c) => c.uuid === category) ? category : null,
       outputItemUuid,
       isDefault: defaultPaths.has(path),
+      inRewardPool: poolPaths.has(path),
       tiers,
     });
     if (category && !categories.some((c) => c.uuid === category)) anomaly('unresolved_ref', from, `category ${category}`);
@@ -342,6 +358,11 @@ export function normalize(input: NormalizeInput): Snapshot {
   // Shop items that are no gear (SHOP_TYPES): catalog-only for the item finder, never bookable. No raw record
   // (the finder needs none, clothing records are large)
   const shopPaths = sweep(store.list(PATHS.items), (def, path) => isShopItem(str(def.Type), str(def.SubType), path));
+  // Inventory volume of one piece in SCU (microSCU / 1e6); none when the record states no positive volume
+  const scuPerPiece = (def: Obj): number | null => {
+    const micro = isObj(def.inventoryOccupancyVolume) ? num(def.inventoryOccupancyVolume.microSCU) : null;
+    return micro !== null && micro > 0 ? micro / 1e6 : null;
+  };
   const manufacturerPaths = new Set<string>();
   const items: Item[] = [...entityPaths].sort().map((path) => {
     const r = store.get(path)!;
@@ -386,6 +407,9 @@ export function normalize(input: NormalizeInput): Snapshot {
       manufacturerUuid,
       nameKey: locKey(loc.Name),
       descriptionKey: locKey(loc.Description),
+      shop: shopPaths.has(path),
+      scuPerPiece: def.SubType === 'Harvestable' ? scuPerPiece(def) : null,
+      baseStats: {},
     };
   });
 
@@ -441,6 +465,8 @@ export function normalize(input: NormalizeInput): Snapshot {
       navIcon: str(v.navIcon),
       hideInStarmap: v.hideInStarmap === true,
       respawnLocationType: str(v.respawnLocationType),
+      freightElevator: arr(v.amenities).some((a) => isObj(a) && a._RecordId_ === FREIGHT_ELEVATOR_AMENITY),
+      refinery: false,
     });
   }
 
@@ -494,6 +520,7 @@ export function normalize(input: NormalizeInput): Snapshot {
     game: input.game,
     extractor: input.extractor,
     extractedAt: new Date().toISOString(),
+    crafting: { defaultCompositionQuality },
     anomalies,
     localization,
     rawRecords,

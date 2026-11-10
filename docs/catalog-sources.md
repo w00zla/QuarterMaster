@@ -66,7 +66,7 @@ starbreaker dcb query --dcb ... 'CraftingBlueprintRecord'              # dump by
 | `contracts/contractscenarios/**` — `ScenarioProgress` | event progress (RoX, ORS): `STierReward` with `minPoints` and `blueprintPool[]` |
 | `missionscenarios/**` — `MissionScenario` | scenarios contracts require; `schedule.enabled: false` = started by hand (an event) |
 | `factions/**`, `reputation/**`, `missiondata/pu_missionlocality/**` | faction names, standings (rank name, `minReputation`), localities (systems a contract is offered in) |
-| `crafting/globalparams/craftingglobalparams.json` | `defaultBlueprintSelection` (default blueprints), `defaultCompositionQuality` = 500, dismantle blacklists |
+| `crafting/globalparams/craftingglobalparams.json` | `defaultBlueprintSelection` (default blueprints), `defaultCompositionQuality` = 500 (snapshot `crafting`, column `import.default_composition_quality`; the crafting check reads the latest import's), dismantle blacklists |
 | `crafting/qualityquantization/*` | quality bands per material (63 records) |
 | `crafting/qualitydistribution/**` | quality distribution per source/location (mining, harvesting) |
 | `crafting/craftedproperties/gpp_*.json` | stat properties modified by quality |
@@ -113,7 +113,7 @@ StarMapObject (_RecordId_ = location UUID)
 ```
 
 - Hierarchy: system star → planet/moon → landing zone/outpost; orbital and Lagrange stations hang directly below the star (`HUR-L1 Green Glade Station · Stanton`). Stanton, Pyro and Nyx are included.
-- **Selection rule for storage locations** (applied by the app, the DB keeps everything; `selectableLocationSql` in `src/stock/service.ts`): `navIcon` `Station` or `LandingZone`, or the freight elevator amenity (a location inventory), not `hideInStarmap` (the Onyx facilities `*_ASD_Delve_Facility_*` are hidden and stay out), plus a fixed key list; an English name. Build 12913470: 152 (69 stations/landing zones, 73 outposts by amenity, 10 by the list). The amenity is incomplete: 10 places where Game.log shows the freight manager's warehouse opened lack it (Wikelo Emporium ×3, the 3 junk sites, QV Logistics Station `Nyx_Kaboos` (hidden), Shubin SMCa-6/-8, Vivere OLP; checked 2026-10-19), hence the list. Build 12660092 (stations/landing zones only): 79 candidates, 76 with an English name, 37 with a German game text.
+- **Selection rule for storage locations** (applied by the app, the DB keeps everything; `selectableLocationSql` in `src/stock/service.ts`): `navIcon` `Station` or `LandingZone`, or the freight elevator amenity (a location inventory; snapshot `freightElevator`, column `location.has_freight_elevator`), not `hideInStarmap` (the Onyx facilities `*_ASD_Delve_Facility_*` are hidden and stay out), plus a fixed key list; an English name. Build 12913470: 152 (69 stations/landing zones, 73 outposts by amenity, 10 by the list). The amenity is incomplete: 10 places where Game.log shows the freight manager's warehouse opened lack it (Wikelo Emporium ×3, the 3 junk sites, QV Logistics Station `Nyx_Kaboos` (hidden), Shubin SMCa-6/-8, Vivere OLP; checked 2026-10-19), hence the list. Build 12660092 (stations/landing zones only): 79 candidates, 76 with an English name, 37 with a German game text.
 - Quirks:
   - Duplicate names in different systems: `Stanton Gateway`, `Pyro Gateway`, `Nyx Gateway` exist twice each → labels need the system/parent.
   - Names without any text: `@RR_P1_L4`, `@RR_P3_L2`, `@RR_P6_L1` (Pyro stations) → fallback to the key.
@@ -276,13 +276,19 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 
 ### Database (`catalog` schema)
 
-- `import`: one row per catalog import (build, channel, label (`Branch` without `sc-alpha-` + `.` + `RequestedP4ChangeNum` from the build manifest, `src/catalog/game-label.ts`), snapshot hash, extractor versions, summary, anomalies).
+- `import`: one row per catalog import (build, channel, label (`Branch` without `sc-alpha-` + `.` + `RequestedP4ChangeNum` from the build manifest, `src/catalog/game-label.ts`), snapshot hash, extractor versions, summary, anomalies, `default_composition_quality`).
 - Global for all guilds; migrations in `drizzle/`.
 - Entities `manufacturer`, `item`, `resource`, `blueprint_category`, `crafted_property`, `quality_quantization`, `blueprint`, `location`, `raw_record`: UUID primary key plus `content_hash`, `first_seen_import_id`, `last_seen_import_id`, `retired_at`. **Never deleted**; missing entries get `retired_at` (cross-checked against the diff), reappearing ones are revived. Guild data references catalog UUIDs and survives retirement.
-- `raw_record` keeps every extracted DataCore record as `jsonb`, so new game data can be normalized later without re-extracting (the component base values are read from it, `src/stock/component-base.ts`).
+- `raw_record` keeps every extracted DataCore record as `jsonb`, so new game data can be normalized later without re-extracting (the component base values are read from it, `src/stock/component-base.ts`). Besides that the app reads no raw record: what it needs from the records the extractor derives into typed snapshot fields and the import stores in columns ("Derived fields" below); the admin UI shows raw data.
 - Quantities are `NUMERIC` and passed to Postgres as strings.
-- Storage locations are selected by the app (stations, landing zones and places with a freight elevator, see "Selection rule for storage locations"; the amenity is read from `raw_record`).
-- `location`: every `StarMapObject` with `parent_uuid` (no foreign key: rows of one import reference each other in any order; the integrity check ensures every parent is in the snapshot), `type`, `nav_icon`, `hide_in_starmap`, `respawn_location_type`. Names via `name_key`.
+- Storage locations are selected by the app (stations, landing zones and places with a freight elevator, see "Selection rule for storage locations"; the amenity is the snapshot's `freightElevator`).
+- `location`: every `StarMapObject` with `parent_uuid` (no foreign key: rows of one import reference each other in any order; the integrity check ensures every parent is in the snapshot), `type`, `nav_icon`, `hide_in_starmap`, `respawn_location_type`. Names via `name_key`; `has_freight_elevator` (the record lists the freight elevator amenity), `has_refinery`.
+- **Derived fields** (snapshot schema 7, migration `0035`; the importer reads schema 7 only and asks for a re-extract on older snapshots): the extractor derives them from the DataCore records, the import stores them, the app reads the columns:
+  - `location.has_freight_elevator` (snapshot `freightElevator`): the record lists the amenity `a783bfb9-…` (Freight Elevator); `location.has_refinery` (`refinery`, always false for now).
+  - `item.is_shop` (`shop`): a shop item (SHOP_TYPES); exactly the items stored without a raw record (`shopItemSql`).
+  - `item.scu_per_piece` (`scuPerPiece`): Harvestables only, `AttachDef.inventoryOccupancyVolume.microSCU / 1e6` when positive, else null (`double precision`); `item.base_stats` (`baseStats`, crafted property key → unmodified base value, empty for now).
+  - `blueprint.in_reward_pool` (`inRewardPool`): some `BlueprintPoolRecord`'s `blueprintRewards` references the blueprint (the obtainable count, the admin overview's "no source" lists).
+  - `import.default_composition_quality` (snapshot `crafting.defaultCompositionQuality`, null if the record is missing).
 - Recipe tables `blueprint_tier` (incl. `required_slots` for "N of M slots"), `blueprint_slot` (modifiers as `jsonb`), `blueprint_input` (`kind` resource/item, `quantity` as `NUMERIC`): replaced as a whole when their blueprint changes.
 - `blueprint_source` (migration `0029`): the snapshot's `blueprintSources`, numbered per blueprint (`source_index`), replaced as a whole on every import (derived, nothing references it). See "Blueprint sources".
 - `mining_provider` and `mineable` (migration `0032`): the snapshot's `miningProviders` (with the star map objects
@@ -370,7 +376,7 @@ Throwaway script, not in the repo. Result:
   Left out by decision: `Cargo` (1748 records, 8 sold), `Paints` (ship liveries), vehicles. A gear type never
   enters through this path (`isShopItem` is false for `COMPONENT_TYPES`/`FPS_TYPES`: the bookable rule goes by
   type alone). **Catalog-only, never bookable**: stock, crafting, bot, `/api/catalog` and the icon renderer use
-  the gear rule (`componentItemSql`). Shop items carry **no raw record** (the finder needs none; clothing
+  the gear rule (`componentItemSql`). Shop items (`item.is_shop`) carry **no raw record** (the finder needs none; clothing
   records are large). Build 12913470 / 4.10.2: 2941 items on top of the 4326 before (the clothing types 1901,
   `FlightController` 271, `Misc` 331, `Food` 128, `Drink` 84, `Flair_Surface` 60, `ExternalFuelTank` 29,
   `WeaponAttachment/Magazine` 27, `MobiGlas` 23, `FPS_Consumable` 32, `InventoryContainer` 18, `WeaponPersonal` 15,

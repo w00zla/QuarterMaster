@@ -7,6 +7,10 @@ import { normalize } from '../src/catalog/extract/normalize.ts';
 import { RecordStore } from '../src/catalog/extract/records.ts';
 import type { Snapshot } from '../src/catalog/snapshot.ts';
 
+/** The star map amenity "Commodity Trading - Freight Elevator" and another one. */
+export const AMENITY = { freightElevator: 'a783bfb9-0f0a-491f-864b-945a49ef5da4', other: '10000000-0000-0000-0000-0000000000c0' };
+const amenity = (id: string) => ({ _RecordPath_: 'file://./x.json', _RecordName_: `StarMapAmenityTypeEntry.${id}`, _RecordId_: id });
+
 export const U = {
   rtdb: '10000000-0000-0000-0000-000000000001',
   metal: '10000000-0000-0000-0000-000000000002',
@@ -149,7 +153,7 @@ export const RECORDS: Record<string, unknown> = {
     categories: [{ _RecordId_: U.category, _RecordName_: 'BlueprintCategoryRecord.TestCat', _Type_: 'BlueprintCategoryRecord' }],
   }),
   'crafting/globalparams/craftingglobalparams.json': rec('CraftingGlobalParams.Main', U.globalParams, {
-    _Type_: 'CraftingGlobalParams',
+    _Type_: 'CraftingGlobalParams', defaultCompositionQuality: 500,
     defaultBlueprintSelection: { _Type_: 'DefaultBlueprintSelection_Whitelist', blueprintRecords: [ref('crafting/blueprints/crafting/bp_craft_test.json')] },
   }),
   'crafting/blueprintrewards/pool.json': rec('BlueprintPoolRecord.Pool', U.pool, {
@@ -178,7 +182,7 @@ export const RECORDS: Record<string, unknown> = {
   }),
   'entities/scitem/carryables/test_gem.json': rec('EntityClassDefinition.TEST_Gem', U.gem, {
     _Type_: 'EntityClassDefinition',
-    Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Type: 'Misc', SubType: 'Harvestable', Localization: { Name: '@items_commodities_testgem' } } }],
+    Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Type: 'Misc', SubType: 'Harvestable', Localization: { Name: '@items_commodities_testgem' }, inventoryOccupancyVolume: { _Type_: 'SMicroCargoUnit', microSCU: 1000 } } }],
   }),
   'starmap/starmapobjecttypes.json': rec('StarMapObjectTypes.StarMapObjectTypes', U.starmapTypes, {
     _Type_: 'StarMapObjectTypes',
@@ -192,11 +196,12 @@ export const RECORDS: Record<string, unknown> = {
   'starmap/pu/system/test/teststar.json': starMapObject('TestStar', U.star, { type: starMapType(U.typeStar), navIcon: 'Star' }),
   'starmap/pu/station/test_station.json': starMapObject('Test_Station', U.station, {
     description: '@Test_Station_Desc', parent: ref('starmap/pu/system/test/teststar.json'), type: starMapType(U.typeStation),
-    navIcon: 'Station', respawnLocationType: 'Hospital',
+    navIcon: 'Station', respawnLocationType: 'Hospital', amenities: [null, amenity(AMENITY.other)],
   }),
   // Dangling parent and an unknown object type
   'starmap/pu/station/test_orphan.json': starMapObject('Test_Orphan', U.orphan, {
     name: '@LOC_UNINITIALIZED', parent: ref('starmap/pu/system/gone.json'), type: starMapType('10000000-0000-0000-0000-0000000000ff'), hideInStarmap: true,
+    amenities: [amenity(AMENITY.other), amenity(AMENITY.freightElevator)],
   }),
   // Not a StarMapObject: raw only
   'starmap/smdefaultmissionmarker.json': rec('MissionMarker.Default', U.marker, { _Type_: 'StarMapMissionMarker' }),

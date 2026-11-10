@@ -139,6 +139,6 @@ whole `app`/`bot`/`web` split).
 - Used by the user web app and `/qm-crafting`; the admin UI has none. `plan.ts`/`types.ts` are pure and
   shared by the web app's API and SPA and the bot: material totals with exact decimals (BigInt micro
   units), modifier curves per material quality, "N of M slots" choice, warnings. `load.ts` loads recipes
-  from the DB. ASSUMPTION (unverified in game): modifiers of several slots on one stat multiply (`combine`).
+  from the DB (the default quality is the latest import's `default_composition_quality`, else 500). ASSUMPTION (unverified in game): modifiers of several slots on one stat multiply (`combine`).
 - `src/planner/stock.ts`: `withQualityFloor`, `needsOf`, `coverageOf` over any batch with the `CoverBatch`
   fields (exact amounts via the planner's micro units); tested in `test/crafting-stock.test.ts`.
