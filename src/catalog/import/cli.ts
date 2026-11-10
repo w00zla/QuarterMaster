@@ -62,11 +62,15 @@ async function main(): Promise<number> {
   log(`          ${file} (${(statSync(file).size / 1024 / 1024).toFixed(1)} MB, sha256 ${hash.slice(0, 12)}…, ${snapshot.anomalies.length} extractor anomalies)`);
 
   // --- import ---
-  const { db, close } = connectUrl(process.env.DATABASE_URL);
+  const { db, close, maintain } = connectUrl(process.env.DATABASE_URL);
   try {
     const result = await runImport(db, snapshot, hash, options);
     let catalogBytes: number | null = null;
     if (result.status === 'imported') {
+      // PGlite neither checkpoints nor vacuums by itself; on Postgres this does nothing
+      const maintainStart = performance.now();
+      await maintain();
+      timings.maintain = performance.now() - maintainStart;
       const [row] = await db.execute<{ bytes: string }>(sql`
         SELECT coalesce(sum(pg_total_relation_size(c.oid)), 0)::text AS bytes
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

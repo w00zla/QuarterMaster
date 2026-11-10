@@ -34,6 +34,8 @@ export interface RealtimeOptions {
   // Same as the app: the only Origin a handshake may come from
   origin: string;
   trustProxy: boolean;
+  // The Host headers a handshake may carry (see WebappConfig.allowedHosts); unset = no check
+  allowedHosts?: string[];
   maxPerUser?: number;
   maxPerAddress?: number;
   // Keepalive: ping, drop dead connections, ask the identity whether the user's login still stands
@@ -59,7 +61,7 @@ const MAX_MESSAGES = 20;
 export class RealtimeHub {
   private readonly db: Db;
   private readonly identity: Identity;
-  private readonly options: Required<RealtimeOptions>;
+  private readonly options: Required<Omit<RealtimeOptions, 'allowedHosts'>> & Pick<RealtimeOptions, 'allowedHosts'>;
   private readonly log: Log;
   private readonly conns = new Set<Conn>();
   private readonly wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
@@ -68,7 +70,7 @@ export class RealtimeHub {
   constructor(db: Db, identity: Identity, options: RealtimeOptions, log: Log) {
     this.db = db;
     this.identity = identity;
-    this.options = { maxPerUser: 5, maxPerAddress: 20, pingMs: 25_000, ...options };
+    this.options = { maxPerUser: 5, maxPerAddress: 20, pingMs: 25_000, allowedHosts: undefined, ...options };
     this.log = log;
     this.timer = setInterval(() => void this.keepalive(), this.options.pingMs);
     this.timer.unref();
@@ -80,6 +82,9 @@ export class RealtimeHub {
       socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     };
     socket.on('error', () => socket.destroy());
+    // DNS rebinding: the page's own host name decides what "same-origin" means to the browser
+    const { allowedHosts } = this.options;
+    if (allowedHosts && !allowedHosts.includes(req.headers.host?.toLowerCase() ?? '')) return reject(421, 'Misdirected Request');
     if (new URL(req.url ?? '/', 'http://localhost').pathname !== '/api/ws') return reject(404, 'Not Found');
     // Browsers send cookies with a cross-site handshake and CORS does not apply: Origin decides
     if (req.headers.origin !== this.options.origin) return reject(403, 'Forbidden');

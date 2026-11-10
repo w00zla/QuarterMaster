@@ -38,6 +38,11 @@ export interface WebappConfig {
   rateLimit?: { windowMs: number; auth: number; apiIp: number; apiUser: number };
   // What this server offers (GET /api/capabilities); `orgs` also decides whether the org routes exist
   capabilities: Capabilities;
+  // The Host header values a request may carry (e.g. 127.0.0.1:28460), lower case; any other request is refused (421).
+  // Against DNS rebinding: a page whose domain was re-pointed to this machine is same-origin to the browser. A host of
+  // the list that is not the origin's own is sent to the origin (GET pages only). Unset = no check (online: Caddy
+  // matches the host).
+  allowedHosts?: string[];
 }
 
 // apiToken: the request authenticated with the user's API token (companion app), not a session
@@ -45,6 +50,8 @@ type Env = { Variables: { session: Session; token: string; apiToken?: boolean } 
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const DEFAULT_LIMITS = { windowMs: 15 * 60_000, auth: 30, apiIp: 3000, apiUser: 1500 };
+// Paths of API clients, which work on any allowed host
+const NOT_A_PAGE = /^\/(api|auth|thumbs|downloads)(\/|$)/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 
 export function createApp(db: Db, identity: Identity, config: WebappConfig) {
@@ -63,6 +70,22 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
   const release = companionRelease(config.companionDir ?? null);
   const thumbs = thumbIndex(config.thumbsDir ?? null);
   const host: IdentityHost = { origin: config.origin, clientIp, release };
+
+  // First of all: a request for a host that is not ours is nobody's business (DNS rebinding)
+  if (config.allowedHosts) {
+    const allowed = new Set(config.allowedHosts);
+    const canonicalHost = new URL(config.origin).host;
+    app.use('*', async (c, next) => {
+      const requested = c.req.header('host')?.toLowerCase();
+      if (requested === undefined || !allowed.has(requested)) return c.json({ error: 'host not allowed' }, 421);
+      // Another name of this machine: the SPA must run on the origin the WebSocket and CSRF checks expect
+      if (requested !== canonicalHost && (c.req.method === 'GET' || c.req.method === 'HEAD') && !NOT_A_PAGE.test(c.req.path)) {
+        const url = new URL(c.req.url);
+        return c.redirect(`${config.origin}${url.pathname}${url.search}`, 307);
+      }
+      return next();
+    });
+  }
 
   app.use('*', secureHeaders({
     contentSecurityPolicy: {

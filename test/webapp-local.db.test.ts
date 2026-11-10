@@ -166,6 +166,17 @@ describe('web app, local identity (database)', { skip: url ? false : 'TEST_DATAB
     assert.equal((await post('/stock/remove', { batchId: mine[0]!.id, amount: null, expected: '2.5' })).status, 200);
   });
 
+  it('history: a request with the companion header is labelled companion, any other webapp (a label, not a check)', async () => {
+    const sources = async () => (await get<{ entries: { source: string; details?: { quality?: number } }[] }>('/history')).body.entries;
+    const metal = { subjectUuid: U.metal, locationUuid: U.station, amount: '1' };
+    assert.equal((await post('/stock/add', { ...metal, quality: 801 })).status, 200);
+    assert.equal((await post('/stock/add', { ...metal, quality: 802 }, { 'x-qm-companion': '0.1.0' })).status, 200);
+    const found = await sources();
+    const [plain, companion] = [801, 802].map((q) => JSON.stringify(found.find((e) => JSON.stringify(e).includes(`${q}`))));
+    assert.match(plain!, /"source":"webapp"/);
+    assert.match(companion!, /"source":"companion"/);
+  });
+
   describe('realtime', () => {
     let server: Server;
     let hub: RealtimeHub;

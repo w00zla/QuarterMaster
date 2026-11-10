@@ -1,6 +1,58 @@
 # Singleuser variant
 
-Two parts are described here: the database (PGlite) and who the user is (the local identity).
+Three parts are described here: the process (how it starts and what it keeps), the database (PGlite) and who the user
+is (the local identity).
+
+# The process
+
+`src/singleuser/main.ts` is the variant's composition root: one local process that serves the web app (the built SPA,
+`webapp/dist`) and its API on PGlite for the one fixed user.
+
+```sh
+pnpm singleuser                                   # the server
+pnpm singleuser:import <snapshot.json.gz> [opts]  # the catalog import into the same data folder (catalog:import's options)
+```
+
+The SPA must be built (`pnpm webapp:build`). **One process per data folder:** PGlite has no second opener, so the server
+and `singleuser:import` must not run at the same time on one folder (use `QM_DATA_DIR` for a second folder).
+`singleuser:import` migrates a fresh folder first, imports, then runs `maintain()` (CHECKPOINT and VACUUM).
+
+| Variable | Meaning |
+|---|---|
+| `QM_DATA_DIR` | the data folder; else `%LOCALAPPDATA%QuarterMastersingleuser` (Windows) or `${XDG_DATA_HOME:-~/.local/share}/quartermaster/singleuser`; created if missing |
+| `QM_PORT` | exactly this port, or the start fails; else the first free one of 28460-28469 (tried by listening on 127.0.0.1) |
+| `QM_THUMBS_DIR` | the thumbnails folder (`s/`, `m/`, `l/`, `thumbs.json`); else `<data folder>/thumbs`, which may be missing (no thumbnails then) |
+
+(`src/singleuser/paths.ts`, `port.ts`: pure, passed the environment; tested in `test/singleuser-helpers.test.ts`.)
+
+**Data folder:** `db/` (the PGlite database, with its `pg_wal/`) and, if the user puts them there, `thumbs/`. Nothing else.
+
+**Start:** the server binds to `127.0.0.1` only; its origin is `http://127.0.0.1:<port>`. It logs one line per loading
+step with its duration (`open database`, `migrations`, `checkpoint`, `listen`) and then
+`listening on <origin>`. The migrations run at every start (a no-op when current), then one `CHECKPOINT`; there are no
+timers. Capabilities: `{ login: 'none', orgs: false, uex: false }`. The rate limits are set so high that one local user
+never meets them. Realtime is the online mechanism: the same triggers and `listenForChanges`, with the PGlite
+connection as the change source.
+
+**Stop:** SIGINT or SIGTERM stops accepting, closes the realtime sockets and the server, awaits the PGlite close and
+exits (at most 10 s, then it leaves anyway). `test/singleuser.test.ts` starts the real process on a temp folder (no
+Postgres) and drives it, through `test/singleuser-runner.mjs`, which turns a line on stdin into SIGINT because a
+Windows child cannot be sent a catchable signal.
+
+**Host guard (DNS rebinding):** a web page whose domain is re-pointed to 127.0.0.1 is same-origin to the browser, and
+would reach everything the open local API offers. The app therefore answers 421 `{"error":"host not allowed"}` to every
+request whose `Host` header is not in `WebappConfig.allowedHosts` (the first middleware; unset = no check, as online,
+where Caddy matches the host), and the WebSocket handshake (`RealtimeOptions.allowedHosts`) is refused with 421 the
+same way. The composition root passes `127.0.0.1:<port>` and `localhost:<port>`. A GET or HEAD page request on a
+host of the list that is not the origin's (`localhost`) is redirected (307) to the origin, so the SPA always runs on the
+origin the WebSocket and the write checks expect; `/api`, `/auth`, `/thumbs` and `/downloads` just work on both
+hosts. Tests: `test/webapp-host.test.ts`.
+
+**Companion label:** a request with the companion's `X-QM-Companion` header is booked as `companion` in the history,
+any other as `webapp`. It is a label, not a security decision: the local API is open anyway.
+
+**What the variant does not have:** orgs (no org routes, no membership), login and sessions, API tokens, the Discord bot,
+the admin UI, the UEX pull.
 
 # The database
 

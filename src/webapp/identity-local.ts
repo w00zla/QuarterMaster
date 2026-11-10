@@ -4,6 +4,7 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { sameOrigin, type Identity } from './identity.ts';
+import { COMPANION_HEADER } from './companion.ts';
 import type { Session } from './session.ts';
 
 /**
@@ -38,6 +39,9 @@ export async function localIdentity(db: Db): Promise<Identity> {
 
     async authenticate(c) {
       c.set('session', LOCAL_SESSION);
+      // A label, not a security decision: the history says "companion" for a request that calls itself the
+      // companion (any local program can say so; there is nothing to gain from it, the API is open anyway)
+      if (c.req.header(COMPANION_HEADER) !== undefined) c.set('apiToken', true);
       return undefined;
     },
 

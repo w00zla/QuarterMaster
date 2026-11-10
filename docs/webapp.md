@@ -34,6 +34,11 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   per-address rate limit, `no-store`. Only this exact path and `GET`. `orgs: false` also leaves the org routes
   (`/api/orgs/…`) unmounted (`registerRoutes`' option; the API's 404). Every other route that takes a guild id
   checks the caller's membership there, so without memberships no parameter reaches an org.
+- `WebappConfig.allowedHosts` (optional): the `Host` header values a request may carry; the first middleware answers any
+  other with 421 `{ error: 'host not allowed' }`, and sends a GET/HEAD page request on a listed host that is not the
+  origin's to the origin (307). Unset (online) = no check, Caddy matches the host. The WebSocket handshake takes the
+  same list through `RealtimeOptions.allowedHosts` (421). Used by the singleuser variant (`docs/singleuser.md`
+  "Host guard").
 - Client IP: socket address, or the last `X-Forwarded-For` entry with `WEBAPP_TRUST_PROXY=1` (Caddy drops
   the client's own header).
 
