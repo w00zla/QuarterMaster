@@ -14,8 +14,12 @@ import { createApp } from '../webapp/app.ts';
 import { localIdentity } from '../webapp/identity-local.ts';
 import { RealtimeHub, listenForChanges } from '../webapp/realtime.ts';
 import { mountDataRoutes } from './data-routes.ts';
+import { describeGameFolder, readLanguagePack } from './game-folder.ts';
 import { dataDir, dbDir, thumbsDir } from './paths.ts';
+import { pairingFile, removePairing, writePairing } from './pairing.ts';
 import { choosePort } from './port.ts';
+import { createSettingsStore, settingsFile } from './settings.ts';
+import { mountSettingsRoutes, type LoadedPack } from './settings-routes.ts';
 
 const HOST = '127.0.0.1';
 
@@ -38,6 +42,19 @@ async function main() {
   const origin = `http://${HOST}:${port}`;
   console.log(`data folder: ${data}`);
 
+  // The settings, the game folder and the language pack: read once, at start (docs/singleuser.md "The game folder")
+  const settings = createSettingsStore(settingsFile(data), process.env, (m) => log(m));
+  const { gameDir, autoUpdate } = settings.get();
+  let t = performance.now();
+  const gameFolder = describeGameFolder(gameDir);
+  console.log(`game folder: ${gameDir ?? 'not set'}: ${gameFolder.state}${gameFolder.problem ? ` (${gameFolder.problem})` : ''}${gameFolder.gameVersion ? `, game ${gameFolder.gameVersion}` : ''} (${Math.round(performance.now() - t)} ms)`);
+  t = performance.now();
+  // The pack's texts are held here for the change that puts them into the queries; nothing uses them yet
+  const languagePack: LoadedPack = { gameDir, pack: gameFolder.state === 'ok' && gameDir !== null ? readLanguagePack(gameDir) : null };
+  const pack = languagePack.pack;
+  console.log(`language pack: ${pack === null ? 'not read' : pack.texts ? `${pack.language}, ${pack.texts.size} texts` : `none (${pack.problem})`} (${Math.round(performance.now() - t)} ms)`);
+  const pairing = pairingFile(process.env, process.platform, homedir());
+
   const connection = connectPglite(dbDir(data));
   const { db, client, migrate, close } = connection;
   try {
@@ -50,8 +67,6 @@ async function main() {
     // The data update: the only thing in this process that uses the network (the GitHub feed, or QM_DATA_FEED: a folder)
     const feed = process.env.QM_DATA_FEED ? folderFeed(process.env.QM_DATA_FEED) : githubFeed({ fetch });
     const updater = createDataUpdater({ connection, dataDir: data, thumbsDir: join(data, 'thumbs'), feed, log: (m) => log(m) });
-    // Interim switch for the automatic update (app and data) until the settings UI has it: on unless QM_AUTO_UPDATE=0
-    const autoUpdate = process.env.QM_AUTO_UPDATE !== '0';
 
     // The Host guard (DNS rebinding): only the names of this machine, with the port
     const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
@@ -64,8 +79,23 @@ async function main() {
       // One local user: the limits must never bite (the mechanism stays)
       rateLimit: { windowMs: 60_000, auth: 100_000, apiIp: 100_000, apiUser: 100_000 },
       allowedHosts,
-      mountApi: mountDataRoutes(updater),
+      mountApi: (api) => {
+        mountDataRoutes(updater)(api);
+        mountSettingsRoutes({
+          store: settings,
+          loaded: languagePack,
+          onGameDirChange: (dir) => writePairingFile(origin, dir),
+        })(api);
+      },
     });
+    // A failing pairing file must not stop the server: the companion just cannot find it
+    const writePairingFile = (o: string, dir: string | null) => {
+      try {
+        writePairing(pairing, { origin: o, gameDir: dir });
+      } catch (err) {
+        log('pairing file: cannot write it', err);
+      }
+    };
     const realtime = new RealtimeHub(db, identity, { origin, trustProxy: false, allowedHosts }, log);
     await listenForChanges(client, realtime, log);
 
@@ -77,9 +107,10 @@ async function main() {
       server.once('error', reject);
     }));
     console.log(`listening on ${origin} (started in ${Math.round(performance.now() - started)} ms)`);
+    writePairingFile(origin, gameDir);
     // In the background: the start never waits for the network
     if (autoUpdate) void updater.check();
-    else console.log('automatic update: off (QM_AUTO_UPDATE=0)');
+    else console.log('automatic update: off');
 
     let stopping = false;
     const shutdown = (signal: string) => {
@@ -88,6 +119,11 @@ async function main() {
       console.log(`${signal}: shutting down`);
       // Never hang: if closing takes longer than this, leave anyway (an install in progress gets its time: it is finished, not cut)
       setTimeout(() => process.exit(1), updater.state().phase === 'installing' ? 120_000 : 10_000).unref();
+      try {
+        removePairing(pairing);
+      } catch (err) {
+        log('pairing file: cannot remove it', err);
+      }
       realtime.close();
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       // Keep-alive connections would hold the server open

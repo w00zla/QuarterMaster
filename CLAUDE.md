@@ -20,7 +20,7 @@ Where things are described (read the matching file before working in an area):
 | `docs/webapp.md` | user web app: backend, login, sessions, API, realtime, SPA views and building blocks, security measures |
 | `docs/adminapp.md` | admin web UI |
 | `docs/companion.md` | companion app (`companion/`): requirements, structure, Game.log, server/config, release, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, OCR adapters (pointers into sc-ohseearr), decisions |
-| `docs/singleuser.md` | singleuser variant: the process (entry point, env variables, data folder, port, Host guard), the DB part (PGlite in the process, `connectUrl`, settings, `maintain()`, the one-connection rule) the data pack (assets, manifest, build, install, the update from GitHub) and the local identity (one fixed user, the open local API) |
+| `docs/singleuser.md` | singleuser variant: the process (entry point, env variables, data folder, port, Host guard), the DB part (PGlite in the process, `connectUrl`, settings, `maintain()`, the one-connection rule) the settings, the game folder, the language pack and the pairing file, the data pack (assets, manifest, build, install, the update from GitHub) and the local identity (one fixed user, the open local API) |
 | `docs/ext.md` | third-party data (UEX trading) |
 | `docs/deploy.md` | production design (image, compose, DB roles, Caddy) and the step-by-step deploy, backups, updates, rollback, restore |
 | `../sc-ohseearr` | OCR engine, models, readers and training (own repo; the companion's Rust path dependencies; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
@@ -64,7 +64,7 @@ pnpm --filter sc-quartermaster-adminapp typecheck   # SPA typecheck only
 pnpm webapp | webapp:watch    # user web app backend on 127.0.0.1:3002 (needs DISCORD_CLIENT_SECRET, WEBAPP_ORIGIN)
 pnpm webapp:dev               # its SPA on Vite, http://localhost:5174 (proxies /api and /auth; open as localhost, not 127.0.0.1)
 pnpm webapp:build             # vue-tsc + vite build -> webapp/dist (served by pnpm webapp)
-pnpm singleuser                # singleuser variant: the web app + API on PGlite for one fixed user, 127.0.0.1:28460-28469 (docs/singleuser.md; needs webapp:build; fetches the data pack itself: QM_AUTO_UPDATE=0 switches that off, QM_DATA_FEED=<dir> reads a folder instead of GitHub)
+pnpm singleuser                # singleuser variant: the web app + API on PGlite for one fixed user, 127.0.0.1:28460-28469 (docs/singleuser.md; needs webapp:build; fetches the data pack itself: QM_AUTO_UPDATE=0 switches that off, QM_DATA_FEED=<dir> reads a folder instead of GitHub, QM_GAME_DIR=<game folder> and QM_PAIRING_FILE=<file> override the setting and the pairing file's place)
 pnpm singleuser:import <pack.zip | snapshot.json.gz>   # installs a full data pack (or imports a snapshot, development) into the singleuser data folder (QM_DATA_DIR); the server must not run
 pnpm data:pack --snapshot <f> --thumbs <dir> --n <n> --out <dir> [--previous <dir>]   # builds a data release (4 assets; docs/singleuser.md "The data pack")
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)

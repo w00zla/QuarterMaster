@@ -2,7 +2,7 @@
 // product range. Needs no Postgres. Every wait has a hard limit; the child is killed in `finally`.
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -14,13 +14,16 @@ import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { buildRelease, gzipStable } from '../src/datapack/build.ts';
 import { connectPglite } from '../src/db/pglite.ts';
 import { dbDir } from '../src/singleuser/paths.ts';
-import type { Capabilities, DataUpdateState, MeResponse, StockListResponse } from '../src/webapp/api-types.ts';
+import type { Capabilities, DataUpdateState, LocalSettingsState, MeResponse, StockListResponse } from '../src/webapp/api-types.ts';
 import { LOCAL_USER_ID } from '../src/webapp/identity-local.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
 const ROOT = new URL('../', import.meta.url);
 const RUNNER = fileURLToPath(new URL('test/singleuser-runner.mjs', ROOT));
 const MAIN = fileURLToPath(new URL('src/singleuser/main.ts', ROOT));
+// Never the real pairing file in the user profile: every child gets one in a temp folder (and no game folder of the environment)
+const PAIRING_ROOT = mkdtempSync(join(tmpdir(), 'qm-singleuser-pairing-'));
+process.on('exit', () => rmSync(PAIRING_ROOT, { recursive: true, force: true }));
 const JSON_TYPE = { 'content-type': 'application/json' };
 
 const freePort = () => new Promise<number>((resolve, reject) => {
@@ -34,7 +37,7 @@ const freePort = () => new Promise<number>((resolve, reject) => {
 
 type Child = { proc: ChildProcess; out: () => string; exited: Promise<number | null> };
 function start(script: string, env: Record<string, string>): Child {
-  const proc = spawn(process.execPath, [script], { env: { ...process.env, DATABASE_URL: '', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc = spawn(process.execPath, [script], { env: { ...process.env, DATABASE_URL: '', QM_GAME_DIR: '', QM_PAIRING_FILE: join(PAIRING_ROOT, 'default', 'pairing.json'), ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let text = '';
   proc.stdout!.on('data', (d: Buffer) => (text += d));
   proc.stderr!.on('data', (d: Buffer) => (text += d));
@@ -123,6 +126,47 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
       child?.proc.kill();
       await new Promise((r) => setTimeout(r, 200));
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('reads the game folder and its language pack at start, pairs with the companion, and unpairs on a clean stop', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'qm-singleuser-game-'));
+    const dir = join(root, 'data');
+    const game = join(root, 'LIVE');
+    const pairing = join(root, 'pairing', 'pairing.json');
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    // A fake game folder with a German pack; the real one is never touched
+    mkdirSync(join(game, 'data', 'Localization', 'german_(germany)'), { recursive: true });
+    writeFileSync(join(game, 'Data.p4k'), '');
+    writeFileSync(join(game, 'build_manifest.id'), JSON.stringify({ Data: { Branch: 'sc-alpha-4.10.2', RequestedP4ChangeNum: '12913470' } }));
+    writeFileSync(join(game, 'user.cfg'), 'g_language = german_(germany)\n');
+    writeFileSync(join(game, 'data', 'Localization', 'german_(germany)', 'global.ini'), 'ui_a=Hallo\nui_b=Welt\nui_c=Drei\n');
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_AUTO_UPDATE: '0', QM_GAME_DIR: game, QM_PAIRING_FILE: pairing };
+    let child: Child | undefined;
+    try {
+      child = start(RUNNER, env);
+      const c = child;
+      await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+      assert.match(c.out(), /game folder: .*: ok, game 4\.10\.2\.12913470 \(\d+ ms\)/);
+      assert.match(c.out(), /language pack: german_\(germany\), 3 texts \(\d+ ms\)/);
+
+      const state = (await (await fetch(`${base}/api/local/settings`, { signal: AbortSignal.timeout(10_000) })).json()) as LocalSettingsState;
+      assert.deepEqual(state, {
+        gameDir: game, autoUpdate: false, overridden: { gameDir: true, autoUpdate: true },
+        gameFolder: { state: 'ok', gameVersion: '4.10.2.12913470' },
+        languagePack: { state: 'loaded', language: 'german_(germany)', texts: 3, pending: false },
+      });
+      assert.deepEqual(JSON.parse(readFileSync(pairing, 'utf8')), { format: 1, origin: base, gameDir: game });
+      assert.equal(existsSync(join(dir, 'settings.json')), false); // overrides are never written
+
+      c.proc.stdin!.write('stop\n');
+      assert.equal(await within(8_000, 'the process ends', c.exited), 0);
+      assert.equal(existsSync(pairing), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 

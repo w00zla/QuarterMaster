@@ -875,3 +875,44 @@ export interface DataUpdateState {
 export interface DataImportRequest {
   path: string;
 }
+
+// --- singleuser: the settings and the game folder (GET/PUT /api/local/settings, docs/singleuser.md "Settings") ---
+
+/** What is wrong with a game folder: not a folder, or one of the two required files is missing. */
+export type GameFolderProblem = 'notFolder' | 'noDataP4k' | 'noBuildManifest';
+
+/** Why there is no language pack. `noUserCfg`, `noLanguage` and `builtInEnglish` are the normal English case. */
+export type LanguagePackProblem = 'noUserCfg' | 'noLanguage' | 'builtInEnglish' | 'iniMissing' | 'iniUnreadable' | 'iniEmpty';
+
+export interface GameFolderState {
+  state: 'unset' | 'invalid' | 'ok';
+  problem?: GameFolderProblem;
+  /** The game version (`4.10.2.12913470`); absent when the folder is not ok or its manifest is unreadable. */
+  gameVersion?: string;
+}
+
+/** The player's language pack as read at start. `none` = the game's English (nothing to report), `problem` = a pack was expected and is unusable. */
+export interface LanguagePackState {
+  state: 'none' | 'loaded' | 'problem';
+  language?: string;
+  /** Number of texts of a loaded pack. */
+  texts?: number;
+  problem?: LanguagePackProblem;
+  /** The game folder changed since the start: the pack is read again at the next start only. */
+  pending: boolean;
+}
+
+export interface LocalSettingsState {
+  gameDir: string | null;
+  autoUpdate: boolean;
+  /** Values the environment overrides (development): they cannot be changed here. */
+  overridden: { gameDir: boolean; autoUpdate: boolean };
+  gameFolder: GameFolderState;
+  languagePack: LanguagePackState;
+}
+
+/** PUT /api/local/settings: only the values to change. */
+export interface LocalSettingsUpdate {
+  gameDir?: string | null;
+  autoUpdate?: boolean;
+}

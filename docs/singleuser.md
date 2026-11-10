@@ -1,6 +1,6 @@
 # Singleuser variant
 
-Four parts are described here: the process (how it starts and what it keeps), the database (PGlite), the data pack (how
+Five parts are described here: the process (how it starts and what it keeps), the database (PGlite), the settings and the game folder, the data pack (how
 game data gets into the app, and how the app fetches it) and who the user is (the local identity).
 
 # The process
@@ -24,12 +24,14 @@ through `installPack`; anything else is a snapshot for `catalog:import`), then r
 | `QM_DATA_DIR` | the data folder; else `%LOCALAPPDATA%QuarterMastersingleuser` (Windows) or `${XDG_DATA_HOME:-~/.local/share}/quartermaster/singleuser`; created if missing |
 | `QM_PORT` | exactly this port, or the start fails; else the first free one of 28460-28469 (tried by listening on 127.0.0.1) |
 | `QM_THUMBS_DIR` | the thumbnails folder (`s/`, `m/`, `l/`, `thumbs.json`); else `<data folder>/thumbs`, which may be missing (no thumbnails then) |
-| `QM_AUTO_UPDATE` | `0` = no automatic data update (no request at start); anything else or unset = on. An interim switch for app and data until the settings UI has it; a check asked for through the API still runs |
+| `QM_AUTO_UPDATE` | `0` = no automatic data update (no request at start), overriding the setting `autoUpdate`; anything else or unset = the setting decides. A check asked for through the API still runs |
+| `QM_GAME_DIR` | the game folder, overriding the setting `gameDir` (development, tests) |
+| `QM_PAIRING_FILE` | the pairing file's path instead of the profile's (development, tests) |
 | `QM_DATA_FEED` | a folder (`channels.json`, `<tag>/<asset>`) the data update reads instead of GitHub; for development and tests |
 
 (`src/singleuser/paths.ts`, `port.ts`: pure, passed the environment; tested in `test/singleuser-helpers.test.ts`.)
 
-**Data folder:** `db/` (the PGlite database, with its `pg_wal/`), `thumbs/` (`s/`, `m/`, `l/`, `thumbs.json`) and `data-pack.json`
+**Data folder:** `settings.json` (the settings, "Settings and the game folder"), `db/` (the PGlite database, with its `pg_wal/`), `thumbs/` (`s/`, `m/`, `l/`, `thumbs.json`) and `data-pack.json`
 (the manifest of the installed data pack); the last two are written by the data pack's install. `downloads/` exists only
 while the data update downloads (deleted afterwards and at the next start). Nothing else.
 
@@ -65,6 +67,73 @@ waited for (up to 120 s instead of 10).
 
 **What the variant does not have:** orgs (no org routes, no membership), login and sessions, API tokens, the Discord bot,
 the admin UI, the UEX pull.
+
+# Settings and the game folder
+
+`src/singleuser/settings.ts`, `game-folder.ts`, `pairing.ts`, `settings-routes.ts`; `main.ts` reads them at start. Dependencies are passed in
+(the file, the environment, the log function).
+
+## Settings
+
+`<data folder>/settings.json`, a zod schema; unknown keys are dropped, a missing key takes its default:
+
+| Key | Default | |
+|---|---|---|
+| `gameDir` | `null` | the game folder: the channel folder, e.g. `...\StarCitizen\LIVE` |
+| `autoUpdate` | `true` | the one switch for the automatic update of app and data (read at start) |
+
+A missing file is the defaults; a broken one (not JSON, wrong types) is the defaults and one logged warning. A write goes
+through a temp file and a rename. `QM_GAME_DIR` and `QM_AUTO_UPDATE=0` override the values (development, tests): they are
+reported as overridden, never written to the file, and the API refuses to change an overridden value (409).
+
+## The game folder
+
+Mandatory for the app, as for the companion. It is valid when it is an absolute path to a folder holding `Data.p4k` and
+`build_manifest.id` (`checkGameFolder`; the problems are `notFolder`, `noDataP4k`, `noBuildManifest`). The game version
+is `gameLabel` of `build_manifest.id`; an unreadable manifest only means no version. **Nothing in the game folder is ever
+written, created or locked**, and nothing in it makes a function throw.
+
+## The language pack
+
+One user is one `global.ini` is one language; no language of game texts is chosen anywhere. The rule is the companion's
+(sc-ohseearr `locale::pack_path`, `language_of`), read on the server side:
+
+- the language is the `g_language` of `<game folder>/user.cfg`: per line everything from the first `;` on is a comment,
+  `key = value` split at the first `=`, the key case-insensitive, the value trimmed (quotes are not special); a line
+  with an empty value is skipped, the first one with a value wins. No `user.cfg` or no language in it: `english`;
+- the file is `<game folder>/data/Localization/<language>/global.ini` (`Data` when there is no `data` folder: Linux);
+- parsed with `parseIniFile` (UTF-8 or UTF-16, keys lower case, "translation not found" placeholders dropped).
+  A language that is not a plain folder name (a path) is treated as having no file.
+
+The result (`readLanguagePack`) is the language, the file, the texts and a `problem` that is never fatal (the app then
+shows the game's English): `noUserCfg`, `noLanguage` and `builtInEnglish` (English set, no file: the game's English
+is inside `Data.p4k`) are the normal English case; `iniMissing` (another language, no file), `iniUnreadable` and
+`iniEmpty` (not one usable text: that is the check for "obviously not a `global.ini`") are real problems.
+
+**Read at start only:** no watcher, no button; a changed game folder or `user.cfg` applies at the next start. The start logs
+one line each for the folder (state, version) and the pack (language, number of texts or why none), with their durations.
+The composition root holds the result as `languagePack`; the pack's texts are not used by any query yet.
+
+## Pairing with the companion
+
+`pairing.json`: `%LOCALAPPDATA%\QuarterMaster\pairing.json` (Windows), `${XDG_DATA_HOME:-~/.local/share}/quartermaster/pairing.json`
+(Linux), or `QM_PAIRING_FILE`. Content `{ "format": 1, "origin": "http://127.0.0.1:<port>", "gameDir": "<folder or null>" }`
+(`pairingSchema`); no token, the local API is open. Written (atomically) when the server listens, rewritten when the game
+folder setting changes, deleted on a clean exit; after a crash a stale file stays (the companion then gets "connection
+refused"). A failing write or delete is logged and never stops the server.
+
+## Endpoints
+
+Singleuser only, mounted through `WebappConfig.mountApi` (types in `src/webapp/api-types.ts`, `LocalSettingsState`):
+
+| Request | Answer |
+|---|---|
+| `GET /api/local/settings` | `{ gameDir, autoUpdate, overridden: { gameDir, autoUpdate }, gameFolder: { state, problem?, gameVersion? }, languagePack: { state, language?, texts?, problem?, pending } }` with `gameFolder.state` one of `unset`, `invalid`, `ok` and `languagePack.state` one of `none`, `loaded`, `problem` |
+| `PUT /api/local/settings` `{ gameDir?, autoUpdate? }` | stores, answers the new state like the GET. `gameDir` must pass the check or be `null`, else 422 `{ error: 'gameFolderInvalid', problem }` and nothing changes; an overridden value is 409 `{ error: 'overridden', keys }`; anything else wrong is 400. A changed `gameDir` re-checks the folder and its version at once and rewrites the pairing file |
+
+`languagePack.pending` is true when the game folder is no longer the one the pack was read for: it is read again at the next
+start (a UI says so in one sentence). `autoUpdate` applies at the next start too. Tests: `test/singleuser-gamefolder.test.ts`,
+the process in `test/singleuser.test.ts`.
 
 # The database
 
