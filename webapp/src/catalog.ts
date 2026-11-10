@@ -3,7 +3,7 @@
 import { computed, ref, watch } from "vue";
 import type { CatalogBlueprint, CatalogLocation, CatalogMaterial, CatalogResponse, Lang } from "../../src/webapp/api-types";
 import { api } from "./api";
-import { lang, t } from "./i18n";
+import { lang } from "./i18n";
 import { onServerMessage } from "./realtime";
 import { status } from "./session";
 
@@ -63,16 +63,3 @@ export const locationOptions = computed(() => (catalog.value?.locations ?? [])
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
 export const refineryLocationOptions = computed(() => (catalog.value?.locations ?? []).filter((l) => l.refinery)
   .map((l) => ({ value: l.uuid, label: l.label })).sort((a, b) => byName(a.label, b.label)));
-
-/** UEX yield bonus of a refinery for a refined material in %; undefined when UEX reports none. */
-export const yieldValue = (locationUuid: string, materialUuid: string | null): number | undefined =>
-  materialUuid ? locations.value.get(locationUuid)?.yields[materialUuid] : undefined;
-
-/** "+5" */
-export const signedBonus = (v: number) => (v > 0 ? `+${v}` : String(v));
-
-/** UEX yield bonus of a refinery for a refined material, e.g. "Bonus +5 %"; null when UEX reports none. */
-export function yieldBonus(locationUuid: string, materialUuid: string | null): string | null {
-  const v = yieldValue(locationUuid, materialUuid);
-  return v === undefined ? null : t("refinery.bonus", { v: signedBonus(v) });
-}

@@ -19,7 +19,6 @@ import RefineryTimeDialog from "../components/RefineryTimeDialog.vue";
 import BatchDialog from "../components/BatchDialog.vue";
 import Thumb from "../components/Thumb.vue";
 import ViewToggle from "../components/ViewToggle.vue";
-import { signedBonus, yieldValue } from "../catalog";
 import { compareBatches, hm, Q_TIER_MAX, qMark, qText, qTier, qty, tierMark, tierQualities } from "../format";
 import { lang, t, viewTexts } from "../i18n";
 import { materialThumb, thumbColumnFlag } from "../thumbs";
@@ -127,7 +126,6 @@ const columns = computed<ColumnSpec[]>(() => [
   { key: "material", label: t("refinery.col.job"), width: 240 },
   { key: "quality", label: t("stock.col.quality"), width: 130 },
   { key: "amount", label: t("refinery.col.expected"), width: 120 },
-  { key: "bonus", label: t("refinery.col.bonus"), width: 90 },
   { key: "ready", label: t("refinery.col.ready"), width: 130 },
   { key: "actions", label: "", width: 110, sortable: false, fixed: true, sep: true },
 ]);
@@ -140,8 +138,6 @@ function rowValue(b: StockBatch, key: string): string | number {
     case "material": return b.material;
     case "quality": return b.quality;
     case "amount": return Number(b.quantity);
-    // No UEX value sorts below every reported one
-    case "bonus": return yieldValue(b.locationUuid, b.subjectUuid) ?? -Infinity;
     default: return "";
   }
 }
@@ -210,11 +206,6 @@ async function chooseRemove(value: string) {
     removing.value = null;
   }
 }
-
-const bonusText = (b: StockBatch) => {
-  const v = yieldValue(b.locationUuid, b.subjectUuid);
-  return v === undefined ? "" : `${signedBonus(v)} %`;
-};
 </script>
 
 <template>
@@ -260,7 +251,6 @@ const bonusText = (b: StockBatch) => {
             </span>
             <span />
             <span class="num group-total">{{ qty(j.total, "SCU") }}</span>
-            <span />
             <span :title="endsTitle(j)">
               <span v-if="left(j) === ''" class="tag ok">{{ t("refinery.readyNow") }}</span>
               <span v-else-if="left(j) === null" class="dim">{{ t("refinery.durationOpen") }}</span>
@@ -282,7 +272,6 @@ const bonusText = (b: StockBatch) => {
             </span>
             <span class="num"><span class="qcell"><span>{{ qMark(b.quality) }}</span><span>{{ b.quality }}</span></span></span>
             <span class="num">{{ qty(b.quantity, b.unit) }}</span>
-            <span class="num">{{ bonusText(b) }}</span>
             <span />
             <span class="sep actions">
               <button type="button" class="icon-btn" :title="t('stock.adjust')" @click="editing = { batch: b, action: 'adjust' }"><Icon name="edit" :size="15" /></button>

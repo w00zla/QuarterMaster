@@ -30,7 +30,6 @@ import { registerMiningRoutes } from './mining.ts';
 import { registerFeatureRoutes } from './features.ts';
 import { minableUuids } from './mining-query.ts';
 import { unlockableBlueprints } from './unlock-query.ts';
-import { refineryMatch } from '../ext/refineries.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CompanionCatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
   OrgBlueprintsResponse,
@@ -216,7 +215,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
     const [bpTypes, types, bpStats] = [await blueprintTypes(db, lang), await itemTypes(db, lang), await blueprintStatNames(db, lang)];
     const unlockable = await unlockableBlueprints(db);
     const minable = await minableUuids(db);
-    const refineries = await refineryMatch(db);
+    const refineries = await stock.refineryLocations(db);
     const thumb = thumbs();
     return c.json({
       materials: [...materials.values()].map((m) => ({
@@ -226,8 +225,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
-        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
-        yields: Object.fromEntries(refineries?.yields.get(l.uuid) ?? []),
+        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: !refineries || refineries.has(l.uuid),
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
       blueprints: blueprints.entries.map((e) => ({
@@ -263,7 +261,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
   api.get('/companion/catalog', async (c) => {
     const lang = langOf(c);
     const [materials, locations, blueprints, types] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang), await itemTypes(db, lang)];
-    const refineries = await refineryMatch(db);
+    const refineries = await stock.refineryLocations(db);
     const thumb = thumbs();
     return c.json({
       materials: [...materials.values()].map((m) => ({
@@ -272,7 +270,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
-        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
+        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: !refineries || refineries.has(l.uuid),
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
       blueprints: blueprints.entries.map((e) => ({

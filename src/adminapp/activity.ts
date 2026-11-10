@@ -135,7 +135,7 @@ const CHECK_TEXT: Record<DataCheckKey, string> = {
   retiredMaterial: 'Stock of retired materials',
   retiredLocation: 'Stock at retired locations',
   retiredBlueprint: 'Registered retired blueprints',
-  jobNotAtRefinery: 'Refinery jobs outside the UEX refineries',
+  jobNotAtRefinery: 'Refinery jobs outside the refineries',
 };
 
 export async function getDashboard(db: Db, lang: string, days: number): Promise<DashboardResponse> {

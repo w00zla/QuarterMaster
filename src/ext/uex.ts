@@ -1,4 +1,4 @@
-// UEX API (community reports): fetches refineries, terminals, commodities and the commodity and item
+// UEX API (community reports): fetches terminals, commodities and the commodity and item
 // prices into ext.snapshot (source `uex`); only endpoints that need no ID.
 import { z } from 'zod';
 import type { Db } from '../db/client.ts';
@@ -7,8 +7,7 @@ import { storeSnapshot } from './store.ts';
 const UEX_SOURCE = 'uex';
 const UEX_API = 'https://api.uexcorp.uk/2.0';
 export const UEX_ENDPOINTS = [
-  'refineries_yields', 'refineries_methods', 'terminals', 'commodities',
-  'commodities_prices_all', 'commodities_raw_prices_all', 'items_prices_all',
+  'terminals', 'commodities', 'commodities_prices_all', 'commodities_raw_prices_all', 'items_prices_all',
 ] as const;
 // Prices (and stock per terminal; commodities holds average prices) change several times a day and are
 // large (items_prices_all ~6 MB): only their latest snapshot is kept

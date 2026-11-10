@@ -95,10 +95,8 @@ export interface CatalogLocation {
   short: string;
   // The game's localization key of the name (lower case), as for materials
   nameKey: string | null;
-  // Has a refinery (per UEX; every location while there is no UEX data yet)
+  // Has a refinery (the catalog's flag; every location while none is flagged yet)
   refinery: boolean;
-  // Refinery yield bonus in % per refined material UUID (per UEX, reported per ore; only those UEX reports for this refinery)
-  yields: Record<string, number>;
 }
 
 export interface CatalogBlueprint {

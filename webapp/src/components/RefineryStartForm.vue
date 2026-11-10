@@ -7,7 +7,7 @@ import { computed, reactive, ref } from "vue";
 import type { OkResponse, RefineryStartRequest } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { api } from "../api";
-import { locations, materials, refineryLocationOptions, resourceOptions, yieldBonus } from "../catalog";
+import { locations, materials, refineryLocationOptions, resourceOptions } from "../catalog";
 import { amountInput, amountOf, durationOfParts, hm, qty, qualityOf } from "../format";
 import { t } from "../i18n";
 import { toast, toastError } from "../toasts";
@@ -34,12 +34,6 @@ const minutes = ref("");
 const seconds = ref("");
 const rows = reactive<MaterialRow[]>([newRow()]);
 const busy = ref(false);
-
-// The refinery picker carries the UEX bonus of the first material picked
-const refineryOptions = computed(() => refineryLocationOptions.value.map((o) => {
-  const bonus = yieldBonus(o.value, rows.find((r) => r.material)?.material ?? null);
-  return bonus ? { ...o, label: `${o.label} · ${bonus}` } : o;
-}));
 
 const amt = (r: MaterialRow) => amountOf(r.amount, "SCU");
 const q = (r: MaterialRow) => qualityOf(r.quality);
@@ -97,7 +91,7 @@ async function submit() {
   <form class="form" @submit.prevent="submit">
     <label class="field">
       {{ t("field.location") }}
-      <Picker v-model="location" :options="refineryOptions" :placeholder="t('pick.location')" />
+      <Picker v-model="location" :options="refineryLocationOptions" :placeholder="t('pick.location')" />
     </label>
     <div class="field">
       {{ t("field.duration") }}

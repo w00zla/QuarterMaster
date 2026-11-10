@@ -20,7 +20,7 @@ Where things are described (read the matching file before working in an area):
 | `docs/webapp.md` | user web app: backend, login, sessions, API, realtime, SPA views and building blocks, security measures |
 | `docs/adminapp.md` | admin web UI |
 | `docs/companion.md` | companion app (`companion/`): requirements, structure, Game.log, server/config, release, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, OCR adapters (pointers into sc-ohseearr), decisions |
-| `docs/ext.md` | third-party data (UEX refineries, refining methods) |
+| `docs/ext.md` | third-party data (UEX trading) |
 | `docs/deploy.md` | production design (image, compose, DB roles, Caddy) and the step-by-step deploy, backups, updates, rollback, restore |
 | `../sc-ohseearr` | OCR engine, models, readers and training (own repo; the companion's Rust path dependencies; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
 | `.claude/open-points.md` | open decisions and follow-ups the user schedules (local, not in git) |

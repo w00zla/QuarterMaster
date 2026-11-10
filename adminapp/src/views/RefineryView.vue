@@ -125,7 +125,7 @@ function valueOf(j: RefineryJob, key: string): string | number {
         </template>
         <template #cell-location="{ row }">
           <span>{{ row.location.name }}</span>
-          <Tooltip v-if="!row.atRefinery" text="Not at a UEX refinery">
+          <Tooltip v-if="!row.atRefinery" text="Not at a refinery">
             <span class="tag warn no-refinery">No refinery</span>
           </Tooltip>
         </template>

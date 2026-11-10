@@ -56,8 +56,8 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 ### Features (`routes.ts`; the contract with all paths and shapes in `api-types.ts`)
 
 - `GET /api/catalog?lang`: bookable materials with unit, the `component` flag, `label`, size, grade letter
-  and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag,
-  yield bonuses and the star map `key` (as Game.log names it, for the companion); materials `minable` (the
+  and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag
+  and the star map `key` (as Game.log names it, for the companion); materials `minable` (the
   mining data answers for it: a mined resource, a refined one from its ores, or a gem item); blueprints (`unlockable`: a
   row in `catalog.blueprint_source`; magazines included); each material and location with its loc `nameKey` (the companion looks it up in
   the player's language pack). From the shared in-memory catalogs; no ores, no refining methods.
@@ -276,7 +276,7 @@ blocks".
 - **Raffinerie**: running jobs as a table with one group per work order (station, total yield and the time
   left with a "ready" tag or "duration open" on the group row; actions: a clock opens `RefineryTimeDialog` to
   set or clear the time left, done, remove with a `ConfirmDialog` listing the materials), the materials below
-  with quality, expected yield and UEX bonus; job columns sort the jobs, material columns the materials
+  with quality and expected yield; job columns sort the jobs, material columns the materials
   within; same filters as Ressourcen. `RefineryStartForm`: station, duration (all three fields empty = "duration
   open") and rows of resource, quality and expected yield (no method, no estimates). `RefineryDoneDialog`
   stores the whole job, each row's amount starting from its expected yield.

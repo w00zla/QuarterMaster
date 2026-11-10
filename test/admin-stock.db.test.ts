@@ -9,7 +9,6 @@ import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
-import { storeSnapshot } from '../src/ext/store.ts';
 import { materialCatalog } from '../src/stock/lookup.ts';
 import { add, COMPONENT_QUALITY, refineStart, split, type Actor } from '../src/stock/service.ts';
 import { getRefineryJobs, getStock, getStockSubject } from '../src/adminapp/stock.ts';
@@ -111,9 +110,9 @@ describe('admin: stock and refinery (database)', { skip: url ? false : 'TEST_DAT
     assert.equal(await getStockSubject(db, 'item', U.metal, 'en'), null);
   });
 
-  it('lists every refinery job with its state and whether it sits at a UEX refinery', async () => {
+  it('lists every refinery job with its state and whether it sits at a refinery', async () => {
     const jobs = await getRefineryJobs(db, 'en');
-    // The next to end first, the one without an end last; without UEX data every location counts
+    // The next to end first, the one without an end last; the station is flagged as a refinery
     assert.deepEqual(jobs.map((j) => [j.owner.userId, j.owner.name, j.state, j.scu, j.atRefinery, !!j.startedAt, !!j.endsAt]), [
       [SOLO, null, 'running', '8', true, true, true],
       [SOLO, null, 'open', '3.5', true, true, false],
@@ -129,10 +128,12 @@ describe('admin: stock and refinery (database)', { skip: url ? false : 'TEST_DAT
       WHERE refine_job = ${jobs[0]!.jobId}`);
     assert.equal((await getRefineryJobs(db, 'en'))[0]!.state, 'ready');
 
-    // UEX data without this station: both jobs sit outside every refinery
-    await storeSnapshot(db, 'uex', 'refineries_yields', [
-      { id_terminal: 1, terminal_name: 'Refinery Nowhere', star_system_name: 'Nyx', space_station_name: 'Nowhere', commodity_name: 'Iron (Ore)', value: 1 },
-    ]);
+    // Another place flagged instead of this station: both jobs sit outside every refinery
+    await db.execute(sql`UPDATE catalog.location SET has_refinery = (uuid = ${U.orphan})`);
     assert.deepEqual((await getRefineryJobs(db, 'en')).map((j) => j.atRefinery), [false, false]);
+    // None flagged (not imported yet): every location counts
+    await db.execute(sql`UPDATE catalog.location SET has_refinery = false`);
+    assert.deepEqual((await getRefineryJobs(db, 'en')).map((j) => j.atRefinery), [true, true]);
+    await db.execute(sql`UPDATE catalog.location SET has_refinery = (uuid = ${U.station})`);
   });
 });

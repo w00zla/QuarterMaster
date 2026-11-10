@@ -16,7 +16,6 @@ import { sql, type SQL } from 'drizzle-orm';
 import { COMPONENT_TYPES, fpsTypeSql } from '../catalog/components.ts';
 import type { Db, Tx } from '../db/client.ts';
 import { one, rows } from '../db/query.ts';
-import { refineryLocations } from '../ext/refineries.ts';
 import { recordHistory, type HistoryCategory, type HistoryDetails, type Source } from '../history/record.ts';
 import type { ModifierRange } from '../planner/types.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
@@ -236,6 +235,15 @@ async function checkLocation(tx: Tx, uuid: string) {
   if (loc.retired) throw new StockError('retired');
 }
 
+/**
+ * The places with a refinery (catalog.location.has_refinery, not retired); null while none is flagged at all
+ * (a database not imported from a v7 snapshot yet): then every selectable location counts as a refinery.
+ */
+export async function refineryLocations(db: Db | Tx): Promise<Set<string> | null> {
+  const found = await rows<{ uuid: string }>(db, sql`SELECT uuid FROM catalog.location WHERE has_refinery AND retired_at IS NULL`);
+  return found.length ? new Set(found.map((r) => r.uuid)) : null;
+}
+
 async function checkHolder(tx: Tx, guildId: string, userId: string) {
   const m = await one<{ active: boolean }>(tx, sql`SELECT active FROM app.member WHERE guild_id = ${guildId} AND user_id = ${userId}`);
   if (!m?.active) throw new StockError('holderNotMember');
@@ -438,7 +446,7 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
   return db.transaction(async (tx) => {
     await ensureUser(tx, actor.userId);
     await checkLocation(tx, input.locationUuid);
-    // Refineries per UEX; without UEX data yet every selectable location
+    // Refinery places from the catalog; none flagged yet = every selectable location
     const refineries = await refineryLocations(tx);
     if (refineries && !refineries.has(input.locationUuid)) throw new StockError('notRefinery');
     const jobId = randomUUID();

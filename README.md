@@ -69,7 +69,7 @@ where; the details are in [docs/](docs).
 ## Credits
 
 - [StarBreaker](https://github.com/diogotr7/StarBreaker) by diogotr7, used (through our fork) to read the game data.
-- [UEX](https://uexcorp.space) for prices and refinery data.
+- [UEX](https://uexcorp.space) for prices.
 
 ## Game data and fan content
 

@@ -96,7 +96,7 @@ api.get('/mining/:uuid', async (c) => {
   return found(c, id ? await getMiningProvider(db, id, lang(c)) : null);
 });
 api.get('/localization/sources', async (c) => c.json(await q.getLocSources(db)));
-api.get('/ext/uex', async (c) => c.json(await q.getUex(db, lang(c))));
+api.get('/ext/uex', async (c) => c.json(await q.getUex(db)));
 api.get('/ext/uex/trade', async (c) => c.json(await q.getUexTrade(db, lang(c))));
 api.get('/localization/search', async (c) => {
   const query = (c.req.query('q') ?? '').trim();

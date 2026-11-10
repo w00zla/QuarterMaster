@@ -27,12 +27,12 @@ function reload() {
 
 const STATE: Record<Health, string> = { ok: "OK", warn: "Late", err: "Stale" };
 
-// User data the catalog or the UEX refinery data no longer backs
+// User data the catalog no longer backs
 const CHECKS: Record<DataCheckKey, string> = {
   retiredMaterial: "Resources of retired materials",
   retiredLocation: "Resources at retired locations",
   retiredBlueprint: "Registered retired blueprints",
-  jobNotAtRefinery: "Refinery orders outside the UEX refineries",
+  jobNotAtRefinery: "Refinery orders outside the refineries",
 };
 
 // The three catalog parts that matter, as tiles; everything else as a subtext line

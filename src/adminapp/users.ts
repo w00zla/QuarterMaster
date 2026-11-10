@@ -7,8 +7,8 @@ import { locText, one, rows } from '../db/query.ts';
 import { blueprintCatalog } from '../bot/blueprints.ts';
 import type { Lang } from '../bot/i18n.ts';
 import { COMPONENT_TYPES, fpsTypeSql } from '../catalog/components.ts';
-import { refineryLocations } from '../ext/refineries.ts';
 import { formatAmount } from '../stock/amount.ts';
+import { refineryLocations } from '../stock/service.ts';
 import { IDLE_MS } from '../webapp/session.ts';
 import type {
   DataCheck, DataCheckHit, MaterialTotal, OrgActivityRow, OrgDetail, OrgMemberRow, OrgRow, ActivitySource, UserDetail,
@@ -263,7 +263,7 @@ export async function getDataChecks(db: Db, lang: string): Promise<DataCheck[]> 
     ORDER BY max(b.refine_ends_at), b.owner_user_id`);
 
   const refineries = await refineryLocations(db);
-  // Without UEX data every selectable location counts as a refinery
+  // None flagged in the catalog yet: every selectable location counts as a refinery
   const outside = !refineries ? sql`false`
     : refineries.size ? sql`b.location_uuid NOT IN (${sql.join([...refineries].map((u) => sql`${u}::uuid`), sql`, `)})`
     : sql`true`;

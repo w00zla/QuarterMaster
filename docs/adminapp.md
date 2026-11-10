@@ -52,7 +52,7 @@ removing imported text sources), the bot's status texts and assigning privileges
   rows the channel would post that the bot has not worked off yet, from `logRows` against
   `bot.guild.logs_after` — the bot keeps no heartbeat —, warning after 2 minutes, error after 10, "No mark"
   while it has not set its mark), the user data checks (`GET /api/checks`, every check listed also without
-  hits: stock of retired materials, stock at retired locations, registered retired blueprints, jobs outside the UEX refineries) and the catalog (counts, texts
+  hits: stock of retired materials, stock at retired locations, registered retired blueprints, jobs outside the refineries) and the catalog (counts, texts
   missing per language, blueprints without a known source (`blueprint.in_reward_pool`) and those registered anyway, without output; `GET /api/overview`) and the item thumbnails (`GET /api/thumbs`, `src/adminapp/thumbs.ts`:
   how many of the thumbnail targets (`src/catalog/thumb-targets.ts`, the same list packshot renders; `docs/webapp.md`
   "Thumbnails") have one, when `thumbs.json` was written, the targets without one by name, linked; after a game patch's
@@ -101,7 +101,7 @@ removing imported text sources), the bot's status texts and assigning privileges
   orgs the owner has left). Detail via `?subject=<kind>:<uuid>`: every batch incl. refinery jobs (so its sum may
   exceed the list's stored total), lot, orgs, stats by name formatted like the crafting check.
 - **Refinery** (`/refinery`, `GET /api/refinery`): every job with owner, station (`atRefinery` by
-  `refineryLocations`; without UEX data every location counts), materials, total SCU, end and state (`open` =
+  `refineryLocations`; while no place is flagged as a refinery every location counts), materials, total SCU, end and state (`open` =
   no end, `ready` however long ago, `running`); state chips, a station filter
   with the job counts.
 

@@ -1,15 +1,14 @@
 // Read-only views of the stock for the admin API: stored stock per subject over all users with its holders,
-// and every refinery job. Reads app and catalog (and ext for the UEX refineries).
+// and every refinery job. Reads app and catalog.
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { locText, one, rows } from '../db/query.ts';
 import { COMPONENT_TYPES, fpsTypeSql } from '../catalog/components.ts';
 import { ITEM_TYPE_KEY_PREFIX, typeLabel } from '../catalog/labels.ts';
-import { refineryLocations } from '../ext/refineries.ts';
 import { formatAmount } from '../stock/amount.ts';
 import { statValueText } from '../stock/component-stats.ts';
 import { locationCatalog } from '../stock/lookup.ts';
-import { componentStats } from '../stock/service.ts';
+import { componentStats, refineryLocations } from '../stock/service.ts';
 import { userNames } from './users.ts';
 import type { RefineryJob, StockHolder, StockRow, StockSubject } from './api-types.ts';
 
@@ -135,7 +134,7 @@ export async function getRefineryJobs(db: Db, lang: string): Promise<RefineryJob
     ORDER BY max(b.refine_ends_at) NULLS LAST, min(b.refine_started_at), b.refine_job`);
   const names = await userNames(db);
   const locations = await locationCatalog(db, lang);
-  // Without UEX data every selectable location counts as a refinery
+  // None flagged in the catalog yet: every selectable location counts as a refinery
   const refineries = await refineryLocations(db);
   return found.map(({ userId, locationUuid, location, ...j }) => ({
     ...j,

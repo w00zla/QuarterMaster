@@ -118,7 +118,7 @@ StarMapObject (_RecordId_ = location UUID)
   - Duplicate names in different systems: `Stanton Gateway`, `Pyro Gateway`, `Nyx Gateway` exist twice each → labels need the system/parent.
   - Names without any text: `@RR_P1_L4`, `@RR_P3_L2`, `@RR_P6_L1` (Pyro stations) → fallback to the key.
   - `@LOC_UNINITIALIZED` (text `<= UNINITIALIZED =>`) on 60 names → treated as a sentinel (`NULL`).
-  - **No refinery flag in the DataCore** (except the star map amenity "Refinery", found 2026-10-19, not used). Refinery terminals are entities (`EntityClassDefinition.Refinery` with `EntityComponentRefineryParams`) placed in the level object containers (socpak), not referenced from star map records. Only 6 Stanton station descriptions mention refining (incomplete). `starmap/pu/station/refinery/refinery_0001` is a WIP placeholder. Refining methods: `refiningprocess/*` (`RefiningProcess`) carry only `refiningSpeed` (Fast/Normal/Slow), `refiningQuality` (Careful/Normal/Wasteful) and the name key (9 methods; the record `RefineNormal` is Normal/Wasteful = Cormack); no factors, times or costs. `EntityComponentRefineryParams` is empty. Yields, times, costs and location bonuses are server-side: the app takes refinery locations and yield bonuses from UEX (`ext` schema, see `docs/ext.md`).
+  - **No refinery flag in the DataCore** (except the star map amenity "Refinery", found 2026-10-19, not used). Refinery terminals are entities (`EntityClassDefinition.Refinery` with `EntityComponentRefineryParams`) placed in the level object containers (socpak), not referenced from star map records. Only 6 Stanton station descriptions mention refining (incomplete). `starmap/pu/station/refinery/refinery_0001` is a WIP placeholder. Refining methods: `refiningprocess/*` (`RefiningProcess`) carry only `refiningSpeed` (Fast/Normal/Slow), `refiningQuality` (Careful/Normal/Wasteful) and the name key (9 methods; the record `RefineNormal` is Normal/Wasteful = Cormack); no factors, times or costs. `EntityComponentRefineryParams` is empty. Yields, times, costs and location bonuses are server-side: the app has no yield bonuses. The refinery places are derived from the object containers (see "Refinery places").
   - `assetManagerLocationParams` is set on 117 objects, Stanton only, including Lagrange points and moons → unusable as "has storage".
 
 ### Blueprint sources
@@ -223,7 +223,7 @@ HarvestableProviderPreset           harvestable/providerpresets/system/<system>/
 - Not covered: the slot presets of caves, contested zones and asteroid bases (`harvestable/slotpresets/`),
   where Carinite, Sadaryx and Saldynium come from; creature parts. Refinery yield bonuses are not in the game
   files (a type `RefineryCompetencies` exists, no record uses it; the `Refinery` entity has empty params, the
-  refinery containers hold nothing about it): they stay with UEX.
+  refinery containers hold nothing about it): the app has none.
 
 ### Refinery places
 

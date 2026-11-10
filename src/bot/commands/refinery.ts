@@ -8,7 +8,6 @@ import {
   type APIApplicationCommandOption, type AutocompleteInteraction, type ModalSubmitInteraction,
 } from 'discord.js';
 import type { Db } from '../../db/client.ts';
-import { refineryLocations } from '../../ext/refineries.ts';
 import { formatMicros, toMicros } from '../../planner/plan.ts';
 import { formatAmount } from '../../stock/amount.ts';
 import { locationCatalog, materialCatalog, pickableBatches, searchWords, type PickableBatch } from '../../stock/lookup.ts';
@@ -280,7 +279,7 @@ async function autocomplete(interaction: AutocompleteInteraction, lang: Lang, db
   const focused = interaction.options.getFocused(true);
   const query = String(focused.value);
   if (focused.name === 'station') {
-    const refineries = await refineryLocations(db);
+    const refineries = await stock.refineryLocations(db);
     const locations = [...(await locationCatalog(db, lang)).values()].filter((l) => !refineries || refineries.has(l.uuid));
     const found = searchWords(locations, query, (l) => `${l.label} ${l.nameEn}`, (l) => l.name);
     return interaction.respond(found.map((l) => ({ name: l.label.slice(0, 100), value: l.uuid })));
@@ -300,7 +299,7 @@ async function start(ctx: CommandContext) {
   const locationUuid = o.getString('station', true);
   const location = (await locationCatalog(ctx.db, ctx.lang)).get(locationUuid);
   if (!location) throw new UserError('stock.err.unknownLocation');
-  const refineries = await refineryLocations(ctx.db);
+  const refineries = await stock.refineryLocations(ctx.db);
   if (refineries && !refineries.has(locationUuid)) throw new UserError('stock.err.notRefinery');
   const draft: StartDraft = { locationUuid, station: location.short, duration: '', materials: '', ready: null, booking: false };
   const token = putState(ctx.interaction.user.id, draft, CONFIRM_TTL_MS);

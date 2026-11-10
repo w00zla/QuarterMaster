@@ -8,12 +8,10 @@ import {
 } from '../catalog/labels.ts';
 import type {
   BlueprintDetail, BlueprintRow, BlueprintSlot, EntityCount, GameInfo, ImportDetail, ImportRow, ItemDetail, ItemRow,
-  LocKeyDetail, LocSearch, LocSource, Meta, Overview, Ref, ResourceDetail, ResourceRow, UexEndpointStatus, UexMethod, UexRefinery, UexResponse,
+  LocKeyDetail, LocSearch, LocSource, Meta, Overview, Ref, ResourceDetail, ResourceRow, UexEndpointStatus, UexResponse,
   UexTradeResponse,
 } from './api-types.ts';
 import { COMPONENT_TYPES, fpsTypeSql } from '../catalog/components.ts';
-import { locationCatalog } from '../stock/lookup.ts';
-import { refineryMatch, refiningMethods, uexTerminals } from '../ext/refineries.ts';
 import { nameKey, tradeData } from '../ext/trade.ts';
 
 /** Timestamp as ISO 8601 string (the driver would return Postgres' text format here). */
@@ -374,7 +372,6 @@ export async function getLocKey(db: Db, key: string): Promise<LocKeyDetail> {
 
 // --- 3rd party: UEX --------------------------------------------------------------------------------
 
-/** Pull status, refinery terminals with their catalog match and yield bonuses, methods. */
 /** The latest snapshot of every pulled UEX endpoint. */
 export function uexEndpoints(db: Db): Promise<UexEndpointStatus[]> {
   return rows<UexEndpointStatus>(db, sql`
@@ -383,33 +380,9 @@ export function uexEndpoints(db: Db): Promise<UexEndpointStatus[]> {
     FROM ext.snapshot WHERE source = 'uex' ORDER BY endpoint, id DESC`);
 }
 
-export async function getUex(db: Db, lang: string): Promise<UexResponse> {
-  const endpoints = await uexEndpoints(db);
-  const latest = async (endpoint: string) => (await one<{ data: Record<string, unknown>[] }>(db, sql`
-    SELECT data FROM ext.snapshot WHERE source = 'uex' AND endpoint = ${endpoint} ORDER BY id DESC LIMIT 1`))?.data ?? [];
-  const [yields, methods] = [await latest('refineries_yields'), await latest('refineries_methods')];
-
-  const match = await refineryMatch(db);
-  const byTerminal = new Map([...match?.matched ?? []].map(([uuid, t]) => [t.id, uuid]));
-  const locations = await locationCatalog(db, lang);
-  const ores = new Set<string>();
-  const refineries = uexTerminals(yields).map((t): UexRefinery => {
-    const uuid = byTerminal.get(t.id) ?? null;
-    return { terminalId: t.id, terminal: t.name, system: t.system, place: t.place, locationUuid: uuid, location: uuid ? locations.get(uuid)?.label ?? null : null, yields: {} };
-  });
-  const byId = new Map(refineries.map((r) => [r.terminalId, r]));
-  for (const y of yields) {
-    const r = byId.get(y.id_terminal as number);
-    if (!r || typeof y.commodity_name !== 'string' || typeof y.value !== 'number') continue;
-    r.yields[y.commodity_name] = y.value;
-    ores.add(y.commodity_name);
-  }
-  return {
-    endpoints,
-    refineries: refineries.sort((a, b) => a.system.localeCompare(b.system) || a.place.localeCompare(b.place)),
-    ores: [...ores].sort((a, b) => a.localeCompare(b)),
-    methods: await joinMethods(db, lang, methods),
-  };
+/** The pull status of the UEX endpoints. */
+export async function getUex(db: Db): Promise<UexResponse> {
+  return { endpoints: await uexEndpoints(db) };
 }
 
 /** Trade coverage: what of the catalog the UEX trade data (trade.ts) reach, matched the same way. */
@@ -450,21 +423,4 @@ export async function getUexTrade(db: Db, lang: string): Promise<UexTradeRespons
     },
     items: { priced: items.filter((i) => trade.has(i.uuid)).length, gear: gear.length, gearPriced: gear.filter((i) => trade.has(i.uuid)).length },
   };
-}
-
-/** UEX's method ratings and the community values (ext.refining_method), one row per code. */
-async function joinMethods(db: Db, lang: string, uex: Record<string, unknown>[]): Promise<UexMethod[]> {
-  const byCode = new Map<string, UexMethod>();
-  for (const m of await refiningMethods(db, lang)) {
-    byCode.set(m.code, {
-      name: m.name, code: m.code, ratingYield: null, ratingCost: null, ratingSpeed: null,
-      yieldPct: m.yieldPct, secondsPerScu: m.secondsPerScu, source: `${m.source} · ${m.gameVersion}`,
-    });
-  }
-  for (const m of uex) {
-    const code = String(m.code);
-    const row = byCode.get(code) ?? { name: String(m.name), code, ratingYield: null, ratingCost: null, ratingSpeed: null, yieldPct: null, secondsPerScu: null, source: null };
-    byCode.set(code, { ...row, ratingYield: Number(m.rating_yield), ratingCost: Number(m.rating_cost), ratingSpeed: Number(m.rating_speed) });
-  }
-  return [...byCode.values()].sort((a, b) => (b.yieldPct ?? -1) - (a.yieldPct ?? -1) || a.name.localeCompare(b.name));
 }

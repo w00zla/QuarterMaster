@@ -338,14 +338,20 @@ describe('stock service (database)', { skip: url ? false : 'TEST_DATABASE_URL no
     await refused(refineRemove(db, mia, job), 'batchNotFound');
   });
 
-  it('refinery: only at UEX refineries once there is UEX data', async () => {
-    const yields = [{ id_terminal: 1, terminal_name: 'Refinement Center - Elsewhere', star_system_name: 'Nyx', space_station_name: 'Elsewhere' }];
-    await db.execute(sql`INSERT INTO ext.snapshot (source, endpoint, content_hash, data)
-      VALUES ('uex', 'refineries_yields', ${'a'.repeat(64)}, ${JSON.stringify(yields)}::jsonb)`);
+  it('refinery: only at refinery places once the catalog flags any', async () => {
     const job = { locationUuid: U.station, rows: [{ resourceUuid: U.metal, quality: 600, amount: '1' }] };
-    await refused(refineStart(db, mia, job), 'notRefinery');
-    await db.execute(sql`DELETE FROM ext.snapshot`);
-    assert.ok((await refineStart(db, mia, job)).batches.length);
+    try {
+      // The fixtures flag the station
+      assert.ok((await refineStart(db, mia, job)).batches.length);
+      // Another place flagged instead: the station is no refinery
+      await db.execute(sql`UPDATE catalog.location SET has_refinery = (uuid = ${U.orphan})`);
+      await refused(refineStart(db, mia, job), 'notRefinery');
+      // None flagged (not imported from a v7 snapshot yet): every selectable location counts
+      await db.execute(sql`UPDATE catalog.location SET has_refinery = false`);
+      assert.ok((await refineStart(db, mia, job)).batches.length);
+    } finally {
+      await db.execute(sql`UPDATE catalog.location SET has_refinery = (uuid = ${U.station})`);
+    }
   });
 
   it('never hands out the same units twice under concurrent removal', async () => {
