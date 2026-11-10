@@ -18,6 +18,7 @@ import { getOverview } from '../src/adminapp/queries.ts';
 import { findStock } from '../src/stock/lookup.ts';
 import { createApp } from '../src/webapp/app.ts';
 import type { DiscordLogin } from '../src/webapp/discord.ts';
+import { discordIdentity } from '../src/webapp/identity-discord.ts';
 import { createSession } from '../src/webapp/session.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
@@ -67,7 +68,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     for (const id of [OLGA, MIA, MAX, SOLO]) {
       tokens.set(id, await createSession(webDb, { id, username: `u${id.slice(-2)}`, globalName: null, avatar: null }));
     }
-    app = createApp(webDb, noLogin, { origin: ORIGIN, trustProxy: false, distDir: null });
+    app = createApp(webDb, discordIdentity(webDb, noLogin), { origin: ORIGIN, trustProxy: false, distDir: null, capabilities: { login: 'discord', orgs: true, uex: true } });
   });
   after(async () => { await closeDb?.(); await closeWeb?.(); });
 

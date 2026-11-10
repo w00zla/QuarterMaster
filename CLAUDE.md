@@ -20,7 +20,7 @@ Where things are described (read the matching file before working in an area):
 | `docs/webapp.md` | user web app: backend, login, sessions, API, realtime, SPA views and building blocks, security measures |
 | `docs/adminapp.md` | admin web UI |
 | `docs/companion.md` | companion app (`companion/`): requirements, structure, Game.log, server/config, release, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, OCR adapters (pointers into sc-ohseearr), decisions |
-| `docs/singleuser.md` | singleuser variant, DB part: PGlite in the process, `connectUrl`, settings, `maintain()`, the one-connection rule |
+| `docs/singleuser.md` | singleuser variant: the DB part (PGlite in the process, `connectUrl`, settings, `maintain()`, the one-connection rule) and the local identity (one fixed user, the open local API) |
 | `docs/ext.md` | third-party data (UEX trading) |
 | `docs/deploy.md` | production design (image, compose, DB roles, Caddy) and the step-by-step deploy, backups, updates, rollback, restore |
 | `../sc-ohseearr` | OCR engine, models, readers and training (own repo; the companion's Rust path dependencies; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
@@ -111,7 +111,7 @@ VS Code tasks (`.vscode/tasks.json`, commented there) start the dev stacks; prod
 - **Catalog** (`docs/catalog-sources.md`): StarBreaker extracts DataCore records from `Data.p4k` → `normalize.ts` → a versioned snapshot (`src/catalog/snapshot.ts`, the contract) → `catalog:import` writes schema `catalog` in one transaction; `loc:import` adds community `global.ini` texts.
 - **Stock** (`docs/stock.md`): every batch belongs to one user, shared into orgs per batch; refinery jobs are personal work orders; `app.history` records every action in the same transaction.
 - **Bot** (`docs/bot.md`): discord.js; roster from member roles; logs channel from `app.history`; one board message per org via `LISTEN qm_changes`.
-- **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth, role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket; features and privileges (`src/webapp/features.ts`).
+- **User web app** (`docs/webapp.md`): Hono backend (`src/webapp/`) with Discord OAuth behind the `Identity` seam (`identity*.ts`), role `qm_web`; Vue SPA (`webapp/`); realtime via Postgres `NOTIFY` → WebSocket; features and privileges (`src/webapp/features.ts`).
 - **Admin web UI** (`docs/adminapp.md`): Hono + Vue, basic auth; control room, read-only user data, catalog browser, imports, UEX, features.
 - **Companion** (`docs/companion.md`, `companion/`): Tauri 2 desktop app (Rust + Vue). Reads `Game.log` and, in a scan session, the game window (OCR from `../sc-ohseearr`, path dependencies; the Rust adapters in `companion/src-tauri/`), and registers blueprints, stock and refinery jobs through the web app's API (per-user token `qmt_…`, version header); server side: that API, `GET /api/companion/catalog` and the release files (`docs/webapp.md` "Companion release"). Tests: `test/companion-*.test.ts` (pure frontend logic, root `pnpm test`), Rust tests in `companion/src-tauri`; the API side is covered by `test/webapp*.test.ts`. OCR engine, models, readers and training: `../sc-ohseearr` (own repo, required next to this one to build the companion).
 - **ext** (`docs/ext.md`): UEX pull every 15 minutes into schema `ext`.

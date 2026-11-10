@@ -1,4 +1,8 @@
-# Singleuser variant: the database
+# Singleuser variant
+
+Two parts are described here: the database (PGlite) and who the user is (the local identity).
+
+# The database
 
 The singleuser variant runs the same code as the online one on **PGlite** (`@electric-sql/pglite`): Postgres compiled to
 WASM, running inside the Node process, its data in a folder (or in memory). Online stays on Postgres through postgres.js;
@@ -65,3 +69,41 @@ TEST_DATABASE_URL=pglite:/some/dir node --env-file-if-exists=.env --test test/st
 Each test file is its own process with its own in-memory database; `prepareDb` migrates it. Skipped on PGlite, with the reason
 in the report: the second-connection test of `test/bot-roster.db.test.ts`. `TEST_ROLES=1` needs Postgres.
 `test/pglite.test.ts` tests the connection itself (rows, guard, `maintain()`, `listen`, a data dir across close and reopen).
+
+# Identity
+
+The web app's HTTP layer asks an `Identity` who the user of a request is (`src/webapp/identity.ts`; the seam and its
+online implementation: `docs/webapp.md` "Identity"). The singleuser one is made with `await localIdentity(db)`
+(`src/webapp/identity-local.ts`) and passed to `createApp` and `RealtimeHub`, together with the capabilities
+`{ login: 'none', orgs: false, … }`.
+
+- **One fixed user, whatever the database holds:** `LOCAL_USER_ID` = `00000000000000000` (seventeen zeros). User ids
+  are Discord snowflakes as text and must match `^[0-9]{17,20}$` (CHECKs in the schema, the same pattern in the code);
+  a real snowflake is the decimal form of a number and never starts with a zero, so the id cannot collide with a
+  user of an imported database. Name "Local", no avatar. `localIdentity` inserts the `app.app_user` row when it is
+  missing (once, when it is made: call it after the migrations, outside a transaction).
+- **No login, no sessions, no tokens:** every `/api/*` request and every WebSocket handshake is that user;
+  cookies and `Authorization` are not looked at. `/auth/*` and `/api/token` do not exist; the companion release
+  files, where configured, need no login either.
+- **No orgs:** the schema is there, the org routes (`/api/orgs/…`) are not mounted (`orgs: false`); the fixed user is
+  a member of nothing, so every route that takes a guild id refuses through its normal membership check (403
+  `notMember`, the stock service's `holderNotMember`).
+- `GET /api/capabilities` tells the SPA and the companion what the server is (`login: 'none'`).
+
+## The open API and what still protects it
+
+The local API has no access protection, on purpose: it is a local app, and other programs on the machine may use
+the API (the companion does). Two things stay:
+
+- The server binds to `127.0.0.1` (by the process that starts it, not by the identity): nothing off the machine
+  reaches it.
+- **Web pages cannot write.** Any page open in the user's browser can send requests to `127.0.0.1`. A browser
+  always sends `Origin` with a cross-origin write (modern ones `Sec-Fetch-Site` with every request), so
+  `acceptsWrite` takes a write when it is same-origin (`Sec-Fetch-Site: same-origin`, else `Origin` = the app's
+  origin: the app's own SPA) or carries **neither** `Origin` nor `Sec-Fetch-Site` (not a browser: the companion, a
+  script), and refuses every other one (403). `Authorization` earns no exemption here (online it does, for the
+  companion's token). Writes take `application/json` only, as online: a cross-origin page cannot send that
+  without a CORS preflight, which is never answered. Reads by a page fail in the browser (no CORS headers). The
+  WebSocket handshake keeps its check: `Origin` must be the app's origin.
+
+Tests: `test/webapp-local.db.test.ts` (on Postgres and on PGlite).

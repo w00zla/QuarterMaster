@@ -15,20 +15,47 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
 
 ## Backend (`src/webapp/`)
 
-- Hono, own process (`main.ts`); `createApp` in `app.ts` builds the app without a server, the tests drive it
-  via `app.request`.
-- Middleware order: `secureHeaders` (strict CSP, no HSTS: Caddy sets it), own same-origin check for every
-  non-GET (`Sec-Fetch-Site`, else `Origin` = `WEBAPP_ORIGIN`; Hono's `csrf()` only covers form content
+- Hono, own process (`main.ts`); `createApp(db, identity, config)` in `app.ts` builds the app without a server, the
+  tests drive it via `app.request`. `app.ts` and `realtime.ts` hold no login, session or token code: who the user
+  is comes from the `Identity` passed in (see "Identity"); `main.ts` is the online composition root (Discord
+  identity, `capabilities` `{ login: 'discord', orgs: true, uex: true }`).
+- Middleware order: `secureHeaders` (strict CSP, no HSTS: Caddy sets it), the write check for every
+  non-GET (the identity's `acceptsWrite`; online: `Sec-Fetch-Site`, else `Origin` = `WEBAPP_ORIGIN`; Hono's `csrf()` only covers form content
   types), `no-store` on `/auth/*` and `/api/*` unless the route sets its own (only `/api/catalog` and `/api/companion/catalog`: `private,
   no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~3 MB per language
   spared (Caddy compresses nothing; the app gzips only `/api/companion/catalog`, below); the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
-  per session), then for `/api/*` the session check (401 for every route, unknown ones too), JSON-only
+  per session), the identity's own routes (online `/auth/*`), `GET /api/capabilities`, then for `/api/*` the
+  user check (the identity's `authenticate`; online 401 for every route, unknown ones too), JSON-only
   writes (415, `DELETE` included) and a 16 KB body limit (a feature's image upload: its own, see
   "Features and privileges").
+- `GET /api/capabilities` → `Capabilities` `{ login: 'discord' | 'none', orgs, uex }` (`api-types.ts`): what this
+  server offers, the value `WebappConfig.capabilities` of the composition root. The one API route answered without
+  a user (the SPA and the companion ask before they have one); it sits before the user check, behind the
+  per-address rate limit, `no-store`. Only this exact path and `GET`. `orgs: false` also leaves the org routes
+  (`/api/orgs/…`) unmounted (`registerRoutes`' option; the API's 404). Every other route that takes a guild id
+  checks the caller's membership there, so without memberships no parameter reaches an org.
 - Client IP: socket address, or the last `X-Forwarded-For` entry with `WEBAPP_TRUST_PROXY=1` (Caddy drops
   the client's own header).
 
-### Login (`discord.ts`)
+### Identity (`identity.ts`, `identity-discord.ts`, `identity-local.ts`)
+
+The seam between the HTTP layer and the variant it runs as. `Identity`:
+
+| Method | Asked | Online (`discordIdentity(db, login)`) |
+|---|---|---|
+| `acceptsWrite(c, origin)` | every non-GET, before anything else; false = 403 | `Authorization` present (the companion's token: no cookie, and a page cannot set the header without a preflight) or same-origin |
+| `mountRoutes(app, host)` | once, after the global middlewares | `/auth/login`, `/auth/callback`, `/auth/logout` |
+| `authenticate(c, host)` | every `/api/*` request but the capabilities | `Authorization`: the companion's version check (426), then its token (401), never the cookie; else the session cookie (401, an unknown cookie deleted). Sets `session`, and `apiToken` for a token |
+| `mountApiRoutes(api, host)` | once, inside the API | `GET`/`POST /api/token`, session only |
+| `authenticateDownload(c)` | `/downloads/companion/*` | token (401) or session (redirect to `/`) |
+| `authenticateUpgrade(req)` | a WebSocket handshake, after path, Origin and the address limit | the session cookie; `valid()` re-validates it at every keepalive |
+
+`host` (`IdentityHost`) is what only the app has: its origin, the client address of a request (for the log) and the
+companion release. Online-only, all inside `identity-discord.ts`: the login, sessions, the API token and the
+companion's version check. The local identity (one fixed user, no login) is described in `docs/singleuser.md`
+"Identity".
+
+### Login (`discord.ts`, routes in `identity-discord.ts`)
 
 `openid-client` with hand-configured Discord endpoints (Discord is no OIDC provider; `arctic` was planned
 but is deprecated on npm), code + PKCE S256 + state, scope `identify`, redirect URI = `WEBAPP_ORIGIN` +
@@ -202,8 +229,8 @@ blocks".
   stock/roster/org state to the org's active members, blueprints/profile to the user and everyone sharing an
   org; a listener reconnect sends `resync`.
 - Handshake checks: path, `Origin` = `WEBAPP_ORIGIN` (cross-site WebSocket hijacking), max 5 sockets per user
-  / 20 per address, session cookie; keepalive every 25 s pings and re-validates the session (close code 4401
-  when gone). Client messages: JSON `{type:'ping'}` only (Zod), 4 KB, 20 per 10 s, anything else closes
+  / 20 per address, the user (the identity's `authenticateUpgrade`: the session cookie); keepalive every 25 s
+  pings and re-validates the session (`SocketUser.valid`; close code 4401 when gone). Client messages: JSON `{type:'ping'}` only (Zod), 4 KB, 20 per 10 s, anything else closes
   (1008). Writes stay on REST. CSP `connect-src` lists the ws(s) origin explicitly.
 
 ## SPA (`webapp/`)
@@ -445,7 +472,7 @@ blocks".
 | XSS | Vue escapes; no `v-html` except `Icon.vue` (constants; enforced by `test/spa-sources.test.ts`). Untrusted texts: external `global.ini` files, Discord names. Strict CSP from the app. |
 | Clickjacking | `frame-ancestors 'none'`, `X-Frame-Options: DENY`. |
 | Access control / IDOR | `Actor` only from the session + roster; a `guildId` from the request only with an active member row there; reads through functions that take the `Actor`, never "load by ID"; writes through the stock service only. DB tests cover other users' stock, other orgs, inactive members. |
-| Missing auth | Auth middleware on everything except `/auth/*` and static files; a test asserts 401 for every route without a session. |
+| Missing auth | Auth middleware on everything except `/auth/*`, `GET /api/capabilities` (no user data: what the server offers) and static files; a test asserts 401 for every other route without a session. |
 | Injection | Parameterized `sql` templates, Zod for every body/query/param, 16 KB body limit, amounts via `parseAmount`. |
 | Session theft | HttpOnly, Secure, HSTS (Caddy), hashed tokens, no Discord tokens stored, `Referrer-Policy: no-referrer`, `no-store` on API responses (the catalog, game data only: `private, no-cache`). |
 | Abuse | Rate limits in memory (one process): `/auth/*` per IP, `/api/*` per session. |

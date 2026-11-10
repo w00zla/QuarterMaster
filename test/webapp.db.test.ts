@@ -15,6 +15,7 @@ import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { createApp, type WebappConfig } from '../src/webapp/app.ts';
 import type { CompanionInfo } from '../src/webapp/api-types.ts';
 import { discordLogin } from '../src/webapp/discord.ts';
+import { discordIdentity } from '../src/webapp/identity-discord.ts';
 import { deleteExpiredSessions } from '../src/webapp/session.ts';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -70,9 +71,9 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
   let closeApp: () => Promise<void>;
   let discord: ReturnType<typeof fakeDiscord>;
 
-  const build = (extra: Partial<WebappConfig> = {}) => createApp(db, discordLogin({
+  const build = (extra: Partial<WebappConfig> = {}) => createApp(db, discordIdentity(db, discordLogin({
     clientId: 'cid', clientSecret: 'secret', redirectUri: `${ORIGIN}/auth/callback`, fetch: discord.fetchFn,
-  }), { origin: ORIGIN, trustProxy: false, distDir: null, ...extra });
+  })), { origin: ORIGIN, trustProxy: false, distDir: null, capabilities: { login: 'discord', orgs: true, uex: true }, ...extra });
   let app: ReturnType<typeof build>;
 
   const cookiesOf = (res: Response) => res.headers.getSetCookie();
@@ -125,9 +126,18 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.equal(res.headers.get('cache-control'), 'no-store');
   });
 
-  it('every API route needs a session, unknown ones too', async () => {
-    const routes = app.routes.filter((r) => r.path.startsWith('/api') && r.method !== 'ALL');
+  it('every API route needs a session, unknown ones too; only the capabilities answer without', async () => {
+    const open = app.routes.filter((r) => r.path === '/api/capabilities');
+    assert.deepEqual(open.map((r) => r.method), ['GET']);
+    const routes = app.routes.filter((r) => r.path.startsWith('/api') && r.method !== 'ALL' && !open.includes(r));
     assert.ok(routes.length > 0);
+    const caps = await app.request('/api/capabilities');
+    assert.equal(caps.status, 200);
+    assert.deepEqual(await caps.json(), { login: 'discord', orgs: true, uex: true });
+    assert.equal(caps.headers.get('cache-control'), 'no-store');
+    // Nothing else of that path is open
+    assert.equal((await app.request('/api/capabilities', { method: 'POST', body: '{}', headers: { ...sameOrigin, 'content-type': 'application/json' } })).status, 401);
+    assert.equal((await app.request('/api/capabilities/x')).status, 401);
     for (const r of [...routes, { method: 'GET', path: '/api/does-not-exist' }]) {
       const res = await app.request(r.path, { method: r.method, headers: sameOrigin });
       assert.equal(res.status, 401, `${r.method} ${r.path}`);

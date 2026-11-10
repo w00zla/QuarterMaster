@@ -27,6 +27,18 @@ export interface MeResponse {
 
 export type Lang = 'de' | 'en';
 
+// --- capabilities (GET /api/capabilities, the one API route without a login) -----------------------
+// What this server offers; the SPA and the companion ask before anything else.
+export interface Capabilities {
+  // How a user gets in: 'discord' = the Discord login (/auth/login, sessions, API tokens for the companion);
+  // 'none' = no login at all, every request is the one local user's (no /auth/*, no /api/token)
+  login: 'discord' | 'none';
+  // Orgs exist: the org routes (/api/orgs/…) and org scopes
+  orgs: boolean;
+  // UEX trading data (prices, terminals) is offered
+  uex: boolean;
+}
+
 // --- errors -----------------------------------------------------------------------------------
 // Every non-2xx answer: { error: code }. Stock codes as in src/stock/service.ts (StockErrorCode);
 // further codes: notLoggedIn (401), notMember (403: not an active member of that org), invalid (400: malformed

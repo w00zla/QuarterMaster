@@ -16,6 +16,7 @@ import { exportFeature, getFeature, getUserPrivileges, grantPrivilege, revokePri
 import type { FeatureEntriesResponse, MeResponse, ThumbReviewSubjectsResponse } from '../src/webapp/api-types.ts';
 import { createApp } from '../src/webapp/app.ts';
 import type { DiscordLogin } from '../src/webapp/discord.ts';
+import { discordIdentity } from '../src/webapp/identity-discord.ts';
 import { BLOB_BODY_LIMIT } from '../src/webapp/features.ts';
 import { createSession } from '../src/webapp/session.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
@@ -67,7 +68,7 @@ describe('privileges and feature data (database)', { skip: url ? false : 'TEST_D
     }
     thumbsDir = mkdtempSync(join(tmpdir(), 'qm-thumbs-'));
     writeFileSync(join(thumbsDir, 'thumbs.json'), JSON.stringify({ [U.gem]: HASH }));
-    app = createApp(webDb, noLogin, { origin: ORIGIN, trustProxy: false, distDir: null, thumbsDir });
+    app = createApp(webDb, discordIdentity(webDb, noLogin), { origin: ORIGIN, trustProxy: false, distDir: null, thumbsDir, capabilities: { login: 'discord', orgs: true, uex: true } });
     assert.ok(await grantPrivilege(db, ANNA, MARK));
     assert.ok(await grantPrivilege(db, BEN, MARK));
     // Again: nothing changes
