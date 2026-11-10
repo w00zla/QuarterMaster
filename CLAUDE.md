@@ -47,7 +47,7 @@ node --env-file-if-exists=.env --test test/plan.test.ts                         
 node --env-file-if-exists=.env --test --test-name-pattern="diffTexts" "test/**/*.test.ts"   # single test
 
 pnpm catalog:extract --p4k "<install>/LIVE/Data.p4k"   # -> local/snapshots/ (does not load .env: pass --p4k); StarBreaker fork ../starbreaker-ps via $STARBREAKER_BIN, else local/starbreaker-ps/ (build: ../sc-packshot/scripts/starbreaker-build.{sh,ps1})
-pnpm catalog:import <snapshot.json.gz> --label 4.10.2 [--dry-run] [--force] [--allow-downgrade] [--json]
+pnpm catalog:import <snapshot.json.gz> [--dry-run] [--force] [--allow-downgrade] [--json]
 pnpm loc:import <global.ini> --source <name> --lang <code> [--priority n] [--dry-run] [--force]
 pnpm loc:import --remove --source <name> --lang <code>
 pnpm packshot:targets [--out <f>]    # the target list for packshot (../sc-packshot renders the icons) from the DB -> local/packshot-targets.json, copied into packshot's targets/ by hand

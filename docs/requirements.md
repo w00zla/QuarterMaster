@@ -126,7 +126,7 @@ Two web apps, **separate processes** (and separate from the bot) sharing one cod
 - **Dashboard**: health (what needs action), KPIs (active users, actions per source, orgs, stock, refinery, blueprints), actions per day by source, latest actions, sources, orgs, reach. **Status**: services (catalog, UEX pull, the bot's logs channels), the **user data checks** (stock of retired materials or at retired locations, registered retired blueprints, jobs outside the UEX refineries) and the catalog's gaps. **Activity**: the whole history with filters.
 - **Orgs** and **Users** (read-only): orgs with bot state, settings (logs, board), roster, what is shared there and their activity; users (also without any org) with channels, stock, refinery jobs, blueprints, history, last web login, companion token. No admin actions on user data (deletion, revoking sessions/tokens): those would need write access to schema `web`.
 - **Stock** and **Refinery**: the stock over all users per subject with its holders; every refinery job with its state.
-- Browses the game catalog (blueprints, materials, items, texts) and runs the catalog and localization imports (file upload, always a dry run first; the catalog import requires the version label, decided 2026-10-22).
+- Browses the game catalog (blueprints, materials, items, texts) and runs the catalog and localization imports (file upload, always a dry run first; the game version label comes from the snapshot, formed from the build manifest).
 - **UEX**: pull status, refinery terminals with their catalog match, yield bonuses per refinery × ore, refining methods, trade coverage. **Bot**: status texts and the servers' settings.
 - Game texts follow a language picker; the UI itself is English.
 

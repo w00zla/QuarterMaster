@@ -1,5 +1,6 @@
 // Reads and checks a snapshot (plain or gzipped JSON): shared by the import CLI and the web API.
 import { gunzipSync } from 'node:zlib';
+import { gameLabel } from '../game-label.ts';
 import { snapshotSchema, type Snapshot } from '../snapshot.ts';
 import { checkIntegrity, sha256 } from './plan.ts';
 
@@ -33,6 +34,15 @@ export function loadSnapshot(bytes: Uint8Array): LoadedSnapshot {
   const errors = timed('integrity', () => checkIntegrity(parsed.data));
   if (errors.length > 0) {
     throw new Error(`Snapshot failed integrity checks (${errors.length}):\n  ${errors.slice(0, 20).join('\n  ')}`);
+  }
+  // Snapshots from before the extractor set the label: derive it from the embedded build manifest
+  const { game } = parsed.data;
+  if (game.label === null) {
+    try {
+      game.label = gameLabel(game.manifest);
+    } catch (err) {
+      throw new Error(`Snapshot has no game label and none can be derived: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   return { snapshot: parsed.data, sha256: sha256(text), timings };
 }

@@ -276,7 +276,7 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 
 ### Database (`catalog` schema)
 
-- `import`: one row per catalog import (build, channel, label, snapshot hash, extractor versions, summary, anomalies).
+- `import`: one row per catalog import (build, channel, label (`Branch` without `sc-alpha-` + `.` + `RequestedP4ChangeNum` from the build manifest, `src/catalog/game-label.ts`), snapshot hash, extractor versions, summary, anomalies).
 - Global for all guilds; migrations in `drizzle/`.
 - Entities `manufacturer`, `item`, `resource`, `blueprint_category`, `crafted_property`, `quality_quantization`, `blueprint`, `location`, `raw_record`: UUID primary key plus `content_hash`, `first_seen_import_id`, `last_seen_import_id`, `retired_at`. **Never deleted**; missing entries get `retired_at` (cross-checked against the diff), reappearing ones are revived. Guild data references catalog UUIDs and survives retirement.
 - `raw_record` keeps every extracted DataCore record as `jsonb`, so new game data can be normalized later without re-extracting (the component base values are read from it, `src/stock/component-base.ts`).

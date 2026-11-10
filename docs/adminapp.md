@@ -11,8 +11,8 @@ removing imported text sources), the bot's status texts and assigning privileges
   Read endpoints under `/api`, response types in `api-types.ts`. Writing endpoints require the header
   `X-Quartermaster: 1` (CSRF protection: a foreign form cannot set it): the status texts (page Bot) and the
   imports (`/api/import/catalog`, `/api/import/localization`), which take the file as raw body and are a dry
-  run unless `dryRun=0`. The catalog import requires `label` (the game version, e.g. 4.10.2; 400 without; the
-  CLI likewise requires `--label`), the SPA's dry run stays disabled until it is set. The SPA uploads via XHR
+  run unless `dryRun=0`. The catalog import takes no label: the snapshot carries it (from the build manifest;
+  an older snapshot without one gets it derived from its embedded manifest). The SPA uploads via XHR
   and shows the upload's progress, then a spinner with the seconds the server has been working (no further
   progress: one transaction). Serves `adminapp/dist` with SPA fallback. Both imports use the same functions as
   the CLIs (`docs/catalog-sources.md`). In schema `web` it reads only the columns `deploy/db-roles.sh` grants

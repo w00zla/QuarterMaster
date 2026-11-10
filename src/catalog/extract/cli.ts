@@ -10,6 +10,7 @@ import { normalize } from './normalize.ts';
 import { RecordStore } from './records.ts';
 import { scanContainerFiles } from './socpak.ts';
 import { exportedCount, starbreaker, starbreakerVersion } from './starbreaker.ts';
+import { gameLabel } from '../game-label.ts';
 import { snapshotSchema } from '../snapshot.ts';
 
 const pkg = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { version: string };
@@ -96,8 +97,7 @@ async function main() {
     build,
     branch: data.Branch ?? '',
     version: data.Version ?? '',
-    // Set by the import (--label): the readable version is not in the build manifest
-    label: null,
+    label: gameLabel(manifest),
     manifest,
   };
   const sbVersion = await starbreakerVersion(bin);
