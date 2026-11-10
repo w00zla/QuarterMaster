@@ -440,7 +440,7 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
     await ensureUser(tx, actor.userId);
     await checkLocation(tx, input.locationUuid);
     // Refineries per UEX; without UEX data yet every selectable location
-    const refineries = await refineryLocations(db);
+    const refineries = await refineryLocations(tx);
     if (refineries && !refineries.has(input.locationUuid)) throw new StockError('notRefinery');
     const jobId = randomUUID();
     const started = (await one<{ now: string }>(tx, sql`SELECT now()::text AS now`))!.now;
