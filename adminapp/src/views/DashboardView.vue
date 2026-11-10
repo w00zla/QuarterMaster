@@ -107,7 +107,7 @@ const share = (part: number, whole: number) => (whole ? `${Math.round((part / wh
             <span class="sub">of {{ dash.data.value.kpis.stock.owners }} users</span>
           </section>
           <section class="panel kpi">
-            <span class="panel-title">Refinery jobs running</span>
+            <span class="panel-title">Refinery orders</span>
             <RouterLink to="/refinery" class="kpi-value">{{ dash.data.value.kpis.refinery.running.toLocaleString() }}</RouterLink>
             <span class="sub"><RouterLink to="/refinery">{{ dash.data.value.kpis.refinery.ready }}</RouterLink> ready to collect</span>
           </section>

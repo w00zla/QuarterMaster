@@ -39,7 +39,7 @@ const COLUMNS: ColumnSpec[] = [
   { key: "scu", label: "SCU", width: 100 },
   { key: "harvestables", label: "Harvestables", width: 120 },
   { key: "gear", label: "Gear", width: 80 },
-  { key: "jobs", label: "Refinery jobs", width: 120 },
+  { key: "jobs", label: "Refinery orders", width: 120 },
   { key: "blueprints", label: "Blueprints", width: 110 },
   { key: "lastActivity", label: "Last action", width: 160 },
   { key: "lastSeen", label: "Last web login", width: 160 },
@@ -268,7 +268,7 @@ function revoke(p: UserPrivilege) {
             <div class="figure"><span class="figure-value mono" :class="{ faint: detail.data.value.resourceScu === '0' }">{{ detail.data.value.resourceScu }}</span><span class="figure-label">SCU</span></div>
             <div class="figure"><span class="figure-value mono" :class="{ faint: detail.data.value.harvestablePcs === '0' }">{{ detail.data.value.harvestablePcs }}</span><span class="figure-label">Harvestables</span></div>
             <div class="figure"><span class="figure-value mono" :class="{ faint: detail.data.value.gearPcs === '0' }">{{ detail.data.value.gearPcs }}</span><span class="figure-label">Gear</span></div>
-            <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.refineryJobs }">{{ detail.data.value.refineryJobs }}</span><span class="figure-label">Refinery jobs</span></div>
+            <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.refineryJobs }">{{ detail.data.value.refineryJobs }}</span><span class="figure-label">Refinery orders</span></div>
             <div class="figure"><span class="figure-value mono" :class="{ faint: !detail.data.value.blueprints }">{{ detail.data.value.blueprints }}</span><span class="figure-label">Blueprints</span></div>
           </div>
           <details class="section" :open="open.has('stock')" @toggle="onToggle('stock', $event)">
@@ -292,7 +292,7 @@ function revoke(p: UserPrivilege) {
                 </tr>
               </tbody>
             </table>
-            <div v-else class="faint">No running jobs</div>
+            <div v-else class="faint">No refinery orders</div>
           </details>
           <details class="section" :open="open.has('blueprints')" @toggle="onToggle('blueprints', $event)">
             <summary><Icon name="chevron-right" :size="14" class="chev" /> <span class="panel-title">Blueprints</span> <span class="count">{{ detail.data.value.blueprintList.length }}</span></summary>

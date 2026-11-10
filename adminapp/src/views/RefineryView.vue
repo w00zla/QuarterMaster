@@ -113,7 +113,7 @@ function valueOf(j: RefineryJob, key: string): string | number {
         :row-key="(j) => j.jobId"
         :value-of="valueOf"
         :numeric="['scu']"
-        empty-text="No refinery jobs"
+        empty-text="No refinery orders"
       >
         <template #cell-owner="{ row }">
           <RouterLink :to="`/users/${row.owner.userId}`">

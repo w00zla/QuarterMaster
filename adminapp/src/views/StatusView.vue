@@ -32,7 +32,7 @@ const CHECKS: Record<DataCheckKey, string> = {
   retiredMaterial: "Resources of retired materials",
   retiredLocation: "Resources at retired locations",
   retiredBlueprint: "Registered retired blueprints",
-  jobNotAtRefinery: "Refinery jobs outside the UEX refineries",
+  jobNotAtRefinery: "Refinery orders outside the UEX refineries",
 };
 
 // The three catalog parts that matter, as tiles; everything else as a subtext line
