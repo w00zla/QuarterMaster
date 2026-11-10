@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { gzipSync } from 'node:zlib';
-import { LANGUAGE_CODES, parseGlobalIni } from './localization.ts';
+import { EXTRACT_LANGUAGE_CODES, parseGlobalIni } from './localization.ts';
 import { MINING_PATHS } from './mining.ts';
 import { normalize } from './normalize.ts';
 import { RecordStore } from './records.ts';
@@ -136,7 +136,7 @@ async function main() {
     const locDir = join(work, 'Data/Localization');
     for (const folder of existsSync(locDir) ? readdirSync(locDir) : []) {
       const file = join(locDir, folder, 'global.ini');
-      const lang = LANGUAGE_CODES[folder];
+      const lang = EXTRACT_LANGUAGE_CODES[folder];
       if (!lang || !existsSync(file)) continue;
       map.set(lang, parseGlobalIni(readFileSync(file, 'utf8')));
     }

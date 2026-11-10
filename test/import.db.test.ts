@@ -192,6 +192,20 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
       assert.equal(await count('localization_source', `lang = 'fr'`), 0);
     });
 
+    it('removes the game texts of a language the snapshot no longer brings, but not an external source', async () => {
+      assert.equal(await count('localization_source', `source = 'game' AND lang = 'de'`), 1);
+      const next = fixtureSnapshot();
+      next.game.build = 1004;
+      delete next.localization.de;
+      const r = await runImport(db, next, hashOf(next), OPTIONS);
+      assert.equal(r.status, 'imported');
+      assert.equal(await count('localization', `source = 'game' AND lang = 'de'`), 0);
+      assert.equal(await count('localization_source', `source = 'game' AND lang = 'de'`), 0);
+      assert.equal(await count('localization', `source = 'game' AND lang = 'en'`), 7);
+      assert.equal(await count('localization', `source = 'community-de'`), 4);
+      assert.equal(await count('localization_source', `source = 'community-de'`), 1);
+    });
+
     it('blocks wrong files and mass removal', async () => {
       const wrong = await runLocImport(db, ini('a=1\r\nb=2\r\nc=3\r\n'), { ...LOC, source: 'other' });
       assert.deepEqual(wrong.violations.map((v) => v.code), ['low_overlap']);
