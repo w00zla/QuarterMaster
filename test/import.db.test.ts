@@ -53,7 +53,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     // The derived fields
     assert.equal(await count('import', 'default_composition_quality = 500'), 1);
     assert.deepEqual((await db.execute<{ uuid: string }>(sql`SELECT uuid FROM catalog.location WHERE has_freight_elevator`)).map((r) => r.uuid), [U.orphan]);
-    assert.equal(await count('location', 'has_refinery'), 0);
+    assert.deepEqual((await db.execute<{ uuid: string }>(sql`SELECT uuid FROM catalog.location WHERE has_refinery`)).map((r) => r.uuid), [U.station]);
     assert.deepEqual((await db.execute<{ uuid: string }>(sql`SELECT uuid FROM catalog.blueprint WHERE in_reward_pool`)).map((r) => r.uuid), [U.blueprint2]);
     assert.equal(await count('item', 'is_shop'), 0);
     assert.deepEqual((await db.execute<{ uuid: string; stats: unknown }>(sql`SELECT uuid, base_stats AS stats FROM catalog.item WHERE base_stats <> '{}'::jsonb`)).map((r) => [r.uuid, r.stats]),

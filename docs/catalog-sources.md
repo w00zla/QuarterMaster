@@ -195,7 +195,7 @@ HarvestableProviderPreset           harvestable/providerpresets/system/<system>/
   12913470) and `unplaced_container` (a container without a star map record above it whose providers did not
   get a place by key: 3, `ellis3`, `pyro1_ptn`, `aaronhalo`); rocks with a missing preset, entity, composition
   or element are `unresolved_ref`. The admin's Imports detail lists them with the others.
-- Build 12913470: 574 containers, 41 providers, 710 mineables (one per provider, method, resource and part; every
+- Build 12913470: 574 star system containers, 41 providers, 710 mineables (one per provider, method, resource and part; every
   ROC/FPS one with its item). Planets and moons by their own container (`stanton2c.socpak` -> `Stanton2c`, Yela), the
   Lagrange clouds as `Stanton2_L3_01` ("CRU L3-A"). Pyro VI uses Yela's belt provider (`HPP_Stanton2c_Belt`).
 - **Parts** (2026-10-24): a ship rock holds an ore as a small rich part (`qualityScale` 1, e.g. 2.8–6.8 %) and a
@@ -225,6 +225,26 @@ HarvestableProviderPreset           harvestable/providerpresets/system/<system>/
   files (a type `RefineryCompetencies` exists, no record uses it; the `Refinery` entity has empty params, the
   refinery containers hold nothing about it): they stay with UEX.
 
+### Refinery places
+
+Which star map objects have a refinery (`locations[].refinery`, column `catalog.location.has_refinery`; the same
+object containers as for mining, `socpak.ts` and `refinery.ts`; verified on build 12913470):
+
+- **The terminal is one entity**: the DataCore entity record(s) with a component `EntityComponentRefineryParams`
+  (`EntityClassDefinition.Refinery`, `2d213d33-8bc1-4828-98e3-e464b1ae6ce6`, `entities/refinery.json`; the only
+  one). The extractor finds them by that component among the exported entities (the filter `entities/*` brings the 229
+  records directly below `entities/`, about 3.5 MB); none found is the anomaly `no_refinery_entity` and no place is flagged.
+- **A container places it** when a `.soc` holds its record GUID (as text, like a provider); four containers do. The
+  scan reads all of `Data/ObjectContainers/PU/**` (8,292 socpaks, 3.5 GB, one file at a time), not only the star
+  systems. The container tree keeps every parent of a container (a module is used by many stations), and the places
+  are the nearest container with a `starMapRecord` along every parent path: 20 on build 12913470 (Levski; ARC-L1, -L2,
+  -L4, CRU-L1, HUR-L1, -L2, MIC-L1, -L2, -L5; the seven jump point gateways; Checkmate, Orbituary, Ruin Station).
+  The decommissioned Pyro stations hold none.
+- **A container with a refinery and no star map record above it** is the anomaly `unplaced_refinery` (1 on build
+  12913470: `…/sideroom/rstop/rstop_sroom_020_rund_001.socpak`, no parent).
+- The mining scan is unchanged by this: it still looks at the star system containers only and takes the first
+  parent (the snapshot's `miningProviders` and `mineables` are identical to those before the wider scan).
+
 ---
 
 ## Implementation
@@ -247,8 +267,8 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
   `Game2.dcb` + all `global.ini`, then `dcb extract --format json` for selected record subtrees; `--filter`
   globs match record *file paths*). `RecordStore` lazily reads records by lower-cased path; references between
   records are `file://…/libs/foundry/records/…` paths resolved via `refPath()`. It also extracts the star systems'
-  object containers (`Data/ObjectContainers/PU/system/**/*.socpak`, 574 files, ~330 MB) and scans them
-  (`socpak.ts`) before normalizing; see "Mining". `normalize.ts` must never crash
+  object containers (`Data/ObjectContainers/PU/**/*.socpak`, 8,292 files, 3.5 GB, ~5.5 GB work directory with the records; the scan
+  takes ~25 s) and scans them (`socpak.ts`) before normalizing; see "Mining" and "Refinery places". `normalize.ts` must never crash
   on unexpected shapes: unknown types, `null` list entries and dangling references become `anomalies` in the
   snapshot. Items and manufacturers are included when referenced by a blueprint, plus every named ship item
   (`entities/scitem/ships/`, no `template` in its path) whose type is in `COMPONENT_TYPES`
@@ -284,7 +304,7 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 - Storage locations are selected by the app (stations, landing zones and places with a freight elevator, see "Selection rule for storage locations"; the amenity is the snapshot's `freightElevator`).
 - `location`: every `StarMapObject` with `parent_uuid` (no foreign key: rows of one import reference each other in any order; the integrity check ensures every parent is in the snapshot), `type`, `nav_icon`, `hide_in_starmap`, `respawn_location_type`. Names via `name_key`; `has_freight_elevator` (the record lists the freight elevator amenity), `has_refinery`.
 - **Derived fields** (snapshot schema 7, migration `0035`; the importer reads schema 7 only and asks for a re-extract on older snapshots): the extractor derives them from the DataCore records, the import stores them, the app reads the columns:
-  - `location.has_freight_elevator` (snapshot `freightElevator`): the record lists the amenity `a783bfb9-…` (Freight Elevator); `location.has_refinery` (`refinery`, always false for now).
+  - `location.has_freight_elevator` (snapshot `freightElevator`): the record lists the amenity `a783bfb9-…` (Freight Elevator); `location.has_refinery` (`refinery`): a container placing the refinery entity lies below the object (see "Refinery places").
   - `item.is_shop` (`shop`): a shop item (SHOP_TYPES); exactly the items stored without a raw record (`shopItemSql`).
   - `item.scu_per_piece` (`scuPerPiece`): Harvestables only, `AttachDef.inventoryOccupancyVolume.microSCU / 1e6` when positive, else null (`double precision`); `item.base_stats` (`baseStats`, `jsonb`): crafted property key → the unmodified value as the tooltip shows it, for every property the item's record (or the damage record it links) holds a number for; the places are the jsonpaths of `src/stock/component-base.ts`, evaluated by the normalizer (`src/stock/jsonpath.ts`: the subset of Postgres' lax jsonpath they use). The migration does not backfill it: empty until the first import from a schema 7 snapshot.
   - `blueprint.in_reward_pool` (`inRewardPool`): some `BlueprintPoolRecord`'s `blueprintRewards` references the blueprint (the obtainable count, the admin overview's "no source" lists).

@@ -7,6 +7,7 @@ import { gzipSync } from 'node:zlib';
 import { EXTRACT_LANGUAGE_CODES, parseGlobalIni } from './localization.ts';
 import { MINING_PATHS } from './mining.ts';
 import { normalize } from './normalize.ts';
+import { refineryEntities } from './refinery.ts';
 import { RecordStore } from './records.ts';
 import { scanContainerFiles } from './socpak.ts';
 import { exportedCount, starbreaker, starbreakerVersion } from './starbreaker.ts';
@@ -36,11 +37,14 @@ const DCB_FILTERS = [
   'libs/foundry/records/harvestable/**',
   'libs/foundry/records/mining/**',
   'libs/foundry/records/entities/mineable/**',
+  // Entities placed directly below entities/ (no subdirectories, 229 records, ~3.5 MB): the refinery terminal is one; found by its component
+  'libs/foundry/records/entities/*',
 ];
 
-// Object containers of the star systems: where the harvestable providers are used (socpak.ts)
-const CONTAINER_FILTER = 'Data/ObjectContainers/PU/system/**/*.socpak';
-const CONTAINER_DIR = 'Data/ObjectContainers/PU/system';
+// Object containers of the Persistent Universe (8,292 files, 3.5 GB): where the harvestable providers are used (star systems only)
+// and which places have a refinery (all) (socpak.ts)
+const CONTAINER_FILTER = 'Data/ObjectContainers/PU/**/*.socpak';
+const CONTAINER_DIR = 'Data/ObjectContainers/PU';
 
 const HELP = `Usage: pnpm catalog:extract [options]
 
@@ -150,7 +154,7 @@ async function main() {
     const dir = join(work, CONTAINER_DIR);
     const files = existsSync(dir) ? readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.socpak')).map((f) => join(dir, f)) : [];
     if (!files.length) throw new Error(`No object containers in ${dir}`);
-    return { files: files.length, ...scanContainerFiles(files, providers) };
+    return { files: files.length, ...scanContainerFiles(files, providers, refineryEntities(store)) };
   });
 
   const snapshot = await step('Normalize', () =>
@@ -194,6 +198,7 @@ async function main() {
     ['  stations', snapshot.locations.filter((l) => l.navIcon === 'Station').length],
     ['  landing zones', snapshot.locations.filter((l) => l.navIcon === 'LandingZone').length],
     ['object containers', containers.files],
+    ['  places with a refinery', containers.refineryPlaces.size],
     ['  not placed (providers left out)', containers.unplaced.length],
     ['mining providers', snapshot.miningProviders.length],
     ['mineables', snapshot.mineables.length],

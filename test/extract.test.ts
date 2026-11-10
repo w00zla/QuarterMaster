@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { displayText, isMissingTranslation, locKey, parseGlobalIni } from '../src/catalog/extract/localization.ts';
 import { partQuality } from '../src/catalog/extract/mining.ts';
-import { refPath } from '../src/catalog/extract/records.ts';
+import { normalize } from '../src/catalog/extract/normalize.ts';
+import { refineryEntities } from '../src/catalog/extract/refinery.ts';
+import { RecordStore, refPath } from '../src/catalog/extract/records.ts';
 import { snapshotSchema } from '../src/catalog/snapshot.ts';
 import { isShopItem } from '../src/catalog/components.ts';
-import { AMENITY, FPS, FPS_RECORDS, RECORDS, SHOP, SHOP_RECORDS, U, fixtureSnapshot } from './fixtures.ts';
+import { AMENITY, FIXTURE_CONTAINERS, FPS, FPS_RECORDS, RECORDS, SHOP, SHOP_RECORDS, U, fixtureSnapshot, writeRecords } from './fixtures.ts';
 
 describe('localization', () => {
   it('parses global.ini with BOM, CRLF, suffixes and "=" in values', () => {
@@ -134,8 +136,13 @@ describe('normalize', () => {
     assert.deepEqual(fixtureSnapshot(without).crafting, { defaultCompositionQuality: null });
   });
 
-  it('leaves the plumbing fields empty', () => {
-    assert.ok(s.locations.every((l) => l.refinery === false));
+  it('leaves the refinery flag empty without a container scan', () => {
+    const unscanned = normalize({
+      store: new RecordStore(writeRecords()), localizations: new Map(), extractor: { version: 'test', starbreaker: 'test' },
+      game: { channel: 'LIVE', build: 1000, branch: 'test', version: '1.0', label: null, manifest: {} },
+    });
+    assert.ok(unscanned.locations.length > 0 && unscanned.locations.every((l) => !l.refinery));
+    assert.equal(unscanned.anomalies.filter((a) => a.code === 'no_refinery_entity').length, 0);
   });
 
   it('reads the base values of the crafted stats from the records', () => {
@@ -199,7 +206,7 @@ describe('normalize', () => {
     assert.deepEqual(s.locations.map((l) => l.uuid).sort(), [U.star, U.station, U.orphan, U.solarSystem].sort());
     assert.deepEqual(s.locations.find((l) => l.uuid === U.station), {
       uuid: U.station, key: 'Test_Station', nameKey: 'test_station', descriptionKey: 'test_station_desc', parentUuid: U.star,
-      type: 'Manmade', navIcon: 'Station', hideInStarmap: false, respawnLocationType: 'Hospital', freightElevator: false, refinery: false,
+      type: 'Manmade', navIcon: 'Station', hideInStarmap: false, respawnLocationType: 'Hospital', freightElevator: false, refinery: true,
     });
     const star = s.locations.find((l) => l.uuid === U.star)!;
     assert.deepEqual([star.parentUuid, star.type, star.descriptionKey], [null, 'Star', null]);
@@ -241,6 +248,31 @@ describe('normalize', () => {
     assert.deepEqual(anomaly('unplaced_container').map((a) => [a.record, a.detail]), [
       ['objectcontainers/pu/system/test/lost.socpak', 'object container without a star map record uses HPP_Test'],
     ]);
+  });
+
+  it('flags the places with a refinery and reports containers without one above them', () => {
+    assert.deepEqual(s.locations.filter((l) => l.refinery).map((l) => l.uuid), [U.station]);
+    assert.deepEqual(anomaly('unplaced_refinery').map((a) => a.record), ['objectcontainers/pu/loc/test/lost_refinery.socpak']);
+    assert.equal(anomaly('no_refinery_entity').length, 0);
+  });
+
+  it('flags no place and reports it when no refinery entity exists', () => {
+    const none = fixtureSnapshot(RECORDS, { ...FIXTURE_CONTAINERS, refineryEntities: [], refineryPlaces: new Set(), refineryUnplaced: [] });
+    assert.ok(none.locations.every((l) => !l.refinery));
+    assert.equal(none.anomalies.filter((a) => a.code === 'no_refinery_entity').length, 1);
+  });
+
+  it('finds the refinery entities by their component', () => {
+    const entity = (name: string, id: string, components: unknown[]) =>
+      ({ _RecordName_: `EntityClassDefinition.${name}`, _RecordId_: id, _RecordTag_: 'Test', _RecordValue_: { _Type_: 'EntityClassDefinition', Components: components } });
+    const store = new RecordStore(writeRecords({
+      'entities/refinery.json': entity('Refinery', '30000000-0000-0000-0000-000000000001', [{ _Type_: 'EntityComponentRefineryParams' }]),
+      'entities/second.json': entity('Second', '30000000-0000-0000-0000-000000000002', [null, { _Type_: 'EntityComponentRefineryParams' }]),
+      'entities/other.json': entity('Other', '30000000-0000-0000-0000-000000000003', [{ _Type_: 'SomethingElse' }]),
+      'entities/bare.json': { ...entity('Bare', '30000000-0000-0000-0000-000000000004', []), _RecordValue_: { _Type_: 'EntityClassDefinition' } },
+    }));
+    assert.deepEqual(refineryEntities(store), ['30000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002']);
+    assert.deepEqual(refineryEntities(new RecordStore(writeRecords({}))), []);
   });
 
   it('reports anomalies instead of failing', () => {

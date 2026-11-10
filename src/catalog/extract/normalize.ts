@@ -50,7 +50,7 @@ export interface NormalizeInput {
   localizations: Map<string, Map<string, string>>;
   game: Snapshot['game'];
   extractor: Snapshot['extractor'];
-  // Where the harvestable providers are used (socpak.ts scanContainers); none: no mining data
+  // Where the harvestable providers are used and which places have a refinery (socpak.ts); none: no mining data
   containers?: ContainerScan;
 }
 
@@ -471,8 +471,20 @@ export function normalize(input: NormalizeInput): Snapshot {
     });
   }
 
+  // Refineries: the places of the containers that place a refinery entity (socpak.ts); none scanned: all stay false
+  const scanned = input.containers;
+  if (scanned) {
+    if (scanned.refineryEntities.length === 0) {
+      anomaly('no_refinery_entity', null, 'no entity record with a refinery component: no place is flagged as having a refinery');
+    }
+    for (const container of scanned.refineryUnplaced) {
+      anomaly('unplaced_refinery', container, 'object container with a refinery has no star map record above it');
+    }
+    for (const l of locations) l.refinery = scanned.refineryPlaces.has(l.uuid);
+  }
+
   // --- mining --------------------------------------------------------------------------
-  const mined = mining(store, input.containers ?? { places: new Map(), unplaced: [] }, locations, [...resources.values()], new Set(items.map((i) => i.uuid)), anomaly);
+  const mined = mining(store, input.containers ?? { places: new Map(), unplaced: [], refineryEntities: [], refineryPlaces: new Set(), refineryUnplaced: [] }, locations, [...resources.values()], new Set(items.map((i) => i.uuid)), anomaly);
 
   // --- raw records and localization --------------------------------------------------
   const rawRecords: RawRecord[] = [...rawPaths].sort().flatMap((path) => {

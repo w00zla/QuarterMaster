@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { parseGlobalIni } from '../src/catalog/extract/localization.ts';
 import { normalize } from '../src/catalog/extract/normalize.ts';
 import { RecordStore } from '../src/catalog/extract/records.ts';
+import type { ContainerScan } from '../src/catalog/extract/socpak.ts';
 import type { Snapshot } from '../src/catalog/snapshot.ts';
 
 /** The star map amenity "Commodity Trading - Freight Elevator" and another one. */
@@ -418,6 +419,16 @@ export const INI_EN ='\uFEFFitems_commodities_testmetal=Test Metal\r\nitems_comm
 export const INI_DE = '\uFEFFitems_commodities_testmetal=Testmetall\r\n'
   + 'item_NameTEST_Output=! GERMAN_(GERMANY) TRANSLATION NOT FOUND FOR LOCID: item_NameTEST_Output !\r\n';
 
+// The test provider is used by an object container at the station and by one placed nowhere; the refinery sits at the
+// station (and in one container placed nowhere)
+export const FIXTURE_CONTAINERS: ContainerScan = {
+  places: new Map([[U.provider, new Set([U.station])]]),
+  unplaced: [{ container: 'objectcontainers/pu/system/test/lost.socpak', providers: [U.provider] }],
+  refineryEntities: ['10000000-0000-0000-0000-0000000000d0'],
+  refineryPlaces: new Set([U.station]),
+  refineryUnplaced: ['objectcontainers/pu/loc/test/lost_refinery.socpak'],
+};
+
 /** Writes the synthetic records to a temp dir and returns their store root. */
 export function writeRecords(records: Record<string, unknown> = RECORDS): string {
   const root = mkdtempSync(join(tmpdir(), 'sc-qm-records-'));
@@ -429,16 +440,12 @@ export function writeRecords(records: Record<string, unknown> = RECORDS): string
   return root;
 }
 
-export function fixtureSnapshot(records: Record<string, unknown> = RECORDS): Snapshot {
+export function fixtureSnapshot(records: Record<string, unknown> = RECORDS, containers: ContainerScan = FIXTURE_CONTAINERS): Snapshot {
   return normalize({
     store: new RecordStore(writeRecords(records)),
     localizations: new Map([['en', parseGlobalIni(INI_EN)], ['de', parseGlobalIni(INI_DE)]]),
     game: { channel: 'LIVE', build: 1000, branch: 'test', version: '1.0', label: null, manifest: {} },
     extractor: { version: 'test', starbreaker: 'test' },
-    // The test provider is used by an object container at the station and by one placed nowhere
-    containers: {
-      places: new Map([[U.provider, new Set([U.station])]]),
-      unplaced: [{ container: 'objectcontainers/pu/system/test/lost.socpak', providers: [U.provider] }],
-    },
+    containers,
   });
 }
