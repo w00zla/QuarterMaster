@@ -239,7 +239,8 @@ export const snapshotSchema = z.object({
   anomalies: z.array(anomalySchema),
   // Language code -> loc key (lower case, without '@') -> text; complete global.ini per shipped language
   localization: z.record(z.string(), z.record(z.string(), z.string())),
-  rawRecords: z.array(rawRecordSchema),
+  // Absent = none: the data pack's slim snapshot (docs/singleuser.md) leaves them out
+  rawRecords: z.array(rawRecordSchema).default([]),
   resources: z.array(resourceSchema),
   manufacturers: z.array(manufacturerSchema),
   items: z.array(itemSchema),

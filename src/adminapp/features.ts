@@ -6,7 +6,7 @@ import type { Db } from '../db/client.ts';
 import { locText as text, rows } from '../db/query.ts';
 import type { FeatureDetail, FeatureEntryRow, FeatureRow, UserPrivilege } from './api-types.ts';
 import { userNames } from './users.ts';
-import { zip } from './zip.ts';
+import { zip } from '../zip.ts';
 
 const iso = (column: string) => sql.raw(`to_json(${column}) #>> '{}'`);
 const UUID_TEXT = sql.raw(`'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'`);

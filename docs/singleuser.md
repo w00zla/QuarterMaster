@@ -1,7 +1,7 @@
 # Singleuser variant
 
-Three parts are described here: the process (how it starts and what it keeps), the database (PGlite) and who the user
-is (the local identity).
+Four parts are described here: the process (how it starts and what it keeps), the database (PGlite), the data pack (how
+game data gets into the app) and who the user is (the local identity).
 
 # The process
 
@@ -10,12 +10,14 @@ is (the local identity).
 
 ```sh
 pnpm singleuser                                   # the server
-pnpm singleuser:import <snapshot.json.gz> [opts]  # the catalog import into the same data folder (catalog:import's options)
+pnpm singleuser:import <pack.zip>                 # installs a full data pack into the same data folder ("The data pack")
+pnpm singleuser:import <snapshot.json.gz> [opts]  # the catalog import into the same data folder (catalog:import's options; development)
 ```
 
 The SPA must be built (`pnpm webapp:build`). **One process per data folder:** PGlite has no second opener, so the server
 and `singleuser:import` must not run at the same time on one folder (use `QM_DATA_DIR` for a second folder).
-`singleuser:import` migrates a fresh folder first, imports, then runs `maintain()` (CHECKPOINT and VACUUM).
+`singleuser:import` migrates a fresh folder first, imports (a `.zip`, by extension or by its first bytes, is a data pack and goes
+through `installPack`; anything else is a snapshot for `catalog:import`), then runs `maintain()` (CHECKPOINT and VACUUM).
 
 | Variable | Meaning |
 |---|---|
@@ -25,7 +27,8 @@ and `singleuser:import` must not run at the same time on one folder (use `QM_DAT
 
 (`src/singleuser/paths.ts`, `port.ts`: pure, passed the environment; tested in `test/singleuser-helpers.test.ts`.)
 
-**Data folder:** `db/` (the PGlite database, with its `pg_wal/`) and, if the user puts them there, `thumbs/`. Nothing else.
+**Data folder:** `db/` (the PGlite database, with its `pg_wal/`), `thumbs/` (`s/`, `m/`, `l/`, `thumbs.json`) and `data-pack.json`
+(the manifest of the installed data pack); the last two are written by the data pack's install. Nothing else.
 
 **Start:** the server binds to `127.0.0.1` only; its origin is `http://127.0.0.1:<port>`. It logs one line per loading
 step with its duration (`open database`, `migrations`, `checkpoint`, `listen`) and then
@@ -121,6 +124,86 @@ TEST_DATABASE_URL=pglite:/some/dir node --env-file-if-exists=.env --test test/st
 Each test file is its own process with its own in-memory database; `prepareDb` migrates it. Skipped on PGlite, with the reason
 in the report: the second-connection test of `test/bot-roster.db.test.ts`. `TEST_ROLES=1` needs Postgres.
 `test/pglite.test.ts` tests the connection itself (rows, guard, `maintain()`, `listen`, a data dir across close and reopen).
+
+# The data pack
+
+The variant ships without game data. Game data comes as a **data pack**: the catalog snapshot (without its raw records)
+and the item thumbnails, published as a GitHub release of this repository and installed into the data folder
+(`src/datapack/`; the network side that fetches releases is not part of it).
+
+## The release
+
+Tag `data-<game label>-<n>`, e.g. `data-4.10.2.12913470-1`: the label is `snapshot.game.label`, `n` (1, 2, …) counts
+re-issues for the same game version. Four assets:
+
+| Asset | What |
+|---|---|
+| `manifest.json` | the manifest (below) |
+| `quartermaster-data-<label>-<n>.zip` | the **full pack**: one ZIP without compression holding `manifest.json`, `catalog.json.gz`, `thumbs.json` and the pictures `s/`, `m/`, `l/` |
+| `catalog.json.gz` | the slim snapshot: the v7 snapshot without its `rawRecords` array (the schema reads an absent array as empty) |
+| `thumbs-update.zip` | a ZIP without compression: the complete `thumbs.json` and only the pictures that are new against the predecessor release; the first release holds every picture |
+
+A picture is `<size>/<uuid>.<hash>.avif` (`src/thumbs.ts`; content-addressed: the same name is the same content), three
+per item in `thumbs.json`. "New" is: that file name is not in the predecessor's set (its complete `thumbs.json`, read from
+its `thumbs-update.zip`). Only pictures `thumbs.json` names go into a pack.
+
+**Manifest** (`src/datapack/manifest.ts`, zod): `format` (1), `tag`, `previous` (the predecessor's tag, null for a first
+release), `game` { `label`, `build` }, `schemaVersion` (the snapshot's), `files` { `full`, `catalog`, `thumbs` }, each
+`{ name, size, sha256 }`, `thumbs` also `count` (pictures in `thumbs-update.zip`). **Rule for `files.full`:** the copy of the
+manifest inside the full pack is the standalone one except that its `files.full` carries the name and the placeholders
+`size: 0`, `sha256` = 64 zeros (an archive cannot hold its own hash). `files.full` is verified only for the downloaded
+asset, against the standalone manifest (the updater's job). A full pack the user picked has no standalone manifest: it is
+checked by the CRC-32 of every entry and by `files.catalog` (the catalog's size and sha256).
+
+## Building: `pnpm data:pack`
+
+```sh
+pnpm data:pack --snapshot <file> --thumbs <dir> --n <number> --out <dir> [--previous <dir>]
+```
+
+The snapshot is a v7 snapshot, full or slim; `--thumbs` holds `thumbs.json`, `s/`, `m/`, `l/` (`thumbs:build`); `--previous` is a
+folder with the predecessor's assets (its `manifest.json` and `thumbs-update.zip`, the latter checked against the former).
+It prints the tag, every asset with size and sha256 and how many pictures are new of how many. A picture that
+`thumbs.json` names and the folder lacks is an error naming it. **Reproducible:** the same input gives the same bytes
+and hashes (with the same Node/zlib): entries sorted by code point, ZIP entries dated 1980-01-01 (`ZIP_EPOCH`), JSON from a
+fixed key order, `thumbs.json` rewritten canonically (sorted, compact), gzip level 9 with the header's OS byte pinned
+(zlib writes the platform's code there otherwise).
+
+## Installing: `installPack`
+
+`installPack({ connection, dataDir, thumbsDir, source })` (`src/datapack/install.ts`): `connection` is `{ db, maintain }` of a
+connection, `thumbsDir` is `<dataDir>/thumbs`. `source` is a full pack (`{ kind: 'full', file }`) or the parts the updater
+hands over (`{ kind: 'parts', manifest, catalog, thumbsUpdates }`: the parsed manifest, the `catalog.json.gz` file, the
+`thumbs-update.zip` files oldest first). `pnpm singleuser:import <pack.zip>` installs a full pack. Order:
+
+1. **Validate, touching nothing:** the manifest (format known, else `DataPackError` `unknownFormat`; schema valid);
+   `schemaVersion` is the app's `SNAPSHOT_SCHEMA_VERSION`, else the **result `appTooOld`** (the caller says "update the app")
+   and nothing else happens; the catalog's size and sha256 against `files.catalog`; in parts, the newest thumbs update
+   against `files.thumbs` (size, sha256, `count`; older ones are checked by the caller against their own manifests); the
+   archives' entries: names must be safe (no `..`, no absolute path, no backslash, no drive, no duplicates; checked when
+   an archive is opened) and exactly the expected ones (`manifest.json`, `catalog.json.gz`, `thumbs.json`, `<s|m|l>/<uuid>.<hash>.avif`
+   named by `thumbs.json`), stored only, every entry's CRC-32 on reading; the catalog loads and its game label and build are
+   the manifest's; every picture `thumbs.json` names is in a given archive or on disk already (else `incomplete`: a link of the
+   chain is missing). Refusals are `DataPackError` with `code` `invalid`, `unknownFormat`, `checksum` or `incomplete` and a readable message.
+2. **Catalog:** `runImport` with every guard off (`allowDowngrade`, ratios 1): the downgrade and mass-change/retire guards do not
+   apply to curated packs. An identical catalog is a no-op, not an error. The slim catalog has no raw records, so it retires any
+   a database holds: the guards of the normal import (`catalog:import`, `singleuser:import <snapshot>`) still block that.
+3. **Pictures:** missing ones are written to `<thumbs>/{s,m,l}` through a temp file and a rename; a file that exists stays (same
+   name, same content). Then `thumbs.json` is replaced atomically (temp file, rename), then pictures it no longer names are
+   deleted (and leftover `.tmp` files).
+4. **`data-pack.json`** (the installed manifest) is written atomically, last. `installedPack(dataDir)` reads it (null if there is none or it is unreadable).
+5. `maintain()` (CHECKPOINT, VACUUM).
+
+Every step is idempotent: an install interrupted anywhere is repeated, the result is the same. The file work happens outside
+the import's transaction (one PGlite connection: the outer `db` must not be used inside it). The result for the UI:
+`{ status: 'installed', tag, gameLabel, catalog: 'imported' | 'unchanged', thumbs: { total, written, removed } }` (picture files) or
+`{ status: 'appTooOld', tag, packSchemaVersion, appSchemaVersion }`.
+
+**Limits:** ZIP without ZIP64: at most 65,534 entries (three pictures per item, so about 21,800 items) and 4 GiB per entry and
+archive; the writer and the reader fail with a clear message beyond that (`src/zip.ts`, which also serves the feature exports).
+
+**Where it lives:** `<data folder>/thumbs/` and `<data folder>/data-pack.json`; the server serves `/thumbs` from `QM_THUMBS_DIR`
+if set, else from there. `singleuser:import` always installs into `<data folder>/thumbs`. Tests: `test/datapack.test.ts` (no Postgres).
 
 # Identity
 
