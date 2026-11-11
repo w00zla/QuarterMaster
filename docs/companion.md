@@ -219,7 +219,7 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   and scroll only their rows (head and column titles stay).
 - Settings window (`settings.html` + `SettingsApp.vue`, no longer a dialog in the main window): opened from the main
   window (Rust `open_settings_window`, async, with the main window's WebView2 arguments; one instance, a second call
-  focuses it), framed like the debug window, 560 px wide, not resizable, centered (excluded from the window state
+  focuses it), frameless with a title bar of its own (settings icon, "QM Companion Settings" / "QM Companion Einstellungen", a close button; the debug window and the app version sit at the left of its foot), 560 px wide, not resizable, centered (excluded from the window state
   plugin). Created hidden; the page loads config and pairing itself (own webview), then reports its content height
   and Rust `fit_settings_window` sets the inner height, centers and shows it (so the Windows-only overlay group
   needs no hard-coded height). After a save Rust emits `config-changed`: the main window re-reads the config, re-checks

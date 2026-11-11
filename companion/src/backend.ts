@@ -89,6 +89,8 @@ export const gpuStatus = () => call<GpuStatus>("gpu_status");
 export const openWebapp = () => call<void>("open_webapp");
 // The companion's releases page on GitHub, in the browser
 export const openReleases = () => call<void>("open_releases");
+/** The project's GitHub page in the browser (the footer's link). */
+export const openRepo = () => call<void>("open_repo");
 // The local app as its pairing file last said (read by the Rust side at every call in the local mode); null online
 // or while it was never seen
 export const getPaired = () => call<Paired | null>("paired");

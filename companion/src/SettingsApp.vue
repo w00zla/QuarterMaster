@@ -7,10 +7,10 @@
 // gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed). The
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor), display (compact or thumbnails) and hotkeys, saved (on/off is the scan row's
-// toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes this
-// window), small left of it the app's version.
+// toggle and the hotkey). In the foot at the left, secondary for the user: the debug window (opening it closes this
+// window), next to it the app's version.
 // The settings window (opened from the main window, Rust `open_settings_window`): fixed width, not resizable,
-// framed like the debug window. This page loads config and pairing itself (its own webview), sizes the window
+// frameless with a title bar of its own (icon, "QM Companion Settings", close), like the desktop app's settings window. This page loads config and pairing itself (its own webview), sizes the window
 // to the content once filled (`fit_settings_window`, which also shows it), and after a save the main window
 // hears "config-changed" and re-reads the config, the connection and the log state.
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
@@ -176,18 +176,11 @@ async function pickFolder() {
 
 <template>
   <div v-if="ready" ref="root" class="settings">
-    <div class="head">
-      <Icon name="settings" :size="18" />
-      <div class="titles">
-        <span class="title">{{ t("settings.title") }}</span>
-      </div>
-      <span class="version mono">{{ version && `v${version}` }}</span>
-      <Tooltip :text="t('settings.debugHint')">
-        <button type="button" class="btn small outline" @click="openDebug">
-          <Icon name="log" :size="12" /> {{ t("debug.open") }}
-        </button>
-      </Tooltip>
-    </div>
+    <!-- The frameless window's title bar, as the desktop app's settings window has it: icon, title, close -->
+    <header class="titlebar" data-tauri-drag-region>
+      <span class="title" data-tauri-drag-region><Icon name="settings" :size="16" />{{ t("settings.windowTitle") }}</span>
+      <button type="button" class="win-btn" :title="t('win.close')" @click="close"><Icon name="close" :size="16" /></button>
+    </header>
     <div class="body">
     <form id="settings" class="settings-groups" @submit.prevent="save">
       <section class="settings-group">
@@ -267,6 +260,14 @@ async function pickFolder() {
     </form>
     </div>
     <div class="foot">
+      <!-- Secondary for the user, at the far left: the debug window and the app's version -->
+      <Tooltip :text="t('settings.debugHint')">
+        <button type="button" class="btn small outline" @click="openDebug">
+          <Icon name="log" :size="12" /> {{ t("debug.open") }}
+        </button>
+      </Tooltip>
+      <span class="version mono">{{ version && `v${version}` }}</span>
+      <span class="spacer" />
       <button type="button" class="btn outline" @click="close">{{ t("common.close") }}</button>
       <button type="submit" form="settings" class="btn primary" :disabled="!changed || busy">
         <Icon name="check" :size="14" /> {{ t("common.save") }}
@@ -282,29 +283,63 @@ async function pickFolder() {
   background: var(--bg-surface);
 }
 
-.head,
+/* The title bar (webapp/src/components/TitleBar.vue's): 44 px, the drag region, the title at the left, close at the right */
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 44px;
+  padding: 0 8px;
+  background: var(--bg-base);
+  user-select: none;
+}
+
+.title {
+  margin-right: auto;
+  padding-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  /* Clicks go to the bar below (the drag region), also on the icon */
+  pointer-events: none;
+}
+
+.win-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.win-btn:hover {
+  background: var(--err);
+  color: var(--accent-text);
+}
+
 .foot {
   display: flex;
   align-items: center;
   padding: 16px 20px;
 }
 
-.head {
-  gap: 10px;
-  border-bottom: 1px solid var(--border-dim);
+/* The buttons at the right keep the controls' height; the debug button at the left stays small */
+.foot .btn:not(.small) {
+  height: var(--h-control);
+  font-size: 14px;
 }
 
-.titles {
+.spacer {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.title {
-  font-weight: 600;
-  font-size: 18px;
 }
 
 .body {
@@ -315,14 +350,8 @@ async function pickFolder() {
 }
 
 .foot {
-  justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid var(--border-dim);
-}
-
-.foot .btn {
-  height: var(--h-control);
-  font-size: 14px;
 }
 
 /* The groups: webapp/src/styles.css `.settings-group` (a tile with a head row: icon and title) */

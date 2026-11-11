@@ -44,6 +44,7 @@ const SCAN_CHANGED: &str = "scan-changed";
 const CONFIG_CHANGED: &str = "config-changed";
 /// The companion's releases (the update panel's button); fixed here, never a URL from the page
 const RELEASES_URL: &str = "https://github.com/w00zla/quartermaster/releases";
+const REPO_URL: &str = "https://github.com/w00zla/quartermaster";
 /// The debug window's label (capabilities/default.json lists it)
 const DEBUG_WINDOW: &str = "debug";
 /// The settings window's label (capabilities/default.json lists it) and its fixed inner width (logical px)
@@ -467,7 +468,9 @@ async fn open_settings_window(app: AppHandle) -> Result<(), String> {
         return w.set_focus().map_err(|e| e.to_string());
     }
     let builder = tauri::WebviewWindowBuilder::new(&app, SETTINGS_WINDOW, tauri::WebviewUrl::App("settings.html".into()))
-        .title("Quartermaster Companion – Settings")
+        // The task bar's name; the window itself has no frame (as the main window): the page draws its title bar
+        .title("QM Companion Settings")
+        .decorations(false)
         .inner_size(SETTINGS_WIDTH, 600.0)
         .resizable(false)
         .maximizable(false)
@@ -683,6 +686,12 @@ fn open_releases() -> Result<(), String> {
     tauri_plugin_opener::open_url(RELEASES_URL, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Opens the project's GitHub page in the browser (the footer's link).
+#[tauri::command]
+fn open_repo() -> Result<(), String> {
+    tauri_plugin_opener::open_url(REPO_URL, None::<&str>).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK's DMABUF renderer triggers "Error 71 (Protocol error)" on many
@@ -796,6 +805,7 @@ pub fn run() {
             gpu_status,
             open_webapp,
             open_releases,
+            open_repo,
             debug_info,
             open_folder,
             get_scan,

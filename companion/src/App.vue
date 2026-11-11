@@ -14,6 +14,7 @@ import Icon from "../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../adminapp/src/components/Tooltip.vue";
 import { PICKER_LABELS } from "../../webapp/src/components/Picker.vue";
 import InventoryPanel from "./components/InventoryPanel.vue";
+import AppFooter from "./components/AppFooter.vue";
 import ScanBar from "./components/ScanBar.vue";
 import SideTabs from "./components/SideTabs.vue";
 import Toasts from "./components/Toasts.vue";
@@ -112,6 +113,8 @@ onMounted(async () => {
         </main>
       </div>
     </template>
+    <!-- Below everything, also while loading or outdated: the footer never moves -->
+    <AppFooter class="app-foot" :version="info?.version ?? null" />
     <Toasts />
     <ClipTip />    <WindowEdges />
   </div>
@@ -157,6 +160,11 @@ onMounted(async () => {
   flex: 1;
   min-height: 0;
   display: flex;
+}
+
+/* At the window's bottom also while nothing above fills the height (loading) */
+.app-foot {
+  margin-top: auto;
 }
 
 /* Only the main area scrolls: the title bar, the scan row and the side panel stay put */
