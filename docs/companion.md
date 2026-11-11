@@ -171,12 +171,12 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 - `App.vue`, `components/TopBar.vue`, `WindowEdges.vue`, `state.ts`: no native frame
   (`decorations: false`), the title bar after BindSight's (drag region, minimize/maximize/close; window
   permissions in `capabilities/default.json`, which lists the windows `main`, `settings`, `debug`, `overlay`),
-  invisible resize edges. The window stays narrow (640 px, also its minimum), 800 px high at start and
+  invisible resize edges. The window stays narrow (696 px, also its minimum: the 640 px the tables had before plus the narrow side panel), 800 px high at start and
   780 px at least (dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
   open where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the
   overlay is excluded, it places itself), created hidden and shown once placed.
 - The title bar holds, before the settings button, the user (Discord avatar from `/api/me`, the name in
-  its tooltip: a 640 px bar has no room for it; CSP `img-src` allows `cdn.discordapp.com`; the local app's user has
+  its tooltip: the bar has little room for it; CSP `img-src` allows `cdn.discordapp.com`; the local app's user has
   neither name nor avatar: nothing is shown) and,
   after it, an icon button opening the web app in the browser (Rust `open_webapp`: the origin of the server in
   use, in the local mode the paired one), or the connection's short reason as a chip when down.
@@ -197,9 +197,16 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   the connection down and are not toasted (`isConnectionError`); a down connection is re-checked every
   30 s, any connection on window focus; a successful check clears the outdated state. Toasts are for events
   only.
-- A tab bar (icons; each tab and panel title with its table's row count, `tabCounts` in `overlay.ts`; the
-  last tab kept in localStorage `qm.companion.tab`; it never switches by itself: the scan row's tag names
-  the screen) with the panels
+- The tabs sit in a **side panel** at the left edge (`components/SideTabs.vue`, copied from the web app's `SideNav.vue`
+  in look and behaviour; below the title bar and the scan row, down to the window's bottom; only the main area beside it
+  scrolls). Two groups with a divider: the three scan modes (also the overlay's modes), then the look-up tabs (Blueprints);
+  a new tab is one more entry in `GROUPS`. Entries: icon, and each tab's table row count (`tabCounts` in `overlay.ts`;
+  tabular, in a fixed room: it never changes an entry's size); the last tab kept in localStorage `qm.companion.tab`; it never
+  switches by itself: the scan row's tag names the screen. **Narrow** (56 px, the default): the icon with the count below it
+  in mono, the tab's name in a tooltip to the right; **wide** (200 px): icon, name, count at the right. A small chevron
+  button half over the panel's right edge at its top toggles them (choice in localStorage `qm.companion.sideMode`); below
+  840 px of window width (`sideTabs.ts`: 696 - 56 + 200) the panel is narrow whatever the choice and the button is disabled.
+  The outdated state shows no panel. The tabs with the panels
   Gear and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`) and
   Blueprints (`UnlocksPanel.vue`), like the web app's navigation (order, names "Ausrüstung" (until 2026-10-20 "Komponenten")/"Ressourcen"/
   "Raffinerie"/"Baupläne", icons; decided 2026-10-20, before: one Inventory tab), all four kept mounted

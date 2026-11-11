@@ -12,9 +12,9 @@
     "windows": [
       {
         "title": "Quartermaster Companion",
-        "width": 640,
+        "width": 696,
         "height": 800,
-        "minWidth": 640,
+        "minWidth": 696,
         "minHeight": 780,
         "decorations": false,
         "visible": false,

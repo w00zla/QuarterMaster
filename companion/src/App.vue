@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The title bar with the user (avatar, the name in its tooltip) and a button that opens the web app,
 // or why the connection is down (chip only then; no reload button: a restart of the app reloads
-// everything); below it the scan row (ScanBar.vue), then a tab
-// bar (icons like the web app's navigation) with the panels: comps, stock (both InventoryPanel), refinery, unlocks.
+// everything); below it the scan row (ScanBar.vue), then the side panel with the tabs (SideTabs.vue, at the left edge, icons like the
+// web app's navigation) and the panels beside it: comps, stock (both InventoryPanel), refinery, unlocks.
 // The chips open the settings window (its own window, SettingsApp.vue; one at a time); it also opens by itself while
 // the app is not connected (no server or token, the token is refused, or the local app is not running). After a
 // save ("config-changed") this window re-reads the config, re-checks the connection and the log state. While the server refuses
@@ -15,6 +15,7 @@ import Tooltip from "../../adminapp/src/components/Tooltip.vue";
 import { PICKER_LABELS } from "../../webapp/src/components/Picker.vue";
 import InventoryPanel from "./components/InventoryPanel.vue";
 import ScanBar from "./components/ScanBar.vue";
+import SideTabs from "./components/SideTabs.vue";
 import Toasts from "./components/Toasts.vue";
 import ClipTip from "./components/ClipTip.vue";
 import TopBar from "./components/TopBar.vue";
@@ -31,7 +32,7 @@ import {
 import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
 import { watchDebugReport } from "./debugReport";
-import { pickTab, tab, TAB_ICONS, tabCounts, watchOverlay } from "./overlay";
+import { tab, watchOverlay } from "./overlay";
 import { watchScan } from "./scan";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
@@ -40,13 +41,6 @@ provide(PICKER_LABELS, { clear: t("pick.clear"), noMatch: t("pick.noMatch") });
 
 const openSettings = () => openSettingsWindow().catch(toastError);
 const ready = ref(false);
-// The panel tabs (also the scan overlay's modes, overlay.ts), like the web app's navigation
-const TABS = [
-  { id: "comps", label: "comps.title" },
-  { id: "stock", label: "stock.title" },
-  { id: "refinery", label: "refinery.title" },
-  { id: "unlocks", label: "unlocks.title" },
-] as const;
 const info = ref<{ version: string } | null>(null);
 
 // Why not connected, short (the full text in the tooltip)
@@ -107,19 +101,16 @@ onMounted(async () => {
       <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :connection="connection" />
     </main>
     <template v-else-if="ready">
-      <nav class="tabs">
-        <button v-for="x in TABS" :key="x.id" type="button" class="tab" :class="{ active: tab === x.id }" @click="pickTab(x.id)">
-          <Icon :name="TAB_ICONS[x.id]" :size="14" /> {{ t(x.label) }}
-          <span class="tab-count">{{ tabCounts[x.id] }}</span>
-        </button>
-      </nav>
-      <!-- All panels stay mounted (v-show): the unlocks panel's catalog and scan progress survive a tab switch -->
-      <main class="main">
-        <InventoryPanel v-show="tab === 'comps'" part="comps" />
-        <InventoryPanel v-show="tab === 'stock'" part="stock" />
-        <RefineryPanel v-show="tab === 'refinery'" />
-        <UnlocksPanel v-show="tab === 'unlocks'" />
-      </main>
+      <div class="body">
+        <SideTabs />
+        <!-- All panels stay mounted (v-show): the unlocks panel's catalog and scan progress survive a tab switch -->
+        <main class="main">
+          <InventoryPanel v-show="tab === 'comps'" part="comps" />
+          <InventoryPanel v-show="tab === 'stock'" part="stock" />
+          <RefineryPanel v-show="tab === 'refinery'" />
+          <UnlocksPanel v-show="tab === 'unlocks'" />
+        </main>
+      </div>
     </template>
     <Toasts />
     <ClipTip />    <WindowEdges />
@@ -140,7 +131,7 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-/* The user and the web app button in the title bar, close together (the 640 px bar has little room) */
+/* The user and the web app button in the title bar, close together (the bar has little room) */
 .account {
   display: flex;
   align-items: center;
@@ -161,8 +152,16 @@ onMounted(async () => {
   background: var(--bg-surface-2);
   color: var(--text-2);
 }
-/* Only the main area scrolls: the title bar, the scan row and the tabs stay put */
+/* The side panel and the main area below the scan row, down to the window's bottom */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* Only the main area scrolls: the title bar, the scan row and the side panel stay put */
 .main {
+  min-width: 0;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -192,42 +191,6 @@ onMounted(async () => {
   font-variant-numeric: tabular-nums;
 }
 
-/* The panel tabs below the state row, like the debug window's */
-.tabs {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-  padding: 6px 16px 0;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border-dim);
-}
-
-.tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--text-2);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent, currentColor);
-}
-
-/* How many rows the tab's table lists */
-.tab-count {
-  font-weight: 400;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
 </style>
 
 <style>
