@@ -174,7 +174,7 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
   align-items: center;
   justify-content: center;
   /* Quiet until pointed at: the bar's own ground, a dim frame, a dim chevron */
-  border: 1px solid var(--border-dim);
+  border: 1px solid color-mix(in srgb, var(--border-dim) 55%, transparent);
   border-radius: var(--radius-control);
   background: var(--bg-surface);
   color: var(--text-3);
