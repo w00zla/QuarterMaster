@@ -388,6 +388,12 @@ async function contract(feed) {
     }
     assert.match(await page.rejects('update_set_channel', { id: '../x' }), /not a channel/);
 
+    // open_external: only refusals are tested (an accepted URL would start the owner's browser)
+    for (const url of ['http://example.com', 'file:///c:/windows', 'javascript:alert(1)', 'data:text/html,x', '/relative', 'https://user:pw@example.com/', 'https:///x', '']) {
+      assert.match(await page.rejects('open_external', { url }), /https|URL|credentials/, `open_external ${url}`);
+    }
+    await page.rejects('open_external', {});
+
     // Refused: the splash's own commands, any plugin command the capability does not list
     await page.rejects('splash_state');
     await page.rejects('quit');

@@ -24,6 +24,8 @@ tauri-plugin-dialog = { version = "2.7.3", default-features = false, features = 
 # The log file (the shell's own lines and the server's output), capped by rotation
 tauri-plugin-log = "2"
 log = "0.4"
+# `open_external`: the URL in the default browser (ShellExecute on Windows); only after lib.rs's URL check
+open = "5"
 # A second start brings the running window to the front
 tauri-plugin-single-instance = "2"
 # Download, signature check and install of an app update; the checks go through update.rs

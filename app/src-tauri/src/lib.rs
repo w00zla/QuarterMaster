@@ -243,6 +243,37 @@ async fn pick_file(window: WebviewWindow, extensions: Vec<String>) -> Option<Str
     dialog.blocking_pick_file()?.into_path().ok().map(|p| p.to_string_lossy().into_owned())
 }
 
+/// The one URL rule of `open_external`: an absolute `https://` URL with a host and no credentials; anything else is refused.
+/// Returns the normalized URL (what is opened, not the caller's text).
+fn external_url(text: &str) -> Result<Url, String> {
+    // The URL parser silently drops tabs and line breaks and trims: what it would repair is refused instead
+    if text.is_empty() || text.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("not an https URL".into());
+    }
+    // The parser is lenient with special schemes (`https:example.com`, `https:///host`): the text must say `https://` and
+    // then start the host itself
+    let rest = text.get(8..).filter(|_| text[..8].eq_ignore_ascii_case("https://"));
+    if rest.is_none_or(|r| r.starts_with(['/', '\\'])) {
+        return Err("only https URLs are opened".into());
+    }
+    let url = Url::parse(text).map_err(|_| "not an absolute URL".to_string())?;
+    if url.scheme() != "https" || url.host_str().is_none_or(str::is_empty) {
+        return Err("only https URLs are opened".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("a URL with credentials is not opened".into());
+    }
+    Ok(url)
+}
+
+/// Opens an `https://` URL in the system's default browser; nothing else is ever opened (`external_url`).
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let url = external_url(&url)?;
+    log::info!("open_external: {}", url.origin().ascii_serialization());
+    open::that_detached(url.as_str()).map_err(|e| format!("the browser could not be started: {e}"))
+}
+
 #[tauri::command]
 fn window_minimize(window: WebviewWindow) -> Result<(), String> {
     window.minimize().map_err(|e| e.to_string())
@@ -379,6 +410,7 @@ pub fn run() {
             quit,
             pick_folder,
             pick_file,
+            open_external,
             window_minimize,
             window_toggle_maximize,
             window_close,
@@ -432,6 +464,45 @@ mod tests {
         let dev = url("http://localhost:1430");
         assert!(navigation_allowed(&url("http://localhost:1430/index.html"), Some(&dev), None));
         assert!(!navigation_allowed(&url("http://localhost:1431/"), Some(&dev), None));
+    }
+
+    #[test]
+    fn only_plain_https_urls_are_opened() {
+        for ok in ["https://uexcorp.space", "https://github.com/w00zla/quartermaster/releases", "https://example.com:8443/a?b=c#d", "HTTPS://Example.com/"] {
+            assert!(external_url(ok).is_ok(), "{ok}");
+        }
+        assert_eq!(external_url("HTTPS://Example.com").unwrap().as_str(), "https://example.com/");
+        for no in [
+            "",
+            "http://example.com",
+            "file:///c:/windows",
+            "javascript:alert(1)",
+            "data:text/html,<b>x</b>",
+            "ftp://example.com/",
+            "tauri://localhost",
+            "ms-msdt:/id PCWDiagnostic",
+            "calculator:",
+            "mailto:a@b.c",
+            "/relative/path",
+            "//example.com/",
+            "example.com",
+            "https:example.com",
+            "https://",
+            "https:///x",
+            "https://user@example.com/",
+            "https://user:pass@example.com/",
+            "https://:pass@example.com/",
+            " https://example.com",
+            "https://example.com ",
+            "https://exa mple.com/",
+            "https://exam\tple.com/",
+            "https://example.com/\u{0}",
+            "https://example.com/\n",
+            "https:example.com",
+            "https:\\example.com",
+        ] {
+            assert!(external_url(no).is_err(), "{no:?}");
+        }
     }
 
     #[test]

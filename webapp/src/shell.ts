@@ -4,7 +4,8 @@
 // the shell must provide are listed in shellLogic.ts and docs/webapp.md "The desktop shell".
 
 import { reactive } from "vue";
-import { bindShell, failedUpdate, type ResizeDirection, type ShellBinding, type TauriGlobal, type UpdateState } from "./shellLogic";
+import { toast } from "./toasts";
+import { bindShell, externalLinkUrl, failedUpdate, type ResizeDirection, type ShellBinding, type TauriGlobal, type UpdateState } from "./shellLogic";
 
 export interface Shell {
   /** The desktop shell is there: native pickers and the frameless window chrome are rendered only then. */
@@ -58,6 +59,7 @@ export async function initShell(tauri: TauriGlobal | undefined = (window as { __
   const bound = bindShell(tauri);
   if (!bound) return;
   wire(bound);
+  installExternalLinks(bound);
   // The window's size follows the user: the maximize state is asked again at every resize (and after a toggle)
   const refreshMaximized = () => void bound.isMaximized().then((m) => (shell.maximized = m), () => {});
   window.addEventListener("resize", refreshMaximized);
@@ -69,6 +71,26 @@ export async function initShell(tauri: TauriGlobal | undefined = (window as { __
   shell.update = state;
   shell.updateAvailable = true;
   await bound.onUpdateChanged((next) => (shell.update = next));
+}
+
+/**
+ * Links that leave the app (`target="_blank"` with an https href, wherever and whenever they are rendered) open in the system's
+ * browser: the shell's window opens nothing for them. One handler on the document; the click is taken over completely (no
+ * in-app navigation, no second window), so Enter on a focused link and the middle button (`auxclick`) open exactly once.
+ */
+function installExternalLinks(bound: ShellBinding): void {
+  const handle = (event: MouseEvent) => {
+    const link = event.target instanceof Element ? event.target.closest("a") : null;
+    const url = externalLinkUrl(
+      { href: link?.href ?? null, target: link?.getAttribute("target") ?? null, button: event.button, defaultPrevented: event.defaultPrevented },
+      shell.available,
+    );
+    if (url === null) return;
+    event.preventDefault();
+    bound.openExternal(url).catch((e) => toast(e instanceof Error ? e.message : String(e), "error"));
+  };
+  document.addEventListener("click", handle);
+  document.addEventListener("auxclick", handle);
 }
 
 function wire(bound: ShellBinding): void {

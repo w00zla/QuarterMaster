@@ -10,6 +10,8 @@
 //
 //   pick_folder       {}                              -> string | null   the chosen folder, null when cancelled
 //   pick_file         { extensions: string[] }        -> string | null   extensions without the dot (e.g. ["zip"]); [] = any file
+//   open_external     { url: string }                 -> void            opens the URL in the system's default browser; the shell accepts
+//                                                                        only absolute https:// URLs without credentials and rejects anything else
 //   window_minimize   {}                              -> void
 //   window_toggle_maximize {}                         -> void            maximize, or restore when maximized
 //   window_close      {}                              -> void
@@ -52,6 +54,7 @@ export type ResizeDirection = "North" | "South" | "East" | "West" | "NorthEast" 
 export const COMMANDS = {
   pickFolder: "pick_folder",
   pickFile: "pick_file",
+  openExternal: "open_external",
   minimize: "window_minimize",
   toggleMaximize: "window_toggle_maximize",
   close: "window_close",
@@ -74,6 +77,7 @@ export interface TauriGlobal {
 export interface ShellBinding {
   pickFolder(): Promise<string | null>;
   pickFile(extensions?: string[]): Promise<string | null>;
+  openExternal(url: string): Promise<void>;
   minimize(): Promise<void>;
   toggleMaximize(): Promise<void>;
   close(): Promise<void>;
@@ -122,6 +126,7 @@ export function bindShell(tauri: TauriGlobal | undefined | null): ShellBinding |
   return {
     pickFolder: () => path(COMMANDS.pickFolder),
     pickFile: (extensions = []) => path(COMMANDS.pickFile, { extensions }),
+    openExternal: (url) => done(COMMANDS.openExternal, { url }),
     minimize: () => done(COMMANDS.minimize),
     toggleMaximize: () => done(COMMANDS.toggleMaximize),
     close: () => done(COMMANDS.close),
@@ -146,6 +151,37 @@ export function bindShell(tauri: TauriGlobal | undefined | null): ShellBinding |
       });
     },
   };
+}
+
+// --- links that leave the app ---
+
+/** A click as the document's handler sees it: the link under it (null: not on a link) and the mouse button. */
+export interface LinkClick {
+  /** The link's resolved `href` (`a.href`, absolute); null or "" when the click is not on a link or the link has none. */
+  href: string | null;
+  /** The link's `target` attribute. */
+  target: string | null;
+  /** 0 = primary (also Enter on a focused link), 1 = middle; any other button is not ours. */
+  button: number;
+  /** Something else already handled the click. */
+  defaultPrevented: boolean;
+}
+
+/**
+ * Which click goes to the shell: with the shell present, a primary or middle click on a `target="_blank"` link with an absolute
+ * https URL (the web app itself runs on http, so such a link always leaves it). Returns the URL for `open_external`, or null
+ * when the browser's own behaviour stays (a browser has no shell; in-app links, blob: links, other schemes are not ours).
+ */
+export function externalLinkUrl(click: LinkClick, shellAvailable: boolean): string | null {
+  if (!shellAvailable || click.defaultPrevented || (click.button !== 0 && click.button !== 1)) return null;
+  if ((click.target ?? "").toLowerCase() !== "_blank" || !click.href) return null;
+  let url: URL;
+  try {
+    url = new URL(click.href);
+  } catch {
+    return null;
+  }
+  return url.protocol === "https:" ? url.href : null;
 }
 
 // --- the update dialog ---

@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  bindShell, failedUpdate, parseUpdateState, statusLine, updateBusy, updateButtons, updateFound,
-  type TauriGlobal, type UpdatePhase, type UpdateState,
+  bindShell, externalLinkUrl, failedUpdate, parseUpdateState, statusLine, updateBusy, updateButtons, updateFound,
+  type LinkClick, type TauriGlobal, type UpdatePhase, type UpdateState,
 } from '../webapp/src/shellLogic.ts';
 
 const PHASES: UpdatePhase[] = ['idle', 'checking', 'current', 'available', 'downloading', 'installing', 'error'];
@@ -59,6 +59,7 @@ describe('shell contract: commands and payloads', () => {
     await shell.close();
     assert.equal(await shell.isMaximized(), true);
     await shell.startResize('SouthEast');
+    await shell.openExternal('https://uexcorp.space/');
     await shell.updateCheck();
     await shell.updateInstall();
     await shell.updateSetChannel('beta');
@@ -71,6 +72,7 @@ describe('shell contract: commands and payloads', () => {
       ['window_close', {}],
       ['window_is_maximized', {}],
       ['window_start_resize', { direction: 'SouthEast' }],
+      ['open_external', { url: 'https://uexcorp.space/' }],
       ['update_check', {}],
       ['update_install', {}],
       ['update_set_channel', { id: 'beta' }],
@@ -93,6 +95,11 @@ describe('shell contract: commands and payloads', () => {
   it('passes a failed required command on to the caller', async () => {
     const shell = bindShell(fakeShell({ window_close: new Error('no window') }).tauri)!;
     await assert.rejects(shell.close(), /no window/);
+  });
+
+  it('passes a refused URL on to the caller', async () => {
+    const refusing = bindShell(fakeShell({ open_external: new Error('only https URLs are opened') }).tauri)!;
+    await assert.rejects(refusing.openExternal('http://example.com/'), /only https/);
   });
 });
 
@@ -191,5 +198,36 @@ describe('update dialog: busy, mark and status line', () => {
     assert.deepEqual(statusLine(state({ state: 'installing', progress: 1 })), { text: 'update.installing', error: null, percent: null });
     assert.deepEqual(statusLine(state({ state: 'error', error: 'Signature mismatch (os error 5)' })), { text: null, error: 'Signature mismatch (os error 5)', percent: null });
     for (const phase of ['idle', 'current', 'available'] as const) assert.deepEqual(statusLine(state({ state: phase })), { text: null, error: null, percent: null });
+  });
+});
+
+describe('shell contract: links that leave the app', () => {
+  const link = (over: Partial<LinkClick> = {}): LinkClick => ({ href: 'https://uexcorp.space/', target: '_blank', button: 0, defaultPrevented: false, ...over });
+
+  it('sends a primary or middle click on a target=_blank https link to the shell, as the normalized URL', () => {
+    assert.equal(externalLinkUrl(link(), true), 'https://uexcorp.space/');
+    assert.equal(externalLinkUrl(link({ button: 1 }), true), 'https://uexcorp.space/');
+    assert.equal(externalLinkUrl(link({ target: '_BLANK', href: 'https://github.com/w00zla/quartermaster/releases?x=1#y' }), true), 'https://github.com/w00zla/quartermaster/releases?x=1#y');
+  });
+
+  it('leaves everything to the browser without the shell', () => {
+    assert.equal(externalLinkUrl(link(), false), null);
+  });
+
+  it('leaves links that stay in the app, or are not https, alone', () => {
+    for (const over of [
+      { target: null }, { target: '' }, { target: '_self' }, { target: 'other' },
+      { href: null }, { href: '' }, { href: 'not a url' },
+      { href: 'http://example.com/' }, { href: 'blob:http://127.0.0.1:28460/1234' }, { href: 'file:///c:/x' },
+      { href: 'javascript:alert(1)' }, { href: 'mailto:a@b.c' }, { href: 'http://127.0.0.1:28460/stock' },
+    ]) {
+      assert.equal(externalLinkUrl(link(over), true), null, JSON.stringify(over));
+    }
+  });
+
+  it('ignores other mouse buttons and clicks something else already handled', () => {
+    assert.equal(externalLinkUrl(link({ button: 2 }), true), null);
+    assert.equal(externalLinkUrl(link({ button: 3 }), true), null);
+    assert.equal(externalLinkUrl(link({ defaultPrevented: true }), true), null);
   });
 });

@@ -511,6 +511,12 @@ SPA, a reactive object `shell` with `available` (the desktop shell is there: pic
 `minimize()`, `toggleMaximize()`, `close()`, `startResize(direction)`). `initShell()` (called in `main.ts` before the first render)
 binds the global the shell injects; in a browser everything stays "not available". No shell package is imported by the SPA.
 
+**Links that leave the app.** With the shell present, `initShell()` installs one `click` and `auxclick` handler on the document: a primary or
+middle click (or Enter on a focused link) on an `<a target="_blank">` with an absolute `https://` href, wherever and whenever it is
+rendered, is taken over (no in-app navigation, no second window) and sent to `open_external`; a failed call shows the error text as a
+toast. The decision is the pure `externalLinkUrl` in `shellLogic.ts`. In a browser nothing is installed and the links work as links.
+There is no `window.open` call in the SPA. Links with other hrefs (`blob:` previews) are left alone.
+
 ### The desktop shell (the contract)
 
 The desktop app is its own Tauri program (`app/`; how it implements this contract, its capabilities and its updater: `docs/app.md`): it starts
@@ -524,6 +530,7 @@ Commands (`args` is one object, possibly empty; a rejection carries a text):
 |---|---|---|
 | `pick_folder` | `{}` | the chosen folder, or `null` when cancelled |
 | `pick_file` | `{ extensions: string[] }` (without the dot, e.g. `["zip"]`; `[]` = any file) | the chosen file, or `null` |
+| `open_external` | `{ url: string }` | nothing; opens the URL in the system's default browser. The shell accepts only an absolute `https://` URL with a host and no credentials, and rejects anything else (http, file, custom schemes, `javascript:`, `data:`, relative, with credentials) with a text |
 | `window_minimize` | `{}` | nothing |
 | `window_toggle_maximize` | `{}` | nothing (maximizes, or restores when maximized) |
 | `window_close` | `{}` | nothing |

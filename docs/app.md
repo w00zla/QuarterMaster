@@ -99,6 +99,7 @@ splash and the origin the server reported. Any other navigation is refused (`nav
 | Command | Implementation |
 |---|---|
 | `pick_folder`, `pick_file { extensions }` | the system's dialogs (tauri-plugin-dialog), modal to the window; the path, or `null` when cancelled; `extensions` become one filter, `[]` is any file |
+| `open_external { url }` | the URL in the system's default browser (the `open` crate, ShellExecute on Windows), started detached. The one rule (`external_url`): the text starts with `https://` and a host, parses as an absolute URL with scheme `https`, a host, no user name or password, no whitespace or control character; anything else is rejected with a text and nothing is started. The opened URL is the parsed one (normalized). No opener or shell plugin exists, so the page cannot open anything else |
 | `window_minimize`, `window_toggle_maximize`, `window_is_maximized` | the window's own functions |
 | `window_close` | a close request to the window: the stop above |
 | `window_start_resize { direction }` | the system's resize drag from that edge or corner; a direction that is none of the eight is rejected |
@@ -109,7 +110,7 @@ splash and the origin the server reported. Any other navigation is refused (`nav
 callable by default. Two capabilities grant them:
 
 - `splash.json`, the app's own page: `splash_state`, `quit`, listening to events, dragging the window.
-- `webapp.json`, pages at `http://127.0.0.1:*` only (`remote.urls`, `local: false`): the contract's eleven commands, listening and
+- `webapp.json`, pages at `http://127.0.0.1:*` only (`remote.urls`, `local: false`): the contract's twelve commands, listening and
   unlistening to events, and the two window functions Tauri's `data-tauri-drag-region` calls (`start_dragging`,
   `internal_toggle_maximize`: the double click on the title bar).
 
@@ -245,7 +246,7 @@ debugging port (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`). Scenarios:
 |---|---|
 | `lifecycle` | pairing file, `GET /api/capabilities` and `/`, exactly one `node` child, no update request with `QM_AUTO_UPDATE=0`; after a close request to the window both processes are gone within 15 s and the pairing file and `server.lock` are removed |
 | `hardKill` | the app killed: the server ends by itself; app and server killed: the lock stays and the next start takes it over |
-| `contract` | from the web app's page: the IPC without a CSP report and exactly one extra `connect-src` source, the window commands, `update_state`, the `update-changed` events of a check, an update found, downloaded and refused for its signature, a channel chosen and stored, a vanished channel back to stable, the commands that must be refused; `window_close` from a minimized window ends everything |
+| `contract` | from the web app's page: the IPC without a CSP report and exactly one extra `connect-src` source, the window commands, `update_state`, the `update-changed` events of a check, an update found, downloaded and refused for its signature, a channel chosen and stored, a vanished channel back to stable, the commands that must be refused (`open_external` with http, file, `javascript:`, data, relative, credentials and empty URLs; an accepted URL is never sent, it would start the owner's browser); `window_close` from a minimized window ends everything |
 | `locked` | a second app on the same data folder: the splash's failure sentence and quit button (read from the page), the first app untouched, quit by the button |
 | `singleInstance` | the default data folder (moved under the temp folder through `LOCALAPPDATA`): a second start ends with 0, the first keeps running |
 | `startUpdate` | the switch on: the start asks the feed, downloads the update, refuses it and starts; a feed that never answers holds the start for the limit only; `autoUpdate: false` in `settings.json` asks nothing |

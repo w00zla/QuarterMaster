@@ -6,6 +6,7 @@ fn main() {
         "quit",
         "pick_folder",
         "pick_file",
+        "open_external",
         "window_minimize",
         "window_toggle_maximize",
         "window_close",
