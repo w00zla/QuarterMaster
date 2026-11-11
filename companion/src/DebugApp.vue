@@ -10,6 +10,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getConfig } from "./backend";
 import { applyLangSetting, t } from "./i18n";
 import { errorText, toast } from "./toasts";
+import WindowEdges from "./components/WindowEdges.vue";
+import WindowTitleBar from "./components/WindowTitleBar.vue";
 import DebugGamelog from "./components/DebugGamelog.vue";
 import DebugGeneral from "./components/DebugGeneral.vue";
 import DebugScan from "./components/DebugScan.vue";
@@ -32,6 +34,9 @@ onMounted(async () => {
 
 <template>
   <div class="debug">
+    <!-- The frameless window's title bar, as the settings window's; the window can be resized (WindowEdges) -->
+    <WindowTitleBar icon="log" :title="t('debug.windowTitle')" />
+    <WindowEdges />
     <nav class="tabs">
       <button type="button" class="tab" :class="{ active: tab === 'scan' }" @click="tab = 'scan'">{{ t("debug.tab.scan") }}</button>
       <button type="button" class="tab" :class="{ active: tab === 'log' }" @click="tab = 'log'">{{ t("debug.tab.log") }}</button>
@@ -58,7 +63,7 @@ onMounted(async () => {
   flex: 1;
 }
 
-/* The tab bar at the top (the window's own title names it), like the web app's */
+/* The tab bar below the title bar, like the web app's */
 .debug .tabs {
   display: flex;
   gap: 4px;

@@ -28,6 +28,7 @@ import { applyConfig, config, loadConfig, paired, refreshConnection } from "./st
 import { errorText, toast, toastError } from "./toasts";
 import HotkeyInput from "./components/HotkeyInput.vue";
 import Toasts from "./components/Toasts.vue";
+import WindowTitleBar from "./components/WindowTitleBar.vue";
 
 // The form shows once config and pairing are loaded (its fields start from them)
 const ready = ref(false);
@@ -177,10 +178,7 @@ async function pickFolder() {
 <template>
   <div v-if="ready" ref="root" class="settings">
     <!-- The frameless window's title bar, as the desktop app's settings window has it: icon, title, close -->
-    <header class="titlebar" data-tauri-drag-region>
-      <span class="title" data-tauri-drag-region><Icon name="settings" :size="16" />{{ t("settings.windowTitle") }}</span>
-      <button type="button" class="win-btn" :title="t('win.close')" @click="close"><Icon name="close" :size="16" /></button>
-    </header>
+    <WindowTitleBar icon="settings" :title="t('settings.windowTitle')" close-only />
     <div class="body">
     <form id="settings" class="settings-groups" @submit.prevent="save">
       <section class="settings-group">
@@ -281,49 +279,6 @@ async function pickFolder() {
 /* The window's content, as the dialog was (ConfirmDialog.vue's head, body and foot); the window is as high as it */
 .settings {
   background: var(--bg-surface);
-}
-
-/* The title bar (webapp/src/components/TitleBar.vue's): 44 px, the drag region, the title at the left, close at the right */
-.titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  height: 44px;
-  padding: 0 8px;
-  background: var(--bg-base);
-  user-select: none;
-}
-
-.title {
-  margin-right: auto;
-  padding-left: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  /* Clicks go to the bar below (the drag region), also on the icon */
-  pointer-events: none;
-}
-
-.win-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.win-btn:hover {
-  background: var(--err);
-  color: var(--accent-text);
 }
 
 .foot {

@@ -502,7 +502,9 @@ async fn open_debug_window(app: AppHandle, debug: tauri::State<'_, ocrwatch::Deb
         return w.set_focus().map_err(|e| e.to_string());
     }
     let builder = tauri::WebviewWindowBuilder::new(&app, DEBUG_WINDOW, tauri::WebviewUrl::App("debug.html".into()))
-        .title("Quartermaster Companion – Debug")
+        // The task bar's name; no frame, the page draws its title bar (as the settings window)
+        .title("QM Companion Debug")
+        .decorations(false)
         .inner_size(960.0, 760.0)
         .min_inner_size(640.0, 400.0)
         .visible(false);
