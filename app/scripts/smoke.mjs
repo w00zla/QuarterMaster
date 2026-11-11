@@ -584,7 +584,8 @@ try {
   if (!args.includes('--no-build')) {
     log('building (pnpm app:build)');
     const begun = Date.now();
-    execSync('pnpm app:build', { cwd: root, stdio: 'inherit', timeout: BUILD_LIMIT });
+    // QM_TEST_FEED=1: the build's updater accepts the local http feed (app/src-tauri/tauri.testfeed.conf.json); never set for a release
+    execSync('pnpm app:build', { cwd: root, stdio: 'inherit', timeout: BUILD_LIMIT, env: { ...process.env, QM_TEST_FEED: '1' } });
     log(`built in ${((Date.now() - begun) / 60_000).toFixed(1)} min`);
   }
   for (const file of [exe, join(exe, '..', windows ? 'node.exe' : 'node'), join(exe, '..', 'server', 'bundle.json')]) assert.ok(existsSync(file), `${file} is missing`);

@@ -18,7 +18,10 @@ run('pnpm app:fetch-node');
 
 const tauri = 'pnpm --filter sc-quartermaster-app exec tauri';
 // The sidecar and the bundle are named in a config of their own: `cargo test` and `cargo clippy` need neither
-const config = '--config src-tauri/tauri.bundle.conf.json';
+let config = '--config src-tauri/tauri.bundle.conf.json';
+// The updater plugin refuses an http endpoint in a release build. Only the smoke test (a local http feed) switches that
+// off, with QM_TEST_FEED=1; a build without it, the one CI makes, keeps the plugin's https-only rule.
+if (process.env.QM_TEST_FEED === '1') config += ' --config src-tauri/tauri.testfeed.conf.json';
 if (mode === '--dev') {
   run(`${tauri} dev ${config}`);
 } else if (mode === '--fast') {
