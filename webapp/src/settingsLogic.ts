@@ -84,9 +84,6 @@ export function uexTag(s: Pick<LocalSettingsState, "uexKeySet">, u: UexState | n
 
 export const uexRefused = (s: Pick<LocalSettingsState, "uexKeySet">, u: UexState | null) => s.uexKeySet && u?.last?.outcome === "refused";
 
-/** "Fetch now" works with a key, while no pull runs. */
-export const canFetchNow = (s: Pick<LocalSettingsState, "uexKeySet">, u: UexState | null) => s.uexKeySet && !!u && u.phase === "idle";
-
 /** The next fetch's time is only shown while one is planned (an `off` or `pulling` state has none). */
 export const nextFetch = (u: UexState | null) => (u?.phase === "idle" ? u.nextPull : null);
 

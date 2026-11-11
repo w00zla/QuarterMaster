@@ -9,11 +9,11 @@ import ImportDialog from "../components/ImportDialog.vue";
 import LangSelect from "../components/LangSelect.vue";
 import { ApiError } from "../api";
 import { lang, t } from "../i18n";
-import { checkData, data, loadSettings, pullUex, refreshData, refreshUex, saveSettings, settings, uex } from "../local";
+import { checkData, data, loadSettings, refreshData, refreshUex, saveSettings, settings, uex } from "../local";
 import { dayTime, megabytes, shortTime } from "../localTime";
 import { me, saveProfile } from "../session";
 import {
-  canFetchNow, dataTag, folderView, gameDirChange, isBusy, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag,
+  dataTag, folderView, gameDirChange, isBusy, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag,
   type TagModel,
 } from "../settingsLogic";
 import { shell } from "../shell";
@@ -124,14 +124,6 @@ const intervals = computed(() => [15, 30, 60].map((n) => ({ value: String(n), la
 async function setIntervalMinutes(value: string) {
   try {
     await saveSettings({ uexIntervalMinutes: Number(value) as 15 | 30 | 60 });
-  } catch (e) {
-    toastError(e);
-  }
-}
-
-async function fetchNow() {
-  try {
-    await pullUex();
   } catch (e) {
     toastError(e);
   }
@@ -293,10 +285,6 @@ onUnmounted(() => clearTimeout(timer));
           </div>
           <div class="srow">
             <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer" class="ext"><Icon name="external" :size="14" /> uexcorp.space</a>
-            <span class="spacer" />
-            <button class="btn outline" type="button" :disabled="!canFetchNow(s, uex)" @click="fetchNow">
-              <Icon name="refresh" :size="14" /> {{ t("uex.fetch") }}
-            </button>
           </div>
         </form>
       </section>

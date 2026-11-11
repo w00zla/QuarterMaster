@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import type { DataUpdateState, LocalSettingsState, UexState } from '../src/webapp/api-types.ts';
 import { navGroups, routeAllowed, userControls, type NavCaps } from '../webapp/src/navigation.ts';
-import { dataTag, appTooOld, canFetchNow, firstRun, folderView, gameDirChange, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag } from '../webapp/src/settingsLogic.ts';
+import { dataTag, appTooOld, firstRun, folderView, gameDirChange, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag } from '../webapp/src/settingsLogic.ts';
 import { progressShare, tileModel, UNREACHABLE_AFTER, type TileInput } from '../webapp/src/startTile.ts';
 import { dayTime, megabytes, shortTime } from '../webapp/src/localTime.ts';
 
@@ -176,12 +176,8 @@ describe('settings decisions', () => {
     assert.equal(uexRefused({ uexKeySet: false }, u({ last: { outcome: 'refused', at } })), false);
   });
 
-  it('lets "fetch now" work with a key and no pull running; the next fetch exists only while one is planned', () => {
+  it('names the next fetch only while one is planned', () => {
     const u = (phase: UexState['phase']): UexState => ({ phase, lastPull: null, nextPull: at, last: null });
-    assert.equal(canFetchNow({ uexKeySet: true }, u('idle')), true);
-    assert.equal(canFetchNow({ uexKeySet: true }, u('pulling')), false);
-    assert.equal(canFetchNow({ uexKeySet: false }, u('off')), false);
-    assert.equal(canFetchNow({ uexKeySet: true }, null), false);
     assert.equal(nextFetch(u('idle')), at);
     assert.equal(nextFetch(u('pulling')), null);
     assert.equal(nextFetch(u('off')), null);

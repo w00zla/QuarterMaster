@@ -70,10 +70,6 @@ export async function saveSettings(update: LocalSettingsUpdate): Promise<void> {
   } else if (update.uexIntervalMinutes !== undefined) await refreshUex();
 }
 
-export async function pullUex(): Promise<void> {
-  uex.value = await api<UexState>("/local/uex/pull", { method: "POST", body: {} });
-}
-
 export async function checkData(): Promise<void> {
   data.value = await api<DataUpdateState>("/local/data/check", { method: "POST", body: {} });
   failedPolls.value = 0;

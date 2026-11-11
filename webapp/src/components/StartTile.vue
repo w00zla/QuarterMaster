@@ -82,8 +82,9 @@ async function retry() {
 </template>
 
 <style scoped>
+/* Fills what the title bar of the desktop window leaves (the app is a column as high as the window) */
 .start {
-  min-height: 100vh;
+  flex: 1;
   box-sizing: border-box;
   display: flex;
   align-items: stretch;
