@@ -3,7 +3,7 @@
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
 //! connection (the online server or the Quartermaster app on this PC), the
 //! Quartermaster server, the user's API token, the SC channel folder whose
-//! `Game.log` is followed (in the local mode the app's folder comes first, `pairing.rs`), the UI language, the automatic tab switch, the OCR on the GPU and the scan overlay's position, display and hotkeys. The server defaults to the production
+//! `Game.log` is followed (in the local mode the app's folder comes first, `pairing.rs`), the UI language, the automatic tab switch, the OCR on the GPU, the scan overlay's position, display and hotkeys, and the updates (the switch and the chosen channel). The server defaults to the production
 //! one; the settings can set another (e.g. a server of one's own), and only then the file holds a `server` entry.
 
 use std::path::PathBuf;
@@ -66,6 +66,13 @@ pub struct Config {
     /// on fast CPUs it reads hardly faster and holds VRAM next to the game.
     #[serde(default)]
     pub gpu: bool,
+    /// Updates by themselves: with this on, a check at start installs a newer version at once (update.rs).
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
+    /// The update channel the user chose in the update dialog; empty = none (the build's own channel, else stable). Only
+    /// `update_set_channel` changes it (`set_config` keeps the stored one).
+    #[serde(default)]
+    pub update_channel: String,
 }
 
 pub const ONLINE: &str = "online";
@@ -109,6 +116,8 @@ impl Default for Config {
             hotkey_mode: String::new(),
             auto_tab: true,
             gpu: false,
+            auto_update: true,
+            update_channel: String::new(),
         }
     }
 }
@@ -193,6 +202,11 @@ mod tests {
         // Missing in files written before it existed: on (the GPU off)
         assert!(c.auto_tab);
         assert!(!c.gpu);
+        // Updates: on, no channel chosen
+        assert!(c.auto_update);
+        assert_eq!(c.update_channel, "");
+        assert!(!parse(r#"{"autoUpdate":false}"#).unwrap().auto_update);
+        assert_eq!(parse(r#"{"updateChannel":"beta"}"#).unwrap().update_channel, "beta");
         assert_eq!(c.overlay_display, "thumbs");
         // Files written before the local mode existed: online
         assert_eq!(c.connection, ONLINE);

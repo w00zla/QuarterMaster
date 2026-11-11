@@ -7,6 +7,8 @@
 //! with sc-ohseearr's readers, in the player's game language (sc-ohseearr's `Locale`); the frames come
 //! from the screen capture (`capture.rs` on sc-ohseearr's capture crate, Windows only so far).
 //! The scan overlay (`overlay.rs`, Windows only) shows the main window's detections over the game.
+//! Updates by channel from GitHub releases (`update.rs`, the desktop app's way): the commands `update_*`, and at start,
+//! with `autoUpdate` on, a check that installs a newer version at once.
 
 #[cfg(windows)]
 mod capture;
@@ -22,6 +24,7 @@ mod overlay;
 mod pairing;
 pub mod refinery;
 mod server;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -32,6 +35,7 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 use config::Config;
 use gamelog::{LocationLine, Unlock};
+use update::{UpdateState, Updater};
 
 /// Event to the frontend: the log state (file found, unlocks, location lines) changed; it
 /// fetches `log_state` again (not for the file's size and times alone: the game writes all the time).
@@ -242,6 +246,8 @@ fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config
     if !config::OVERLAY_DISPLAYS.contains(&config.overlay_display.as_str()) {
         config.overlay_display = Config::default().overlay_display;
     }
+    // The channel is the update dialog's (`update_set_channel`); a settings window that was opened earlier must not undo it
+    config.update_channel = state.lock().unwrap().config.update_channel.clone();
     #[cfg(windows)]
     overlay::set_hotkeys(&app, &config.hotkey_overlay, &config.hotkey_mode)?;
     config::save(&app, &config)?;
@@ -692,7 +698,55 @@ fn open_webapp(app: AppHandle) -> Result<(), String> {
     tauri_plugin_opener::open_url(format!("{origin}/"), None::<&str>).map_err(|e| e.to_string())
 }
 
-/// Opens the companion's releases page in the browser (the update panel: the app installs nothing itself).
+// --- updates (update.rs): the dialog's commands, the same as the desktop app's shell contract ---
+
+#[tauri::command]
+fn update_state(updater: tauri::State<Updater>) -> UpdateState {
+    updater.state()
+}
+
+#[tauri::command]
+fn update_check(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        update::check(&app, false).await;
+    });
+}
+
+#[tauri::command]
+fn update_install(app: AppHandle) {
+    tauri::async_runtime::spawn(async move { update::install(&app).await });
+}
+
+#[tauri::command]
+fn update_set_channel(app: AppHandle, id: String) -> Result<(), String> {
+    update::choose_channel(&app, &id)?;
+    tauri::async_runtime::spawn(async move {
+        update::check(&app, true).await;
+    });
+    Ok(())
+}
+
+/// Keeps the chosen update channel in the config (`update::choose_channel`).
+fn store_update_channel(app: &AppHandle, id: &str) -> Result<(), String> {
+    let state = app.state::<Mutex<AppData>>();
+    let config = {
+        let mut data = state.lock().unwrap();
+        data.config.update_channel = id.to_string();
+        data.config.clone()
+    };
+    config::save(app, &config)
+}
+
+/// The start's update check (the switch "Automatic updates" on): a newer version is downloaded and installed at once,
+/// then the app restarts into it, as the desktop app does at its start. No answer, no update or an update that cannot be
+/// installed (the dialog shows the error): the app goes on as it is.
+async fn update_at_start(app: AppHandle) {
+    if update::check(&app, false).await {
+        update::install(&app).await;
+    }
+}
+
+/// Opens the companion's releases page in the browser (the update panel, for an installation that cannot update itself).
 #[tauri::command]
 fn open_releases() -> Result<(), String> {
     tauri_plugin_opener::open_url(RELEASES_URL, None::<&str>).map_err(|e| e.to_string())
@@ -730,6 +784,8 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // The updater's plugin side; the checks go through update.rs
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // The main and the debug window open where they were closed (place incl. monitor, size,
         // maximized); the overlay places itself, the settings window sizes itself to its content and centers
         .plugin(
@@ -744,7 +800,19 @@ pub fn run() {
         .setup(|app| {
             std::panic::set_hook(Box::new(|info| log::error!("panic: {info}")));
             let config = config::load(app.handle());
-            log::info!("Companion {} started, connection {}, game folder {}", env!("CARGO_PKG_VERSION"), config.connection, config.game_dir);
+            log::info!(
+                "Companion {} started, connection {}, game folder {}, updater {}",
+                env!("CARGO_PKG_VERSION"),
+                config.connection,
+                config.game_dir,
+                if update::updater_available() { "available" } else { "not available (not an installed build)" }
+            );
+            app.manage(Updater::new(env!("CARGO_PKG_VERSION"), config.update_channel.clone(), update::Feed::github()));
+            if config.auto_update {
+                tauri::async_runtime::spawn(update_at_start(app.handle().clone()));
+            } else {
+                log::info!("automatic update: off");
+            }
             app.manage(Mutex::new(AppData { config, paired: None, log_found: false, unlocks: Vec::new(), locations: Vec::new(), file: None, unlocks_on: true, reread: false }));
             app.manage(server::client());
             spawn_game_log_watch(app.handle().clone());
@@ -816,6 +884,10 @@ pub fn run() {
             app_info,
             gpu_status,
             open_webapp,
+            update_state,
+            update_check,
+            update_install,
+            update_set_channel,
             open_releases,
             open_repo,
             debug_info,
