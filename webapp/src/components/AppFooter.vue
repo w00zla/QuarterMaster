@@ -7,7 +7,7 @@
 // Update dialog where the desktop shell offers updates; plain in a browser) and the link to the GitHub page.
 import { computed } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { loginNone } from "../capabilities";
+import { localApp } from "../capabilities";
 import { settings } from "../local";
 import { shell } from "../shell";
 import { updateFound } from "../shellLogic";
@@ -18,7 +18,7 @@ import uexLogo from "../assets/uex-logo-20.png";
 import uexLogo2x from "../assets/uex-logo-40.png";
 import { t } from "../i18n";
 
-const version = computed(() => (loginNone.value && settings.value ? `v${settings.value.appVersion}` : null));
+const version = computed(() => (localApp.value && settings.value ? `v${settings.value.appVersion}` : null));
 const REPO_URL = "https://github.com/w00zla/quartermaster";
 const found = computed(() => !!shell.update && updateFound(shell.update));
 </script>

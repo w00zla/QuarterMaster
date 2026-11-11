@@ -15,7 +15,7 @@ import Dropdown from "../components/Dropdown.vue";
 import Thumb from "../components/Thumb.vue";
 import ViewToggle from "../components/ViewToggle.vue";
 import { actionLabel, actionText, categoryText, detailsText, personText, sourceText, when } from "../history";
-import { loginNone } from "../capabilities";
+import { singleUser } from "../capabilities";
 import { lang, t, viewTexts } from "../i18n";
 import { blueprintThumb, materialThumb, thumbColumnFlag } from "../thumbs";
 import { coalesced, onServerMessage } from "../realtime";
@@ -130,11 +130,11 @@ const columns = computed<ColumnSpec[]>(() => [
   ...(thumbCol.on.value ? [THUMB_COLUMN] : []),
   { key: "at", label: t("history.col.at"), width: 140 },
   // Singleuser: no source column (there is no bot and no web site, only this app and its companion)
-  ...(loginNone.value ? [] : [{ key: "source", label: t("history.col.source"), width: 110 }]),
+  ...(singleUser.value ? [] : [{ key: "source", label: t("history.col.source"), width: 110 }]),
   { key: "category", label: t("history.col.category"), width: 110 },
   { key: "action", label: t("history.col.action"), width: 120 },
   // ... and no "who": it is always the one user
-  ...(loginNone.value ? [] : [{ key: "actor", label: t("history.col.actor"), width: 120 }]),
+  ...(singleUser.value ? [] : [{ key: "actor", label: t("history.col.actor"), width: 120 }]),
   { key: "target", label: t("history.col.target"), width: 220 },
   { key: "details", label: t("history.col.details"), width: 260, sortable: false },
 ]);
@@ -174,10 +174,10 @@ const rows = computed(() => sortRows(entries.value ?? [], cols.sort.value, value
         <span class="head-title">{{ t("history.title") }}</span>
       </div>
       <div class="filters">
-        <Dropdown v-if="!loginNone" v-model="sourceFilter" variant="chip" :options="sourceOptions" />
+        <Dropdown v-if="!singleUser" v-model="sourceFilter" variant="chip" :options="sourceOptions" />
         <Dropdown v-model="categoryFilter" variant="chip" :options="categoryOptions" />
         <Dropdown v-model="actionFilter" variant="chip" :options="actionOptions" />
-        <Dropdown v-if="!loginNone" v-model="byFilter" variant="chip" :options="byOptions" />
+        <Dropdown v-if="!singleUser" v-model="byFilter" variant="chip" :options="byOptions" />
         <ViewToggle :table="cols" :texts="viewTexts()" :size="22" />
       </div>
       <div v-if="!entries" class="empty-line">{{ t("common.loading") }}</div>
@@ -187,10 +187,10 @@ const rows = computed(() => sortRows(entries.value ?? [], cols.sort.value, value
         <div v-for="e in rows" :key="e.id" class="row data-row">
           <span v-if="thumbView" class="thumb-cell"><Thumb v-bind="targetThumb(e)" size="m" :px="48" :icon="targetIcon(e)" :icon-size="24" /></span>
           <span class="cell mono">{{ when(e.at) }}</span>
-          <span v-if="!loginNone" class="cell">{{ sourceText(e) }}</span>
+          <span v-if="!singleUser" class="cell">{{ sourceText(e) }}</span>
           <span class="cell">{{ categoryText(e) }}</span>
           <span class="cell">{{ actionText(e) }}</span>
-          <span v-if="!loginNone" class="cell user-cell" :class="{ faint: e.actor.userId === me?.userId }">{{ personText(e.actor) }}</span>
+          <span v-if="!singleUser" class="cell user-cell" :class="{ faint: e.actor.userId === me?.userId }">{{ personText(e.actor) }}</span>
           <span class="cell target"><Thumb v-if="!thumbView" v-bind="targetThumb(e)" size="s" :px="20" :icon="targetIcon(e)" :icon-size="15" class="target-thumb" />{{ e.target }}</span>
           <span class="cell" :title="detailsText(e)">{{ detailsText(e) }}</span>
         </div>

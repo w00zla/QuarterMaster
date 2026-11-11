@@ -1,4 +1,5 @@
-// Which navigation the top bar, the side bar (singleuser) and the router offer for a server's capabilities (pure: tested in test/webapp-local.test.ts).
+// What the UI derives from a server's capabilities: the traits the views ask (`traitsOf`: local app, one user, side layout) and
+// which navigation the top bar, the side bar and the router offer (pure: tested in test/webapp-local.test.ts).
 // (No imports of Vue files or i18n: the root type check and the tests load this file; `label` and `icon` are literal
 // strings that the top bar checks against the text keys and the icon map.)
 
@@ -19,7 +20,27 @@ export interface NavCaps {
   uex: boolean;
 }
 
-const HOME: NavItem = { to: "/", label: "nav.home", icon: "overview" };
+/**
+ * What the views ask instead of the capabilities themselves: each property is named for what it means, so a view never
+ * tests "no login" when it means something else. Today all three follow from `login: "none"` (the singleuser variant);
+ * a variant that differs in one of them changes this function only.
+ */
+export interface Traits {
+  /** The app runs on the user's PC with its own settings, data updates and app version (`/api/local/*`, the start tile). */
+  localApp: boolean;
+  /** Exactly one user: nothing has to say who did something or through what (the history's "who" and "source"). */
+  singleUser: boolean;
+  /** The header across the full width with the side bar below it, the app as high as the window; else the top bar. */
+  sideLayout: boolean;
+}
+
+/** Until the capabilities are known the online behaviour applies. */
+export function traitsOf(caps: NavCaps | null): Traits {
+  const none = caps?.login === "none";
+  return { localApp: none, singleUser: none, sideLayout: none };
+}
+
+const HOME: NavItem ={ to: "/", label: "nav.home", icon: "overview" };
 const DATA: NavItem[] = [
   { to: "/gear", label: "nav.components", icon: "gear" },
   { to: "/resources", label: "nav.stock", icon: "type-crate" },

@@ -16,7 +16,7 @@ import "./history";
 import TopBar from "./components/TopBar.vue";
 import LoginView from "./views/LoginView.vue";
 import SettingsView from "./views/SettingsView.vue";
-import { capabilities, loadCapabilities, loginNone } from "./capabilities";
+import { capabilities, loadCapabilities, localApp, sideLayout } from "./capabilities";
 import { t } from "./i18n";
 import { topbarHeight } from "./layout";
 import { reloadAll, settings, startLocal, tile, updateNeeded } from "./local";
@@ -42,7 +42,7 @@ onMounted(async () => {
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   capsFailed.value = false;
-  if (loginNone.value) startLocal();
+  if (localApp.value) startLocal();
   await loadMe();
 });
 
@@ -60,7 +60,7 @@ if (!settingsWindow) {
   // First run without a usable game folder: the settings open by themselves (the shell's window, in a browser the page), once per
   // start (the user can leave them)
   let firstRunChecked = false;
-  const appShown = computed(() => loginNone.value && status.value === "in" && !tile.value.visible && !!settings.value);
+  const appShown = computed(() => localApp.value &&status.value === "in" && !tile.value.visible && !!settings.value);
   watch(appShown, (shown) => {
     if (!shown || firstRunChecked || !settings.value) return;
     firstRunChecked = true;
@@ -84,7 +84,7 @@ if (!settingsWindow) {
 // The settings window sizes itself once: when the panel is on screen (and the fonts are in), its height is asked for, the shell
 // sets that inner size and shows the window. The window cannot be resized, so nothing else changes it.
 const win = ref<HTMLElement | null>(null);
-const settingsReady = computed(() => status.value === "in" && loginNone.value && !!settings.value);
+const settingsReady = computed(() => status.value === "in" && localApp.value && !!settings.value);
 if (settingsWindow) {
   onMounted(() => (topbarHeight.value = 44));
   let fitted = false;
@@ -113,7 +113,7 @@ if (settingsWindow) {
     </main>
     <Toasts />
   </div>
-  <div v-else class="app" :class="{ framed: loginNone }">
+  <div v-else class="app" :class="{ framed: sideLayout }">
     <!-- The frameless desktop window: the app bar is its title bar; where that is not shown, a bar with the window buttons -->
     <TitleBar v-if="!capabilities || tile.visible || status !== 'in'" />
     <WindowEdges />
@@ -124,7 +124,7 @@ if (settingsWindow) {
       <template v-if="status === 'in'">
         <!-- Singleuser: the header across the full width (logo, game version, settings, window buttons), below it the navigation
              at the left edge beside the content, as in the companion; online: the top bar -->
-        <template v-if="loginNone">
+        <template v-if="sideLayout">
           <SlimBar />
           <div class="side-layout">
             <SideNav />

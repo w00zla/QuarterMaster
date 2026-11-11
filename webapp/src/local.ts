@@ -5,7 +5,7 @@
 import { computed, ref, watch } from "vue";
 import type { DataUpdateState, LocalSettingsState, LocalSettingsUpdate, UexState } from "../../src/webapp/api-types";
 import { api } from "./api";
-import { loadCapabilities, loginNone } from "./capabilities";
+import { loadCapabilities, localApp } from "./capabilities";
 import { loadMe } from "./session";
 import { appTooOld, isBusy } from "./settingsLogic";
 import { tileModel } from "./startTile";
@@ -21,12 +21,12 @@ export const uex = ref<UexState | null>(null);
 /** The installed data pack's tag: undefined = not known yet, null = none installed. */
 export const installedTag = computed(() => (data.value ? (data.value.installed?.tag ?? null) : undefined));
 
-export const tile = computed(() => loginNone.value
+export const tile = computed(() => localApp.value
   ? tileModel({ data: data.value, failedPolls: failedPolls.value, autoUpdate: settings.value?.autoUpdate ?? null })
   : ({ visible: false } as const));
 
 /** The bold notice above every view. */
-export const updateNeeded = computed(() => loginNone.value && appTooOld(data.value));
+export const updateNeeded = computed(() => localApp.value && appTooOld(data.value));
 
 const BUSY_MS = 1000;
 const IDLE_MS = 15_000;

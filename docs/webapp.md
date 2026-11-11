@@ -29,6 +29,13 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   user check (the identity's `authenticate`; online 401 for every route, unknown ones too), JSON-only
   writes (415, `DELETE` included) and a 16 KB body limit (a feature's image upload: its own, see
   "Features and privileges").
+- **How the SPA uses the capabilities.** A view never asks for the variant or the login. It asks either a capability
+  (`capabilities.ts`: `orgsOn`, `uexOn`) or a trait derived from them in one place (`navigation.ts` `traitsOf`, exported by
+  `capabilities.ts`): `localApp` (own settings, data updates, app version, start tile: `/api/local/*`), `singleUser` (no "who"
+  and no "source", e.g. in the history) and `sideLayout` (header across the full width with the side bar below, instead of the
+  top bar). Today all three follow from `login: 'none'`; they are named apart so a view says what it means and a variant that
+  differs in one of them changes `traitsOf` only. Whether the page runs in the desktop shell (`shell.available`) or is the
+  settings window (`windows.ts`) is a different question (the frame, not the variant).
 - `GET /api/capabilities` → `Capabilities` `{ login: 'discord' | 'none', orgs, uex, game }` (`api-types.ts`): what this
   server offers (`ServerCapabilities`: `WebappConfig.capabilities` of the composition root, **a value or a function** returning it,
   asked at every request: the singleuser variant's `uex` follows the user's key; online passes a value; `orgs` is read once, when

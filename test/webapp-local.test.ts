@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import type { DataUpdateState, LocalSettingsState, UexState } from '../src/webapp/api-types.ts';
-import { navGroups, parseSideMode, routeAllowed, sideGroups, sideModeFor, userControls, type NavCaps } from '../webapp/src/navigation.ts';
+import { navGroups, parseSideMode, routeAllowed, sideGroups, sideModeFor, traitsOf, userControls, type NavCaps } from '../webapp/src/navigation.ts';
 import { dataTag, appTooOld, canFetchNow, firstRun, folderView, gameDirChange, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag } from '../webapp/src/settingsLogic.ts';
 import { progressShare, tileModel, UNREACHABLE_AFTER, type TileInput } from '../webapp/src/startTile.ts';
 import { dayTime, megabytes, shortTime } from '../webapp/src/localTime.ts';
@@ -89,6 +89,12 @@ describe('navigation per capability', () => {
   it('offers the settings button instead of the user, profile, logout and companion controls without a login', () => {
     assert.deepEqual(userControls(online), { settings: false, companion: true, user: true, profile: true, logout: true, history: true });
     assert.deepEqual(userControls(single), { settings: true, companion: false, user: false, profile: false, logout: false, history: true });
+  });
+
+  it('derives what the views ask from the capabilities: the local app, one user and the side layout without a login, none of them online or while unknown', () => {
+    assert.deepEqual(traitsOf(single), { localApp: true, singleUser: true, sideLayout: true });
+    assert.deepEqual(traitsOf(online), { localApp: false, singleUser: false, sideLayout: false });
+    assert.deepEqual(traitsOf(null), { localApp: false, singleUser: false, sideLayout: false });
   });
 
   it('gives the side bar the top bar\'s groups and the history as a group of its own, quieter', () => {
