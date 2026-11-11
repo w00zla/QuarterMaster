@@ -1,7 +1,8 @@
 # Companion app
 
-A desktop app (Tauri 2) that works for the user next to the game, through the Quartermaster web app's API with
-the user's API token ("Access Key"):
+A desktop app (Tauri 2) that works for the user next to the game, through the Quartermaster API of one of two
+servers: the online web app with the user's API token ("Access Key"), or the Quartermaster app on the same PC (the
+singleuser variant, `docs/singleuser.md`), found through its pairing file. It always talks to a server:
 
 - reads blueprint unlocks from `Game.log` and registers them;
 - scans the freight manager's warehouse for material stacks and the character inventory for gear (ship
@@ -29,15 +30,16 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 
 ## Structure
 
-- Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `logwatch`, `gamelog`, `server`, `ocr` (loads the
+- Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `logwatch`, `gamelog`, `server`, `pairing` (the local
+  app's pairing file), `ocr` (loads the
   OCR), `inventory` (warehouse), `components` (character inventory), `refinery` (the three: the companion's payloads
   and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker), `capture` (the capture loop on
   sc-ohseearr's capture crate), `overlay`. The OCR engine and models, the readers, the game's texts (`Locale`)
-  and the capture itself are sc-ohseearr's (the sibling repo `../sc-ohseearr`, path dependencies; see "OCR").
+  and the capture itself are sc-ohseearr's (its public repository, git dependencies by release tag; see "OCR").
 - Vue SPA with three pages (`index.html` → `App.vue`, `debug.html` → `DebugApp.vue`, `overlay.html` →
   `OverlayApp.vue`), components in `src/components/`, styles in `src/styles/` (`base.css` with tokens, fonts and
   `ui.css`; `views.css` for forms, fields and table rows), the fonts in `src/assets/fonts/`. Pure logic in
-  `src/{match,inventory,components,refinery}.ts`, tested from the root `test/companion-*.test.ts` (`pnpm test`).
+  `src/{match,inventory,components,refinery,connection}.ts`, tested from the root `test/companion-*.test.ts` (`pnpm test`).
 - The window structure and look follow BindSight (title bar, settings, `Dropdown`, `ConfirmDialog`, the icon set,
   `tableColumns.ts`). The shared UI components, `tableColumns.ts` and the styles come from `adminapp/src/` and
   `webapp/src/` by relative import, the pure helpers (`api-types.ts` with the web app's API types, `thumbs.ts`,
@@ -81,32 +83,59 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 
 ## Server and config
 
-- `server.rs`, `config.rs`: server origin fixed (`https://quartermaster.w00z.net`; missing or empty in
-  the file = that; only a `server` entry in the config file changes it, e.g. `http://localhost:5174` for
-  dev, read at start). Config as JSON in the app config dir like BindSight
-  (`%APPDATA%\com.w00zla.quartermaster.companion\config.json`): Access Key (pasted from the web app's
-  Companion dialog), LIVE folder, UI language (`de`, `en` or empty = the system's; `langRef` in `i18n.ts`
-  is reactive, the debug window re-reads it on `config-changed`), the overlay's position, display and hotkeys.
-  Saving keeps the file's `server` entry as it is: the default is never written, a hand edit while the app
-  runs is not overwritten.
-- Every API call goes through the Rust `api` command (only `/api/…`, GET/POST; no CORS) with
-  `X-QM-Companion` = the Cargo version. With `cache` (only the catalog) a GET's answer is kept with its
+- **Two connections** (config `connection`, the settings' "Verbindung" / "Connection"; `connection.ts` holds the
+  decisions, `lib.rs` `target` resolves the server per call):
+  - **Online** (`online`, the default; files without the entry are online): the server origin is fixed
+    (`https://quartermaster.w00z.net`; missing or empty in the file = that; only a `server` entry in the config file
+    changes it, e.g. `http://localhost:5174` for dev, read at start; plain http only for localhost) and every call
+    carries the Access Key (`Authorization: Bearer`, pasted from the web app's Companion dialog).
+  - **Local app** (`local`): the Quartermaster app on this PC. `pairing.rs` reads its pairing file
+    (`%LOCALAPPDATA%\QuarterMaster\pairing.json` on Windows, `${XDG_DATA_HOME:-~/.local/share}/quartermaster/pairing.json`
+    on Linux, `QM_PAIRING_FILE` overrides both: the server's rule, `docs/singleuser.md` "Pairing with the companion")
+    at **every call** (the app's port can change between its starts) and uses its `origin`; no `Authorization` is
+    sent. Only `{ "format": 1, "origin": "http://127.0.0.1:<port>", "gameDir": … }` with exactly that origin form is
+    accepted: a planted file cannot send the companion elsewhere. No file, an unreadable or invalid one, or a server
+    that does not answer (a stale file after a crash: connection refused) are one state, `noLocalApp` ("App läuft
+    nicht" / "App not running"), re-checked on the usual path (every 30 s while down, on window focus); nothing polls
+    the file.
+  - **The game folder in use**: in the local mode the pairing file's `gameDir` (the app's setting) comes first; when
+    it is null, and online, the companion's own setting applies, which stays stored either way. The Rust side keeps
+    the pairing as last read (`AppData.paired`, also while the app does not run; dropped when the connection is set
+    to online); Game.log, the language pack, the debug recordings and the debug window follow `AppData::game_dir()`,
+    the frontend `gameDir` in `state.ts` (from Rust `paired`, asked after every connection check).
+- Config as JSON in the app config dir like BindSight
+  (`%APPDATA%\com.w00zla.quartermaster.companion\config.json`): the connection, Access Key, LIVE folder, UI language
+  (`de`, `en` or empty = the system's; `langRef` in `i18n.ts` is reactive, the debug window re-reads it on
+  `config-changed`), the overlay's position, display and hotkeys. Saving keeps the file's `server` entry as it is: the
+  default is never written, a hand edit while the app runs is not overwritten.
+- Every API call goes through the Rust `api` command (only `/api/…`, GET/POST; no CORS) with two headers:
+  `X-QM-Companion` = the Cargo version (a label) and `X-QM-Companion-Api` = the API contract number, which the
+  frontend passes in with every call: `COMPANION_API` in `src/webapp/api-types.ts` is its one source (no constant in
+  Rust). With `cache` (only the catalog) a GET's answer is kept with its
   ETag in the app cache dir (`%LOCALAPPDATA%\com.w00zla.quartermaster.companion\api\<path>.json`,
   `server::cached_api`) and sent with `If-None-Match`; a 304 answers the kept body (the ETag hashes the
   content: another server or user never gets a wrong one; a broken file only costs the transfer).
-- What the server expects and answers (`docs/webapp.md` "Companion API"): every companion request carries its API
-  contract number in `X-QM-Companion-Api` (the app version in `X-QM-Companion` is a label). A number missing or below the
-  server's minimum gets 426 `{ "error": "companionOutdated", "apiMin": n }`, one above its maximum 409
-  `{ "error": "serverOutdated", "apiMax": n }`; the range is also in `GET /api/capabilities` (`companionApi`).
-  Online a companion request is one with an `Authorization` header, on the singleuser server one with either header.
-  `GET /api/companion/locale` gives the game's English texts as `global.ini` lines (ETag, gzip, 404 `noCatalog`).
-  The server serves no companion files, no update feed and no release info.
+- **The contract check's answers** (`docs/webapp.md` "Companion API"; `connection.ts` `outdatedOf`): 426
+  `companionOutdated` (this companion's number is below the server's minimum) and 409 `serverOutdated` (it is above
+  the server's maximum: the server, or the local app, is older than the companion; any other 409 is a route's own
+  refusal). Either sets `outdated` and the app does no work: it shows only the update panel (`UpdatePanel.vue`): the
+  state ("Update erforderlich", "Server veraltet" or "App veraltet" with its sentence), the installed version and,
+  for an outdated companion, one button "Releases auf GitHub" that opens
+  https://github.com/w00zla/quartermaster/releases in the browser (Rust `open_releases`, the URL fixed there). The
+  app downloads and installs nothing itself; a successful connection check clears the state. The range is also in
+  `GET /api/capabilities` (`companionApi`); the server serves no companion files, no update feed and no release info.
+- **The game's English texts** come from the server: `GET /api/companion/locale` (`global.ini` lines, ETag, gzip, 404
+  `noCatalog`) through Rust `refresh_locale` (`server::cached_text`), kept in the app cache dir as
+  `api\_api_companion_locale.ini` with its ETag next to it (`.etag`; the table written to a temp file and renamed, so
+  a reader never sees half of it) and revalidated with `If-None-Match`. The frontend asks for it when the connection
+  comes up and whenever it loads the catalog (`state.ts` `refreshConnection`, `refinerySync.ts` `loadCatalog`; one
+  run at a time). It is the readers' English table (see "OCR"); before the first connection there is none.
 - **Item thumbnails** (2026-10-25; the sizes at `ThumbSize` in `backend.ts`, the server side in `docs/webapp.md`
   "Thumbnails"): only for catalog entries with a hash (`CatalogMaterial.thumb`, `CatalogBlueprint.thumb` of
   its `outputUuid`); without one nothing is asked and the row looks as before. Rust `thumb(size, uuid, hash)`
   (s|m|l, UUID and 8-hex hash checked) answers a `data:image/avif;base64,…` URL (the CSP stays: `img-src`
   has `data:`, not the server) from `%LOCALAPPDATA%\com.w00zla.quartermaster.companion\thumbs\<size>\<uuid>.<hash>.avif`,
-  else fetched from the configured origin's public `/thumbs/…` (no token, the API's client and user agent)
+  else fetched from the public `/thumbs/…` of the server in use (no token, the API's client and user agent)
   and kept there for good (temp file, renamed when complete: a URL's content never changes). Frontend
   `thumbs.ts`: one promise per image and window for the session (a failure is asked again by the next
   element), `Thumb.vue` a fixed square that stays empty while loading or without an image (nothing moves).
@@ -117,35 +146,21 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   saving; `loadingTexts` in `state.ts`). While connected without the catalog, the location picker and Scan
   are disabled ("Catalog is loading…") and the unlocks list shows that state instead of
   "Not in catalog". The HTTP client has no total timeout (the catalog is ~2.5 MB per language): 10 s to
-  connect, 30 s without data at most (`server::client`); the update download keeps its 30 min. A 426 makes the app show only the update panel (`UpdatePanel.vue`:
-  installed and required version, the download for its platform): Rust `download_update` fetches it with
-  the token (only URLs below the configured origin's `/downloads/`, `<dest>.part` renamed when complete,
-  the file left as downloaded: no permission changes) to a path picked in a save dialog, progress as the
-  `download-progress` event. Plain http only for localhost.
-- Installed app (Windows NSIS setup, per user, no admin): it updates itself instead (like BindSight, but
-  from the own server). `app_info.updater` says which build runs: the bundler stamps the exe it packs into
-  the setup (`bundle_type()` = NSIS), the bare exe of the standalone zip stays unstamped and keeps the
-  download above. The panel's "Install update" calls Rust `install_update`: `tauri-plugin-updater` (Windows
-  only, registered under `cfg(windows)`) reads the feed `<origin>/downloads/companion/latest.json` and the
-  setup with the token (`Authorization` header), checks the setup against the updater key
-  (`plugins.updater.pubkey` in `tauri.windows.conf.json`), runs it passive (progress window, no questions)
-  and ends the app; the setup starts the new version. Progress as `download-progress` like the download.
-  `dangerousInsecureTransportProtocol` is on because `server::origin` already allows plain http for
-  localhost only. Updates come only with the 426 (the manifest's version is required), there is no own check.
+  connect, 30 s without data at most (`server::client`).
+- Installed app (Windows NSIS setup, per user, no admin) or the bare exe: `app_info.setup` says which build runs
+  (the bundler stamps the exe it packs into the setup, `bundle_type()` = NSIS; the debug window shows it). Neither
+  updates itself.
 
 ## Release
 
 - Bump the version in `src-tauri/Cargo.toml` (bundle names and the header use it), build per platform:
-  Windows `pnpm companion:build` (`build:windows`) with the updater's private key **as content** in
-  `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if it has one; the `_PATH` variant is not
-  read by the CLI, see BindSight) gives the setup (with `DirectML.dll` next to the exe, from `pnpm directml`)
-  `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and its `.sig`, and
-  `target/release/quartermaster-companion.exe`; Linux the AppImage.
+  Windows `pnpm companion:build` (`build:windows`) gives the setup (with `DirectML.dll` next to the exe, from
+  `pnpm directml`) `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and
+  `target/release/quartermaster-companion.exe`; Linux the AppImage. The build needs network access for the OCR
+  crates (git, by tag) and nothing next to this repository.
 - The server hosts no companion files: the downloads are the GitHub releases of this repository
-  (https://github.com/w00zla/quartermaster/releases), which the web app's Companion dialog links to. The server side
-  (the API contract number, the locale route): `docs/webapp.md` "Companion API".
-- The key pair comes from `pnpm tauri signer generate -w <file>` once; the private key never goes into the repo,
-  losing it means installed apps take no update until reinstalled with a new key.
+  (https://github.com/w00zla/quartermaster/releases), which the web app's Companion dialog and the companion's update
+  panel link to. The server side (the API contract number, the locale route): `docs/webapp.md` "Companion API".
 
 ## Window, tabs and state
 
@@ -161,9 +176,10 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   open where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the
   overlay is excluded, it places itself), created hidden and shown once placed.
 - The title bar holds, before the settings button, the user (Discord avatar from `/api/me`, the name in
-  its tooltip: a 640 px bar has no room for it; CSP `img-src` allows `cdn.discordapp.com`) and,
-  after it, an icon button opening the web app in the browser (Rust `open_webapp`: the configured origin
-  only), or the connection's short reason as a chip when down.
+  its tooltip: a 640 px bar has no room for it; CSP `img-src` allows `cdn.discordapp.com`; the local app's user has
+  neither name nor avatar: nothing is shown) and,
+  after it, an icon button opening the web app in the browser (Rust `open_webapp`: the origin of the server in
+  use, in the local mode the paired one), or the connection's short reason as a chip when down.
 - Below it the **scan row** (`ScanBar.vue`, fixed height, decided 2026-10-19): the Scan toggle (off =
   outline with an eye, on = accent with a pulsing dot, locked with a lock icon while the overlay runs it),
   the overlay toggle (Windows; a desktop icon, off = dashed and dimmed, on = accent), one tag that always
@@ -176,9 +192,10 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   change without moving it, the state tag clips when room runs out). Problem chips
   open the settings.
 - `state.ts` holds config, connection and log state; every API call goes through its `api()`; connection
-  refusals (`noServer`, `noToken`, `invalidServer`, `insecureServer`, `invalidToken`, `network`, 426) mark
+  refusals (`noServer`, `noToken`, `invalidServer`, `insecureServer`, `invalidToken`, `network`, `noLocalApp`,
+  426, 409 `serverOutdated`) mark
   the connection down and are not toasted (`isConnectionError`); a down connection is re-checked every
-  30 s, any connection on window focus; a successful check clears the update hint. Toasts are for events
+  30 s, any connection on window focus; a successful check clears the outdated state. Toasts are for events
   only.
 - A tab bar (icons; each tab and panel title with its table's row count, `tabCounts` in `overlay.ts`; the
   last tab kept in localStorage `qm.companion.tab`; it never switches by itself: the scan row's tag names
@@ -190,7 +207,9 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   (room for "999": the chips after it stay put), the panel's filter chips (no label: "Scanned" / "Not
   scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
   and scroll only their rows (head and column titles stay).
-- Settings dialog (`SettingsDialog.vue`): Access Key, language, game folder, the "Bildschirm-Scan" group
+- Settings dialog (`SettingsDialog.vue`): "Verbindung" ("Connection": "Online" or "Lokale App" / "Local app", a
+  dropdown of fixed width), Access Key (disabled for the local app, which needs none; it stays in place), language,
+  game folder (in the local mode the paired app's folder, shown disabled, when it has one; the own setting is kept), the "Bildschirm-Scan" group
   ("Screen Scan": "App-Ansicht automatisch wechseln" (the automatic tab switch), then "GPU-Beschleunigung
   aktivieren" (since 2026-10-31 a plain row below it, off by default; before, a highlighted card on top) with a state tag "Aktiv" / "CPU" / "Nicht verfügbar" / "Fehler" and a dim
   note below (pays off only when the scan reads slowly on a weaker CPU, takes VRAM), switches; the
@@ -472,8 +491,8 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
 
 ## OCR
 
-- **sc-ohseearr** (the sibling checkout `../sc-ohseearr`, path dependencies from `src-tauri/Cargo.toml`, so it must sit next to
-  this repo wherever the companion is built): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
+- **sc-ohseearr** (https://github.com/w00zla/sc-ohseearr, git dependencies by release tag in `src-tauri/Cargo.toml`,
+  one tag for all its crates; no checkout next to this repo is needed to build): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
   `paddle-det-tiny` (PP-OCRv6 tiny's detector), `sc-rec-latin` (our recognizer: tiny's cut to Latin and fine-tuned on
   the game's font) and `sc-warehouse-layout`, compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the
   reader interface, the game's texts), the readers `-warehouse`, `-gear-inventory`, `-refinery` and
@@ -487,11 +506,12 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   detector counts in the detector's timings. `inventory.rs`, `components.rs` and `refinery.rs` keep the companion's
   serde payloads (frontend, events, recordings) and map the readers' neutral output onto them (`to_legacy`; fields
   like `Field::raw`/`ambiguous` and the names' loc keys are not used beyond that yet).
-- **Regression check** for any change of sc-ohseearr or the adapters: `companion/scripts/regression-dumps.sh <out> [repo root]`
-  runs `inventory_dump`, `components_dump` (this repo) and sc-ohseearr's `regress-refinery` over the regression sets
+- **Regression check** for any change of the sc-ohseearr tag or the adapters: `companion/scripts/regression-dumps.sh <out> [repo root]`
+  runs `inventory_dump`, `components_dump` (this repo) and sc-ohseearr's `regress-refinery` (from a checkout of it
+  next to this repo, which also holds the data root) over the regression sets
   each reader's `regression.toml` lists (debug recordings in `regression/<reader>/` of sc-ohseearr's data root, no
   screenshots: its ADR 0014; 652 warehouse frames, 444 character inventory frames, the refinery's set pending; the
-  refinery needs the English table, `REFINERY_ENGLISH`, default the app's `global-english.ini`), compared byte for
+  refinery needs the English table, `REFINERY_ENGLISH`, default the table the app keeps from its server), compared byte for
   byte (`*.norm.txt`, `overlays.sha256`) against the build before.
 - **The recognizer's training data from here**: `components_dump --dataset` exports the real tooltip lines from debug
   recordings as line crops, `tools/dataset-export/ocr-eval-label.ts` labels them (its README); the game's font (Blender Pro, taken from `Data.p4k`) is used
@@ -508,12 +528,14 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   unless ready (`gpu_status`, event `ocr-gpu`). Not measured: what the GPU load costs the running game's frame time.
 - **The game's texts** (sc-ohseearr's `Locale`, its ADR 0007: no game text compiled in): `user.cfg`'s
   `g_language` picks `data/Localization/<language>/global.ini` (a language pack, also one replacing the English
-  texts like StarStrings; keys case-insensitive, a pack's `key,P=` suffix dropped), and the game's own English
-  texts come from **`global-english.ini` in the app's local data folder** (Windows
-  `%LOCALAPPDATA%\com.w00zla.quartermaster.companion\global-english.ini`): the game keeps them inside
-  `Data.p4k`, sc-ohseearr's `scripts/extract-global-ini.{ps1,sh}` extracts them per game build. How
-  players get that file without placing it by hand is open (the companion's call, sc-ohseearr ADR 0012; see
-  "Open"); until then it is placed by hand. `ocrwatch` keeps a `LocaleSource` (re-read when
+  texts like StarStrings; keys case-insensitive, a pack's `key,P=` suffix dropped; the companion reads the player's
+  pack itself, from the game folder in use), and the game's own English
+  texts come from **the server** (the game keeps them inside `Data.p4k`): the table kept in the app's cache
+  (`api\_api_companion_locale.ini`, see "Server and config"), handed to sc-ohseearr's `Locale` as its English table
+  like any `global.ini`. For the readers the server's table reads the same as the game's raw file (2026-11-11, game
+  build 12913470: the same 90946 keys; 597 values differ, 596 only by white space at their ends, one by a carriage
+  return, none once only letters and digits count as the readers compare; sc-ohseearr's `regress-refinery` over its 61
+  frames byte-identical with either table). `ocrwatch` keeps a `LocaleSource` (re-read when
   `user.cfg`, the pack or the English table change, checked every 10 s; dropped when the scan stops) and
   passes the locale into every reader's frame: the refinery reader anchors on loc keys (below), the others
   only resolve names to loc keys (not used yet). With neither a pack nor the English table the refinery is
@@ -675,10 +697,7 @@ GPU process should not compete with the game; not measured yet.
   own and the count is certain (proposed 2026-10-19, not decided).
 - "[CS2] StrikeForce Missile" stays unknown (the catalog says "StrikeForce II Missile"); which tooltips show
   stats at all; Quantum Fuel Burn (a lower value is the improvement, the bounds run 0…+20 %).
-- Not decided: how players get the English `global-english.ini` (the game's own texts, needed for the refinery
-  without a language pack) without placing it by hand; it must work for the planned standalone version too (no
-  web app), so a server alone does not do.
-- Planned: decoupling from the web app, with a standalone version next to the connected one (not specified). The readers on sc-ohseearr (2026-11-06) are verified in game (2026-11-08) except the refinery.
-- Not built: the Linux screen capture (xdg portal), the AppImage's updater, CI, tray/autostart; the API
+- The readers on sc-ohseearr (2026-11-06) are verified in game (2026-11-08) except the refinery.
+- Not built: the Linux screen capture (xdg portal), a self-update, CI, tray/autostart; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.

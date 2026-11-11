@@ -38,15 +38,14 @@ refinery entries:
   with OCR from the game window. Each read becomes a proposal you confirm in the app.
 - **Overlay**: what the scan sees, drawn click-through over the game.
 
-It needs Windows 10/11 for the scans and the overlay (Linux builds read `Game.log` only), an API token from the web
-app's Companion dialog, and for the refinery scan a language pack or the game's English texts as `global-english.ini`
-in the app's data folder. How it works: [docs/companion.md](docs/companion.md).
+It needs Windows 10/11 for the scans and the overlay (Linux builds read `Game.log` only) and an API token from the web
+app's Companion dialog. How it works: [docs/companion.md](docs/companion.md).
 
 ## Build
 
 Requirements: Node 26+, pnpm, PostgreSQL 18 (bot and web app); Rust and the [Tauri 2
 prerequisites](https://tauri.app/start/prerequisites/) (companion). The companion's OCR comes from
-[sc-ohseearr](https://github.com/w00zla/sc-ohseearr): clone it next to this repository.
+[sc-ohseearr](https://github.com/w00zla/sc-ohseearr): the build fetches it by its release tag.
 
 ```sh
 pnpm install

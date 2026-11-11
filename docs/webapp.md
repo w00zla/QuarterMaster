@@ -109,7 +109,7 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   only the fields it reads (`CompanionCatalogResponse`, `Pick`s of the types above): materials without unit
   (follows from `kind`), class and `minable`; locations without yields; blueprints with uuid, label, name,
   size, grade letter, `isDefault`, `retired`, `outputUuid`, `thumb`. Cached like `/api/catalog` (`private,
-  no-cache`, ETag). Session or API token like every route; companion builds before it keep `/api/catalog`.
+  no-cache`, ETag). Session or API token like every route.
   Size per language (dev DB, 2026-11-01): ~2.45 MB instead of ~2.95 MB raw, gzip ~340 instead of ~360 KB
   (the components with their stats are most of it and the companion needs them). Gzipped by the server when the
   client sends `Accept-Encoding: gzip` (so the proxy needs no `encode`): `Content-Encoding: gzip`,
