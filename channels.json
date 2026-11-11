@@ -1,0 +1,13 @@
+{
+  "app": {
+    "stable": null,
+    "channels": []
+  },
+  "companion": {
+    "stable": null,
+    "channels": []
+  },
+  "data": {
+    "stable": null
+  }
+}
