@@ -504,10 +504,72 @@ fresh: no reload by the user.
 `failed` with reason `unsupported`: "App update needed / New game data needs a newer app." Its button is rendered only where the
 shell offers app updates.
 
-**The shell adapter** (`shell.ts`): the one place where native functions enter the SPA, a reactive object `shell` with `available`
-(a folder/file picker exists), `pickFolder()`, `pickFile(extensions?)` (both answer null when cancelled or unavailable),
-`updateAvailable` and `openUpdate()`. In a browser everything is "not available"; the desktop shell sets the members. No shell package
-is imported by the SPA.
+**The shell adapter** (`shell.ts`, the contract and its pure part in `shellLogic.ts`): the one place where native functions enter the
+SPA, a reactive object `shell` with `available` (the desktop shell is there: pickers and window chrome), `pickFolder()`,
+`pickFile(extensions?)` (both answer null when cancelled or unavailable), `updateAvailable`, `update` (the updater's state),
+`openUpdate()`/`closeUpdate()`/`updateOpen`, `checkUpdate()`, `installUpdate()`, `setChannel(id)`, the window (`maximized`,
+`minimize()`, `toggleMaximize()`, `close()`, `startResize(direction)`). `initShell()` (called in `main.ts` before the first render)
+binds the global the shell injects; in a browser everything stays "not available". No shell package is imported by the SPA.
+
+### The desktop shell (the contract)
+
+The desktop app is its own Tauri program: it starts the server as a sidecar ("The app bundle" in `docs/singleuser.md`), waits for
+`QM_READY`, and shows `http://127.0.0.1:<port>` in its window. The SPA talks to it through the global `window.__TAURI__`
+(Tauri's `withGlobalTauri`): `__TAURI__.core.invoke(command, args)` and `__TAURI__.event.listen(event, handler)`. Without that global (or
+without `core.invoke`) nothing below exists: pickers answer null, no window chrome, no footer button, no app update.
+
+Commands (`args` is one object, possibly empty; a rejection carries a text):
+
+| Command | Arguments | Result |
+|---|---|---|
+| `pick_folder` | `{}` | the chosen folder, or `null` when cancelled |
+| `pick_file` | `{ extensions: string[] }` (without the dot, e.g. `["zip"]`; `[]` = any file) | the chosen file, or `null` |
+| `window_minimize` | `{}` | nothing |
+| `window_toggle_maximize` | `{}` | nothing (maximizes, or restores when maximized) |
+| `window_close` | `{}` | nothing |
+| `window_is_maximized` | `{}` | `boolean`; asked at start, after every toggle and at every `resize` of the page |
+| `window_start_resize` | `{ direction: "North" \| "South" \| "East" \| "West" \| "NorthEast" \| "NorthWest" \| "SouthEast" \| "SouthWest" }` | nothing; the window starts a resize drag from that edge or corner |
+| `update_state` | `{}` | `UpdateState` (below) |
+| `update_check` | `{}` | nothing; starts a check, the progress arrives as `update-changed` |
+| `update_install` | `{}` | nothing; starts download and install of the available version |
+| `update_set_channel` | `{ id: string }` | nothing; saves the channel and checks it at once |
+
+```ts
+interface UpdateState {
+  state: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'installing' | 'error';
+  current: string;           // the running version, without "v"
+  available: string | null;  // the version found, without "v"
+  notes: string | null;      // plain text
+  progress: number | null;   // 0..1 while downloading, null when unknown
+  error: string | null;      // shown as it is, in the error colour
+  channel: string;           // the selected channel's id
+  channels: string[];        // every channel the user can select
+}
+```
+
+Event `update-changed`, payload `UpdateState`: at every change, progress included. Dragging the window is not a command: the title bar
+carries the standard `data-tauri-drag-region` attribute (on the bar and on its non-interactive parts, never on a button or link). The
+update commands are optional as a group: when `update_state` rejects at start, the SPA treats the shell as one without updates. A
+payload that is not an `UpdateState` is dropped; a command that rejects shows as an error of the updater. What the shell sets in
+the server's environment: `QM_DATA_DIR`, `QM_PORT`, `QM_MIGRATIONS_DIR`, `QM_DIST_DIR`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (`docs/singleuser.md`).
+
+**The frameless window.** Only with `shell.available`: the top bar is the title bar (drag region; double click maximizes, the shell's
+doing) with the three window buttons (`WindowButtons.vue`: minimize, maximize or restore, close; 36 px slots, close hovers in the error
+colour) at its right end; where the app bar is not shown (the start tile, the server not reachable) `TitleBar.vue` gives a bar with the
+buttons alone; `WindowEdges.vue` puts eight invisible 6 px strips along the edges (none while maximized). The window buttons sit
+absolutely at the top right (the bar keeps 128 px of right padding), so a wrapped bar keeps them in its first row; up to a window width
+of 1400 px the wordmark, the tab padding and the gaps give way so the bar stays one row at 1280 px.
+
+**The app footer and the update dialog.** With `login: 'none'` the footer starts with the app version (mono, 22 px high). Where the shell
+offers updates it is a button opening the dialog and a mark (the download arrow in the accent colour; its room is kept when empty) follows
+it while a version was found (`available`, `downloading`, `installing`); in a browser the version is plain text. The dialog
+(`UpdateDialog.vue`, "App Update"; also opened by the bold notice's button and the App panel's "App Update" row in the settings
+view, which exists only with the shell) shows the channel select in the head (disabled while busy), the current and available version as
+chips, the notes in a box of fixed height (kept when empty) and one status line of fixed height ("Checking …", "Downloading …" with the
+percent and a progress bar, "Installing …", or the error text in the error colour). Buttons (`updateButtons` in `shellLogic.ts`):
+Close always first on the left; then "Check Update" in idle, current, checking and error (disabled while checking) or "Install" in
+available, downloading and installing (disabled while downloading and installing); the two share one button's room
+(`ConfirmButton.reserve`). Closes by its button or Escape only. Tests: `test/webapp-shell.test.ts`.
 
 Tests: `test/webapp-local.test.ts` (start tile states including the timeout rule, navigation per capability, the settings
 decisions, time formatting, both languages having the same texts).
@@ -572,7 +634,7 @@ decisions, time formatting, both languages having the same texts).
 | Vector | Measure |
 |---|---|
 | CSRF | Session cookie SameSite=Lax; own same-origin check on every non-GET; writes accept `application/json` only (a JSON body cross-origin needs a CORS preflight, never answered); no state change on GET. Same-site is not enough: admin (`:8443`) and user app are the same site. |
-| XSS | Vue escapes; no `v-html` except `Icon.vue` (constants; enforced by `test/spa-sources.test.ts`). Untrusted texts: external `global.ini` files, Discord names. Strict CSP from the app. |
+| XSS | Vue escapes; no `v-html` except `Icon.vue` (constants; enforced by `test/spa-sources.test.ts`). Untrusted texts: external `global.ini` files, Discord names. Strict CSP from the app (`connect-src` is `'self'` and the WebSocket; `WebappConfig.extraConnectSrc` adds sources, unset online; the singleuser entry fills it from `QM_CSP_CONNECT`, which the desktop shell sets to what its IPC needs). |
 | Clickjacking | `frame-ancestors 'none'`, `X-Frame-Options: DENY`. |
 | Access control / IDOR | `Actor` only from the session + roster; a `guildId` from the request only with an active member row there; reads through functions that take the `Actor`, never "load by ID"; writes through the stock service only. DB tests cover other users' stock, other orgs, inactive members. |
 | Missing auth | Auth middleware on everything except `/auth/*`, `GET /api/capabilities` (no user data: what the server offers) and static files; a test asserts 401 for every other route without a session. |

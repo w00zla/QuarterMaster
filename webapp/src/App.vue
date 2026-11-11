@@ -4,8 +4,11 @@ import { RouterView, useRoute, useRouter } from "vue-router";
 import { PICKER_LABELS } from "./components/Picker.vue";
 import AppFooter from "./components/AppFooter.vue";
 import StartTile from "./components/StartTile.vue";
+import TitleBar from "./components/TitleBar.vue";
 import Toasts from "./components/Toasts.vue";
+import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
+import WindowEdges from "./components/WindowEdges.vue";
 // Notices of actions from the bot and the companion app (listens to the realtime messages)
 import "./history";
 import TopBar from "./components/TopBar.vue";
@@ -16,6 +19,7 @@ import { settings, startLocal, tile, updateNeeded } from "./local";
 import { routeAllowed } from "./navigation";
 import { startRealtime, stopRealtime } from "./realtime";
 import { loadMe, status } from "./session";
+import { shell } from "./shell";
 import { firstRun } from "./settingsLogic";
 
 // The pickers' own texts (the component has no i18n: the companion app imports it too)
@@ -55,6 +59,9 @@ watch(appShown, (shown) => {
 
 <template>
   <div class="app">
+    <!-- The frameless desktop window: the app bar is its title bar; where that is not shown, a bar with the window buttons -->
+    <TitleBar v-if="!capabilities || tile.visible || status !== 'in'" />
+    <WindowEdges />
     <div v-if="!capabilities" class="empty-line">{{ capsFailed ? t("error.backend") : "" }}</div>
     <!-- No game data yet (singleuser): the start tile instead of the app -->
     <StartTile v-else-if="tile.visible" :model="tile" :version="settings?.appVersion ?? null" />
@@ -70,6 +77,7 @@ watch(appShown, (shown) => {
       <div v-else-if="status === 'error'" class="empty-line">{{ t("error.backend") }}</div>
       <AppFooter />
     </template>
+    <UpdateDialog v-if="shell.updateOpen && shell.update" />
     <Toasts />
   </div>
 </template>

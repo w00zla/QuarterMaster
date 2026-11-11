@@ -10,8 +10,10 @@ import { t, type Key } from "../i18n";
 import { topbarHeight } from "../layout";
 import { navGroups, userControls } from "../navigation";
 import { logout, me } from "../session";
+import { shell } from "../shell";
 import CompanionDialog from "./CompanionDialog.vue";
 import ProfileDialog from "./ProfileDialog.vue";
+import WindowButtons from "./WindowButtons.vue";
 
 // The overview on its own, then the data views, then the tools (as in the admin UI): which tabs exist follows the
 // server's capabilities (no buy/sell tab without UEX data)
@@ -23,6 +25,9 @@ const privilegeTabs: Array<{ to: string; label: Key; icon: IconName; key: string
   { to: "/feature/thumb-review", label: "nav.thumbReview", icon: "eye", key: "thumb-review.mark" },
 ];
 const supportTabs = computed(() => privilegeTabs.filter((tab) => me.value?.privileges.includes(tab.key)));
+
+// The attribute's mere presence marks a drag region (not in a browser)
+const drag = computed(() => (shell.available ? "" : undefined));
 
 const profileOpen = ref(false);
 const companionOpen = ref(false);
@@ -38,22 +43,23 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header ref="bar" class="topbar">
-    <div class="brand">
-      <img class="logo" :src="logo" alt="" />
-      <span class="wordmark">QUARTER<span class="accent">MASTER</span></span>
+  <!-- In the desktop shell the window has no frame: this bar is the title bar (`data-tauri-drag-region` only where nothing is clickable) -->
+  <header ref="bar" class="topbar" :class="{ framed: shell.available }" :data-tauri-drag-region="drag">
+    <div class="brand" :data-tauri-drag-region="drag">
+      <img class="logo" :src="logo" alt="" :data-tauri-drag-region="drag" />
+      <span class="wordmark" :data-tauri-drag-region="drag">QUARTER<span class="accent">MASTER</span></span>
     </div>
     <!-- Three bars: the overview, the data views, the tools -->
-    <div class="navs">
-      <nav v-for="(group, i) in groups" :key="i" class="tabs">
+    <div class="navs" :data-tauri-drag-region="drag">
+      <nav v-for="(group, i) in groups" :key="i" class="tabs" :data-tauri-drag-region="drag">
         <RouterLink v-for="tab in group" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
           <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
         </RouterLink>
       </nav>
     </div>
-    <div class="spacer" />
+    <div class="spacer" :data-tauri-drag-region="drag" />
     <!-- The game version of the installed data (both variants); a fixed width, so the dash and the number take the same room -->
-    <span class="ver-chip fixed" :class="{ none: !gameLabel }" :title="t('nav.gameVersion')">{{ gameLabel ?? "–" }}</span>
+    <span class="ver-chip fixed" :class="{ none: !gameLabel }" :title="t('nav.gameVersion')" :data-tauri-drag-region="drag">{{ gameLabel ?? "–" }}</span>
     <template v-if="controls.companion">
       <RouterLink v-for="tab in supportTabs" :key="tab.to" :to="tab.to" class="btn small outline support" :class="{ active: $route.path === tab.to }">
         <Icon :name="tab.icon" :size="14" /> {{ t(tab.label) }}
@@ -75,6 +81,8 @@ onUnmounted(() => {
       <Icon name="settings" :size="15" />
     </RouterLink>
     <button v-if="controls.logout" class="icon-btn" type="button" :title="t('user.logout')" @click="logout"><Icon name="log-out" :size="15" /></button>
+    <!-- The window buttons, at the top right in their own slots (the bar may wrap: they stay in the first row) -->
+    <WindowButtons class="win-top" />
   </header>
 </template>
 
@@ -92,6 +100,19 @@ onUnmounted(() => {
   padding: 0 16px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
+}
+
+/* The title bar of the frameless window: not selectable, the window buttons close to the edge */
+.topbar.framed {
+  /* Room for the three 36 px buttons (and their gaps) at the top right */
+  padding-right: 128px;
+  user-select: none;
+}
+
+.win-top {
+  position: absolute;
+  top: 10px;
+  right: 8px;
 }
 
 .brand {
@@ -206,6 +227,21 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The frameless window's bar also carries the window buttons: the wordmark gives way before the bar has to wrap */
+@media (max-width: 1400px) {
+  .topbar.framed {
+    gap: 12px;
+  }
+
+  .topbar.framed .wordmark {
+    display: none;
+  }
+
+  .topbar.framed .tab {
+    padding: 6px 10px;
+  }
 }
 
 /* Narrow screens: the tab bars get a row of their own (the data views scrolling sideways if needed) */

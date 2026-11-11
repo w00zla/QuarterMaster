@@ -316,6 +316,12 @@ onUnmounted(() => clearTimeout(timer));
             <label class="k" for="auto-update">{{ t("app.autoUpdate") }}</label>
             <input id="auto-update" class="switch" type="checkbox" role="switch" :checked="s.autoUpdate" :disabled="s.overridden.autoUpdate" @change="setAuto" />
           </div>
+          <!-- Only where the desktop shell offers app updates -->
+          <div v-if="shell.updateAvailable" class="srow end">
+            <button class="btn outline" type="button" @click="shell.openUpdate()">
+              <Icon name="imports" :size="14" /> {{ t("update.button") }}
+            </button>
+          </div>
           <div class="srow">
             <span class="k">{{ t("lang.title") }}</span>
             <LangSelect :model-value="langChoice" variant="outline" @update:model-value="setLang" />
