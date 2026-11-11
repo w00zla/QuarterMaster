@@ -121,6 +121,18 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
   display: block;
 }
 
+/* Narrow: smaller and centred over the icons (the toggle reaches 9 px into the bar: the logo keeps a gap to it) */
+.side.narrow .brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.side.narrow .logo {
+  width: 28px;
+  height: 28px;
+  margin-right: 0;
+}
+
 .wordmark {
   font-size: 13px;
   font-weight: 700;
