@@ -3,8 +3,9 @@
 // site disclaimer towards CIG: a short line, the full text on hover; before it, after a divider, the
 // third-party source (UEX: logo from its site, uex-logo-{20,40}.png Lanczos from its 960 px touch icon); the
 // Star Citizen logo from the official fankit at the right edge (exact sizes from
-// local/Fankit_*/03_LOGOS/STARCITIZEN_WHITE.png). The singleuser app (no login) starts the line with its version: a button that
-// opens the App Update dialog where the desktop shell offers updates (plain text in a browser), and the mark while one was found.
+// local/Fankit_*/03_LOGOS/STARCITIZEN_WHITE.png). The singleuser app (no login) ends the line as BindSight does: its version, a
+// button that opens the App Update dialog where the desktop shell offers updates (plain text in a browser), before it the mark
+// while one was found, and the link to the GitHub page.
 import { computed } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { loginNone } from "../capabilities";
@@ -18,19 +19,12 @@ import uexLogo2x from "../assets/uex-logo-40.png";
 import { t } from "../i18n";
 
 const version = computed(() => (loginNone.value && settings.value ? `v${settings.value.appVersion}` : null));
+const REPO_URL = "https://github.com/w00zla/quartermaster";
 const found = computed(() => !!shell.update && updateFound(shell.update));
 </script>
 
 <template>
   <footer class="footer">
-    <template v-if="version">
-      <button v-if="shell.updateAvailable" class="version mono" type="button" :title="t('update.button')" @click="shell.openUpdate()">{{ version }}</button>
-      <span v-else class="version plain mono">{{ version }}</span>
-      <!-- The mark's room is kept while there is none: nothing moves when it appears -->
-      <button v-if="shell.updateAvailable" class="mark" :class="{ hidden: !found }" type="button" :title="t('update.mark')" :tabindex="found ? 0 : -1" :aria-hidden="!found" @click="shell.openUpdate()">
-        <Icon name="imports" :size="14" />
-      </button>
-    </template>
     <span class="credits">Made with ❤️ and ☕ by w00zla &amp; Claude</span>
     <span class="powered">
       {{ t("footer.poweredBy") }}
@@ -41,6 +35,17 @@ const found = computed(() => !!shell.update && updateFound(shell.update));
     <div class="divider" />
     <span class="disclaimer" :title="t('footer.disclaimer')">{{ t("footer.disclaimerShort") }}</span>
     <img class="sc-logo" :src="scLogo" :srcset="`${scLogo} 1x, ${scLogo2x} 2x`" alt="Star Citizen" />
+    <!-- As in BindSight, at the right edge: the update mark, the version and the GitHub page (the desktop shell opens the link
+         in the system's browser, shell.ts) -->
+    <span v-if="version" class="meta">
+      <!-- The mark's room is kept while there is none: nothing moves when it appears -->
+      <button v-if="shell.updateAvailable" class="mark" :class="{ hidden: !found }" type="button" :title="t('update.mark')" :tabindex="found ? 0 : -1" :aria-hidden="!found" @click="shell.openUpdate()">
+        <Icon name="imports" :size="14" />
+      </button>
+      <button v-if="shell.updateAvailable" class="version mono" type="button" :title="t('update.button')" @click="shell.openUpdate()">{{ version }}</button>
+      <span v-else class="version plain mono">{{ version }}</span>
+      <a class="repo" :href="REPO_URL" target="_blank" rel="noopener noreferrer"><Icon name="github" :size="14" fill="currentColor" /> GitHub</a>
+    </span>
   </footer>
 </template>
 
@@ -101,7 +106,6 @@ const found = computed(() => !!shell.update && updateFound(shell.update));
   justify-content: center;
   width: 14px;
   height: 14px;
-  margin-left: -8px;
   padding: 0;
   border: none;
   background: none;
@@ -111,6 +115,27 @@ const found = computed(() => !!shell.update && updateFound(shell.update));
 
 .mark.hidden {
   visibility: hidden;
+}
+
+.meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.repo:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .credits {

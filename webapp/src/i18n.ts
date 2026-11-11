@@ -391,6 +391,7 @@ const en = {
 
   // Trading (UEX prices)
   "trade.button": "Trading",
+  "trade.noUex": "No trade data: the UEX sync is off",
   "trade.prices": "Prices",
   "trade.title": "Buy/Sell",
   "trade.pick": "Material or gear…",
@@ -893,6 +894,7 @@ const de: Record<Key, string> = {
 
   // Handel (UEX-Preise)
   "trade.button": "Handel",
+  "trade.noUex": "Keine Handels-Daten: der UEX-Abgleich läuft nicht",
   "trade.prices": "Preise",
   "trade.title": "Kaufen/Verkaufen",
   "trade.pick": "Material oder Ausrüstung…",

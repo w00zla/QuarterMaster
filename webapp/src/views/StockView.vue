@@ -102,7 +102,7 @@ watch(lang, load);
 // UEX prices per material (GET /api/trade/prices): the Handel button and the UEC columns; per visit
 const prices = ref<Record<string, PriceSummary>>({});
 async function loadPrices() {
-  // No UEX data offered (singleuser without a key): no prices, no columns, no trade button
+  // No UEX data offered (singleuser without a key): no prices, no UEC columns, the trade button greyed out
   if (!uexOn.value) return;
   try {
     prices.value = (await api<TradePricesResponse>("/trade/prices")).prices;
@@ -193,9 +193,9 @@ const columnsFor = (orgView: boolean) => computed<ColumnSpec[]>(() => [
   // Mini-Abstand (3px) vor der Handel-Spalte: Ressourcen fünf Buttons, Ausrüstung vier
   // (ohne Orgs fehlt der Teilen-Button: einer weniger)
   { key: "actions", label: "", width: (() => { const n = (props.components ? 4 : 5) - (orgsOn.value ? 0 : 1); return n * 26 + (n - 1) * 6; })() + 6 + 3, sortable: false, fixed: true, sep: true },
-  // Der Handel-Button der Materialzeile (Preise gelten je Material); ohne UEX-Daten keine Spalte
+  // Der Handel-Button der Materialzeile (Preise gelten je Material); ohne UEX-Daten ausgegraut
   // Der Button füllt die Spalte (kein Polster); breit genug für "Handel" und "Trading"
-  ...(uexOn.value ? [{ key: "trade", label: "", width: 6 + 62, sortable: false, fixed: true, sep: true }] : []),
+  { key: "trade", label: "", width: 6 + 62, sortable: false, fixed: true, sep: true },
 ]);
 const storageKey = props.components ? "qm.webapp.columns.components" : "qm.webapp.columns.stock";
 const defaultSort: SortState = props.components ? { key: "amount", dir: "desc" } : { key: "quality", dir: "desc" };
@@ -400,7 +400,8 @@ function open(batch: StockBatch, action: BatchAction) {
             <span v-if="components && on('stats')" />
             <span v-for="k in uecShown" :key="k" class="num uec total">{{ uecText(uecMicros(g.uuid, g.total, k)) }}</span>
             <span v-for="c in groupRest" :key="c" :class="{ sep: c === groupRest }" />
-            <span v-if="uexOn" class="sep trade"><ChipButton :label="t('trade.button')" :disabled="!prices[g.uuid]" @click="trade = { uuid: g.uuid, name: g.material }" /></span>
+            <!-- Without UEX data (singleuser without a key) the button stays, greyed out; the cell's tooltip says why -->
+            <span class="sep trade" :title="uexOn ? undefined : t('trade.noUex')"><ChipButton :label="t('trade.button')" :disabled="!uexOn || !prices[g.uuid]" @click="trade = { uuid: g.uuid, name: g.material }" /></span>
           </div>
           <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
             <span v-if="thumbView" />
@@ -439,7 +440,7 @@ function open(batch: StockBatch, action: BatchAction) {
               <button v-if="!components" type="button" class="icon-btn" :title="t('stock.adjust')" :disabled="!canChange(b) || b.state !== 'stored'" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
               <button v-else type="button" class="icon-btn" :title="t('stock.adjustStats')" :disabled="!canChange(b) || !materials.get(b.subjectUuid)?.stats.length" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
             </span>
-            <span v-if="uexOn" class="sep" />
+            <span class="sep" />
           </div>
         </template>
       </div>
