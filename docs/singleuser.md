@@ -54,11 +54,14 @@ request whose `Host` header is not in `WebappConfig.allowedHosts` (the first mid
 where Caddy matches the host), and the WebSocket handshake (`RealtimeOptions.allowedHosts`) is refused with 421 the
 same way. The composition root passes `127.0.0.1:<port>` and `localhost:<port>`. A GET or HEAD page request on a
 host of the list that is not the origin's (`localhost`) is redirected (307) to the origin, so the SPA always runs on the
-origin the WebSocket and the write checks expect; `/api`, `/auth`, `/thumbs` and `/downloads` just work on both
+origin the WebSocket and the write checks expect; `/api`, `/auth` and `/thumbs` just work on both
 hosts. Tests: `test/webapp-host.test.ts`.
 
-**Companion label:** a request with the companion's `X-QM-Companion` header is booked as `companion` in the history,
-any other as `webapp`. It is a label, not a security decision: the local API is open anyway.
+**Companion label:** a request with the companion's `X-QM-Companion` or `X-QM-Companion-Api` header is booked as
+`companion` in the history, any other as `webapp`. It is a label, not a security decision: the local API is open anyway.
+The same request is held to the companion API contract (`docs/webapp.md` "Companion API"): without a contract number in
+`X-QM-Companion-Api`, or with one outside the capabilities' `companionApi` range, it gets 426 `companionOutdated` or
+409 `serverOutdated`. `GET /api/companion/locale` gives it the game's English texts, never the player's language pack.
 
 **Network:** the data update ("Updating the data") is the only thing in this process that makes a request, and only to GitHub (or
 to `QM_DATA_FEED`, a folder). After "listening" a check starts in the background when the automatic update is on; the start
@@ -442,8 +445,8 @@ online implementation: `docs/webapp.md` "Identity"). The singleuser one is made 
   user of an imported database. No name and no avatar (`/api/me` answers `name`, `username` and `avatarUrl` as `null`: the session carries `noProfile`). `localIdentity` inserts the `app.app_user` row when it is
   missing (once, when it is made: call it after the migrations, outside a transaction).
 - **No login, no sessions, no tokens:** every `/api/*` request and every WebSocket handshake is that user;
-  cookies and `Authorization` are not looked at. `/auth/*` and `/api/token` do not exist; the companion release
-  files, where configured, need no login either.
+  cookies and `Authorization` are not looked at. `/auth/*` and `/api/token` do not exist. A request that carries
+  `X-QM-Companion` or `X-QM-Companion-Api` is the companion's (see "Companion label").
 - **No orgs:** the schema is there, the org routes (`/api/orgs/…`) are not mounted (`orgs: false`); the fixed user is
   a member of nothing, so every route that takes a guild id refuses through its normal membership check (403
   `notMember`, the stock service's `holderNotMember`).

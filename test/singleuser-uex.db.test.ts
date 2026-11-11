@@ -11,7 +11,7 @@ import type { Db } from '../src/db/client.ts';
 import { UEX_ENDPOINTS } from '../src/ext/uex.ts';
 import { createUexPuller, type UexTimers } from '../src/singleuser/uex.ts';
 import { mountUexRoutes } from '../src/singleuser/uex-routes.ts';
-import type { Capabilities, MeResponse, UexState } from '../src/webapp/api-types.ts';
+import { COMPANION_API, COMPANION_API_MIN, type Capabilities, type MeResponse, type UexState } from '../src/webapp/api-types.ts';
 import { createApp, type ApiApp } from '../src/webapp/app.ts';
 import { localIdentity } from '../src/webapp/identity-local.ts';
 import { fixtureSnapshot } from './fixtures.ts';
@@ -339,7 +339,7 @@ describe('singleuser UEX', { skip: url ? false : 'TEST_DATABASE_URL not set' }, 
       settings.uexKey = 'k';
       assert.equal((await caps(app)).uex, true);
       settings.uexKey = null;
-      assert.deepEqual(await caps(app), { login: 'none', orgs: false, uex: false, game: null });
+      assert.deepEqual(await caps(app), { login: 'none', orgs: false, uex: false, game: null, companionApi: { min: COMPANION_API_MIN, max: COMPANION_API } });
       // The trade routes stay mounted without data: they answer, empty
       assert.equal((await app.request('/api/trade/items')).status, 200);
     });
@@ -348,7 +348,7 @@ describe('singleuser UEX', { skip: url ? false : 'TEST_DATABASE_URL not set' }, 
       let orgs = true;
       const value = { login: 'discord' as const, orgs, uex: true };
       const app = createApp(webDb, await localIdentity(webDb), { origin: ORIGIN, trustProxy: false, distDir: null, capabilities: value });
-      assert.deepEqual(await caps(app), { login: 'discord', orgs: true, uex: true, game: null });
+      assert.deepEqual(await caps(app), { login: 'discord', orgs: true, uex: true, game: null, companionApi: { min: COMPANION_API_MIN, max: COMPANION_API } });
       const changing = createApp(webDb, await localIdentity(webDb), {
         origin: ORIGIN, trustProxy: false, distDir: null, capabilities: () => ({ login: 'none', orgs, uex: false }),
       });

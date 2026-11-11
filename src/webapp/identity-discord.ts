@@ -5,8 +5,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { parse as parseCookies } from 'hono/utils/cookie';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Db } from '../db/client.ts';
-import type { ApiTokenCreated, CompanionOutdated } from './api-types.ts';
-import { COMPANION_HEADER, PLATFORMS, compareVersions, downloadPath } from './companion.ts';
+import type { ApiTokenCreated } from './api-types.ts';
 import type { DiscordLogin } from './discord.ts';
 import { sameOrigin, type Identity } from './identity.ts';
 import type { Env } from './routes.ts';
@@ -76,21 +75,13 @@ export function discordIdentity(db: Db, login: DiscordLogin): Identity {
       });
     },
 
-    async authenticate(c, { origin, release }) {
+    // The companion sends its API token, the web app only its cookie
+    isCompanionRequest: (c) => c.req.header('authorization') !== undefined,
+
+    async authenticate(c) {
       // Companion app: its API token, never a cookie
       const auth = c.req.header('authorization');
       if (auth !== undefined) {
-        // An outdated app does no work: it gets the new version's links instead (also before its token is checked)
-        const current = release();
-        const version = c.req.header(COMPANION_HEADER) ?? '';
-        if (current && compareVersions(version, current.version) < 0) {
-          const downloads: CompanionOutdated['downloads'] = {};
-          for (const p of PLATFORMS) {
-            const f = current.files[p];
-            if (f) downloads[p] = `${origin}${downloadPath(f.file)}`;
-          }
-          return c.json({ error: 'companionOutdated', version: current.version, downloads } satisfies CompanionOutdated, 426);
-        }
         const match = API_TOKEN.exec(auth);
         const session = match ? await validateApiToken(db, match[1]!) : null;
         if (!session) return c.json({ error: 'not logged in' }, 401);
@@ -121,20 +112,6 @@ export function discordIdentity(db: Db, login: DiscordLogin): Identity {
         console.log(`API token created by ${c.get('session').userId} (ip ${clientIp(c)})`);
         return c.json({ token } satisfies ApiTokenCreated);
       });
-    },
-
-    async authenticateDownload(c) {
-      // The companion app downloads its update itself, with its token (no version check here: an
-      // outdated app is exactly the one that needs the file)
-      const auth = c.req.header('authorization');
-      if (auth !== undefined) {
-        const match = API_TOKEN.exec(auth);
-        if (!match || !await validateApiToken(db, match[1]!)) return c.json({ error: 'not logged in' }, 401);
-      } else {
-        const token = sessionToken(c);
-        if (!token || !await validateSession(db, token)) return c.redirect('/', 302);
-      }
-      return undefined;
     },
 
     // The session cookie itself: the handshake runs outside Hono

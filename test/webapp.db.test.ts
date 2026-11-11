@@ -13,7 +13,7 @@ import { connectAs, prepareDb } from './roles.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
 import { createApp, type WebappConfig } from '../src/webapp/app.ts';
-import type { CompanionInfo } from '../src/webapp/api-types.ts';
+import { COMPANION_API, COMPANION_API_MIN, type Capabilities } from '../src/webapp/api-types.ts';
 import { discordLogin } from '../src/webapp/discord.ts';
 import { discordIdentity } from '../src/webapp/identity-discord.ts';
 import { deleteExpiredSessions } from '../src/webapp/session.ts';
@@ -133,7 +133,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.ok(routes.length > 0);
     const caps = await app.request('/api/capabilities');
     assert.equal(caps.status, 200);
-    assert.deepEqual(await caps.json(), { login: 'discord', orgs: true, uex: true, game: null });
+    assert.deepEqual(await caps.json(), { login: 'discord', orgs: true, uex: true, game: null, companionApi: { min: COMPANION_API_MIN, max: COMPANION_API } });
     assert.equal(caps.headers.get('cache-control'), 'no-store');
     // Nothing else of that path is open
     assert.equal((await app.request('/api/capabilities', { method: 'POST', body: '{}', headers: { ...sameOrigin, 'content-type': 'application/json' } })).status, 401);
@@ -358,9 +358,10 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     const asUser = (token: string, path: string, method = 'GET') => app.request(`/api${path}`, method === 'GET'
       ? { headers: { cookie: `__Host-qm_session=${token}` } }
       : { method, headers: { cookie: `__Host-qm_session=${token}`, ...json, ...sameOrigin }, body: '{}' });
+    const companion = { 'x-qm-companion-api': String(COMPANION_API) };
     const asToken = (token: string, path: string, body?: unknown) => app.request(`/api${path}`, body === undefined
-      ? { headers: { authorization: `Bearer ${token}` } }
-      : { method: 'POST', headers: { authorization: `Bearer ${token}`, ...json }, body: JSON.stringify(body) });
+      ? { headers: { authorization: `Bearer ${token}`, ...companion } }
+      : { method: 'POST', headers: { authorization: `Bearer ${token}`, ...companion, ...json }, body: JSON.stringify(body) });
     const create = async (session: string) => {
       const res = await asUser(session, '/token', 'POST');
       assert.equal(res.status, 200);
@@ -402,7 +403,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
       const token = await create(session);
       // Passes the CSRF check and reaches the route (validation)
       assert.equal((await asToken(token, '/blueprints/add', { uuid: 'not-a-uuid' })).status, 400);
-      const bad = await app.request('/api/me', { headers: { authorization: 'Bearer qmt_wrong', cookie: `__Host-qm_session=${session}` } });
+      const bad = await app.request('/api/me', { headers: { authorization: 'Bearer qmt_wrong', ...companion, cookie: `__Host-qm_session=${session}` } });
       assert.equal(bad.status, 401);
       const csrf = await app.request('/api/profile', {
         method: 'POST', headers: { cookie: `__Host-qm_session=${session}`, ...json }, body: JSON.stringify({}),
@@ -417,118 +418,95 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     });
   });
 
-  describe('companion app release', () => {
-    /** A release dir: the manifest names the Windows standalone zip and the AppImage (and the setup with its signature). */
-    const releaseDir = (version = '1.2.0', setup = false) => {
-      const dir = mkdtempSync(join(tmpdir(), 'qm-companion-'));
-      writeFileSync(join(dir, 'QM_x64-standalone.zip'), 'zip-bytes');
-      writeFileSync(join(dir, 'QM_amd64.AppImage'), 'appimage-bytes!');
-      writeFileSync(join(dir, 'secret.txt'), 'nope');
-      if (setup) {
-        writeFileSync(join(dir, 'QM_x64-setup.exe'), 'setup');
-        writeFileSync(join(dir, 'QM_x64-setup.exe.sig'), 'c2lnbmF0dXJl\n');
-      }
-      writeFileSync(join(dir, 'companion.json'), JSON.stringify({
-        version, windows: 'QM_x64-standalone.zip', linux: 'QM_amd64.AppImage', ...(setup ? { windowsSetup: 'QM_x64-setup.exe' } : {}),
-      }));
-      return dir;
-    };
+  describe('companion API contract', () => {
     const tokenFor = async (session: string) => ((await (await app.request('/api/token', {
       method: 'POST', headers: { cookie: `__Host-qm_session=${session}`, 'content-type': 'application/json', ...sameOrigin }, body: '{}',
     })).json()) as { token: string }).token;
-    const meWith = (token: string, version?: string) => app.request('/api/me', {
-      headers: { authorization: `Bearer ${token}`, ...(version ? { 'x-qm-companion': version } : {}) },
+    const meWith = (token: string, headers: Record<string, string> = {}) => app.request('/api/me', {
+      headers: { authorization: `Bearer ${token}`, ...headers },
+    });
+    const BAD = `qmt_${'x'.repeat(43)}`;
+    const outdated = { error: 'companionOutdated', apiMin: COMPANION_API_MIN };
+
+    it('an app without a contract number, or below the minimum, gets 426 and nothing else; an equal one works', async () => {
+      const token = await tokenFor(await loginAs());
+      // The app version header is only a label: it decides nothing
+      for (const headers of [{}, { 'x-qm-companion': '99.0.0' }, { 'x-qm-companion-api': '0' }, { 'x-qm-companion-api': 'garbage' }, { 'x-qm-companion-api': '' }, { 'x-qm-companion-api': '-1' }] as Record<string, string>[]) {
+        const res = await meWith(token, headers);
+        assert.equal(res.status, 426, JSON.stringify(headers));
+        assert.deepEqual(await res.json(), outdated);
+      }
+      assert.equal((await meWith(token, { 'x-qm-companion-api': String(COMPANION_API_MIN), 'x-qm-companion': '0.0.1' })).status, 200);
+      assert.equal((await meWith(token, { 'x-qm-companion-api': String(COMPANION_API) })).status, 200);
     });
 
-    it('lists the release with versions and sizes; no manifest = none', async () => {
+    it('an app built for a newer contract gets 409 with the server\'s number', async () => {
+      const token = await tokenFor(await loginAs());
+      const res = await meWith(token, { 'x-qm-companion-api': String(COMPANION_API + 1) });
+      assert.equal(res.status, 409);
+      assert.deepEqual(await res.json(), { error: 'serverOutdated', apiMax: COMPANION_API });
+    });
+
+    it('the check runs before the token check: a bad token gets the 426 or 409, only a fitting app gets the 401', async () => {
+      assert.deepEqual(await (await meWith(BAD)).json(), outdated);
+      assert.equal((await meWith(BAD, { 'x-qm-companion-api': String(COMPANION_API + 1) })).status, 409);
+      assert.equal((await meWith(BAD, { 'x-qm-companion-api': String(COMPANION_API) })).status, 401);
+      // Whatever the Authorization header holds, it makes the request the companion's
+      const basic = await app.request('/api/me', { headers: { authorization: 'Basic abc' } });
+      assert.equal(basic.status, 426);
+      // Writes and unknown routes are held to it as well
+      const write = await app.request('/api/blueprints/add', {
+        method: 'POST', headers: { authorization: `Bearer ${BAD}`, 'content-type': 'application/json' }, body: '{}',
+      });
+      assert.equal(write.status, 426);
+      assert.equal((await app.request('/api/does-not-exist', { headers: { authorization: `Bearer ${BAD}` } })).status, 426);
+    });
+
+    it('the web app\'s own requests are not touched: a session needs no number, and a number alone does not make a request the companion\'s', async () => {
       const session = await loginAs();
       const cookie = { cookie: `__Host-qm_session=${session}` };
-      assert.deepEqual(await (await app.request('/api/companion', { headers: cookie })).json(), { version: null, downloads: [] });
-      app = build({ companionDir: releaseDir() });
-      assert.deepEqual(await (await app.request('/api/companion', { headers: cookie })).json(), {
-        version: '1.2.0',
-        downloads: [
-          { platform: 'windows', kind: 'standalone', file: 'QM_x64-standalone.zip', size: 9, url: '/downloads/companion/QM_x64-standalone.zip' },
-          { platform: 'linux', kind: 'standalone', file: 'QM_amd64.AppImage', size: 15, url: '/downloads/companion/QM_amd64.AppImage' },
-        ],
-      });
-      app = build({ companionDir: releaseDir('1.2.0', true) });
-      const { downloads } = await (await app.request('/api/companion', { headers: cookie })).json() as CompanionInfo;
-      assert.deepEqual(downloads.map((d) => [d.kind, d.file, d.size]), [
-        ['setup', 'QM_x64-setup.exe', 5], ['standalone', 'QM_x64-standalone.zip', 9], ['standalone', 'QM_amd64.AppImage', 15],
-      ]);
+      assert.equal((await app.request('/api/me', { headers: cookie })).status, 200);
+      assert.equal((await app.request('/api/me', { headers: { ...cookie, 'x-qm-companion': '0.0.1' } })).status, 200);
+      assert.equal((await app.request('/api/me', { headers: { ...cookie, 'x-qm-companion-api': '99' } })).status, 200);
+      assert.equal((await app.request('/api/me')).status, 401);
+      // The capabilities are the way to find out, so no check
+      const caps = await app.request('/api/capabilities', { headers: { authorization: `Bearer ${BAD}` } });
+      assert.equal(caps.status, 200);
     });
 
-    it('hands the installed app its update feed and setup with its token; none without a setup', async () => {
-      const token = await tokenFor(await loginAs());
-      const auth = { authorization: `Bearer ${token}`, 'x-qm-companion': '1.0.0' };
-      app = build({ companionDir: releaseDir('1.2.0') });
-      assert.equal((await app.request('/downloads/companion/latest.json', { headers: auth })).status, 404);
-      app = build({ companionDir: releaseDir('1.2.0', true) });
-      assert.equal((await app.request('/downloads/companion/latest.json')).status, 302, 'not logged in');
-      assert.equal((await app.request('/downloads/companion/latest.json', { headers: { authorization: `Bearer qmt_${'x'.repeat(43)}` } })).status, 401);
-      const feed = await app.request('/downloads/companion/latest.json', { headers: auth });
-      assert.equal(feed.status, 200);
-      assert.deepEqual(await feed.json(), {
-        version: '1.2.0',
-        platforms: { 'windows-x86_64': { url: `${ORIGIN}/downloads/companion/QM_x64-setup.exe`, signature: 'c2lnbmF0dXJl' } },
-      });
-      const setup = await app.request('/downloads/companion/QM_x64-setup.exe', { headers: auth });
-      assert.equal(setup.status, 200);
-      assert.equal(await setup.text(), 'setup');
-      assert.equal((await app.request('/downloads/companion/QM_x64-setup.exe.sig', { headers: auth })).status, 404);
+    it('the capabilities carry the accepted range', async () => {
+      const caps = (await (await app.request('/api/capabilities')).json()) as Capabilities;
+      assert.deepEqual(caps.companionApi, { min: COMPANION_API_MIN, max: COMPANION_API });
     });
 
-    it('ignores a manifest whose setup has no signature', async () => {
-      const dir = releaseDir('1.2.0', true);
-      rmSync(join(dir, 'QM_x64-setup.exe.sig'));
-      app = build({ companionDir: dir });
-      const cookie = { cookie: `__Host-qm_session=${await loginAs()}` };
-      assert.deepEqual(await (await app.request('/api/companion', { headers: cookie })).json(), { version: null, downloads: [] });
-    });
-
-    it('serves only the manifest files, only when logged in', async () => {
-      app = build({ companionDir: releaseDir() });
-      const anon = await app.request('/downloads/companion/QM_x64-standalone.zip');
-      assert.equal(anon.status, 302);
-      const cookie = { cookie: `__Host-qm_session=${await loginAs()}` };
-      const res = await app.request('/downloads/companion/QM_x64-standalone.zip', { headers: cookie });
-      assert.equal(res.status, 200);
-      assert.equal(await res.text(), 'zip-bytes');
-      assert.match(res.headers.get('content-disposition') ?? '', /attachment; filename="QM_x64-standalone.zip"/);
-      for (const file of ['secret.txt', 'companion.json', '..%2Fcompanion.json']) {
-        assert.equal((await app.request(`/downloads/companion/${file}`, { headers: cookie })).status, 404, file);
-      }
-    });
-
-    it('serves the files to the companion app with its token, also an outdated one; a wrong token gets 401', async () => {
-      const token = await tokenFor(await loginAs());
-      app = build({ companionDir: releaseDir('1.2.0') });
-      const res = await app.request('/downloads/companion/QM_amd64.AppImage', { headers: { authorization: `Bearer ${token}`, 'x-qm-companion': '1.0.0' } });
-      assert.equal(res.status, 200);
-      assert.equal(await res.text(), 'appimage-bytes!');
-      const bad = await app.request('/downloads/companion/QM_amd64.AppImage', { headers: { authorization: `Bearer qmt_${'x'.repeat(43)}` } });
-      assert.equal(bad.status, 401);
-      assert.equal((await app.request('/downloads/companion/QM_amd64.AppImage', { headers: { authorization: 'Basic abc' } })).status, 401);
-    });
-
-    it('refuses an outdated or silent app with 426 and the links; same or newer works; no release = no check', async () => {
+    it('the server hosts no release any more: the release info is a 404, the downloads and the update feed fall to the page', async () => {
       const session = await loginAs();
+      const cookie = { cookie: `__Host-qm_session=${session}` };
       const token = await tokenFor(session);
-      assert.equal((await meWith(token)).status, 200, 'no release: no check');
-      app = build({ companionDir: releaseDir('1.2.0') });
-      for (const version of [undefined, '1.1.9', '0.9.99', 'garbage']) {
-        const res = await meWith(token, version);
-        assert.equal(res.status, 426, String(version));
-        assert.deepEqual(await res.json(), {
-          error: 'companionOutdated', version: '1.2.0',
-          downloads: { windows: `${ORIGIN}/downloads/companion/QM_x64-standalone.zip`, linux: `${ORIGIN}/downloads/companion/QM_amd64.AppImage` },
-        });
+      const spa = build({ distDir: spaDist() });
+      const api = { 'x-qm-companion-api': String(COMPANION_API) };
+      for (const headers of [cookie, { authorization: `Bearer ${token}`, ...api }]) {
+        const res = await spa.request('/api/companion', { headers });
+        assert.deepEqual([res.status, await res.json()], [404, { error: 'not found' }]);
       }
-      assert.equal((await meWith(token, '1.2.0')).status, 200);
-      assert.equal((await meWith(token, '1.10.0')).status, 200, 'numeric, not text order');
-      // The browser session is not affected
-      assert.equal((await me(session)).status, 200);
+      for (const path of ['/downloads/companion/latest.json', '/downloads/companion/QM_x64-setup.exe', '/downloads/companion/companion.json']) {
+        for (const headers of [{}, cookie, { authorization: `Bearer ${token}`, ...api }]) {
+          const res = await spa.request(path, { headers });
+          assert.equal(res.status, 200, path);
+          assert.ok((await res.text()).includes('spa-index'), path);
+        }
+      }
+    });
+
+    it('the game\'s English texts need the companion\'s login; without a catalog they are a 404 noCatalog', async () => {
+      assert.equal((await app.request('/api/companion/locale')).status, 401);
+      const token = await tokenFor(await loginAs());
+      const res = await meWith(token, { 'x-qm-companion-api': String(COMPANION_API) });
+      assert.equal(res.status, 200);
+      const locale = await app.request('/api/companion/locale', { headers: { authorization: `Bearer ${token}`, 'x-qm-companion-api': String(COMPANION_API) } });
+      assert.deepEqual([locale.status, await locale.json()], [404, { error: 'noCatalog' }]);
+      // The version check applies to this route like to the others
+      assert.equal((await app.request('/api/companion/locale', { headers: { authorization: `Bearer ${token}` } })).status, 426);
     });
   });
 

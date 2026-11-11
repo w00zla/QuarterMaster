@@ -1,9 +1,8 @@
 <script setup lang="ts">
-// The companion app as an app card: logo, name, version and the downloads of the release the server
-// hands out (the browser's own platform first and primary); below it a bar with its Access Key (the
-// API token; shown once when created, a new one replaces the old).
+// The companion app as an app card: logo, name and the link to its releases on GitHub; below it a bar with
+// its Access Key (the API token; shown once when created, a new one replaces the old).
 import { computed, onMounted, ref } from "vue";
-import type { ApiTokenCreated, ApiTokenInfo, CompanionDownload, CompanionInfo, CompanionPlatform } from "../../../src/webapp/api-types";
+import type { ApiTokenCreated, ApiTokenInfo } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 // Exact sizes (72 px, 144 px for 2x screens) from assets/logo.png
 import logo from "../assets/logo-72.png";
@@ -18,20 +17,10 @@ const emit = defineEmits<{ close: [] }>();
 const keyInfo = ref<ApiTokenInfo | null>(null);
 // The key just created: shown until the dialog closes, never again
 const newKey = ref<string | null>(null);
-const release = ref<CompanionInfo | null>(null);
 const busy = ref(false);
 
+const RELEASES = "https://github.com/w00zla/quartermaster/releases";
 const buttons: ConfirmButton[] = [{ label: t("common.close"), kind: "outline", value: "close" }];
-const PLATFORM: Record<CompanionPlatform, { name: string; type: string }> = {
-  windows: { name: "Windows", type: "zip" },
-  linux: { name: "Linux", type: "AppImage" },
-};
-const type = (d: CompanionDownload) => (d.kind === "setup" ? "Setup" : PLATFORM[d.platform].type);
-// The browser's platform, for the primary download (its first: the setup on Windows)
-const ua = navigator.userAgent;
-const own: CompanionPlatform | null = /Windows/.test(ua) ? "windows" : /Linux/.test(ua) && !/Android/.test(ua) ? "linux" : null;
-// The own platform first (stable: the server's order within it)
-const downloads = computed(() => [...(release.value?.downloads ?? [])].sort((a, b) => Number(b.platform === own) - Number(a.platform === own)));
 
 // "2026-10-07" in every language
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -48,7 +37,7 @@ const keyText = computed(() => {
 
 onMounted(async () => {
   try {
-    [keyInfo.value, release.value] = [await api<ApiTokenInfo>("/token"), await api<CompanionInfo>("/companion")];
+    keyInfo.value = await api<ApiTokenInfo>("/token");
   } catch (e) {
     toastError(e);
   }
@@ -83,23 +72,10 @@ async function copyKey() {
       <div class="app-head">
         <img class="logo" :src="logo" :srcset="`${logo} 1x, ${logo2x} 2x`" alt="" />
         <div class="app-main">
-          <div class="app-name">
-            Quartermaster Companion
-            <span v-if="release?.version" class="tag mono">v{{ release.version }}</span>
-          </div>
-          <div v-if="release && !release.version" class="faint">{{ t("companion.noRelease") }}</div>
-          <div v-if="release?.version" class="downloads">
-            <a
-              v-for="(d, i) in downloads"
-              :key="d.file"
-              class="btn small get"
-              :class="i === 0 && d.platform === own ? 'primary' : 'outline'"
-              :href="d.url"
-              download
-            >
-              <Icon name="imports" :size="14" /> {{ PLATFORM[d.platform].name }} · {{ type(d) }}
-            </a>
-          </div>
+          <div class="app-name">Quartermaster Companion</div>
+          <a class="btn small primary get" :href="RELEASES" target="_blank" rel="noopener noreferrer">
+            <Icon name="external" :size="14" /> {{ t("companion.releases") }}
+          </a>
         </div>
       </div>
     </div>
@@ -126,7 +102,7 @@ async function copyKey() {
 </template>
 
 <style scoped>
-/* The app: logo left of name and version, the downloads below them (wrapping when they do not fit) */
+/* The app: logo left of name and the releases link */
 .app-card {
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-dim);
@@ -136,12 +112,6 @@ async function copyKey() {
   display: flex;
   align-items: center;
   gap: 16px;
-}
-
-.downloads {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .logo {
@@ -161,9 +131,6 @@ async function copyKey() {
 }
 
 .app-name {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   font-size: 16px;
   font-weight: 600;
 }

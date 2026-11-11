@@ -1,10 +1,9 @@
 // The user web app's HTTP layer (Hono): security headers, the origin check for writes, rate limits and the
 // JSON API. Who the user is (login, sessions, tokens, or one fixed user) is the Identity's, passed in.
 // Built by createApp so tests can drive it without a server. Design and rationale: docs/webapp.md.
-import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
@@ -12,12 +11,13 @@ import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from 'hono-rate-limiter';
 import type { Db } from '../db/client.ts';
-import type { Capabilities, CompanionInfo, ServerCapabilities } from './api-types.ts';
-import { PLATFORMS, UPDATE_FEED, companionRelease, downloadPath, updateFeed } from './companion.ts';
+import { COMPANION_API, COMPANION_API_MIN, type Capabilities, type ServerCapabilities } from './api-types.ts';
+import { companionApiRefusal } from './companion.ts';
 import { BLOB_BODY_LIMIT, BLOB_ROUTE } from './features.ts';
 import { gameVersionReader } from './game-version.ts';
 import type { Identity, IdentityHost } from './identity.ts';
 import { clientAddress, rateKey } from './ip.ts';
+import { registerCompanionLocale } from './locale.ts';
 import { getMe } from './me.ts';
 import { HttpError, registerRoutes } from './routes.ts';
 import type { Session } from './session.ts';
@@ -31,8 +31,6 @@ export interface WebappConfig {
   trustProxy: boolean;
   // Built SPA; null = none
   distDir: string | null;
-  // Companion app release (companion.json + files, see companion.ts); null/missing = none
-  companionDir?: string | null;
   // Item thumbnails (s/, m/, l/ and thumbs.json, see thumbs.ts); null/missing = none
   thumbsDir?: string | null;
   // Per window: auth and apiIp per client address (IPv6 per /64), apiUser per logged-in user
@@ -59,7 +57,7 @@ export type ApiApp = Hono<Env>;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const DEFAULT_LIMITS = { windowMs: 15 * 60_000, auth: 30, apiIp: 3000, apiUser: 1500 };
 // Paths of API clients, which work on any allowed host
-const NOT_A_PAGE = /^\/(api|auth|thumbs|downloads)(\/|$)/;
+const NOT_A_PAGE = /^\/(api|auth|thumbs)(\/|$)/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 
 export function createApp(db: Db, identity: Identity, config: WebappConfig) {
@@ -75,9 +73,8 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
     }
     return clientAddress(c.req.header('x-forwarded-for'), remote, config.trustProxy);
   };
-  const release = companionRelease(config.companionDir ?? null);
   const thumbs = thumbIndex(config.thumbsDir ?? null);
-  const host: IdentityHost = { origin: config.origin, clientIp, release };
+  const host: IdentityHost = { origin: config.origin, clientIp };
 
   // First of all: a request for a host that is not ours is nobody's business (DNS rebinding)
   if (config.allowedHosts) {
@@ -142,10 +139,15 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
   // What this server offers: before the user check (the SPA asks before it has a session)
   const capabilities = typeof config.capabilities === 'function' ? config.capabilities : () => config.capabilities as ServerCapabilities;
   const gameVersion = gameVersionReader(db);
-  app.get('/api/capabilities', async (c) => c.json({ ...capabilities(), game: await gameVersion() } satisfies Capabilities));
+  app.get('/api/capabilities', async (c) => c.json({
+    ...capabilities(), game: await gameVersion(), companionApi: { min: COMPANION_API_MIN, max: COMPANION_API },
+  } satisfies Capabilities));
 
   // --- API --------------------------------------------------------------------------------
   const api = new Hono<Env>();
+  // The companion's contract number first, before any user check: an outdated or too new app does no work (online, also
+  // with a bad token)
+  api.use('*', async (c, next) => (identity.isCompanionRequest(c) ? companionApiRefusal(c) : null) ?? next());
   api.use('*', async (c, next) => (await identity.authenticate(c, host)) ?? next());
   api.use('*', rateLimiter<Env>({ windowMs: limits.windowMs, limit: limits.apiUser, keyGenerator: (c) => `u:${c.get('session').userId}` }));
   // Writes take JSON only: a cross-site JSON request needs a CORS preflight, which is never answered
@@ -164,22 +166,7 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
 
   api.get('/me', async (c) => c.json(await getMe(db, c.get('session'))));
   registerRoutes(api, db, thumbs, { orgs: capabilities().orgs });
-
-  api.get('/companion', (c) => {
-    const current = release();
-    // The setup first (the Windows app for good, it updates itself), then the standalone builds
-    const setup = current?.setup;
-    const downloads: CompanionInfo['downloads'] = setup
-      ? [{ platform: 'windows', kind: 'setup', file: setup.file, size: setup.size, url: downloadPath(setup.file) }]
-      : [];
-    if (current) {
-      for (const platform of PLATFORMS) {
-        const f = current.files[platform];
-        if (f) downloads.push({ platform, kind: 'standalone', file: f.file, size: f.size, url: downloadPath(f.file) });
-      }
-    }
-    return c.json({ version: current?.version ?? null, downloads } satisfies CompanionInfo);
-  });
+  registerCompanionLocale(api, db);
 
   // The routes that only exist with accounts (online: the API token)
   identity.mountApiRoutes(api, host);
@@ -193,27 +180,6 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
     if (err instanceof HttpError) return c.json({ error: err.message }, err.status);
     console.error(err);
     return c.json({ error: 'internal error' }, 500);
-  });
-
-  // --- companion app downloads (who may: the identity; only the files the manifest names) ---
-  app.use('/downloads/*', rateLimiter({ windowMs: limits.windowMs, limit: limits.auth, keyGenerator: (c) => rateKey(clientIp(c)) }));
-  app.use('/downloads/companion/*', async (c, next) => (await identity.authenticateDownload(c)) ?? next());
-  // The installed app's updater reads the setup's URL and signature here
-  app.get(`/downloads/companion/${UPDATE_FEED}`, (c) => {
-    const feed = updateFeed(release(), config.origin);
-    c.header('Cache-Control', 'no-store');
-    return feed ? c.json(feed) : c.json({ error: 'not found' }, 404);
-  });
-  app.get('/downloads/companion/:file', async (c) => {
-    const current = release();
-    const file = c.req.param('file');
-    const entry = current && [...PLATFORMS.map((p) => current.files[p]), current.setup].find((f) => f?.file === file);
-    if (!entry || !config.companionDir) return c.text('Not found', 404);
-    c.header('Content-Type', 'application/octet-stream');
-    c.header('Content-Length', String(entry.size));
-    c.header('Content-Disposition', `attachment; filename="${entry.file.replace(/"/g, '')}"`);
-    c.header('Cache-Control', 'no-store');
-    return c.body(Readable.toWeb(createReadStream(join(config.companionDir, entry.file))) as ReadableStream);
   });
 
   // --- item thumbnails (public, no login: game renders like the wiki's; the name carries a content hash) ---

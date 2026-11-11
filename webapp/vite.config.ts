@@ -14,8 +14,8 @@ export default defineConfig(({ mode }) => {
       host: "localhost",
       port: 5174,
       strictPort: true,
-      // ws: the realtime socket (/api/ws) goes through the proxy too; /downloads: the companion app; /thumbs: item thumbnails
-      proxy: { "/api": { target: backend, ws: true }, "/auth": backend, "/downloads": backend, "/thumbs": backend },
+      // ws: the realtime socket (/api/ws) goes through the proxy too; /thumbs: item thumbnails
+      proxy: { "/api": { target: backend, ws: true }, "/auth": backend, "/thumbs": backend },
       // Only what the SPA imports (default: the whole workspace, readable by anything on localhost)
       fs: { allow: [".", "../adminapp/src", "../src/webapp/api-types.ts", "../src/thumbs.ts", "../src/stock/amount.ts", "../src/stock/quality.ts", "../src/stock/component-stats.ts", "../src/planner/plan.ts", "../src/planner/stock.ts"] },
     },

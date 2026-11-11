@@ -4,7 +4,6 @@
 // user, no login). Design: docs/webapp.md "Identity".
 import type { IncomingMessage } from 'node:http';
 import type { Context, Hono } from 'hono';
-import type { CompanionRelease } from './companion.ts';
 import type { Env } from './routes.ts';
 
 /** What the app hands the identity's HTTP parts: the things only createApp has. */
@@ -13,8 +12,6 @@ export interface IdentityHost {
   origin: string;
   /** The request's client address, for the log. */
   clientIp(c: Context): string;
-  /** The companion release the server hands out (the app's cached reader); null = none. */
-  release(): CompanionRelease | null;
 }
 
 /** The user behind an accepted WebSocket. */
@@ -33,14 +30,17 @@ export interface Identity {
   /** Mounts the identity's own routes on the app (after its security headers, write check, no-store and the per-address rate limit of /auth/*). */
   mountRoutes(app: Hono<Env>, host: IdentityHost): void;
   /**
+   * Whether an API request is the companion app's (not the web app's own): the app then holds it to the companion
+   * API contract (companionApiRefusal), before `authenticate` looks at it.
+   */
+  isCompanionRequest(c: Context): boolean;
+  /**
    * The user of an API request: sets `session` (and `apiToken` for a request that is not the web app's own) on
    * the context and returns nothing, or returns the refusal to send. Runs before any API route, unknown ones too.
    */
   authenticate(c: Context<Env>, host: IdentityHost): Promise<Response | undefined>;
   /** Mounts the API routes that only exist with accounts (behind authenticate and the API's own checks). */
   mountApiRoutes(api: Hono<Env>, host: IdentityHost): void;
-  /** Whether a request may fetch the companion release files: nothing, or the refusal to send. */
-  authenticateDownload(c: Context): Promise<Response | undefined>;
   /** The user of a WebSocket handshake (path, Origin and the address limit are checked by the hub before); null = 401. */
   authenticateUpgrade(req: IncomingMessage): Promise<SocketUser | null>;
 }

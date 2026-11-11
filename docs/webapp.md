@@ -9,7 +9,7 @@ before go-live: the privacy notice (needs the controller's name and contact from
 it), an OWASP ZAP baseline scan, the deploy (`docs/deploy.md`).
 
 Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend runs on `:3002`, its Vite on
-`:5174` with a proxy for `/api`, `/auth` and `/downloads`; always open it as `localhost`, never
+`:5174` with a proxy for `/api`, `/auth` and `/thumbs`; always open it as `localhost`, never
 `127.0.0.1` (another cookie host). The dev Discord application has the redirect
 `http://localhost:5174/auth/callback`; the dev bot must run against the dev DB, else the roster is empty.
 
@@ -25,6 +25,7 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~3 MB per language
   spared (Caddy compresses nothing; the app gzips only `/api/companion/catalog`, below); the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
   per session), the identity's own routes (online `/auth/*`), `GET /api/capabilities`, then for `/api/*` the
+  companion API check (only for a request the identity calls the companion's, see "Companion API"), the
   user check (the identity's `authenticate`; online 401 for every route, unknown ones too), JSON-only
   writes (415, `DELETE` included) and a 16 KB body limit (a feature's image upload: its own, see
   "Features and privileges").
@@ -61,14 +62,13 @@ The seam between the HTTP layer and the variant it runs as. `Identity`:
 |---|---|---|
 | `acceptsWrite(c, origin)` | every non-GET, before anything else; false = 403 | `Authorization` present (the companion's token: no cookie, and a page cannot set the header without a preflight) or same-origin |
 | `mountRoutes(app, host)` | once, after the global middlewares | `/auth/login`, `/auth/callback`, `/auth/logout` |
-| `authenticate(c, host)` | every `/api/*` request but the capabilities | `Authorization`: the companion's version check (426), then its token (401), never the cookie; else the session cookie (401, an unknown cookie deleted). Sets `session`, and `apiToken` for a token |
+| `isCompanionRequest(c)` | every `/api/*` request but the capabilities, before `authenticate` | `Authorization` present (any value) |
+| `authenticate(c, host)` | every `/api/*` request but the capabilities, after the companion API check | `Authorization`: its token (401), never the cookie; else the session cookie (401, an unknown cookie deleted). Sets `session`, and `apiToken` for a token |
 | `mountApiRoutes(api, host)` | once, inside the API | `GET`/`POST /api/token`, session only |
-| `authenticateDownload(c)` | `/downloads/companion/*` | token (401) or session (redirect to `/`) |
 | `authenticateUpgrade(req)` | a WebSocket handshake, after path, Origin and the address limit | the session cookie; `valid()` re-validates it at every keepalive |
 
-`host` (`IdentityHost`) is what only the app has: its origin, the client address of a request (for the log) and the
-companion release. Online-only, all inside `identity-discord.ts`: the login, sessions, the API token and the
-companion's version check. The local identity (one fixed user, no login) is described in `docs/singleuser.md`
+`host` (`IdentityHost`) is what only the app has: its origin and the client address of a request (for the log).
+Online-only, all inside `identity-discord.ts`: the login, sessions and the API token. The local identity (one fixed user, no login) is described in `docs/singleuser.md`
 "Identity".
 
 ### Login (`discord.ts`, routes in `identity-discord.ts`)
@@ -160,7 +160,7 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 
 One per user for the companion app, managed in the top bar's "Companion" dialog (`CompanionDialog.vue`;
 `POST /api/token`, shown once, only the SHA-256 and the creating session's Discord profile stored; a new one
-replaces the old). `Authorization: Bearer qmt_…` authenticates `/api/*` as the user (never falls back to the
+replaces the old; the dialog also links to the companion's GitHub releases). `Authorization: Bearer qmt_…` authenticates `/api/*` as the user (never falls back to the
 cookie) and skips the same-origin check (a cross-site page cannot set the header without a preflight);
 `/api/token` itself is session-only. Requests made with it are history source `companion`.
 
@@ -196,20 +196,38 @@ subject = catalog UUID, payload `{ hash }` = the thumbnail it was marked on, a W
 `GET /api/features/thumb-review/subjects?lang` lists every thumbnail of the index with name, class name, type and
 item class label. The SPA view: "Views".
 
-### Companion release (`companion.ts`)
+### Companion API (`companion.ts`, `locale.ts`)
 
-The companion app itself (code, build, release scripts) is described in `docs/companion.md`; this is the server side.
+The companion app itself is described in `docs/companion.md`; this is the server side. The server hosts no companion
+files: the releases are the GitHub releases of this repository (https://github.com/w00zla/quartermaster/releases),
+which the Companion dialog links to.
 
-`COMPANION_DIR` (default `local/companion`; where the companion's publish script writes) holds the built app files and `companion.json`
-`{"version":"x.y.z","windows":"<…_x64-standalone.zip>","linux":"<.AppImage>","windowsSetup":"<…_x64-setup.exe>"}`
-(re-read when it changes; the setup's updater signature is read from `<setup>.sig` next to it, missing =
-manifest ignored). `GET /api/companion` lists version and downloads (the setup first, `kind` setup or
-standalone); `GET /downloads/companion/<file>` serves only manifest files (not the `.sig`), only with a
-session (else redirect to `/`) or the API token (no version check: the outdated app downloads its update;
-a wrong token = 401). `GET /downloads/companion/latest.json`, same access: the installed app's update feed
-in the Tauri updater format (`version`, `platforms.windows-x86_64` with the setup's absolute URL and
-signature), 404 without a setup. Token requests must send `X-QM-Companion: <version>`: older than
-the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no manifest = no check.
+**Contract number.** The API contract is numbered, not the apps: `COMPANION_API` (in `api-types.ts`) is the number a
+companion built from this tree sends and, for a server, its maximum; `COMPANION_API_MIN` is the oldest number the server
+still accepts (`COMPANION_API_MIN <= COMPANION_API`, both 1 at the start). Both go into `GET /api/capabilities` as
+`companionApi: { min, max }`, in both variants. A companion sends its number in `X-QM-Companion-Api` (an integer) and
+its app version in `X-QM-Companion` (`x.y.z`, for logs and labels only, never decided on).
+
+**The check** (`companionApiRefusal`, one implementation, run by the app for every companion request before the
+identity's user check, so before the token check online): a number that is missing, not an integer or below
+`COMPANION_API_MIN` = 426 `{ "error": "companionOutdated", "apiMin": <n> }`; above `COMPANION_API` = 409
+`{ "error": "serverOutdated", "apiMax": <n> }`. Neither carries data or links. Every `/api/*` route is covered
+(writes and unknown routes too) except `GET /api/capabilities`, which is how a companion finds the range. What a
+companion request is, is the identity's call (`isCompanionRequest`): online a request carrying `Authorization`
+(whatever its value; the web app sends a cookie); singleuser a request carrying `X-QM-Companion` or `X-QM-Companion-Api`
+(no tokens there; the header is a label, any local program may send it or leave it out). The web app's own
+requests are never checked.
+
+**Locale** (`GET /api/companion/locale`): the game's own English texts, so the companion needs no hand-placed
+`global.ini`: the `game` source in `en` of the installed catalog, never the effective texts (the singleuser variant's
+language pack and external sources sit above the game's texts there and must not leak into this table; the companion
+reads the player's pack itself). The same lines a `global.ini` has: `key=value`, UTF-8 without BOM, `\n` line ends, a line
+break inside a value written back as the two characters `\n` as the game does, keys as stored (lower case, without
+`,P`), ordered by key. `Content-Type: text/plain; charset=utf-8`. The ETag is the game source's `content_sha256`
+(`"<sha>"`, `"<sha>-gzip"` for the gzipped body), so it changes exactly when a catalog import changed the game texts and
+costs no hash over the ~90k rows; a matching `If-None-Match` = 304. `Cache-Control: private, no-cache`, gzipped when the
+client accepts it (`Vary: Accept-Encoding`). The text (and its gzip) is kept in memory until the source's hash changes.
+No catalog installed = 404 `{ "error": "noCatalog" }`. Authenticated and version-checked like every companion route.
 
 ### Thumbnails (`thumbs.ts`, `src/thumbs.ts`)
 

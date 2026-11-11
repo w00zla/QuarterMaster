@@ -15,9 +15,9 @@ const HOSTS = ['127.0.0.1:28460', 'localhost:28460'];
 const identity: Identity = {
   acceptsWrite: () => true,
   mountRoutes() {},
+  isCompanionRequest: () => false,
   authenticate: async (c) => { c.set('session', { userId: '00000000000000000', username: 'local', globalName: 'Local', avatar: null }); return undefined; },
   mountApiRoutes() {},
-  authenticateDownload: async () => undefined,
   authenticateUpgrade: async () => ({ userId: '00000000000000000', valid: async () => true }),
 };
 const db = { execute: async () => [] } as unknown as Db;

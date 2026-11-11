@@ -14,7 +14,7 @@ import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { buildRelease, gzipStable } from '../src/datapack/build.ts';
 import { connectPglite } from '../src/db/pglite.ts';
 import { dbDir } from '../src/singleuser/paths.ts';
-import type { Capabilities, DataUpdateState, LocalSettingsState, MeResponse, StockListResponse, UexState } from '../src/webapp/api-types.ts';
+import { COMPANION_API, COMPANION_API_MIN, type Capabilities, type DataUpdateState, type LocalSettingsState, type MeResponse, type StockListResponse, type UexState } from '../src/webapp/api-types.ts';
 import { LOCAL_USER_ID } from '../src/webapp/identity-local.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
@@ -93,7 +93,7 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
         const res = await fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(10_000) });
         return { status: res.status, body: (await res.json()) as T };
       };
-      assert.deepEqual(await json<Capabilities>('/api/capabilities'), { status: 200, body: { login: 'none', orgs: false, uex: false, game: { label: null, build: 1000 } } });
+      assert.deepEqual(await json<Capabilities>('/api/capabilities'), { status: 200, body: { login: 'none', orgs: false, uex: false, game: { label: null, build: 1000 }, companionApi: { min: COMPANION_API_MIN, max: COMPANION_API } } });
       // The data update is off: nothing installed, nothing asked
       assert.deepEqual(await json<DataUpdateState>('/api/local/data'), { status: 200, body: { phase: 'idle', installed: null, progress: null, last: null } });
       // No key: the UEX pull is off, nothing was requested, and the trade part stays hidden

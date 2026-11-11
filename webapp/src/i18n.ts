@@ -387,7 +387,7 @@ const en = {
   "companion.copy": "Copy",
   "companion.copied": "Copied.",
   "companion.keyActive": "Active",
-  "companion.noRelease": "No download available.",
+  "companion.releases": "Releases on GitHub",
 
   // Trading (UEX prices)
   "trade.button": "Trading",
@@ -452,7 +452,6 @@ const en = {
   "start.noConnection": "No connection",
   "start.missing": "Game data missing.",
   "start.retry": "Try again",
-  "settings.saved": "Saved.",
   "folder.title": "Game folder",
   "folder.found": "Found",
   "folder.noGame": "No game",
@@ -876,7 +875,7 @@ const de: Record<Key, string> = {
   "companion.copy": "Kopieren",
   "companion.copied": "Kopiert.",
   "companion.keyActive": "Aktiv",
-  "companion.noRelease": "Kein Download verfügbar.",
+  "companion.releases": "Releases auf GitHub",
 
   // Handel (UEX-Preise)
   "trade.button": "Handel",
@@ -940,7 +939,6 @@ const de: Record<Key, string> = {
   "start.noConnection": "Keine Verbindung",
   "start.missing": "Spieldaten fehlen.",
   "start.retry": "Erneut versuchen",
-  "settings.saved": "Gespeichert.",
   "folder.title": "Spielordner",
   "folder.found": "Gefunden",
   "folder.noGame": "Kein Spiel",

@@ -2,9 +2,10 @@
 // request and every WebSocket is that user's. The local API is open to other programs on the machine on purpose
 // (docs/singleuser.md "Identity"); what is kept out is web pages (acceptsWrite below).
 import { sql } from 'drizzle-orm';
+import type { Context } from 'hono';
 import type { Db } from '../db/client.ts';
 import { sameOrigin, type Identity } from './identity.ts';
-import { COMPANION_HEADER } from './companion.ts';
+import { COMPANION_API_HEADER, COMPANION_HEADER } from './companion.ts';
 import type { Session } from './session.ts';
 
 /**
@@ -24,6 +25,7 @@ const LOCAL_SESSION: Session = { userId: LOCAL_USER_ID, username: 'local', globa
  */
 export async function localIdentity(db: Db): Promise<Identity> {
   await db.execute(sql`INSERT INTO app.app_user (user_id) VALUES (${LOCAL_USER_ID}) ON CONFLICT DO NOTHING`);
+  const isCompanion = (c: Context) => c.req.header(COMPANION_HEADER) !== undefined || c.req.header(COMPANION_API_HEADER) !== undefined;
 
   return {
     // The API is open to local programs, but not to web pages: any page in the user's browser can send requests to
@@ -37,18 +39,19 @@ export async function localIdentity(db: Db): Promise<Identity> {
     // No login: no /auth/* routes
     mountRoutes() {},
 
+    // A label, not a security decision: a request that calls itself the companion is held to the companion API
+    // contract and the history says "companion" for it (any local program can say so; there is nothing to gain
+    // from it, the API is open anyway)
+    isCompanionRequest: isCompanion,
+
     async authenticate(c) {
       c.set('session', LOCAL_SESSION);
-      // A label, not a security decision: the history says "companion" for a request that calls itself the
-      // companion (any local program can say so; there is nothing to gain from it, the API is open anyway)
-      if (c.req.header(COMPANION_HEADER) !== undefined) c.set('apiToken', true);
+      if (isCompanion(c)) c.set('apiToken', true);
       return undefined;
     },
 
     // No accounts: no /api/token
     mountApiRoutes() {},
-
-    authenticateDownload: async () => undefined,
 
     authenticateUpgrade: async () => ({ userId: LOCAL_USER_ID, valid: async () => true }),
   };

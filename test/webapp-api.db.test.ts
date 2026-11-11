@@ -107,7 +107,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
 
   it('companion catalog: the same rows with only the companion\'s fields, by API token, with an ETag', async () => {
     const token = ((await (await app.request('/api/token', { method: 'POST', body: '{}', headers: { ...headers(SOLO), 'content-type': 'application/json' } })).json()) as { token: string }).token;
-    const auth = { authorization: `Bearer ${token}` };
+    const auth = { authorization: `Bearer ${token}`, 'x-qm-companion-api': '1' };
     const res = await app.request('/api/companion/catalog?lang=en', { headers: auth });
     assert.equal(res.status, 200);
     const tag = res.headers.get('etag');
@@ -136,7 +136,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     const again = await app.request('/api/companion/catalog?lang=en', { headers: { ...auth, 'if-none-match': tag } });
     assert.equal(again.status, 304);
     assert.equal(again.headers.get('cache-control'), 'private, no-cache');
-    assert.equal((await app.request('/api/companion/catalog?lang=en', { headers: { authorization: `Bearer qmt_${'x'.repeat(43)}` } })).status, 401);
+    assert.equal((await app.request('/api/companion/catalog?lang=en', { headers: { authorization: `Bearer qmt_${'x'.repeat(43)}`, 'x-qm-companion-api': '1' } })).status, 401);
     // Gzipped by the server when accepted: the same body, its own ETag, revalidated alike
     const zipped = await app.request('/api/companion/catalog?lang=en', { headers: { ...auth, 'accept-encoding': 'gzip, deflate' } });
     assert.equal(zipped.status, 200);
@@ -394,7 +394,7 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
     // The owner gives some to another member from the companion app (API token)
     const token = ((await (await app.request('/api/token', { method: 'POST', body: '{}', headers: { ...headers(MIA), 'content-type': 'application/json' } })).json()) as { token: string }).token;
     const moved = await app.request('/api/stock/move', {
-      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-qm-companion-api': '1', 'content-type': 'application/json' },
       body: JSON.stringify({ batchId: batch.id, amount: '1', expected: '3', guildId: G, toOwnerUserId: MAX }),
     });
     assert.equal(moved.status, 200);

@@ -94,6 +94,13 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   ETag in the app cache dir (`%LOCALAPPDATA%\com.w00zla.quartermaster.companion\api\<path>.json`,
   `server::cached_api`) and sent with `If-None-Match`; a 304 answers the kept body (the ETag hashes the
   content: another server or user never gets a wrong one; a broken file only costs the transfer).
+- What the server expects and answers (`docs/webapp.md` "Companion API"): every companion request carries its API
+  contract number in `X-QM-Companion-Api` (the app version in `X-QM-Companion` is a label). A number missing or below the
+  server's minimum gets 426 `{ "error": "companionOutdated", "apiMin": n }`, one above its maximum 409
+  `{ "error": "serverOutdated", "apiMax": n }`; the range is also in `GET /api/capabilities` (`companionApi`).
+  Online a companion request is one with an `Authorization` header, on the singleuser server one with either header.
+  `GET /api/companion/locale` gives the game's English texts as `global.ini` lines (ETag, gzip, 404 `noCatalog`).
+  The server serves no companion files, no update feed and no release info.
 - **Item thumbnails** (2026-10-25; the sizes at `ThumbSize` in `backend.ts`, the server side in `docs/webapp.md`
   "Thumbnails"): only for catalog entries with a hash (`CatalogMaterial.thumb`, `CatalogBlueprint.thumb` of
   its `outputUuid`); without one nothing is asked and the row looks as before. Rust `thumb(size, uuid, hash)`
@@ -134,15 +141,9 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   read by the CLI, see BindSight) gives the setup (with `DirectML.dll` next to the exe, from `pnpm directml`)
   `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and its `.sig`, and
   `target/release/quartermaster-companion.exe`; Linux the AppImage.
-- Windows: `scripts/publish-win-companion.ps1 <user@host> [-DeployPath …]` copies the setup, its `.sig` and the exe
-  zipped with `DirectML.dll` (`…_x64-standalone.zip`) into `COMPANION_DIR` (default `local/companion`), writes
-  `companion.json` (version, windows, linux kept, windowsSetup) and pushes. Linux: copy the AppImage there, add it to
-  `companion.json`, then `scripts/push-companion.sh <user@host>`.
-- The push is one implementation, `scripts/push-companion.mjs` (Node and scp, on Windows its OpenSSH scp; the ps1
-  calls it, the .sh is its Linux entry point): the files the manifest names into `<DEPLOY_PATH>/local/companion/` on
-  the VM (default `/opt/sc-quartermaster`), the manifest last (it raises the required version; copied first, it
-  would send outdated apps to downloads that are not there yet). The server side: `docs/deploy.md`
-  and `docs/webapp.md` "Companion release".
+- The server hosts no companion files: the downloads are the GitHub releases of this repository
+  (https://github.com/w00zla/quartermaster/releases), which the web app's Companion dialog links to. The server side
+  (the API contract number, the locale route): `docs/webapp.md` "Companion API".
 - The key pair comes from `pnpm tauri signer generate -w <file>` once; the private key never goes into the repo,
   losing it means installed apps take no update until reinstalled with a new key.
 
@@ -501,7 +502,7 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   Microsoft, MIT) next to the exe: Windows' own (`System32`, 1.0 on Windows 10) refuses the session. `pnpm directml`
   (`scripts/fetch-directml.mjs`) fetches it into `src-tauri/resources/ocr/` (only that file of the 200 MB NuGet package,
   by HTTP ranges, SHA-256 pinned); `build:windows` and `build:fast:windows` put it next to the exe
-  (`tauri.setup.conf.json`: `$INSTDIR\DirectML.dll`), `publish-win-companion.ps1` into the standalone zip; not in
+  (`tauri.setup.conf.json`: `$INSTDIR\DirectML.dll`); not in
   `tauri dev`. `ocrwatch::Gpu`: ready (the DLL next to the exe), missing, or failed (any OCR error on the GPU: the
   models load anew on the CPU from the next frame, for the rest of the run); the settings grey the switch out (off)
   unless ready (`gpu_status`, event `ocr-gpu`). Not measured: what the GPU load costs the running game's frame time.

@@ -41,10 +41,21 @@ export interface ServerCapabilities {
   uex: boolean;
 }
 
+/**
+ * The companion app's API contract number: what a companion built from this tree sends in `X-QM-Companion-Api`, and
+ * for a server its maximum (the number it was built with). Raised when the contract changes in a way an older
+ * companion cannot follow (or, the other way round, a newer companion needs something an older server lacks).
+ */
+export const COMPANION_API = 1;
+/** The oldest contract number a server still accepts from a companion; never above COMPANION_API. */
+export const COMPANION_API_MIN = 1;
+
 /** The answer of GET /api/capabilities: the server's capabilities and the installed game data. */
 export interface Capabilities extends ServerCapabilities {
   // The latest catalog import's game version (label `4.10.2.12913470`, and its build number); null = no catalog installed
   game: { label: string | null; build: number } | null;
+  // The companion contract numbers this server accepts: `min` (COMPANION_API_MIN) to `max` (COMPANION_API)
+  companionApi: { min: number; max: number };
 }
 
 // --- errors -----------------------------------------------------------------------------------
@@ -166,6 +177,10 @@ export interface CompanionCatalogResponse {
   locations: CompanionCatalogLocation[];
   blueprints: CompanionCatalogBlueprint[];
 }
+
+// --- the companion app's English texts (GET /api/companion/locale) -----------------------------------
+// text/plain, the lines `key=value` of a global.ini (a line break in a value as the literal `\n`): the game's own
+// English texts only. ETag, gzip when accepted; 404 `{ error: 'noCatalog' }` without an installed catalog.
 
 // --- stock -------------------------------------------------------------------------------------
 // All take &lang=de|en for material and location names and answer StockListResponse.
@@ -681,8 +696,9 @@ export interface ProfileRequest {
 // GET  /api/token -> ApiTokenInfo       (session only, 403 'sessionOnly' with a token)
 // POST /api/token -> ApiTokenCreated    creates the token, replacing an existing one; shown only here
 // With "Authorization: Bearer <token>" every other /api route works as the user. The companion app
-// also sends its version in X-QM-Companion; older than the server's release (or missing, while the
-// server has one) = 426 CompanionOutdated for every token request.
+// also sends its contract number in X-QM-Companion-Api (and its app version in X-QM-Companion, for logs):
+// a number below COMPANION_API_MIN or none = 426 CompanionOutdated, above COMPANION_API = 409 ServerOutdated,
+// for every token request (before the token is checked).
 
 export interface ApiTokenInfo {
   // null = no token
@@ -694,32 +710,19 @@ export interface ApiTokenCreated {
   token: string;
 }
 
-// --- companion app release (GET /api/companion; files at GET /downloads/companion/<file>, session or API token;
-// the installed app's update feed at GET /downloads/companion/latest.json, Tauri updater format)
-export type CompanionPlatform = 'windows' | 'linux';
-
-export interface CompanionDownload {
-  platform: CompanionPlatform;
-  // setup = the installed app (Windows, updates itself); standalone = the bare exe zipped, the AppImage
-  kind: 'setup' | 'standalone';
-  file: string;
-  // Bytes
-  size: number;
-  // Path on this server
-  url: string;
-}
-
-export interface CompanionInfo {
-  // null = the server has no release
-  version: string | null;
-  downloads: CompanionDownload[];
-}
-
+// --- companion API contract check (every companion request, any /api route but capabilities) ---------
+/** 426: the companion's contract number is missing or below the server's minimum. */
 export interface CompanionOutdated {
   error: 'companionOutdated';
-  version: string;
-  // Absolute URLs per platform
-  downloads: Partial<Record<CompanionPlatform, string>>;
+  // COMPANION_API_MIN
+  apiMin: number;
+}
+
+/** 409: the companion's contract number is above the server's maximum. */
+export interface ServerOutdated {
+  error: 'serverOutdated';
+  // COMPANION_API
+  apiMax: number;
 }
 
 // --- history (GET /api/history?lang&before&after&source&category&action&by) ------------------------

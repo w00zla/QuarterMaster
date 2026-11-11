@@ -28,7 +28,6 @@ const app = createApp(db, identity, {
   origin,
   trustProxy: config.trustProxy,
   distDir: fileURLToPath(new URL('../../webapp/dist', import.meta.url)),
-  companionDir: config.companionDir,
   thumbsDir: config.thumbsDir,
   capabilities: { login: 'discord', orgs: true, uex: true },
 });

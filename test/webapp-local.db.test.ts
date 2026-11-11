@@ -3,6 +3,7 @@
 // Through Hono (app.request) and, for the WebSocket, a real server.
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
@@ -13,7 +14,7 @@ import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
-import type { Capabilities, MeResponse, ServerCapabilities, ServerMessage, StockListResponse } from '../src/webapp/api-types.ts';
+import { COMPANION_API, COMPANION_API_MIN, type Capabilities, type MeResponse, type ServerCapabilities, type ServerMessage, type StockListResponse } from '../src/webapp/api-types.ts';
 import { createApp, type WebappConfig } from '../src/webapp/app.ts';
 import type { Identity } from '../src/webapp/identity.ts';
 import { LOCAL_USER_ID, localIdentity } from '../src/webapp/identity-local.ts';
@@ -79,7 +80,7 @@ describe('web app, local identity (database)', { skip: url ? false : 'TEST_DATAB
     assert.deepEqual([body.name, body.username, body.avatarUrl], [null, null, null]);
     assert.deepEqual(body.orgs, []);
     assert.deepEqual(body.privileges, []);
-    for (const headers of [{ cookie: '__Host-qm_session=nope' }, { authorization: 'Bearer qmt_wrong' }, { authorization: 'Bearer qmt_wrong', 'x-qm-companion': '0.0.1' }]) {
+    for (const headers of [{ cookie: '__Host-qm_session=nope' }, { authorization: 'Bearer qmt_wrong' }, { authorization: 'Bearer qmt_wrong', 'x-qm-companion-api': String(COMPANION_API) }]) {
       const res = await app.request('/api/me', { headers });
       assert.equal(res.status, 200, JSON.stringify(headers));
       assert.equal(((await res.json()) as MeResponse).userId, LOCAL_USER_ID);
@@ -90,7 +91,7 @@ describe('web app, local identity (database)', { skip: url ? false : 'TEST_DATAB
   it('capabilities: answered without a login, never cached, within the rate limit per address', async () => {
     const res = await app.request('/api/capabilities');
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ...CAPS, game: { label: null, build: 1000 } });
+    assert.deepEqual(await res.json(), { ...CAPS, game: { label: null, build: 1000 }, companionApi: { min: COMPANION_API_MIN, max: COMPANION_API } });
     assert.equal(res.headers.get('cache-control'), 'no-store');
     const limited = build({ rateLimit: { windowMs: 60_000, auth: 100, apiIp: 2, apiUser: 100 } });
     const codes = [];
@@ -170,11 +171,136 @@ describe('web app, local identity (database)', { skip: url ? false : 'TEST_DATAB
     const sources = async () => (await get<{ entries: { source: string; details?: { quality?: number } }[] }>('/history')).body.entries;
     const metal = { subjectUuid: U.metal, locationUuid: U.station, amount: '1' };
     assert.equal((await post('/stock/add', { ...metal, quality: 801 })).status, 200);
-    assert.equal((await post('/stock/add', { ...metal, quality: 802 }, { 'x-qm-companion': '0.1.0' })).status, 200);
+    assert.equal((await post('/stock/add', { ...metal, quality: 802 }, { 'x-qm-companion': '0.1.0', 'x-qm-companion-api': '1' })).status, 200);
     const found = await sources();
     const [plain, companion] = [801, 802].map((q) => JSON.stringify(found.find((e) => JSON.stringify(e).includes(`${q}`))));
     assert.match(plain!, /"source":"webapp"/);
     assert.match(companion!, /"source":"companion"/);
+    // Either header makes the request the companion's
+    assert.equal((await post('/stock/add', { ...metal, quality: 803 }, { 'x-qm-companion-api': '1' })).status, 200);
+    assert.match(JSON.stringify((await sources()).find((e) => JSON.stringify(e).includes('803'))), /"source":"companion"/);
+  });
+
+  describe('companion API contract', () => {
+    const outdated = { error: 'companionOutdated', apiMin: COMPANION_API_MIN };
+    const call = async (headers: Record<string, string>, path = '/api/me') => {
+      const res = await app.request(path, { headers });
+      return { status: res.status, body: (await res.json()) as unknown };
+    };
+
+    it('a request that calls itself the companion needs a contract number in range', async () => {
+      // Either header makes it the companion's; no number, a malformed or a low one: 426
+      for (const headers of [
+        { 'x-qm-companion': '0.1.0' }, { 'x-qm-companion-api': '0' }, { 'x-qm-companion-api': 'x' }, { 'x-qm-companion-api': '' },
+        { 'x-qm-companion': '99.0.0', 'x-qm-companion-api': '0' },
+      ] as Record<string, string>[]) {
+        assert.deepEqual(await call(headers), { status: 426, body: outdated }, JSON.stringify(headers));
+      }
+      assert.deepEqual(await call({ 'x-qm-companion-api': String(COMPANION_API + 1) }), { status: 409, body: { error: 'serverOutdated', apiMax: COMPANION_API } });
+      assert.deepEqual(await call({ 'x-qm-companion': '0.0.1', 'x-qm-companion-api': String(COMPANION_API + 1) }), { status: 409, body: { error: 'serverOutdated', apiMax: COMPANION_API } });
+      for (const headers of [{ 'x-qm-companion-api': String(COMPANION_API_MIN) }, { 'x-qm-companion': '0.0.1', 'x-qm-companion-api': String(COMPANION_API) }] as Record<string, string>[]) {
+        assert.equal((await call(headers)).status, 200, JSON.stringify(headers));
+      }
+    });
+
+    it('writes and unknown routes are held to it too', async () => {
+      assert.deepEqual(await post('/profile', { rsiHandle: 'x' }, { 'x-qm-companion': '0.1.0' }), { status: 426, body: outdated });
+      assert.deepEqual(await call({ 'x-qm-companion': '0.1.0' }, '/api/does-not-exist'), { status: 426, body: outdated });
+      assert.deepEqual(await call({ 'x-qm-companion-api': '1' }, '/api/does-not-exist'), { status: 404, body: { error: 'not found' } });
+    });
+
+    it('any other request is untouched: the web app\'s own, a script, an Authorization header (earns nothing here)', async () => {
+      for (const headers of [{}, { origin: ORIGIN, 'sec-fetch-site': 'same-origin' }, { authorization: 'Bearer qmt_anything' }, { cookie: '__Host-qm_session=x' }] as Record<string, string>[]) {
+        assert.equal((await call(headers)).status, 200, JSON.stringify(headers));
+      }
+      // The capabilities are the way to find out, so no check
+      assert.equal((await call({ 'x-qm-companion': '0.1.0' }, '/api/capabilities')).status, 200);
+    });
+  });
+
+  describe('the game\'s English texts for the companion', () => {
+    const companion = { 'x-qm-companion-api': String(COMPANION_API) };
+    const locale = (headers: Record<string, string> = {}) => app.request('/api/companion/locale', { headers: { ...companion, ...headers } });
+    const lines = (text: string) => new Map(text.split('\n').filter((l) => l !== '').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+    const sha = async () => (await db.execute<{ sha: string }>(sql`SELECT content_sha256 AS sha FROM catalog.localization_source WHERE source = 'game' AND lang = 'en'`))[0]!.sha;
+
+    it('is the game source in English as the lines of a global.ini, with a revalidated ETag', async () => {
+      const res = await locale();
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get('content-type'), 'text/plain; charset=utf-8');
+      assert.equal(res.headers.get('cache-control'), 'private, no-cache');
+      const text = await res.text();
+      assert.ok(!text.includes('\r') && !text.startsWith('﻿') && text.endsWith('\n'));
+      const found = lines(text);
+      assert.equal(found.get('items_commodities_testmetal'), 'Test Metal');
+      // A line break inside a value is the literal \n, as in the game's file; the keys stay as stored
+      assert.equal(found.get('item_desctest_output'), 'Item Type: Cooler\\nGrade: B\\nClass: Military\\n\\nKeeps things cool.');
+      assert.ok(found.has('crafting_ui_slotname_frame'));
+      assert.ok(!text.split('\n').some((l) => l !== '' && !l.includes('=')), 'one line per key');
+      const tag = res.headers.get('etag')!;
+      assert.equal(tag, `"${await sha()}"`);
+      const again = await locale({ 'if-none-match': tag });
+      assert.equal(again.status, 304);
+      assert.equal(await again.text(), '');
+      assert.equal(again.headers.get('etag'), tag);
+      assert.equal((await locale({ 'if-none-match': '"other", W/"x"' })).status, 200);
+      assert.equal((await locale({ 'if-none-match': '*' })).status, 304);
+    });
+
+    it('is gzipped when the client accepts it, with an ETag of its own', async () => {
+      const plain = await (await locale()).text();
+      const zipped = await locale({ 'accept-encoding': 'gzip, deflate' });
+      assert.equal(zipped.headers.get('content-encoding'), 'gzip');
+      assert.equal(zipped.headers.get('vary'), 'Accept-Encoding');
+      assert.equal(gunzipSync(Buffer.from(await zipped.arrayBuffer())).toString('utf8'), plain);
+      const tag = zipped.headers.get('etag')!;
+      assert.notEqual(tag, (await locale()).headers.get('etag'));
+      assert.equal((await locale({ 'accept-encoding': 'gzip', 'if-none-match': tag })).status, 304);
+      assert.equal((await locale({ 'if-none-match': tag })).status, 200, 'the gzip tag does not name the plain body');
+    });
+
+    it('has a value with = and a real multi-line value as the game writes them; the ETag follows an import of the game texts', async () => {
+      const before = (await locale()).headers.get('etag');
+      await db.execute(sql`INSERT INTO catalog.localization (source, lang, key, value) VALUES ('game', 'en', 'test_eq', 'a=b=c'), ('game', 'en', 'test_lines', E'one\ntwo\n\nthree')`);
+      try {
+        // Not an import yet: the hash of the source is what says the texts changed
+        assert.equal((await locale()).headers.get('etag'), before);
+        await db.execute(sql`UPDATE catalog.localization_source SET content_sha256 = 'changed' WHERE source = 'game' AND lang = 'en'`);
+        const res = await locale({ 'if-none-match': before! });
+        assert.equal(res.status, 200);
+        assert.equal(res.headers.get('etag'), '"changed"');
+        const found = lines(await res.text());
+        assert.equal(found.get('test_eq'), 'a=b=c');
+        assert.equal(found.get('test_lines'), 'one\\ntwo\\n\\nthree');
+      } finally {
+        await db.execute(sql`DELETE FROM catalog.localization WHERE source = 'game' AND key IN ('test_eq', 'test_lines')`);
+        await db.execute(sql`UPDATE catalog.localization_source SET content_sha256 = ${before!.slice(1, -1)} WHERE source = 'game' AND lang = 'en'`);
+      }
+      const back = await locale();
+      assert.equal(back.headers.get('etag'), before);
+      assert.ok(!(await back.text()).includes('test_eq'));
+    });
+
+    it('is the game\'s texts only: neither the language pack nor an external source of any language leaks in', async () => {
+      const plain = await (await locale()).text();
+      await db.execute(sql`INSERT INTO catalog.localization_source (source, lang, priority, origin, content_sha256, key_count)
+        VALUES ('language-pack', 'en', 500, 'user.cfg', 'p', 2), ('ext-de', 'de', 100, 'x', 'q', 1), ('ext-en', 'en', 100, 'x', 'r', 1)`);
+      await db.execute(sql`INSERT INTO catalog.localization (source, lang, key, value) VALUES
+        ('language-pack', 'en', 'items_commodities_testmetal', 'Pack Metal'), ('language-pack', 'en', 'pack_only', 'x'),
+        ('ext-de', 'de', 'items_commodities_testmetal', 'Testmetall'), ('ext-en', 'en', 'items_commodities_testmetal', 'External Metal')`);
+      try {
+        const res = await locale();
+        assert.equal(res.status, 200);
+        assert.equal(await res.text(), plain);
+        assert.equal(lines(plain).get('items_commodities_testmetal'), 'Test Metal');
+        assert.ok(!plain.includes('pack_only') && !plain.includes('Pack Metal') && !plain.includes('External') && !plain.includes('Testmetall'));
+        // ... while the effective texts do see them
+        const eff = await db.execute<{ value: string }>(sql`SELECT value FROM catalog.localization_effective WHERE lang = 'en' AND key = 'items_commodities_testmetal'`);
+        assert.equal(eff[0]!.value, 'Pack Metal');
+      } finally {
+        await db.execute(sql`DELETE FROM catalog.localization_source WHERE source IN ('language-pack', 'ext-de', 'ext-en')`);
+      }
+    });
   });
 
   describe('realtime', () => {
