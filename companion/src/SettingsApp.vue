@@ -92,9 +92,28 @@ onMounted(async () => {
   // The window's height is what the content takes (the overlay group exists on Windows only); it shows then
   ready.value = true;
   await nextTick();
-  if (root.value) await fitSettingsWindow(Math.ceil(root.value.getBoundingClientRect().height)).catch(toastError);
+  // With the fonts in: a fallback font wraps the texts differently and the window would get too high
+  try {
+    await document.fonts.ready;
+  } catch { /* measured with the fonts it has */ }
+  fit();
+  // And whenever the content's height changes later, so no empty area stays below the foot
+  if (root.value) {
+    observer = new ResizeObserver(fit);
+    observer.observe(root.value);
+  }
 });
+let observer: ResizeObserver | null = null;
+let fitted = 0;
+function fit() {
+  if (!root.value) return;
+  const height = Math.ceil(root.value.getBoundingClientRect().height);
+  if (!height || height === fitted) return;
+  fitted = height;
+  fitSettingsWindow(height).catch(toastError);
+}
 onUnmounted(() => {
+  observer?.disconnect();
   unlisten?.();
   window.removeEventListener("keydown", onKey);
 });

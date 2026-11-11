@@ -491,9 +491,15 @@ async fn open_settings_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn fit_settings_window(app: AppHandle, height: f64) -> Result<(), String> {
     let window = app.get_webview_window(SETTINGS_WINDOW).ok_or("no settings window")?;
+    // The first fit also places and shows the window; a later one (the content's height changed, e.g. once the fonts
+    // are in) only resizes it where it is
+    let first = !window.is_visible().unwrap_or(false);
     window.set_size(tauri::LogicalSize::new(SETTINGS_WIDTH, height)).map_err(|e| e.to_string())?;
-    window.center().map_err(|e| e.to_string())?;
-    window.show().map_err(|e| e.to_string())
+    if first {
+        window.center().map_err(|e| e.to_string())?;
+        window.show().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Opens the debug window (debug.html), or brings it to the front; closing it turns the debug flag
