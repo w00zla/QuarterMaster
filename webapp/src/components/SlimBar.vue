@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The slim bar at the top of the singleuser variant's content (right of the side bar, 44 px like the title bar): the drag region,
+// The slim bar at the top of the singleuser variant's content (right of the side bar, 56 px: the narrow side bar's width): the drag region,
 // the game version chip, the settings button and, in the desktop shell, the window buttons. It never wraps. The settings button
 // opens the shell's settings window, in a plain browser it is the /settings page. In a plain browser the bar has no window buttons
 // and no drag attributes.
@@ -44,7 +44,8 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 30;
-  height: 44px;
+  /* As high as the narrow side bar is wide (and as its logo row): the corner is a square, the line below runs on */
+  height: 56px;
   flex-shrink: 0;
   box-sizing: border-box;
   display: flex;

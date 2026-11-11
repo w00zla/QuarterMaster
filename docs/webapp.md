@@ -480,7 +480,7 @@ opens above or below the button). The choice is stored in `localStorage` (`qm.si
 width the bar is narrow whatever the choice (`sideModeFor`; the stored choice is not touched, the toggle is disabled then). The two
 modes differ in width only: buttons are 36 px high either way, icons and logo sit at the same place, the tooltip wrapper exists in both.
 
-**The slim bar** (`SlimBar.vue`) is the top row of the content beside it (44 px, never wraps): the drag region, the game version chip
+**The slim bar** (`SlimBar.vue`) is the top row of the content beside it (56 px, the narrow side bar's width; never wraps): the drag region, the game version chip
 (`.ver-chip.fixed` with the quiet "Game:" label), the settings button (gear `icon-btn`, as the top bar had it: the shell's settings
 window, in a plain browser the `/settings` page, accent on that route) and, in the shell, the window buttons. In a plain browser it is the same bar without
 window buttons and drag attributes. It measures its height into `layout.ts` `topbarHeight`, so the toasts sit below it. The footer
