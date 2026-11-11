@@ -52,7 +52,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   padding: 0 8px 0 16px;
-  background: var(--bg-base);
+  /* Set apart from the content: the side bar's and the footer's ground, a line below */
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-dim);
   user-select: none;
 }
 

@@ -127,7 +127,7 @@ if (settingsWindow) {
           <SideNav />
           <div class="side-col">
             <SlimBar />
-            <main class="main side-main">
+            <main class="main">
               <UpdateNotice v-if="updateNeeded" />
               <RouterView />
             </main>
@@ -175,10 +175,6 @@ if (settingsWindow) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-}
-
-.side-main {
-  padding: 0 16px 16px;
 }
 
 /* The settings window: as high as its content (that is what it measures), not as the window */

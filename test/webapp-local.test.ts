@@ -93,7 +93,10 @@ describe('navigation per capability', () => {
 
   it('gives the side bar the top bar\'s groups and the history as a group of its own, quieter', () => {
     const groups = sideGroups(single);
-    assert.deepEqual(groups.map((g) => g.map((i) => i.to)), [...keys(single), ['/history']]);
+    // Without UEX data the buy/sell entry stays, disabled
+    assert.deepEqual(groups.map((g) => g.map((i) => i.to)), [['/'], keys(single)[1], ['/crafting', '/mining', '/trade'], ['/history']]);
+    assert.equal(groups[2]![2]!.disabled, true);
+    assert.equal(sideGroups({ ...single, uex: true })[2]![2]!.disabled, undefined);
     assert.equal(groups[3]![0]!.secondary, true);
     assert.equal(groups.slice(0, 3).flat().some((i) => i.secondary), false);
     // The top bar's groups do not carry it

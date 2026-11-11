@@ -2,7 +2,7 @@
 // The singleuser variant's navigation: a bar at the left edge from the window's top down to the footer (the online variant keeps
 // the top bar). The logo (with the wordmark when wide), the nav groups of navigation.ts one below the other with a divider
 // between them, the history as the last group (quieter); nothing below it. At the top right, half over the bar's right edge, a small
-// button toggles between wide (icon and text, 208 px) and narrow (icons with a tooltip, 56 px). The choice is remembered; below
+// button toggles between wide (icon and text, 232 px) and narrow (icons with a tooltip, 56 px). The choice is remembered; below
 // 1000 px of window width the bar is narrow whatever the choice (it is not overwritten). The settings are not here: their button
 // is in the slim bar (SlimBar.vue).
 import { computed, onMounted, onUnmounted, ref } from "vue";
@@ -57,8 +57,13 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
     <nav class="nav">
       <template v-for="(group, i) in groups" :key="i">
         <div v-if="i > 0" class="sep" />
-        <Tooltip v-for="tab in group" :key="tab.to" :text="narrow ? t(tab.label) : null">
-          <RouterLink :to="tab.to" class="item" :class="{ narrow, secondary: tab.secondary, active: route.path === tab.to }" :aria-label="t(tab.label)">
+        <Tooltip v-for="tab in group" :key="tab.to" :text="tab.disabled ? t('trade.noUex') : narrow ? t(tab.label) : null">
+          <!-- Not usable (buy/sell without UEX data): in its place, greyed out, the tooltip says why -->
+          <span v-if="tab.disabled" class="item disabled" :class="{ narrow }" aria-disabled="true" :aria-label="t(tab.label)">
+            <Icon :name="tab.icon" :size="16" />
+            <span v-if="!narrow">{{ t(tab.label) }}</span>
+          </span>
+          <RouterLink v-else :to="tab.to" class="item" :class="{ narrow, secondary: tab.secondary, active: route.path === tab.to }" :aria-label="t(tab.label)">
             <Icon :name="tab.icon" :size="tab.secondary ? 15 : 16" />
             <span v-if="!narrow">{{ t(tab.label) }}</span>
           </RouterLink>
@@ -78,14 +83,15 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 </template>
 
 <style scoped>
-/* From the window's top to the footer (28 px, AppFooter): sticky, the page itself scrolls beside it. Above the slim bar (z 30), so the
+/* From the window's top to the footer (AppFooter): sticky, the page itself scrolls beside it. Above the slim bar (z 30), so the
    toggle that reaches over the edge stays on top */
 .side {
   position: sticky;
   top: 0;
   align-self: flex-start;
   z-index: 31;
-  width: 208px;
+  /* Wide enough that the toggle on the edge keeps a gap to the wordmark */
+  width: 232px;
   /* The footer is 28 px plus its 1 px top border; one pixel more here and the page always scrolls */
   height: calc(100vh - 29px);
   flex-shrink: 0;
@@ -143,7 +149,7 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
   background: var(--border-dim);
 }
 
-/* 20 px wide, 24 high: the middle of it is the border line (the bar's width is the border box: 208 or 56) */
+/* 20 px wide, 24 high: the middle of it is the border line (the bar's width is the border box: 232 or 56) */
 .toggle-wrap {
   position: absolute;
   top: 16px;
@@ -215,6 +221,13 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 
 .item.secondary:hover {
   color: var(--text);
+}
+
+.item.disabled,
+.item.disabled:hover {
+  color: var(--text-3);
+  opacity: 0.6;
+  cursor: default;
 }
 
 .item.active,

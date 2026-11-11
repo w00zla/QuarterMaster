@@ -8,6 +8,8 @@ export interface NavItem {
   icon: "overview" | "gear" | "type-crate" | "drop" | "blueprint" | "crafter" | "pickaxe" | "trade" | "history";
   /** Drawn quieter than the main entries (the side bar's history). */
   secondary?: boolean;
+  /** Shown but not usable (the side bar's buy/sell entry without UEX data). */
+  disabled?: boolean;
 }
 
 /** What the navigation needs of GET /api/capabilities. */
@@ -37,9 +39,13 @@ export function navGroups(caps: NavCaps | null): NavItem[][] {
 
 const HISTORY: NavItem = { to: "/history", label: "nav.history", icon: "history", secondary: true };
 
-/** The side bar's groups (singleuser): the top bar's three, then the history on its own, quieter. */
+/**
+ * The side bar's groups (singleuser): the top bar's three, then the history on its own, quieter. Without UEX data the buy/sell
+ * entry stays in its place, disabled (the side bar greys it out and says why).
+ */
 export function sideGroups(caps: NavCaps | null): NavItem[][] {
-  return [...navGroups(caps), [HISTORY]];
+  const [home, data, tools] = navGroups(caps) as [NavItem[], NavItem[], NavItem[]];
+  return [home, data, caps?.uex === false ? [...tools, { ...TRADE, disabled: true }] : tools, [HISTORY]];
 }
 
 // --- the side bar's width (singleuser) ---
