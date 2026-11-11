@@ -670,8 +670,10 @@ game since.
 
 ## WebView2
 
-Runs with `--disable-gpu` (`additionalBrowserArgs` in `tauri.conf.json` and for every further window): its
-GPU process should not compete with the game; not measured yet.
+Runs with Tauri's default arguments only, stated in `additionalBrowserArgs` in `tauri.conf.json` and passed to every further
+window (`BROWSER_ARGS`; WebView2 wants the same for all). No `--disable-gpu` any more: without the GPU the colours differed
+from the desktop app's on the user's monitor (the GPU path applies the display's colour management). Whether the webview's GPU
+process competes with the game is not measured.
 
 ## Decisions (user) and why
 

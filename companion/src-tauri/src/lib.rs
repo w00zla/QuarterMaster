@@ -52,7 +52,7 @@ const SETTINGS_WINDOW: &str = "settings";
 const SETTINGS_WIDTH: f64 = 800.0;
 /// The main window's WebView2 arguments (tauri.conf.json `additionalBrowserArgs`), for every further window
 #[cfg(windows)]
-pub(crate) const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu --force-color-profile=srgb";
+pub(crate) const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
 struct AppData {
     config: Config,

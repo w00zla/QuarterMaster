@@ -5,9 +5,8 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-// Exact sizes (44 px, 88 px for 2x screens) from assets/logo.png: the webview's own downscaling frays the edge
-import logo from "../assets/logo-44.png";
-import logo2x from "../assets/logo-88.png";
+// The same file and size as the desktop app's side bar (36 px from the 128 px logo): both headers look alike
+import logo from "../../../adminapp/src/assets/logo-128.png";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
 
@@ -37,17 +36,17 @@ onUnmounted(() => {
 <template>
   <header class="topbar" data-tauri-drag-region>
     <div class="brand" data-tauri-drag-region>
-      <img class="logo" :src="logo" :srcset="`${logo} 1x, ${logo2x} 2x`" alt="" data-tauri-drag-region />
+      <img class="logo" :src="logo" alt="" data-tauri-drag-region />
       <span class="wordmark" data-tauri-drag-region>QUARTER<span class="accent">MASTER</span></span>
       <span class="sub" data-tauri-drag-region>{{ t("app.name") }}</span>
     </div>
     <div class="spacer" data-tauri-drag-region />
     <!-- The user or why the connection is down, refresh and web app (App.vue) -->
     <slot />
-    <button type="button" class="btn small outline square" :title="t('settings.title')" @click="emit('settings')">
-      <Icon name="settings" :size="14" />
+    <!-- As the app's slim bar: the gear as an icon button, then the window buttons -->
+    <button type="button" class="icon-btn" :title="t('settings.title')" @click="emit('settings')">
+      <Icon name="settings" :size="15" />
     </button>
-    <div class="divider" />
     <div class="win-btns">
       <button type="button" class="win-btn" :title="t('win.minimize')" @click="win.minimize()">
         <Icon name="minimize" :size="16" />
@@ -66,10 +65,12 @@ onUnmounted(() => {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* The measures of the desktop app's header (SlimBar.vue and SideNav.vue's logo row): height, gaps, the logo 10 px in */
+  gap: 12px;
   height: 56px;
   flex-shrink: 0;
-  padding: 0 8px 0 16px;
+  box-sizing: border-box;
+  padding: 0 8px 0 10px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
   user-select: none;
@@ -83,15 +84,16 @@ onUnmounted(() => {
 }
 
 .logo {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
   display: block;
 }
 
 .wordmark {
   font-weight: 700;
-  font-size: 16px;
-  letter-spacing: 0.22em;
+  font-size: 13px;
+  letter-spacing: 0.16em;
   color: var(--text);
   white-space: nowrap;
 }
@@ -107,15 +109,9 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-}
-
-.divider {
-  width: 1px;
-  height: 24px;
-  background: var(--border-dim);
 }
 
 .win-btns {

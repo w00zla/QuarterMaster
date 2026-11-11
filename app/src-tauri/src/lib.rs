@@ -32,10 +32,6 @@ use update::{UpdateState, Updater};
 const MAIN_WINDOW: &str = "main";
 /// The settings window (docs/app.md "The settings window"): the web app at `SETTINGS_PATH`, opened by `open_settings`.
 const SETTINGS_WINDOW: &str = "settings";
-/// The main window's WebView2 arguments (tauri.conf.json `additionalBrowserArgs`: Tauri's defaults and the sRGB colour
-/// profile, so the colours match the companion's, which renders without the GPU), for every further window
-#[cfg(windows)]
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --force-color-profile=srgb";
 const SETTINGS_PATH: &str = "/settings?window=settings";
 /// Before the page has measured itself (`settings_window_fit`); the window is not shown at this size.
 const SETTINGS_START_SIZE: (f64, f64) = (560.0, 800.0);
@@ -370,11 +366,6 @@ async fn open_settings(app: AppHandle, shell: State<'_, Shell>) -> Result<(), St
         .on_navigation(move |url| navigation_allowed(url, None, allowed.lock().unwrap().as_deref()));
     if let Some(main) = app.get_webview_window(MAIN_WINDOW) {
         builder = builder.parent(&main).map_err(|e| e.to_string())?;
-    }
-    // WebView2 wants the same arguments for every window of the app
-    #[cfg(windows)]
-    {
-        builder = builder.additional_browser_args(BROWSER_ARGS);
     }
     builder.build().map_err(|e| e.to_string())?;
     let handle = app.clone();

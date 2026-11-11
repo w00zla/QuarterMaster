@@ -93,7 +93,7 @@ onMounted(async () => {
         <!-- Only online: the local app is its own window on this PC, there is no web page to open -->
         <Tooltip v-if="connection !== 'local'" :text="t('webapp.open')">
           <button type="button" class="icon-btn" @click="openWebapp().catch(toastError)">
-            <Icon name="external" :size="14" />
+            <Icon name="external" :size="15" />
           </button>
         </Tooltip>
       </div>
