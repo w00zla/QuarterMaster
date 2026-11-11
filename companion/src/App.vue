@@ -3,8 +3,8 @@
 // or why the connection is down (chip only then; no reload button: a restart of the app reloads
 // everything); below it the scan row (ScanBar.vue), then the side panel with the tabs (SideTabs.vue, at the left edge, icons like the
 // web app's navigation) and the panels beside it: comps, stock (both InventoryPanel), refinery, unlocks.
-// The chips open the settings window (its own window, SettingsApp.vue; one at a time); it also opens by itself while
-// the app is not connected (no server or token, the token is refused, or the local app is not running). After a
+// The chips open the settings window (its own window, SettingsApp.vue; one at a time); it never opens by itself, also not
+// while the app is not connected (the red chip says why). After a
 // save ("config-changed") this window re-reads the config, re-checks the connection and the log state. While the server refuses
 // the app's API contract number (the companion or the server is too old) only the update panel shows
 // (no work until that changed). The local app's user has no name or avatar: nothing is shown for it.
@@ -72,8 +72,8 @@ onMounted(async () => {
   await watchInventory().catch(toastError);
   await watchDebugReport().catch(toastError);
   await watchOverlay().catch(toastError);
+  // Not connected: the red tag in the top bar says why and opens the settings on a click; they never open by themselves
   ready.value = true;
-  if (!connected.value && !outdated.value) void openSettings();
 });
 </script>
 
