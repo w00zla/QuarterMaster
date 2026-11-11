@@ -538,7 +538,7 @@ dialog (`shell.openUpdate()`) and is brought to the front: the dialog stays the 
 once per page load and only after the app is shown (not over the start tile); the user can leave them.
 
 **The start tile** (`StartTile.vue`, state from `startTile.ts`) replaces the whole app (side bar, views, footer) while `login: 'none'` and no data
-pack is installed: the app-icon slot (empty, reserved), the wordmark, the app version, four segments and one line of text; a
+pack is installed: the logo (128 px), the wordmark, the app version, four segments and one line of text; a
 download adds the amount ("12 / 45 MB") and a bar. Phases map to the steps: nothing known yet "Starting …" (1), checking and downloading
 "Loading game data …" (2), installing "Setting up game data …" (3). Without a connection (outcome offline or failed with nothing
 installed) the tile shows the "No connection" tag, "Game data missing." and two buttons, "Try again" first and then "Import file" (primary; the same dialog as in the settings;

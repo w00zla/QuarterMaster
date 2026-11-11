@@ -130,10 +130,11 @@
         gap: 14px;
       }
 
-      /* Room for the app icon (no icon yet), as on the web app's start tile */
+      /* The app's logo, as on the web app's start tile (logo-128.png, logo-256.png for 2x screens: copies of the web app's) */
       .icon-slot {
         width: 128px;
         height: 128px;
+        display: block;
       }
 
       .wordmark {
@@ -229,7 +230,7 @@
     </header>
     <div class="tile" data-tauri-drag-region>
       <div class="top" data-tauri-drag-region>
-        <div class="icon-slot" aria-hidden="true" data-tauri-drag-region></div>
+        <img class="icon-slot" src="logo-128.png" srcset="logo-128.png 1x, logo-256.png 2x" alt="" draggable="false" data-tauri-drag-region />
         <div class="wordmark" data-tauri-drag-region>QUARTER<span class="accent" data-tauri-drag-region>MASTER</span></div>
         <div id="version" class="version" data-tauri-drag-region></div>
       </div>

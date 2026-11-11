@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// The start tile: shown instead of the app while the singleuser variant has no game data. The wordmark, the app version, a
+// The start tile: shown instead of the app while the singleuser variant has no game data. The logo, the wordmark, the app version, a
 // row of segments and one line of text; without a connection the tag and the two ways out (import a file, try again).
 import { computed, ref } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
+import logo from "../../../adminapp/src/assets/logo-128.png";
+import logo2x from "../assets/logo-256.png";
 import { lang, t } from "../i18n";
 import { checkData } from "../local";
 import { megabytes } from "../localTime";
@@ -38,8 +40,7 @@ async function retry() {
   <div class="start">
     <div class="panel tile">
       <div class="top">
-        <!-- Room for the app icon (no icon yet) -->
-        <div class="icon-slot" aria-hidden="true" />
+        <img class="icon-slot" :src="logo" :srcset="`${logo} 1x, ${logo2x} 2x`" alt="" draggable="false" />
         <div class="wordmark">QUARTER<span class="accent">MASTER</span></div>
         <div class="version mono">{{ version ? `v${version}` : "" }}&nbsp;</div>
       </div>
@@ -105,9 +106,11 @@ async function retry() {
   gap: 14px;
 }
 
+/* The app's logo (the splash of the desktop shell shows the same picture at the same place) */
 .icon-slot {
   width: 128px;
   height: 128px;
+  display: block;
 }
 
 .wordmark {

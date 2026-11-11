@@ -66,7 +66,7 @@ wurde unerwartet beendet." / "The server stopped unexpectedly." and the quit but
 
 ## The splash
 
-The look of the web app's start tile (`StartTile.vue`): the base `#0a1d29`, the tile `#0f2c3e`, the reserved icon slot, the wordmark
+The look of the web app's start tile (`StartTile.vue`): the base `#0a1d29`, the tile `#0f2c3e`, the logo (128 px; `app/splash/logo-128.png` and `logo-256.png` are copies of the web app's files), the wordmark
 QUARTER in `#ffffff` and MASTER in the accent `#54adf7` (Bai Jamjuree 700), the app version in Share Tech Mono, a row of four segments and
 one line of text, all centred, under a slim bar (44 px) with the three window buttons (minimize, maximize or restore, close; the look of `WindowButtons.vue`)
 and the drag region on the rest, so a hanging start can be closed. It is the app's own page and gets its whole state from the shell (command
