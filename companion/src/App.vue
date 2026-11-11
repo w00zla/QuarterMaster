@@ -3,29 +3,30 @@
 // or why the connection is down (chip only then; no reload button: a restart of the app reloads
 // everything); below it the scan row (ScanBar.vue), then a tab
 // bar (icons like the web app's navigation) with the panels: comps, stock (both InventoryPanel), refinery, unlocks.
-// The chips open the settings; the settings also open by themselves while the app is not connected
-// (no server or token, the token is refused, or the local app is not running). While the server refuses
+// The chips open the settings window (its own window, SettingsApp.vue; one at a time); it also opens by itself while
+// the app is not connected (no server or token, the token is refused, or the local app is not running). After a
+// save ("config-changed") this window re-reads the config, re-checks the connection and the log state. While the server refuses
 // the app's API contract number (the companion or the server is too old) only the update panel shows
 // (no work until that changed). The local app's user has no name or avatar: nothing is shown for it.
 import { computed, onMounted, provide, ref } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import Icon from "../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../adminapp/src/components/Tooltip.vue";
 import { PICKER_LABELS } from "../../webapp/src/components/Picker.vue";
 import InventoryPanel from "./components/InventoryPanel.vue";
 import ScanBar from "./components/ScanBar.vue";
-import SettingsDialog from "./components/SettingsDialog.vue";
 import Toasts from "./components/Toasts.vue";
 import ClipTip from "./components/ClipTip.vue";
 import TopBar from "./components/TopBar.vue";
 import UnlocksPanel from "./components/UnlocksPanel.vue";
 import UpdatePanel from "./components/UpdatePanel.vue";
 import WindowEdges from "./components/WindowEdges.vue";
-import { AppError, appInfo, openWebapp, outdated } from "./backend";
+import { AppError, appInfo, openSettingsWindow, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
 import { outdatedKeys } from "./connection";
 import {
-  config, connectError, connected, connection, connectionText, loadConfig, meAvatar, meName, paired, refreshConnection, watchConnection,
-  watchLog,
+  config, connectError, connected, connection, connectionText, loadConfig, loadLog, meAvatar, meName, paired, refreshConnection,
+  watchConnection, watchLog,
 } from "./state";
 import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
@@ -37,7 +38,7 @@ import { toastError } from "./toasts";
 
 provide(PICKER_LABELS, { clear: t("pick.clear"), noMatch: t("pick.noMatch") });
 
-const settingsOpen = ref(false);
+const openSettings = () => openSettingsWindow().catch(toastError);
 const ready = ref(false);
 // The panel tabs (also the scan overlay's modes, overlay.ts), like the web app's navigation
 const TABS = [
@@ -67,6 +68,9 @@ onMounted(async () => {
     toastError(e);
   }
   watchConnection();
+  // The settings window saved: its new config, the connection check and the log state (the game folder may differ)
+  await listen("config-changed", () => void loadConfig().then(() => Promise.all([refreshConnection(), loadLog()])).catch(toastError))
+    .catch(toastError);
   await watchLog().catch(toastError);
   await watchScan().catch(toastError);
   await watchRefinery().catch(toastError);
@@ -74,15 +78,15 @@ onMounted(async () => {
   await watchDebugReport().catch(toastError);
   await watchOverlay().catch(toastError);
   ready.value = true;
-  if (!connected.value && !outdated.value) settingsOpen.value = true;
+  if (!connected.value && !outdated.value) void openSettings();
 });
 </script>
 
 <template>
   <div class="app">
-    <TopBar @settings="settingsOpen = true">
+    <TopBar @settings="openSettings">
       <Tooltip v-if="!connected && connectError" :text="serverTip">
-        <button type="button" class="tag err problem" @click="settingsOpen = true">
+        <button type="button" class="tag err problem" @click="openSettings">
           <Icon name="warning" :size="12" /> {{ serverLabel }}
         </button>
       </Tooltip>
@@ -98,7 +102,7 @@ onMounted(async () => {
         </Tooltip>
       </div>
     </TopBar>
-    <ScanBar @settings="settingsOpen = true" />
+    <ScanBar @settings="openSettings" />
     <main v-if="ready && outdated" class="main">
       <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :connection="connection" />
     </main>
@@ -117,7 +121,6 @@ onMounted(async () => {
         <UnlocksPanel v-show="tab === 'unlocks'" />
       </main>
     </template>
-    <SettingsDialog v-if="settingsOpen" @close="settingsOpen = false" />
     <Toasts />
     <ClipTip />    <WindowEdges />
   </div>
@@ -228,8 +231,8 @@ onMounted(async () => {
 </style>
 
 <style>
-/* Dialogs (teleported next to #app) sit near the top instead of 10vh down: the settings fit into the
-   780 px minimum height. The id beats ConfirmDialog's scoped rule */
+/* Dialogs (teleported next to #app) sit near the top instead of 10vh down (made for the settings, which now
+   have their own window). The id beats ConfirmDialog's scoped rule */
 #app ~ .backdrop {
   padding-top: 16px;
 }

@@ -36,8 +36,8 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker), `capture` (the capture loop on
   sc-ohseearr's capture crate), `overlay`. The OCR engine and models, the readers, the game's texts (`Locale`)
   and the capture itself are sc-ohseearr's (its public repository, git dependencies by release tag; see "OCR").
-- Vue SPA with three pages (`index.html` → `App.vue`, `debug.html` → `DebugApp.vue`, `overlay.html` →
-  `OverlayApp.vue`), components in `src/components/`, styles in `src/styles/` (`base.css` with tokens, fonts and
+- Vue SPA with four pages (`index.html` → `App.vue`, `settings.html` → `SettingsApp.vue`, `debug.html` →
+  `DebugApp.vue`, `overlay.html` → `OverlayApp.vue`), components in `src/components/`, styles in `src/styles/` (`base.css` with tokens, fonts and
   `ui.css`; `views.css` for forms, fields and table rows), the fonts in `src/assets/fonts/`. Pure logic in
   `src/{match,inventory,components,refinery,connection}.ts`, tested from the root `test/companion-*.test.ts` (`pnpm test`).
 - The window structure and look follow BindSight (title bar, settings, `Dropdown`, `ConfirmDialog`, the icon set,
@@ -170,9 +170,9 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   icon in a fixed 14 px place, the debug recording button as wide as its longer text).
 - `App.vue`, `components/TopBar.vue`, `WindowEdges.vue`, `state.ts`: no native frame
   (`decorations: false`), the title bar after BindSight's (drag region, minimize/maximize/close; window
-  permissions in `capabilities/default.json`, which lists the windows `main`, `debug`, `overlay`),
+  permissions in `capabilities/default.json`, which lists the windows `main`, `settings`, `debug`, `overlay`),
   invisible resize edges. The window stays narrow (640 px, also its minimum), 800 px high at start and
-  780 px at least (the settings dialog fits; dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
+  780 px at least (dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
   open where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the
   overlay is excluded, it places itself), created hidden and shown once placed.
 - The title bar holds, before the settings button, the user (Discord avatar from `/api/me`, the name in
@@ -207,7 +207,14 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   (room for "999": the chips after it stay put), the panel's filter chips (no label: "Scanned" / "Not
   scanned" as their tooltip), then the buttons on the right. Stock, Components and Refinery fill the window
   and scroll only their rows (head and column titles stay).
-- Settings dialog (`SettingsDialog.vue`): "Verbindung" ("Connection": "Online" or "Lokale App" / "Local app", a
+- Settings window (`settings.html` + `SettingsApp.vue`, no longer a dialog in the main window): opened from the main
+  window (Rust `open_settings_window`, async, with the main window's WebView2 arguments; one instance, a second call
+  focuses it), framed like the debug window, 560 px wide, not resizable, centered (excluded from the window state
+  plugin). Created hidden; the page loads config and pairing itself (own webview), then reports its content height
+  and Rust `fit_settings_window` sets the inner height, centers and shows it (so the Windows-only overlay group
+  needs no hard-coded height). After a save Rust emits `config-changed`: the main window re-reads the config, re-checks
+  the connection and reloads the log state (`App.vue`); the settings window shows the "Saved" toast. Escape or
+  "Schließen" closes it. Content: "Verbindung" ("Connection": "Online" or "Lokale App" / "Local app", a
   dropdown of fixed width), Access Key (disabled for the local app, which needs none; it stays in place), language,
   game folder (in the local mode the paired app's folder, shown disabled, when it has one; the own setting is kept), the "Bildschirm-Scan" group
   ("Screen Scan": "App-Ansicht automatisch wechseln" (the automatic tab switch), then "GPU-Beschleunigung
@@ -217,8 +224,8 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
   place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
   `overlayDisplay`, applied once saved); the hotkeys "Hotkey Overlay an/aus" and "Hotkey Overlay-Ansicht wechseln"; the UI says "Ansicht" for tab and overlay view alike, since 2026-10-30), in the head's right end
-  a small "Debug" button for the debug window (secondary for the user; what it does as tooltip; the dialog
-  closes once the window is open; `ConfirmDialog`'s `head` slot). Labels left, controls right like
+  a small "Debug" button for the debug window (secondary for the user; what it does as tooltip; the settings
+  window closes once the debug window is open). Labels left, controls right like
   BindSight's settings.
 - Refinery panel cards (`RefineryPanel.vue`), three lines: the icon-only job badge (live colour), the
   station and the actions (registering blue, storing a crate on green, removing outlined); the state tag
@@ -427,7 +434,7 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
 
 ## Debug window
 
-- `debug.html` + `DebugApp.vue`, opened from the settings (Rust `open_debug_window`, async, with the main
+- `debug.html` + `DebugApp.vue`, opened from the settings window (Rust `open_debug_window`, async, with the main
   window's WebView2 browser arguments: another set hangs WebView2; no JS close handler: `destroy` would
   need a permission); closing the main window ends the app, the debug window with it.
 - Three tabs (`DebugApp.vue`, all stay mounted, the OCR scan opens first, General is the last on the right; the shared table, panel and key/value styles sit unscoped

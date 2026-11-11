@@ -7,34 +7,40 @@
 // gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed). The
 // server is fixed (only the config file changes it). The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor), display (compact or thumbnails) and hotkeys, saved (on/off is the scan row's
-// toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes the
-// dialog), small left of it the app's version.
-import { computed, onMounted, onUnmounted, ref } from "vue";
+// toggle and the hotkey). In the head, secondary for the user: the debug window (opening it closes this
+// window), small left of it the app's version.
+// The settings window (opened from the main window, Rust `open_settings_window`): fixed width, not resizable,
+// framed like the debug window. This page loads config and pairing itself (its own webview), sizes the window
+// to the content once filled (`fit_settings_window`, which also shows it), and after a save the main window
+// hears "config-changed" and re-reads the config, the connection and the log state.
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import Dropdown from "../../../adminapp/src/components/Dropdown.vue";
-import Icon from "../../../adminapp/src/components/Icon.vue";
-import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
-import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/components/ConfirmDialog.vue";
-import { appInfo, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "../backend";
-import type { OverlayDisplay } from "../overlayLayout";
-import { t } from "../i18n";
-import { connectionOf } from "../connection";
-import { applyConfig, config, loadLog, paired, refreshConnection } from "../state";
-import { errorText, toast, toastError } from "../toasts";
-import HotkeyInput from "./HotkeyInput.vue";
+import Dropdown from "../../adminapp/src/components/Dropdown.vue";
+import Icon from "../../adminapp/src/components/Icon.vue";
+import Tooltip from "../../adminapp/src/components/Tooltip.vue";
+import { appInfo, fitSettingsWindow, getPaired, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "./backend";
+import type { OverlayDisplay } from "./overlayLayout";
+import { t } from "./i18n";
+import { connectionOf } from "./connection";
+import { applyConfig, config, loadConfig, paired, refreshConnection } from "./state";
+import { errorText, toast, toastError } from "./toasts";
+import HotkeyInput from "./components/HotkeyInput.vue";
+import Toasts from "./components/Toasts.vue";
 
-const emit = defineEmits<{ close: [] }>();
-
-const connection = ref<string>(connectionOf(config.value));
+// The form shows once config and pairing are loaded (its fields start from them)
+const ready = ref(false);
+const root = ref<HTMLElement | null>(null);
+const connection = ref<string>("online");
 const local = computed(() => connection.value === "local");
 // The local app's game folder comes first (as paired at the last connection); null: the own setting applies
 const pairedDir = computed(() => (local.value ? paired.value?.gameDir ?? null : null));
-const token = ref(config.value?.token ?? "");
-const gameDir = ref(config.value?.gameDir ?? "");
-const language = ref(config.value?.language ?? "");
-const autoTab = ref(config.value?.autoTab ?? true);
-const gpu = ref(config.value?.gpu ?? false);
+const token = ref("");
+const gameDir = ref("");
+const language = ref("");
+const autoTab = ref(true);
+const gpu = ref(false);
 // Until the Rust side answered: as if it can
 const gpuState = ref<GpuStatus["state"]>("ready");
 const gpuOk = computed(() => gpuState.value === "ready");
@@ -44,23 +50,56 @@ const gpuTag = computed(() => {
   if (gpuState.value === "failed") return { cls: "err", text: t("settings.gpuFailed") };
   return gpu.value ? { cls: "ok", text: t("settings.gpuOn") } : { cls: "", text: t("settings.gpuCpu") };
 });
-const overlayPosition = ref<OverlayPosition>(config.value?.overlayPosition ?? "top-left");
-const overlayDisplay = ref<OverlayDisplay>(config.value?.overlayDisplay ?? "thumbs");
-const hotkeyOverlay = ref(config.value?.hotkeyOverlay ?? "");
-const hotkeyMode = ref(config.value?.hotkeyMode ?? "");
+const overlayPosition = ref<OverlayPosition>("top-left");
+const overlayDisplay = ref<OverlayDisplay>("thumbs");
+const hotkeyOverlay = ref("");
+const hotkeyMode = ref("");
 const busy = ref(false);
 const version = ref("");
+
+// The fields from the loaded config
+function fill() {
+  const c = config.value;
+  connection.value = connectionOf(c);
+  token.value = c?.token ?? "";
+  gameDir.value = c?.gameDir ?? "";
+  language.value = c?.language ?? "";
+  autoTab.value = c?.autoTab ?? true;
+  gpu.value = c?.gpu ?? false;
+  overlayPosition.value = c?.overlayPosition ?? "top-left";
+  overlayDisplay.value = c?.overlayDisplay ?? "thumbs";
+  hotkeyOverlay.value = c?.hotkeyOverlay ?? "";
+  hotkeyMode.value = c?.hotkeyMode ?? "";
+}
+
 let unlisten: (() => void) | null = null;
 onMounted(async () => {
+  window.addEventListener("keydown", onKey);
   try {
     unlisten = await listen<GpuStatus>("ocr-gpu", (e) => (gpuState.value = e.payload.state));
+    await loadConfig();
+    paired.value = await getPaired();
+    fill();
     version.value = (await appInfo()).version;
     gpuState.value = (await gpuStatus()).state;
   } catch (e) {
     toastError(e);
   }
+  // The window's height is what the content takes (the overlay group exists on Windows only); it shows then
+  ready.value = true;
+  await nextTick();
+  if (root.value) await fitSettingsWindow(Math.ceil(root.value.getBoundingClientRect().height)).catch(toastError);
 });
-onUnmounted(() => unlisten?.());
+onUnmounted(() => {
+  unlisten?.();
+  window.removeEventListener("keydown", onKey);
+});
+
+const close = () => void getCurrentWindow().close();
+// Escape closes, unless something in the page took it (a hotkey field recording, a dropdown)
+function onKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && !e.defaultPrevented) close();
+}
 // The overlay needs the screen capture's window tracking (Windows only so far)
 const isWindows = navigator.userAgent.includes("Windows");
 
@@ -90,10 +129,6 @@ const changed = computed(() => connection.value !== connectionOf(config.value)
   || overlayDisplay.value !== (config.value?.overlayDisplay ?? "thumbs")
   || hotkeyOverlay.value !== config.value?.hotkeyOverlay
   || hotkeyMode.value !== config.value?.hotkeyMode);
-const buttons = computed<ConfirmButton[]>(() => [
-  { label: t("common.close"), kind: "outline", value: "close" },
-  { label: t("common.save"), kind: "primary", value: "save", icon: "check", form: "settings", disabled: !changed.value || busy.value },
-]);
 
 async function save() {
   if (!changed.value || busy.value) return;
@@ -112,7 +147,9 @@ async function save() {
       autoTab: autoTab.value,
       gpu: gpu.value,
     }));
-    await Promise.all([refreshConnection(), loadLog()]);
+    // This webview's own connection state (the paired app's folder shown above); the main window re-checks
+    // on "config-changed" (App.vue)
+    await refreshConnection();
     toast(t("settings.saved"));
   } catch (e) {
     // The save itself failed
@@ -125,7 +162,7 @@ async function save() {
 async function openDebug() {
   try {
     await openDebugWindow();
-    emit("close");
+    close();
   } catch (e) {
     toastError(e);
   }
@@ -138,15 +175,20 @@ async function pickFolder() {
 </script>
 
 <template>
-  <ConfirmDialog :title="t('settings.title')" icon="settings" :buttons="buttons" @choose="emit('close')">
-    <template #head>
+  <div v-if="ready" ref="root" class="settings">
+    <div class="head">
+      <Icon name="settings" :size="18" />
+      <div class="titles">
+        <span class="title">{{ t("settings.title") }}</span>
+      </div>
       <span class="version mono">{{ version && `v${version}` }}</span>
       <Tooltip :text="t('settings.debugHint')">
         <button type="button" class="btn small outline" @click="openDebug">
           <Icon name="log" :size="12" /> {{ t("debug.open") }}
         </button>
       </Tooltip>
-    </template>
+    </div>
+    <div class="body">
     <form id="settings" class="form single flush groups" @submit.prevent="save">
       <section class="group">
         <div class="group-title">{{ t("settings.app") }}</div>
@@ -223,10 +265,66 @@ async function pickFolder() {
         </div>
       </section>
     </form>
-  </ConfirmDialog>
+    </div>
+    <div class="foot">
+      <button type="button" class="btn outline" @click="close">{{ t("common.close") }}</button>
+      <button type="submit" form="settings" class="btn primary" :disabled="!changed || busy">
+        <Icon name="check" :size="14" /> {{ t("common.save") }}
+      </button>
+    </div>
+  </div>
+  <Toasts />
 </template>
 
 <style scoped>
+/* The window's content, as the dialog was (ConfirmDialog.vue's head, body and foot); the window is as high as it */
+.settings {
+  background: var(--bg-surface);
+}
+
+.head,
+.foot {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+}
+
+.head {
+  gap: 10px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.titles {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.foot {
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--border-dim);
+}
+
+.foot .btn {
+  height: var(--h-control);
+  font-size: 14px;
+}
+
 /* Room for the group titles straddling the tiles' top edges */
 .groups {
   gap: 22px;

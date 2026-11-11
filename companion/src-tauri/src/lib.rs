@@ -40,12 +40,15 @@ const LOG_CHANGED: &str = "log-changed";
 const SCAN_PROGRESS: &str = "scan-progress";
 // The scan session changed: its mode name
 const SCAN_CHANGED: &str = "scan-changed";
-// The config was saved (the debug window re-reads the language)
+// The config was saved (the main window re-reads it and the connection, the debug window the language)
 const CONFIG_CHANGED: &str = "config-changed";
 /// The companion's releases (the update panel's button); fixed here, never a URL from the page
 const RELEASES_URL: &str = "https://github.com/w00zla/quartermaster/releases";
 /// The debug window's label (capabilities/default.json lists it)
 const DEBUG_WINDOW: &str = "debug";
+/// The settings window's label (capabilities/default.json lists it) and its fixed inner width (logical px)
+const SETTINGS_WINDOW: &str = "settings";
+const SETTINGS_WIDTH: f64 = 560.0;
 /// The main window's WebView2 arguments (tauri.conf.json `additionalBrowserArgs`), for every further window
 #[cfg(windows)]
 pub(crate) const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
@@ -454,6 +457,38 @@ fn set_scan(app: AppHandle, detect: tauri::State<ocrwatch::Detect>, scan: tauri:
     log::debug!("scan scope {scope:?}");
 }
 
+/// Opens the settings window (settings.html), or brings it to the front. Fixed width, not resizable; it starts
+/// hidden, and the page reports its content height (`fit_settings_window`), which sets the height before the
+/// window shows (what the page holds depends on the platform). Async and with the main window's browser
+/// arguments like the debug window.
+#[tauri::command]
+async fn open_settings_window(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(SETTINGS_WINDOW) {
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    let builder = tauri::WebviewWindowBuilder::new(&app, SETTINGS_WINDOW, tauri::WebviewUrl::App("settings.html".into()))
+        .title("Quartermaster Companion – Settings")
+        .inner_size(SETTINGS_WIDTH, 600.0)
+        .resizable(false)
+        .maximizable(false)
+        .center()
+        .visible(false);
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(BROWSER_ARGS);
+    builder.build().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Sizes the settings window to its content (`height`, logical px; the page measures it once it is filled), centers
+/// it and shows it.
+#[tauri::command]
+fn fit_settings_window(app: AppHandle, height: f64) -> Result<(), String> {
+    let window = app.get_webview_window(SETTINGS_WINDOW).ok_or("no settings window")?;
+    window.set_size(tauri::LogicalSize::new(SETTINGS_WIDTH, height)).map_err(|e| e.to_string())?;
+    window.center().map_err(|e| e.to_string())?;
+    window.show().map_err(|e| e.to_string())
+}
+
 /// Opens the debug window (debug.html), or brings it to the front; closing it turns the debug flag
 /// off. Async: the window is built off the main thread (a sync command runs on it, and building a
 /// window waits for it). The webview gets the main window's browser arguments: WebView2 shares one
@@ -675,13 +710,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         // The main and the debug window open where they were closed (place incl. monitor, size,
-        // maximized); the overlay places itself
+        // maximized); the overlay places itself, the settings window sizes itself to its content and centers
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::POSITION | tauri_plugin_window_state::StateFlags::SIZE | tauri_plugin_window_state::StateFlags::MAXIMIZED,
                 )
-                .with_denylist(&["overlay"])
+                .with_denylist(&["overlay", "settings"])
                 .build(),
         );
     builder
@@ -769,6 +804,8 @@ pub fn run() {
             start_debug_recording,
             stop_debug_recording,
             open_debug_window,
+            open_settings_window,
+            fit_settings_window,
             get_game_seen,
             get_game_front,
             game_names,

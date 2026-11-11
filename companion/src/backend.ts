@@ -129,6 +129,10 @@ export type ScanScreen = "none" | "warehouse" | "inventory" | "refinery";
 export const setDebug = (on: boolean) => call<void>("set_debug", { on });
 export const startDebugRecording = (dir: string) => call<string>("start_debug_recording", { dir });
 export const stopDebugRecording = () => call<void>("stop_debug_recording");
+// The settings window (settings.html), opened or focused
+export const openSettingsWindow = () => call<void>("open_settings_window");
+// The settings window's first size: its content height (logical px); the window then shows
+export const fitSettingsWindow = (height: number) => call<void>("fit_settings_window", { height });
 // The debug window (debug.html), opened or focused
 export const openDebugWindow = () => call<void>("open_debug_window");
 export const getGameSeen = () => call<boolean>("get_game_seen");

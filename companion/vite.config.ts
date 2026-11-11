@@ -8,8 +8,8 @@ export default defineConfig(() => ({
   plugins: [vue()],
   // Rust errors stay visible in `tauri dev`
   clearScreen: false,
-  // Three pages: the app, the debug window and the scan overlay
-  build: { rollupOptions: { input: { main: "index.html", debug: "debug.html", overlay: "overlay.html" } } },
+  // Four pages: the app, the settings window, the debug window and the scan overlay
+  build: { rollupOptions: { input: { main: "index.html", settings: "settings.html", debug: "debug.html", overlay: "overlay.html" } } },
   server: {
     port: 1430,
     strictPort: true,
