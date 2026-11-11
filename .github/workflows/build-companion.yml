@@ -90,6 +90,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.test.outputs.version }}
+      # The production key pair: the secrets hold its private half, and the build keeps the production public key
+      # of tauri.conf.json (every other build swaps in the development one, scripts/build.mjs)
+      QM_UPDATER_KEY: prod
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:

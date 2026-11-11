@@ -22,6 +22,11 @@ let config = '--config src-tauri/tauri.bundle.conf.json';
 // The updater plugin refuses an http endpoint in a release build. Only the smoke test (a local http feed) switches that
 // off, with QM_TEST_FEED=1; a build without it, the one CI makes, keeps the plugin's https-only rule.
 if (process.env.QM_TEST_FEED === '1') config += ' --config src-tauri/tauri.testfeed.conf.json';
+// Two updater key pairs: tauri.conf.json carries the production public key, and only a build that says so keeps it
+// (QM_UPDATER_KEY=prod, set by the release workflow, whose secret is the production private key). Every other build,
+// this machine's, gets the development public key: it accepts updates signed with the development key only, and a
+// local build can never pass as a release.
+if (process.env.QM_UPDATER_KEY !== 'prod') config += ' --config src-tauri/tauri.devkey.conf.json';
 if (mode === '--dev') {
   run(`${tauri} dev ${config}`);
 } else if (mode === '--fast') {

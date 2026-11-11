@@ -12,7 +12,12 @@ const windows = process.platform === "win32";
 const run = (command, env = {}) => execSync(command, { stdio: "inherit", env: { ...process.env, ...env } });
 
 // The setup config adds DirectML.dll next to the exe (Windows only)
-const setup = windows ? " --config src-tauri/tauri.setup.conf.json" : "";
+// Two updater key pairs: tauri.conf.json carries the production public key, and only a build that says so keeps it
+// (QM_UPDATER_KEY=prod, set by the release workflow, whose secret is the production private key). Every other build,
+// this machine's, gets the development public key: it accepts updates signed with the development key only, and a
+// local build can never pass as a release.
+const key = process.env.QM_UPDATER_KEY === "prod" ? "" : " --config src-tauri/tauri.devkey.conf.json";
+const setup = (windows ? " --config src-tauri/tauri.setup.conf.json" : "") + key;
 if (mode === "--fast") {
   run(`pnpm tauri build --no-bundle${setup} -- --profile fast`);
 } else {

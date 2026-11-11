@@ -171,8 +171,8 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   in effect (chosen, else the build's own, else stable) and "only a newer version, any other right after a switch" are
   the app's. The feed is GitHub's only: no override, no `dangerousInsecureTransportProtocol` (a release build refuses
   http); the pure parts are Rust unit tests in `update.rs`.
-- **Signing:** the updater's public key in `tauri.conf.json` (`plugins.updater.pubkey`) is the desktop app's: one key pair
-  serves both apps. `createUpdaterArtifacts` is in `src-tauri/tauri.updater.conf.json`, which `scripts/build.mjs` adds
+- **Signing:** the updater's public key in `tauri.conf.json` (`plugins.updater.pubkey`) is the production key, the same as the desktop app's; every build but the release workflow's swaps in the development
+  key (`tauri.devkey.conf.json`, `docs/releasing.md` on the two key pairs). `createUpdaterArtifacts` is in `src-tauri/tauri.updater.conf.json`, which `scripts/build.mjs` adds
   only for the release build with `TAURI_SIGNING_PRIVATE_KEY` set (`build:windows`, `build:linux`); `build:fast:*` never
   makes updater artifacts and needs no key. Without the key the installer is built but has no `.sig`, so it cannot be
   published as an update.

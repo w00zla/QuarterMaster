@@ -49,7 +49,7 @@ else should (`scripts/channels-set.mjs <tag>` is the same step by hand).
      suite on PGlite in the process, `cargo test` and `cargo clippy -D warnings` of `app/src-tauri`; companion: its SPA typecheck,
      `test/companion-*.test.ts`, `cargo test --release` of `companion/src-tauri`).
   2. *Build* on Linux (AppImage) and Windows (NSIS setup), signed with the secrets `TAURI_SIGNING_PRIVATE_KEY` /
-     `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (one key for both apps; its public half is in both `tauri.conf.json`). App: `pnpm app:build`;
+     `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the production key pair, for both apps; its public half is in both `tauri.conf.json`, and the workflows set `QM_UPDATER_KEY=prod` so the build keeps it). App: `pnpm app:build`;
      companion: `pnpm companion:directml` (Windows) and `pnpm companion:build`. The release build keeps the updater's http switch off (below).
   3. *Draft release* for the tag (a tag with `-` is marked pre-release): the installers, their `.sig` files and `latest.json`
      (`scripts/latest-json.mjs`), which names the assets of exactly that release. Release assets: app `Quartermaster_<v>_x64-setup.exe`,
@@ -108,7 +108,7 @@ their next data check. Keep `<out dir>` for the next pack's `--previous`. The da
 ## Once, before the first release
 
 - **Secrets** (repository settings, Actions): `TAURI_SIGNING_PRIVATE_KEY` (the minisign private key as one line, or its file's content),
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty if the key has none). The key pair is the one whose public key is in both `tauri.conf.json`.
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty if the key has none). It is the **production** pair, whose public key is in both `tauri.conf.json`. Two updater key pairs, each serving both apps: **production** (public key in both `tauri.conf.json`; private key and password only in the repository's Actions secrets and the maintainer's safe; a build keeps this public key only with `QM_UPDATER_KEY=prod`, which the build workflows set) and **development** (public key in `tauri.devkey.conf.json` of each app, added by `scripts/build.mjs` to every other build; private key in the maintainer's environment for local signed builds and the smoke test's feed). A local build therefore never accepts production updates as its own and can never pass as a release; an installed release accepts nothing signed with the development key. Losing the production private key means no installed app can ever be updated again.
 - **Visibility:** the apps read `raw.githubusercontent.com` and the release assets without a token, so the repository must be public.
 - **Actions permissions:** workflow permissions "Read and write" (the workflows ask `contents: write` themselves), and Actions allowed to
   create releases.

@@ -190,7 +190,7 @@ click; the start is the only moment an update installs by itself ("The start", 4
 it as NSIS or AppImage) only compares versions: a newer one is state `error` with "Version X ist verfügbar. Diese Installation kann sich
 nicht selbst aktualisieren." / "Version X is available. This installation cannot update itself."
 
-**The signing key.** One updater key pair serves both apps; the public key in `tauri.conf.json` is the one the companion's updater had.
+**The signing key.** Two updater key pairs, each serving both apps: **production** (public key in both `tauri.conf.json`; private key and password only in the repository's Actions secrets and the maintainer's safe; a build keeps this public key only with `QM_UPDATER_KEY=prod`, which the build workflows set) and **development** (public key in `tauri.devkey.conf.json` of each app, added by `scripts/build.mjs` to every other build; private key in the maintainer's environment for local signed builds and the smoke test's feed). A local build therefore never accepts production updates as its own and can never pass as a release; an installed release accepts nothing signed with the development key. Losing the production private key means no installed app can ever be updated again.
 The private key is the maintainer's and is in no repository. A build without `TAURI_SIGNING_PRIVATE_KEY` in its environment is
 **unsigned for updating**: the installer is built and installs normally, the app in it checks and installs signed updates, but the build
 makes no `.sig` and so cannot be published as an update (a `latest.json` needs the signature). With the key set, `pnpm app:build` adds
