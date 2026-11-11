@@ -385,3 +385,28 @@
   font-family: var(--font-mono);
   font-size: 12px;
 }
+
+/* A version as a mono chip (the game version in the top bar, versions in the settings view). `.fixed`: the width of a
+   game version (4.10.2.12913470), so a dash and the real number take the same room */
+.ver-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--h-chip);
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  background: var(--bg-surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.ver-chip.none {
+  color: var(--text-2);
+}
+
+.ver-chip.fixed {
+  min-width: calc(15ch + 20px);
+}

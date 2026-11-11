@@ -426,10 +426,78 @@ blocks".
   a logo link to UEX (`uex-logo-{20,40}.png`, Lanczos from its touch icon), a divider, a short CIG fan site disclaimer (the full text on hover) and the Star Citizen
   logo from the official fankit (`webapp/src/assets/sc-logo-{20,40}.png`), on every page incl. login.
 
+### Capabilities and the singleuser UI
+
+The SPA asks `GET /api/capabilities` before anything else (`capabilities.ts`, reactive; retried every 2 s while the server does not
+answer) and only then loads `/api/me`. What it shows follows the capabilities, not a build flag:
+
+- **`login: 'discord'`**: the online behaviour as always (login view, user, profile, logout, companion dialog, the
+  "thumbnail review" privilege button).
+- **`login: 'none'`** (the singleuser variant): no login view, no user name or avatar, no profile dialog, no logout, no companion download
+  dialog. In their place a settings button (icon `settings`, an outlined icon button, the accent colour on its route) leads to
+  `/settings`; the route exists only without a login, with a login it leads home (`navigation.ts` `routeAllowed`, a router guard, and
+  `App.vue` re-checks the current route when the capabilities arrive or change).
+- **`orgs: false`**: no scope switch (`ScopeBar` renders nothing), no "Your orgs" panel on the overview, no sharing button in the stock
+  table (its actions column is one button narrower). The rest of the org handling needs no condition: a user without any org already
+  is a case (`me.orgs` is empty: no share switches in the add form, no recipient pickers, no owners lines).
+- **`uex: false`**: no buy/sell tab (and `/trade` leads home), in the stock and gear tables no UEC columns, no trade button column
+  and no worth in the head (no `/api/trade/prices` request), no trade dialog, no price section in the info cards, no worth tile on
+  the overview. A UEX key set or removed in the settings changes the capabilities at once; the views follow.
+- **The game version chip** (`.ver-chip`, mono; tooltip "Spielversion") in the top bar of both variants shows `capabilities.game.label`,
+  a dash while there is none. It has the width of a game version, so the dash and the number take the same room and nothing moves.
+  The capabilities are refreshed after a data install, after the UEX key changes and every 15 s while the data state is idle.
+
+The navigation is built from `navigation.ts` (pure: which tab groups, which top bar controls, which routes for which capabilities).
+
+**The settings view** (`/settings`, `SettingsView.vue`) has four panels, each with a coloured tag in the head (a word, never colour alone;
+the head keeps its height with or without the tag) and rows of a fixed label column; the decisions are in `settingsLogic.ts`:
+
+- *Game folder* (`/api/local/settings`): the path field applies on Enter or when it loses focus with a changed value. A refusal (422) shows
+  "no game in this folder" and the "no game" tag and keeps the saved setting (the typed text stays). "Browse" exists only where the shell
+  has a folder picker; it is the primary button while there is no usable folder, without a picker the field gets the accent border instead.
+  The game version and the language pack's tag (active, none, restart needed) follow the settings.
+- *Game data* (`/api/local/data`): installed version, time of the last check, the amount while something downloads (that row replaces the
+  check time), "Import file" (a dialog with a path field, plus the picker button where the shell has one) and "Check for data"; both are
+  disabled while something runs. The state is polled while its phase is not idle.
+- *UEX* (`/api/local/uex`): the key field is a password field showing a mask while a key is set; "Save" stores a typed key, a cleared
+  field removes the key after a confirmation. The interval select (15, 30, 60 minutes) saves at once and is disabled without a key. One
+  row holds the times of the last and the next fetch (local; today as the clock, other days with the day); "Fetch now" needs a key and a
+  pull that is not running; the state is polled every 1.5 s while pulling. A refused key shows the "Refused" tag and a message.
+- *App*: the version, the automatic updates switch (saves at once) and the language select (`me.langOverride` through `/api/profile`; the
+  profile dialog that holds it online does not exist here). A value the environment overrides (`overridden`) is shown, disabled.
+
+**The first run:** without a usable game folder (`firstRun`) the settings view opens by itself, once per page load and only after the app
+is shown (not over the start tile); the user can leave it.
+
+**The start tile** (`StartTile.vue`, state from `startTile.ts`) replaces the whole app (top bar, views, footer) while `login: 'none'` and no data
+pack is installed: the app-icon slot (empty, reserved), the wordmark, the app version, four segments and one line of text; a
+download adds the amount ("12 / 45 MB") and a bar. Phases map to the steps: nothing known yet "Starting …" (1), checking and downloading
+"Loading game data …" (2), installing "Setting up game data …" (3). Without a connection (outcome offline or failed with nothing
+installed) the tile shows the "No connection" tag, "Game data missing." and two buttons, "Import file" (the same dialog as in the settings)
+and "Try again" (posts a check); the same layout with "Game data missing." alone where nothing will fetch the data (updates off, no
+data channel), and with the "App update needed" tag where the newest data needs a newer app. The state (`local.ts`) is polled every
+second while it is busy and rarely while idle, each request with a 3 s limit. **A request that fails or times out while a check, a
+download or an installation was last seen counts as "still installing"** (the catalog import blocks the whole process for seconds, the
+state endpoint included), never as an error; five failed requests in a row with nothing running say the server is not reachable.
+When a data pack appears (`installedTag` changes) the catalog cache is dropped and the catalog loaded again, and the views mount
+fresh: no reload by the user.
+
+**The bold notice** (`UpdateNotice.vue`) sits above every view while the last data outcome is `appTooOld` with `pack: 'newer'` or a
+`failed` with reason `unsupported`: "App update needed / New game data needs a newer app." Its button is rendered only where the
+shell offers app updates.
+
+**The shell adapter** (`shell.ts`): the one place where native functions enter the SPA, a reactive object `shell` with `available`
+(a folder/file picker exists), `pickFolder()`, `pickFile(extensions?)` (both answer null when cancelled or unavailable),
+`updateAvailable` and `openUpdate()`. In a browser everything is "not available"; the desktop shell sets the members. No shell package
+is imported by the SPA.
+
+Tests: `test/webapp-local.test.ts` (start tile states including the timeout rule, navigation per capability, the settings
+decisions, time formatting, both languages having the same texts).
+
 ### Layout and building blocks
 
 - List views share one layout: Ressourcen and Blueprints have the scope switch above (`ScopeBar.vue`: big
-  buttons personal, each org, optionally "All"; always shown, also without any org; `scopeName` for heads),
+  buttons personal, each org, optionally "All"; always shown, also without any org, but not without the `orgs` capability; `scopeName` for heads),
   then ONE panel: head "<View> · <scope>" with the add button, the add area (`.add-area`), filters, table
   (Raffinerie the same without a scope switch). Never a panel holding only a head (its border doubles the
   panel's).

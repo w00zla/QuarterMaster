@@ -420,6 +420,11 @@ when the updater is made.
 The browser is not told when a catalog changed: the triggers notify user data only (`ServerMessage` has no catalog message), and
 the thumbnail index is re-read at most every 10 s.
 
+The SPA polls `GET /api/local/data` (every second while busy, 3 s limit per request) for the start tile, the settings view and the "app
+update needed" notice, and treats a request that gets no answer while an install runs as "still installing" (`docs/webapp.md` "Capabilities
+and the singleuser UI"). The first catalog install blocks the process for about 12 s on the development machine; the request in the
+middle of it timed out once, the next ones were answered.
+
 Tests: `test/datapack-plan.test.ts` (every branch of the plan), `test/datapack-update.test.ts` (feeds with an injected `fetch`, the
 updater on a folder feed built with `buildRelease`), the update in `test/singleuser.test.ts` (the real process). None needs the
 network or Postgres.

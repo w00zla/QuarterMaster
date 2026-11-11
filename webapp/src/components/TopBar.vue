@@ -5,26 +5,19 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import Icon, { type IconName } from "../../../adminapp/src/components/Icon.vue";
 import logo from "../../../adminapp/src/assets/logo-128.png";
+import { capabilities, gameLabel } from "../capabilities";
 import { t, type Key } from "../i18n";
 import { topbarHeight } from "../layout";
+import { navGroups, userControls } from "../navigation";
 import { logout, me } from "../session";
 import CompanionDialog from "./CompanionDialog.vue";
 import ProfileDialog from "./ProfileDialog.vue";
 
-// The overview on its own, then the data views
-const homeTab: { to: string; label: Key; icon: IconName } = { to: "/", label: "nav.home", icon: "overview" };
-const tabs: Array<{ to: string; label: Key; icon: IconName }> = [
-  { to: "/gear", label: "nav.components", icon: "gear" },
-  { to: "/resources", label: "nav.stock", icon: "type-crate" },
-  { to: "/refinery", label: "nav.refinery", icon: "drop" },
-  { to: "/blueprints", label: "nav.blueprints", icon: "blueprint" },
-];
-// Tools, after a divider (as in the admin UI)
-const toolTabs: Array<{ to: string; label: Key; icon: IconName }> = [
-  { to: "/crafting", label: "nav.crafting", icon: "crafter" },
-  { to: "/mining", label: "nav.mining", icon: "pickaxe" },
-  { to: "/trade", label: "nav.trade", icon: "trade" },
-];
+// The overview on its own, then the data views, then the tools (as in the admin UI): which tabs exist follows the
+// server's capabilities (no buy/sell tab without UEX data)
+const groups = computed(() => navGroups(capabilities.value));
+// Without a login there is no user, profile, logout or companion download; the settings button takes their place
+const controls = computed(() => userControls(capabilities.value));
 // Features (docs/webapp.md "Features and privileges"): a button left of Companion for whoever holds the privilege
 const privilegeTabs: Array<{ to: string; label: Key; icon: IconName; key: string }> = [
   { to: "/feature/thumb-review", label: "nav.thumbReview", icon: "eye", key: "thumb-review.mark" },
@@ -52,39 +45,36 @@ onUnmounted(() => {
     </div>
     <!-- Three bars: the overview, the data views, the tools -->
     <div class="navs">
-      <nav class="tabs">
-        <RouterLink :to="homeTab.to" class="tab" :class="{ active: $route.path === homeTab.to }">
-          <Icon :name="homeTab.icon" :size="16" /> {{ t(homeTab.label) }}
-        </RouterLink>
-      </nav>
-      <nav class="tabs">
-        <RouterLink v-for="tab in tabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
-          <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
-        </RouterLink>
-      </nav>
-      <nav class="tabs">
-        <RouterLink v-for="tab in toolTabs" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
+      <nav v-for="(group, i) in groups" :key="i" class="tabs">
+        <RouterLink v-for="tab in group" :key="tab.to" :to="tab.to" class="tab" :class="{ active: $route.path === tab.to }">
           <Icon :name="tab.icon" :size="16" /> {{ t(tab.label) }}
         </RouterLink>
       </nav>
     </div>
     <div class="spacer" />
-    <RouterLink v-for="tab in supportTabs" :key="tab.to" :to="tab.to" class="btn small outline support" :class="{ active: $route.path === tab.to }">
-      <Icon :name="tab.icon" :size="14" /> {{ t(tab.label) }}
-    </RouterLink>
-    <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="desktop" :size="14" /> {{ t("companion.open") }}</button>
-    <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
+    <!-- The game version of the installed data (both variants); a fixed width, so the dash and the number take the same room -->
+    <span class="ver-chip fixed" :class="{ none: !gameLabel }" :title="t('nav.gameVersion')">{{ gameLabel ?? "–" }}</span>
+    <template v-if="controls.companion">
+      <RouterLink v-for="tab in supportTabs" :key="tab.to" :to="tab.to" class="btn small outline support" :class="{ active: $route.path === tab.to }">
+        <Icon :name="tab.icon" :size="14" /> {{ t(tab.label) }}
+      </RouterLink>
+      <button class="btn small outline" type="button" @click="companionOpen = true"><Icon name="desktop" :size="14" /> {{ t("companion.open") }}</button>
+      <CompanionDialog v-if="companionOpen" @close="companionOpen = false" />
+    </template>
     <span class="tab-divider" />
-    <span v-if="me" class="user">
-      <img class="avatar" :src="me.avatarUrl" alt="" />
+    <span v-if="controls.user && me" class="user">
+      <img v-if="me.avatarUrl" class="avatar" :src="me.avatarUrl" alt="" />
       <span class="name">{{ me.name }}</span>
     </span>
-    <button v-if="me" class="icon-btn" type="button" :title="t('profile.open')" @click="profileOpen = true"><Icon name="settings" :size="15" /></button>
+    <button v-if="controls.profile && me" class="icon-btn" type="button" :title="t('profile.open')" @click="profileOpen = true"><Icon name="settings" :size="15" /></button>
     <ProfileDialog v-if="profileOpen" @close="profileOpen = false" />
     <RouterLink to="/history" class="icon-btn link-btn" :class="{ active: $route.path === '/history' }" :title="t('nav.history')">
       <Icon name="history" :size="15" />
     </RouterLink>
-    <button class="icon-btn" type="button" :title="t('user.logout')" @click="logout"><Icon name="log-out" :size="15" /></button>
+    <RouterLink v-if="controls.settings" to="/settings" class="icon-btn link-btn" :class="{ active: $route.path === '/settings' }" :title="t('nav.settings')">
+      <Icon name="settings" :size="15" />
+    </RouterLink>
+    <button v-if="controls.logout" class="icon-btn" type="button" :title="t('user.logout')" @click="logout"><Icon name="log-out" :size="15" /></button>
   </header>
 </template>
 

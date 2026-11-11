@@ -22,8 +22,10 @@ const props = withDefaults(
     // Open the list above the button (a dropdown at the bottom of a
     // scrolling container would otherwise grow the container).
     up?: boolean;
+    // Not changeable (shown as it is)
+    disabled?: boolean;
   }>(),
-  { placeholder: "", variant: "chip", title: undefined, up: false },
+  { placeholder: "", variant: "chip", title: undefined, up: false, disabled: false },
 );
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
@@ -57,7 +59,7 @@ onUnmounted(() => {
 
 <template>
   <div ref="root" class="dd" :class="`dd-${variant}`">
-    <button type="button" class="dd-btn" :title="title" @click="open = !open">
+    <button type="button" class="dd-btn" :title="title" :disabled="disabled" @click="open = !open">
       <span class="dd-name" :class="{ empty: !current, mono: variant === 'mono' }">{{ current?.label ?? placeholder }}</span>
       <Icon name="chevron-down" :size="variant === 'mono' ? 14 : 12" />
     </button>
@@ -100,6 +102,12 @@ onUnmounted(() => {
 
 .dd-btn:hover {
   background: var(--bg-surface-3);
+}
+
+/* No pointer events: no hover look either */
+.dd-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .dd-name {

@@ -23,6 +23,7 @@ import ColumnHead from "../../../adminapp/src/components/ColumnHead.vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { sortRows, THUMB_COLUMN, useTableColumns, type ColumnSpec, type SortState } from "../../../adminapp/src/tableColumns";
 import { api } from "../api";
+import { orgsOn, uexOn } from "../capabilities";
 import BatchDialog, { type BatchAction } from "../components/BatchDialog.vue";
 import ColumnsButton from "../components/ColumnsButton.vue";
 import Thumb from "../components/Thumb.vue";
@@ -101,6 +102,8 @@ watch(lang, load);
 // UEX prices per material (GET /api/trade/prices): the Handel button and the UEC columns; per visit
 const prices = ref<Record<string, PriceSummary>>({});
 async function loadPrices() {
+  // No UEX data offered (singleuser without a key): no prices, no columns, no trade button
+  if (!uexOn.value) return;
   try {
     prices.value = (await api<TradePricesResponse>("/trade/prices")).prices;
   } catch (e) {
@@ -171,9 +174,11 @@ const columnsFor = (orgView: boolean) => computed<ColumnSpec[]>(() => [
   { key: "amount", label: props.components ? t("stock.col.count") : t("stock.col.amount"), width: 120, hideable: true },
   ...(props.components ? [{ key: "stats", label: t("stock.col.stats"), width: 260, hideable: true }] : []),
   // What the amount is worth at UEX's prices (best sell shown, the others on demand); items have no averages
-  { key: "uecSell", label: t("trade.col.sell"), width: 120, hideable: true, hiddenByDefault: orgView },
-  { key: "uecBuy", label: t("trade.col.buy"), width: 120, hideable: true, hiddenByDefault: true },
-  ...(props.components ? [] : [
+  ...(uexOn.value ? [
+    { key: "uecSell", label: t("trade.col.sell"), width: 120, hideable: true, hiddenByDefault: orgView },
+    { key: "uecBuy", label: t("trade.col.buy"), width: 120, hideable: true, hiddenByDefault: true },
+  ] : []),
+  ...(props.components || !uexOn.value ? [] : [
     { key: "uecSellAvg", label: t("trade.col.sellAvg"), width: 120, hideable: true, hiddenByDefault: true },
     { key: "uecBuyAvg", label: t("trade.col.buyAvg"), width: 120, hideable: true, hiddenByDefault: true },
   ]),
@@ -186,10 +191,11 @@ const columnsFor = (orgView: boolean) => computed<ColumnSpec[]>(() => [
   ...(orgView ? [] : [{ key: "state", label: t("stock.col.state"), width: 40, hideable: true }]),
   // Genau so breit wie die Buttons (je 26px, 6px Abstand) plus der Abstand hinter der Trennlinie (6px) und ein
   // Mini-Abstand (3px) vor der Handel-Spalte: Ressourcen fünf Buttons, Ausrüstung vier
-  { key: "actions", label: "", width: (props.components ? 4 * 26 + 3 * 6 : 5 * 26 + 4 * 6) + 6 + 3, sortable: false, fixed: true, sep: true },
-  // Der Handel-Button der Materialzeile (Preise gelten je Material)
+  // (ohne Orgs fehlt der Teilen-Button: einer weniger)
+  { key: "actions", label: "", width: (() => { const n = (props.components ? 4 : 5) - (orgsOn.value ? 0 : 1); return n * 26 + (n - 1) * 6; })() + 6 + 3, sortable: false, fixed: true, sep: true },
+  // Der Handel-Button der Materialzeile (Preise gelten je Material); ohne UEX-Daten keine Spalte
   // Der Button füllt die Spalte (kein Polster); breit genug für "Handel" und "Trading"
-  { key: "trade", label: "", width: 6 + 62, sortable: false, fixed: true, sep: true },
+  ...(uexOn.value ? [{ key: "trade", label: "", width: 6 + 62, sortable: false, fixed: true, sep: true }] : []),
 ]);
 const storageKey = props.components ? "qm.webapp.columns.components" : "qm.webapp.columns.stock";
 const defaultSort: SortState = props.components ? { key: "amount", dir: "desc" } : { key: "quality", dir: "desc" };
@@ -334,7 +340,7 @@ function open(batch: StockBatch, action: BatchAction) {
     <section class="panel unclipped">
       <div class="head">
         <Icon :name="components ? 'gear' : 'type-crate'" :size="16" />
-        <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span><span class="head-worth">({{ uecText(listWorth) }} aUEC)</span></span>
+        <span class="head-title">{{ components ? t("nav.components") : t("nav.stock") }} <span class="dim">· {{ scopeName(scope) }}</span><span v-if="uexOn" class="head-worth">({{ uecText(listWorth) }} aUEC)</span></span>
         <!-- Offen: als Umriss-Button "Schließen", damit nur der Hinzufügen-Button im Formular gefüllt ist -->
         <button type="button" class="btn small" :class="showAdd ? 'outline' : 'primary'" @click="showAdd = !showAdd">
           <Icon :name="showAdd ? 'close' : 'plus'" :size="14" />
@@ -394,7 +400,7 @@ function open(batch: StockBatch, action: BatchAction) {
             <span v-if="components && on('stats')" />
             <span v-for="k in uecShown" :key="k" class="num uec total">{{ uecText(uecMicros(g.uuid, g.total, k)) }}</span>
             <span v-for="c in groupRest" :key="c" :class="{ sep: c === groupRest }" />
-            <span class="sep trade"><ChipButton :label="t('trade.button')" :disabled="!prices[g.uuid]" @click="trade = { uuid: g.uuid, name: g.material }" /></span>
+            <span v-if="uexOn" class="sep trade"><ChipButton :label="t('trade.button')" :disabled="!prices[g.uuid]" @click="trade = { uuid: g.uuid, name: g.material }" /></span>
           </div>
           <div v-for="b in g.rows" :key="b.id" class="row data-row batch-row">
             <span v-if="thumbView" />
@@ -417,7 +423,7 @@ function open(batch: StockBatch, action: BatchAction) {
             <span class="sep actions">
               <!-- Fremde Einträge (Org-Ansicht, Alle): dieselben Buttons, ausgegraut -->
               <!-- Sharing needs an org to share in; taking back always works -->
-              <button type="button" class="icon-btn" :title="t('field.sharing')"
+              <button v-if="orgsOn" type="button" class="icon-btn" :title="t('field.sharing')"
                 :disabled="!canChange(b) || b.state !== 'stored' || (!b.sharedIn.length && !shareable)" @click="open(b, 'share')"><Icon name="users" :size="15" /></button>
               <!-- In der Raffinerie: nichts entnehmen; korrigiert wird im Raffinerie-Tab -->
               <button type="button" class="icon-btn" :title="t('stock.remove')" :disabled="!canChange(b) || b.state !== 'stored'" @click="open(b, 'remove')"><Icon name="arrow-up" :size="15" /></button>
@@ -433,14 +439,14 @@ function open(batch: StockBatch, action: BatchAction) {
               <button v-if="!components" type="button" class="icon-btn" :title="t('stock.adjust')" :disabled="!canChange(b) || b.state !== 'stored'" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
               <button v-else type="button" class="icon-btn" :title="t('stock.adjustStats')" :disabled="!canChange(b) || !materials.get(b.subjectUuid)?.stats.length" @click="open(b, 'adjust')"><Icon name="edit" :size="15" /></button>
             </span>
-            <span class="sep" />
+            <span v-if="uexOn" class="sep" />
           </div>
         </template>
       </div>
     </section>
 
     <BatchDialog v-if="dialog" :key="dialog.batch.id" :batch="dialog.batch" :action="dialog.action" @close="dialog = null" @done="load" />
-    <TradeDialog v-if="trade" :key="trade.uuid" :uuid="trade.uuid" :name="trade.name" @close="trade = null" />
+    <TradeDialog v-if="trade && uexOn":key="trade.uuid" :uuid="trade.uuid" :name="trade.name" @close="trade = null" />
   </div>
 </template>
 

@@ -15,6 +15,7 @@ export function scopeName(scope: string): string {
 // Shown also without any org, so every list view has the same layout. Model: "personal", a guildId
 // or "all".
 import Icon from "../../../adminapp/src/components/Icon.vue";
+import { orgsOn } from "../capabilities";
 import { me } from "../session";
 
 defineProps<{ all?: boolean }>();
@@ -22,7 +23,8 @@ const scope = defineModel<string>({ required: true });
 </script>
 
 <template>
-  <div class="scope-bar">
+  <!-- Without orgs (the singleuser variant) there is only one scope: no switch -->
+  <div v-if="orgsOn" class="scope-bar">
     <button type="button" class="scope" :class="{ active: scope === 'personal' }" @click="scope = 'personal'">
       <Icon name="user" :size="14" /> {{ t("stock.personal") }}
     </button>

@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 import type { CatalogBlueprint, CatalogLocation, CatalogMaterial, CatalogResponse, Lang } from "../../src/webapp/api-types";
 import { api } from "./api";
 import { lang } from "./i18n";
+import { installedTag } from "./local";
 import { onServerMessage } from "./realtime";
 import { status } from "./session";
 
@@ -36,6 +37,14 @@ async function load(l: Lang, force = false) {
 watch([lang, status], ([l, s]) => {
   if (s === "in") void load(l);
 }, { immediate: true });
+
+// Singleuser: a game data pack was installed (the first one from the start tile, or an update): the catalog changed under
+// the cached one, and nothing tells the browser. Not on the first value (that is the state at the start).
+watch(installedTag, (tag, old) => {
+  if (old === undefined || tag === old) return;
+  cache.clear();
+  if (status.value === "in") void load(lang.value, true);
+});
 
 onServerMessage((m) => {
   if (m.type !== "resync") return;
