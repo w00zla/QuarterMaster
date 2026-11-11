@@ -204,7 +204,7 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   tabular, in a fixed room: it never changes an entry's size); the last tab kept in localStorage `qm.companion.tab`; it never
   switches by itself: the scan row's tag names the screen. **Narrow** (56 px, the default): the icon with the count below it
   in mono, the tab's name in a tooltip to the right; **wide** (200 px): icon, name, count at the right. A small chevron
-  button half over the panel's right edge at its top toggles them (always possible; choice in localStorage
+  button half over the panel's right edge at the middle of its height toggles them (always possible; choice in localStorage
   `qm.companion.sideMode`). Wide raises the window's minimum width to 840 px (`sideTabs.ts`: 696 - 56 + 200; `setMinSize`
   from the frontend, capability `main-window.json`; the minimum height is the constant `MIN_HEIGHT`, as in `tauri.conf.json`)
   and widens a narrower window to it, keeping position and height; this also runs at start, after the window-state plugin

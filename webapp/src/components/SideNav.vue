@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The singleuser variant's navigation: a bar at the left edge from the window's top down to the footer (the online variant keeps
 // the top bar). The logo (with the wordmark when wide), the nav groups of navigation.ts one below the other with a divider
-// between them, the history as the last group (quieter); nothing below it. At the top right, half over the bar's right edge, a small
+// between them, the history as the last group (quieter); nothing below it. At the middle of its height, half over the bar's right edge, a small
 // button toggles between wide (icon and text, 232 px) and narrow (icons with a tooltip, 56 px). The choice is remembered; below
 // 1000 px of window width the bar is narrow whatever the choice (it is not overwritten). The settings are not here: their button
 // is in the slim bar (SlimBar.vue).
@@ -158,10 +158,12 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 }
 
 /* 20 px wide, 24 high: the middle of it is the border line (the bar's width is the border box: 232 or 56) */
+/* At the middle of the bar's height */
 .toggle-wrap {
   position: absolute;
-  top: 16px;
+  top: 50%;
   right: -11px;
+  transform: translateY(-50%);
 }
 
 .toggle {

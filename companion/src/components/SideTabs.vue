@@ -128,10 +128,12 @@ onMounted(fit);
 }
 
 /* 20 px wide, 24 high: the middle of it is the border line (the panel's width is the border box: 200 or 56) */
+/* At the middle of the panel's height */
 .toggle-wrap {
   position: absolute;
-  top: 16px;
+  top: 50%;
   right: -11px;
+  transform: translateY(-50%);
 }
 
 .toggle {
@@ -203,7 +205,7 @@ onMounted(fit);
   min-width: 3ch;
   text-align: right;
   font-weight: 400;
-  font-size: 13px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
@@ -216,7 +218,7 @@ onMounted(fit);
 /* Narrow: the icon over the small count in mono, both centred (the entry is 40 px wide, the same height in every state) */
 .item.narrow {
   width: 40px;
-  height: 52px;
+  height: 56px;
   flex: none;
   flex-direction: column;
   justify-content: center;
@@ -229,7 +231,7 @@ onMounted(fit);
   width: 100%;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 14px;
+  font-size: 14px;
+  line-height: 16px;
 }
 </style>

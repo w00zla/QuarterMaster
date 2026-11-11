@@ -475,7 +475,7 @@ routes for which capabilities).
 to the footer (the singleuser app is as high as the window and only the content beside the bar scrolls). From the top: the logo (with the wordmark when wide; the
 logo's row is a drag region in the shell), the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
 quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups; nothing below them. The toggle is a small
-button at the top right of the bar, half over its right edge (chevron, tooltip). Two modes: *wide* (icon and text, 232 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
+button at the middle of the bar's height, half over its right edge (chevron, tooltip). Two modes: *wide* (icon and text, 232 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
 opens above or below the button). The choice is stored in `localStorage` (`qm.sideMode`, in a try/catch); below 1000 px of window
 width the bar is narrow whatever the choice (`sideModeFor`; the stored choice is not touched, the toggle is disabled then). The two
 modes differ in width only: buttons are 36 px high either way, icons and logo sit at the same place, the tooltip wrapper exists in both.
