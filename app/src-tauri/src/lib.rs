@@ -344,7 +344,8 @@ fn show_window(window: &WebviewWindow) {
 /// not resizable, owned by the main window (it stays above it). It stays hidden until its page has sent its size
 /// (`settings_window_fit`), or `SETTINGS_SHOW_LIMIT` has passed.
 #[tauri::command]
-fn open_settings(app: AppHandle, shell: State<Shell>) -> Result<(), String> {
+async fn open_settings(app: AppHandle, shell: State<'_, Shell>) -> Result<(), String> {
+    // (async: a window built in a synchronous command blocks the thread that has to create it, on Windows)
     if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
         show_window(&window);
         return Ok(());

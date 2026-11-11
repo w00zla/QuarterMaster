@@ -95,7 +95,8 @@ if (settingsWindow) {
     try {
       await document.fonts.ready;
     } catch { /* measured with the fonts it has */ }
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    // (no requestAnimationFrame: the window is still hidden, and a hidden page gets no frames)
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const size = settingsFitSize(win.value?.offsetHeight ?? 0);
     if (size) shell.fitSettings(size.width, size.height);
   }, { immediate: true });
