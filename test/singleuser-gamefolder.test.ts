@@ -310,7 +310,7 @@ describe('settings routes', () => {
     packFile(dir, 'german_(germany)', 'ui_a=Hallo\nui_b=Welt\n');
     const { call } = setup({ QM_GAME_DIR: dir });
     const res = await call('GET');
-    assert.deepEqual(res.body.languagePack, { state: 'loaded', language: 'german_(germany)', texts: 2, active: true, pending: false });
+    assert.deepEqual(res.body.languagePack, { state: 'loaded', language: 'german_(germany)', file: 'data/Localization/german_(germany)/global.ini', texts: 2, active: true, pending: false });
   });
 
   it('PUT: an invalid folder answers 422 with the problem and changes nothing', async () => {

@@ -163,7 +163,7 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
         gameDir: game, autoUpdate: false, uexKeySet: false, uexIntervalMinutes: 15, appVersion: PACKAGE_VERSION,
         overridden: { gameDir: true, autoUpdate: true, uexKey: false, uexIntervalMinutes: false },
         gameFolder: { state: 'ok', gameVersion: '4.10.2.12913470' },
-        languagePack: { state: 'loaded', language: 'german_(germany)', texts: 3, active: true, pending: false },
+        languagePack: { state: 'loaded', language: 'german_(germany)', file: 'data/Localization/german_(germany)/global.ini', texts: 3, active: true, pending: false },
       });
       assert.deepEqual(JSON.parse(readFileSync(pairing, 'utf8')), { format: 1, origin: base, gameDir: game });
       assert.equal(existsSync(join(dir, 'settings.json')), false); // overrides are never written

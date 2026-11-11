@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The settings of the singleuser variant (/settings, and the desktop shell's settings window): ONE tile that grows downward, built
-// like the companion's settings window (companion/src/SettingsApp.vue): a head (icon, title, the app's version small), a body of
+// like the companion's settings window (companion/src/SettingsApp.vue): a head (icon, title; on the page only, the window's title bar names it), a body of
 // groups (a tile on the base background, the group's title on its top border, label left and control right, a field's label above
 // its input) and, in the window only, a foot with "Close". Groups: the game folder (Star Citizen), the game data, the UEX trade data
 // and the app. Everything applies at once (no save button). Everything comes from /api/local/*; the decisions (tags, what a field
@@ -192,12 +192,10 @@ onUnmounted(() => clearTimeout(timer));
   <div class="page" :class="{ win: settingsWindow }">
     <div v-if="!s || !folder" class="empty-line">{{ t("common.loading") }}</div>
     <div v-else class="settings" :class="{ win: settingsWindow }">
-      <div class="head">
+      <!-- The window's title bar names it (App.vue); the page has no bar of its own -->
+      <div v-if="!settingsWindow" class="head">
         <Icon name="settings" :size="18" />
-        <div class="titles">
-          <span class="title">{{ t("nav.settings") }}</span>
-        </div>
-        <span class="version mono">v{{ s.appVersion }}</span>
+        <span class="title">{{ t("nav.settings") }}</span>
       </div>
       <div class="body">
         <form class="form single flush groups" @submit.prevent="submitKey">
@@ -238,7 +236,11 @@ onUnmounted(() => clearTimeout(timer));
             </div>
             <div class="line between">
               <span class="label">{{ t("folder.pack") }}</span>
-              <span class="tag" :class="tagClass(packTag(s.languagePack))">{{ t(packTag(s.languagePack).text) }}</span>
+              <span class="with pack">
+                <!-- The loaded pack's file below the game folder -->
+                <span v-if="s.languagePack.file" class="v path" :title="s.languagePack.file">{{ s.languagePack.file }}</span>
+                <span class="tag" :class="tagClass(packTag(s.languagePack))">{{ t(packTag(s.languagePack).text) }}</span>
+              </span>
             </div>
           </section>
 
@@ -278,7 +280,11 @@ onUnmounted(() => clearTimeout(timer));
               <span class="tag" :class="tagClass(uexTag(s, uex))">{{ t(uexTag(s, uex).text) }}</span>
             </div>
             <div class="field">
-              <label for="uex-key">{{ t("uex.key") }}</label>
+              <!-- Where the key comes from, right above its field -->
+              <div class="line between">
+                <label for="uex-key">{{ t("uex.key") }}</label>
+                <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer" class="ext"><Icon name="external" :size="14" /> uexcorp.space</a>
+              </div>
               <div class="line">
                 <input
                   id="uex-key"
@@ -301,7 +307,12 @@ onUnmounted(() => clearTimeout(timer));
             </div>
             <div class="line between">
               <span class="label">{{ t("uex.every") }}</span>
-              <Dropdown :model-value="String(s.uexIntervalMinutes)" variant="outline" :options="intervals" :disabled="!s.uexKeySet" :title="t('uex.every')" @update:model-value="setIntervalMinutes" />
+              <span class="with">
+                <Dropdown :model-value="String(s.uexIntervalMinutes)" variant="outline" :options="intervals" :disabled="!s.uexKeySet" :title="t('uex.every')" @update:model-value="setIntervalMinutes" />
+                <button class="btn outline" type="button" :disabled="!canFetchNow(s, uex)" @click="fetchNow">
+                  <Icon name="refresh" :size="14" /> {{ t("uex.fetch") }}
+                </button>
+              </span>
             </div>
             <div class="line between">
               <span class="label">{{ t("uex.lastNext") }}</span>
@@ -310,12 +321,6 @@ onUnmounted(() => clearTimeout(timer));
                 <span class="slash">/</span>
                 <span class="v time">{{ shortTime(nextFetch(uex), new Date(), lang) || "–" }}</span>
               </span>
-            </div>
-            <div class="line between">
-              <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer" class="ext"><Icon name="external" :size="14" /> uexcorp.space</a>
-              <button class="btn outline" type="button" :disabled="!canFetchNow(s, uex)" @click="fetchNow">
-                <Icon name="refresh" :size="14" /> {{ t("uex.fetch") }}
-              </button>
             </div>
           </section>
 
@@ -328,7 +333,7 @@ onUnmounted(() => clearTimeout(timer));
                 <span class="ver-chip">v{{ s.appVersion }}</span>
                 <!-- Only where the desktop shell offers app updates -->
                 <button v-if="shell.updateAvailable" class="btn outline" type="button" @click="openUpdate">
-                  <Icon name="imports" :size="14" /> {{ t("update.button") }}
+                  <Icon name="imports" :size="14" /> {{ t("app.checkUpdate") }}
                 </button>
               </span>
             </div>
@@ -383,14 +388,6 @@ onUnmounted(() => clearTimeout(timer));
   border-bottom: 1px solid var(--border-dim);
 }
 
-.titles {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
 .title {
   font-weight: 600;
   font-size: 18px;
@@ -412,11 +409,6 @@ onUnmounted(() => clearTimeout(timer));
 .foot .btn {
   height: var(--h-control);
   font-size: 14px;
-}
-
-.version {
-  font-size: 11px;
-  color: var(--text-2);
 }
 
 /* Room for the group titles straddling the tiles' top edges */
@@ -488,18 +480,44 @@ onUnmounted(() => clearTimeout(timer));
   gap: 8px;
 }
 
-/* The message keeps its room, so nothing moves when it appears */
+/* The message sits in the gap below its field and takes no room of its own (it cancels one of the two gaps around it): nothing
+   moves when it appears, and no empty row stays while there is none */
 .msg {
-  min-height: 18px;
-  margin-top: -4px;
+  position: relative;
+  height: 0;
+  margin-top: -12px;
+}
+
+.msg .err-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 11px;
+  line-height: 12px;
+  white-space: nowrap;
 }
 
 .hidden {
   visibility: hidden;
 }
 
+/* Plain information (a time, a path): quieter than what can be changed */
 .v {
-  font-size: 13px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* The pack's path gives way before the row breaks */
+.pack {
+  min-width: 0;
+}
+
+.path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 /* Times in a row: room for "Gestern, 21:05" so the second one does not move */
@@ -539,5 +557,6 @@ onUnmounted(() => clearTimeout(timer));
   align-items: center;
   gap: 6px;
   font-size: 13px;
+  font-weight: 600;
 }
 </style>

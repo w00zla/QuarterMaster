@@ -268,7 +268,7 @@ describe('UI texts', () => {
 
   it('writes German with real umlauts', () => {
     assert.equal(JSON.parse(de.get('start.setup')!), 'Spieldaten werden eingerichtet …');
-    assert.equal(JSON.parse(de.get('uex.key')!), 'Zugangsschlüssel');
+    assert.equal(JSON.parse(de.get('app.checkUpdate')!), 'Prüfe Update');
     assert.equal(JSON.parse(de.get('pack.restart')!), 'Neustart nötig');
   });
 });

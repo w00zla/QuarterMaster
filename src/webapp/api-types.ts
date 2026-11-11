@@ -906,6 +906,8 @@ export interface GameFolderState {
 export interface LanguagePackState {
   state: 'none' | 'loaded' | 'problem';
   language?: string;
+  /** A loaded pack's `global.ini`, relative to the game folder, with forward slashes (`data/Localization/<language>/global.ini`). */
+  file?: string;
   /** Number of texts of a loaded pack. */
   texts?: number;
   /** A loaded pack is in effect: its texts show instead of the game's English (`loaded` and `active`: "active with N texts in language X"). */

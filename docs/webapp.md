@@ -472,7 +472,7 @@ routes for which capabilities).
 ### The side bar and the settings window
 
 **The side bar** (`SideNav.vue`, singleuser only; the online variant keeps `TopBar.vue` unchanged) runs from the top of the window down
-to the footer (sticky, `calc(100vh - 29px)`; the page scrolls beside it). From the top: the logo (with the wordmark when wide; the
+to the footer (the singleuser app is as high as the window and only the content beside the bar scrolls). From the top: the logo (with the wordmark when wide; the
 logo's row is a drag region in the shell), the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
 quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups; nothing below them. The toggle is a small
 button at the top right of the bar, half over its right edge (chevron, tooltip). Two modes: *wide* (icon and text, 232 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which

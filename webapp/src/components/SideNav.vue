@@ -83,17 +83,13 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 </template>
 
 <style scoped>
-/* From the window's top to the footer (AppFooter): sticky, the page itself scrolls beside it. Above the slim bar (z 30), so the
-   toggle that reaches over the edge stays on top */
+/* From the window's top to the footer (App.vue's layout stretches it; only the content beside it scrolls). Above the slim bar
+   (z 30), so the toggle that reaches over the edge stays on top */
 .side {
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
+  position: relative;
   z-index: 31;
   /* Wide enough that the toggle on the edge keeps a gap to the wordmark */
   width: 232px;
-  /* The footer is 28 px plus its 1 px top border; one pixel more here and the page always scrolls */
-  height: calc(100vh - 29px);
   flex-shrink: 0;
   box-sizing: border-box;
   display: flex;

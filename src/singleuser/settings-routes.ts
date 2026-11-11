@@ -1,5 +1,6 @@
 // The singleuser settings routes (docs/singleuser.md "Settings"): the settings with the game folder's state and the
 // language pack's, and the change of them. The pack is the one read at start; a changed game folder does not re-read it.
+import { relative } from 'node:path';
 import { z } from 'zod';
 import type { GameFolderState, LanguagePackState, LocalSettingsState } from '../webapp/api-types.ts';
 import type { ApiApp } from '../webapp/app.ts';
@@ -21,7 +22,11 @@ export function languagePackState(loaded: LoadedPack, gameDir: string | null): L
   const pending = loaded.gameDir !== gameDir;
   const { pack } = loaded;
   if (pack === null) return { state: 'none', pending };
-  if (pack.texts !== null) return { state: 'loaded', language: pack.language ?? undefined, texts: pack.texts.size, active: loaded.active, pending };
+  if (pack.texts !== null) {
+    // The file as the user finds it below the game folder
+    const file = pack.file !== null && loaded.gameDir !== null ? relative(loaded.gameDir, pack.file).replaceAll('\\', '/') : undefined;
+    return { state: 'loaded', language: pack.language ?? undefined, ...(file ? { file } : {}), texts: pack.texts.size, active: loaded.active, pending };
+  }
   const problem = pack.problem!;
   return { state: NORMAL_ENGLISH.has(problem) ? 'none' : 'problem', ...(pack.language ? { language: pack.language } : {}), problem, pending };
 }

@@ -106,14 +106,14 @@ if (settingsWindow) {
 <template>
   <!-- The settings window: the title bar (the title, the close button) and the panel -->
   <div v-if="settingsWindow" ref="win" class="settings-win">
-    <TitleBar title="Quartermaster" />
+    <TitleBar :title="t('settings.windowTitle')" />
     <main class="settings-main">
       <SettingsView v-if="settingsReady" />
       <div v-else class="empty-line">{{ capabilities ? (status === "error" ? t("error.backend") : "") : (capsFailed ? t("error.backend") : "") }}</div>
     </main>
     <Toasts />
   </div>
-  <div v-else class="app">
+  <div v-else class="app" :class="{ framed: loginNone }">
     <!-- The frameless desktop window: the app bar is its title bar; where that is not shown, a bar with the window buttons -->
     <TitleBar v-if="!capabilities || tile.visible || status !== 'in'" />
     <WindowEdges />
@@ -163,18 +163,32 @@ if (settingsWindow) {
   padding: 16px;
 }
 
+/* Singleuser: the app is exactly as high as the window, and only the content scrolls (the scroll bar stays between the slim bar
+   and the footer); online the page scrolls as a whole */
+.app.framed {
+  height: 100%;
+  min-height: 0;
+}
+
 /* The side bar beside the slim bar and the content; the footer below stays across the full width */
 .side-layout {
   flex: 1;
   display: flex;
   min-width: 0;
+  min-height: 0;
 }
 
 .side-col {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.side-col .main {
+  min-height: 0;
+  overflow: auto;
 }
 
 /* The settings window: as high as its content (that is what it measures), not as the window */
