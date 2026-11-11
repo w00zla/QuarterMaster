@@ -105,8 +105,12 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     port = (server.address() as AddressInfo).port;
   });
-  beforeEach(() => {
+  beforeEach(async () => {
     for (const ws of sockets.splice(0)) ws.terminate();
+    // The hub drops a terminated socket only when its own side sees the close: without waiting, the next case's
+    // sockets can run into maxPerUser (seen as an intermittent "refused 429")
+    for (let i = 0; i < 200 && hub.connections > 0; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(hub.connections, 0, 'sockets of the previous case still open');
   });
   after(async () => {
     for (const ws of sockets) ws.terminate();

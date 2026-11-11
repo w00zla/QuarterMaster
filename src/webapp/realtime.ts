@@ -224,6 +224,11 @@ export class RealtimeHub {
     return new Set(rows.map((r) => r.guild_id));
   }
 
+  /** Open connections (the tests wait for 0 between cases: a terminated socket leaves the hub a moment later). */
+  get connections(): number {
+    return this.conns.size;
+  }
+
   private count(match: (c: Conn) => boolean) {
     let n = 0;
     for (const c of this.conns) if (match(c)) n++;
