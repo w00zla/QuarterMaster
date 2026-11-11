@@ -1,11 +1,13 @@
-// Which navigation the top bar and the router offer for a server's capabilities (pure: tested in test/webapp-local.test.ts).
+// Which navigation the top bar, the side bar (singleuser) and the router offer for a server's capabilities (pure: tested in test/webapp-local.test.ts).
 // (No imports of Vue files or i18n: the root type check and the tests load this file; `label` and `icon` are literal
 // strings that the top bar checks against the text keys and the icon map.)
 
 export interface NavItem {
   to: string;
-  label: "nav.home" | "nav.components" | "nav.stock" | "nav.refinery" | "nav.blueprints" | "nav.crafting" | "nav.mining" | "nav.trade";
-  icon: "overview" | "gear" | "type-crate" | "drop" | "blueprint" | "crafter" | "pickaxe" | "trade";
+  label: "nav.home" | "nav.components" | "nav.stock" | "nav.refinery" | "nav.blueprints" | "nav.crafting" | "nav.mining" | "nav.trade" | "nav.history";
+  icon: "overview" | "gear" | "type-crate" | "drop" | "blueprint" | "crafter" | "pickaxe" | "trade" | "history";
+  /** Drawn quieter than the main entries (the side bar's history). */
+  secondary?: boolean;
 }
 
 /** What the navigation needs of GET /api/capabilities. */
@@ -32,6 +34,26 @@ const TOOLS: NavItem[] = [
 export function navGroups(caps: NavCaps | null): NavItem[][] {
   return [[HOME], DATA, caps?.uex === false ? TOOLS : [...TOOLS, TRADE]];
 }
+
+const HISTORY: NavItem = { to: "/history", label: "nav.history", icon: "history", secondary: true };
+
+/** The side bar's groups (singleuser): the top bar's three, then the history on its own, quieter. */
+export function sideGroups(caps: NavCaps | null): NavItem[][] {
+  return [...navGroups(caps), [HISTORY]];
+}
+
+// --- the side bar's width (singleuser) ---
+
+export type SideMode = "wide" | "narrow";
+
+/** Below this window width the side bar is narrow whatever the user chose (the choice itself stays). */
+export const SIDE_NARROW_BELOW = 1000;
+
+/** The stored choice; anything else is wide. */
+export const parseSideMode = (stored: string | null): SideMode => (stored === "narrow" ? "narrow" : "wide");
+
+/** The mode in effect for a window width. */
+export const sideModeFor = (choice: SideMode, windowWidth: number): SideMode => (windowWidth < SIDE_NARROW_BELOW ? "narrow" : choice);
 
 /** The controls at the right end of the bar. `history` is in both variants. */
 export function userControls(caps: NavCaps | null) {

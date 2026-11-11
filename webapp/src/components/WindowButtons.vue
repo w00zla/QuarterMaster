@@ -1,15 +1,18 @@
 <script setup lang="ts">
 // The three window buttons of the frameless desktop window (minimize, maximize or restore, close), each in a fixed 36 px slot.
-// Rendered only in the desktop shell. The close button turns to the error colour on hover.
+// Rendered only in the desktop shell. The close button turns to the error colour on hover. `closeOnly`: the settings window, which
+// can be neither minimized nor maximized.
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
 import { shell } from "../shell";
+
+defineProps<{ closeOnly?: boolean }>();
 </script>
 
 <template>
   <div v-if="shell.available" class="win-btns">
-    <button type="button" class="win-btn" :title="t('win.minimize')" @click="shell.minimize()"><Icon name="minimize" :size="16" /></button>
-    <button type="button" class="win-btn" :title="t(shell.maximized ? 'win.restore' : 'win.maximize')" @click="shell.toggleMaximize()">
+    <button v-if="!closeOnly" type="button" class="win-btn" :title="t('win.minimize')" @click="shell.minimize()"><Icon name="minimize" :size="16" /></button>
+    <button v-if="!closeOnly" type="button" class="win-btn" :title="t(shell.maximized ? 'win.restore' : 'win.maximize')" @click="shell.toggleMaximize()">
       <Icon :name="shell.maximized ? 'restore' : 'maximize'" :size="14" />
     </button>
     <button type="button" class="win-btn close" :title="t('win.close')" @click="shell.close()"><Icon name="close" :size="16" /></button>

@@ -452,25 +452,45 @@ answer) and only then loads `/api/me`. What it shows follows the capabilities, n
 - **`login: 'discord'`**: the online behaviour as always (login view, user, profile, logout, companion dialog, the
   "thumbnail review" privilege button).
 - **`login: 'none'`** (the singleuser variant): no login view, no user name or avatar, no profile dialog, no logout, no companion download
-  dialog. In their place a settings button (icon `settings`, an outlined icon button, the accent colour on its route) leads to
-  `/settings`; the route exists only without a login, with a login it leads home (`navigation.ts` `routeAllowed`, a router guard, and
-  `App.vue` re-checks the current route when the capabilities arrive or change).
+  dialog, and no top bar: the navigation is the side bar ("The side bar and the settings window" below), whose "Settings" entry opens
+  the settings window of the desktop shell or, in a plain browser, `/settings`; the route exists only without a login, with a login
+  it leads home (`navigation.ts` `routeAllowed`, a router guard, and `App.vue` re-checks the current route when the capabilities
+  arrive or change).
 - **`orgs: false`**: no scope switch (`ScopeBar` renders nothing), no "Your orgs" panel on the overview, no sharing button in the stock
   table (its actions column is one button narrower). The rest of the org handling needs no condition: a user without any org already
   is a case (`me.orgs` is empty: no share switches in the add form, no recipient pickers, no owners lines).
 - **`uex: false`**: no buy/sell tab (and `/trade` leads home), in the stock and gear tables no UEC columns, no trade button column
   and no worth in the head (no `/api/trade/prices` request), no trade dialog, no price section in the info cards, no worth tile on
   the overview. A UEX key set or removed in the settings changes the capabilities at once; the views follow.
-- **The game version chip** (`.ver-chip`, mono; tooltip "Spielversion") in the top bar of both variants shows `capabilities.game.label`,
+- **The game version chip** (`.ver-chip`, mono; tooltip "Spielversion") in the top bar (online) and in the slim bar beside the side bar (singleuser) shows `capabilities.game.label`,
   a dash while there is none. It has the width of a game version, so the dash and the number take the same room and nothing moves.
   The capabilities are refreshed after a data install, after the UEX key changes and every 15 s while the data state is idle.
 
-The navigation is built from `navigation.ts` (pure: which tab groups, which top bar controls, which routes for which capabilities).
+The navigation is built from `navigation.ts` (pure: which tab groups, which top bar controls, the side bar's groups and width, which
+routes for which capabilities).
 
-**The settings view** (`/settings`, `SettingsView.vue`) has four panels, each with a coloured tag in the head (a word, never colour alone;
-the head keeps its height with or without the tag) and rows of a fixed label column; the decisions are in `settingsLogic.ts`:
+### The side bar and the settings window
 
-- *Game folder* (`/api/local/settings`): the path field applies on Enter or when it loses focus with a changed value. A refusal (422) shows
+**The side bar** (`SideNav.vue`, singleuser only; the online variant keeps `TopBar.vue` unchanged) runs from the top of the window down
+to the footer (sticky, `calc(100vh - 28px)`; the page scrolls beside it). From the top: the logo (with the wordmark when wide; the
+logo's row is a drag region in the shell), the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
+quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups, and at the bottom Settings, a divider and the
+toggle. Two modes: *wide* (icon and text, 208 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
+opens above or below the button). The choice is stored in `localStorage` (`qm.sideMode`, in a try/catch); below 1000 px of window
+width the bar is narrow whatever the choice (`sideModeFor`; the stored choice is not touched, the toggle is disabled then). The two
+modes differ in width only: buttons are 36 px high either way, icons and logo sit at the same place, the tooltip wrapper exists in both.
+
+**The slim bar** (`SlimBar.vue`) is the top row of the content beside it (44 px, never wraps): the drag region, the game version chip
+(`.ver-chip.fixed` with the quiet "Game:" label) and, in the shell, the window buttons. In a plain browser it is the same bar without
+window buttons and drag attributes. It measures its height into `layout.ts` `topbarHeight`, so the toasts sit below it. The footer
+(`AppFooter.vue`) stays across the full width.
+
+**The settings** (`SettingsView.vue`) are one panel (640 px wide, head "Settings" with the settings icon) with four groups in the look of
+the companion's settings dialog (a tile on the base background, its title straddling the top border, label left and control right).
+Each state tag sits in its group's title (a word, never colour alone); the title is positioned absolutely, so a tag appearing moves
+nothing. The decisions are in `settingsLogic.ts`:
+
+- *Star Citizen* (`/api/local/settings`): the path field applies on Enter or when it loses focus with a changed value. A refusal (422) shows
   "no game in this folder" and the "no game" tag and keeps the saved setting (the typed text stays). "Browse" exists only where the shell
   has a folder picker; it is the primary button while there is no usable folder, without a picker the field gets the accent border instead.
   The game version and the language pack's tag (active, none, restart needed) follow the settings.
@@ -479,15 +499,35 @@ the head keeps its height with or without the tag) and rows of a fixed label col
   disabled while something runs. The state is polled while its phase is not idle.
 - *UEX* (`/api/local/uex`): the key field is a password field showing a mask while a key is set; "Save" stores a typed key, a cleared
   field removes the key after a confirmation. The interval select (15, 30, 60 minutes) saves at once and is disabled without a key. One
-  row holds the times of the last and the next fetch (local; today as the clock, other days with the day); "Fetch now" needs a key and a
-  pull that is not running; the state is polled every 1.5 s while pulling. A refused key shows the "Refused" tag and a message.
-- *App*: the version, the automatic updates switch (saves at once) and the language select (`me.langOverride` through `/api/profile`; the
-  profile dialog that holds it online does not exist here). A value the environment overrides (`overridden`) is shown, disabled.
+  row holds the times of the last and the next fetch (local; today as the clock, other days with the day); "Fetch now" (next to the link
+  to UEX) needs a key and a pull that is not running; the state is polled every 1.5 s while pulling. A refused key shows the "Refused" tag
+  and a message.
+- *App*: the version (with the "App Update" button where the shell offers updates), the automatic updates switch (saves at once) and the
+  language select (`me.langOverride` through `/api/profile`; the profile dialog that holds it online does not exist here). A value the
+  environment overrides (`overridden`) is shown, disabled.
 
-**The first run:** without a usable game folder (`firstRun`) the settings view opens by itself, once per page load and only after the app
-is shown (not over the start tile); the user can leave it.
+**The settings window.** In the desktop shell the settings are not a page but a window of their own: the side bar's Settings entry (and the
+first run) calls `open_settings`; the shell opens a second window, label `settings`, with the same origin at
+`/settings?window=settings` (or brings it to the front). The query is read once at start (`windows.ts` `settingsWindow`, pure part
+`windowMode`): in that mode `App.vue` renders only `TitleBar.vue` (with the title and the close button alone: `WindowButtons`
+`closeOnly`) and `SettingsView` (no side bar, footer, start tile, realtime or routes; the window works without game data, as the panel
+needs no catalog). The window cannot be resized: once its panel and the fonts are rendered, the page measures its height and calls
+`settings_window_fit` (`settingsFitSize`: 672 px wide, the height of the content plus 2 px, at least 400 px, which leaves the dialogs
+the panel opens, `ImportDialog` and the remove-key `ConfirmDialog`, room); the shell sizes and shows it. The settings window waits for
+the shell's update state before it renders (`main.ts`), so the height with or without the "App Update" row is known when it measures.
+In a plain browser the entry is the `/settings` page inside the normal layout.
 
-**The start tile** (`StartTile.vue`, state from `startTile.ts`) replaces the whole app (top bar, views, footer) while `login: 'none'` and no data
+**The two windows** tell each other over one `BroadcastChannel` (`windows.ts`, name `quartermaster-windows`; safe where it is missing:
+nothing is sent). The settings window posts `changed` after every successful change (`local.ts`: `saveSettings`, `pullUex`,
+`checkData`, `importData`; the language in `SettingsView`); the main window answers with `reloadAll()` (settings, data state, UEX state,
+capabilities, `me`, then the data polling at its quick pace once), so a saved UEX key shows the trade tab, the language and the game
+version follow. "App Update" in the settings window posts `open-update` and calls `window_focus_main`; the main window opens the update
+dialog (`shell.openUpdate()`) and is brought to the front: the dialog stays the main window's.
+
+**The first run:** without a usable game folder (`firstRun`) the settings open by themselves (the shell's window, in a browser the page),
+once per page load and only after the app is shown (not over the start tile); the user can leave them.
+
+**The start tile** (`StartTile.vue`, state from `startTile.ts`) replaces the whole app (side bar, views, footer) while `login: 'none'` and no data
 pack is installed: the app-icon slot (empty, reserved), the wordmark, the app version, four segments and one line of text; a
 download adds the amount ("12 / 45 MB") and a bar. Phases map to the steps: nothing known yet "Starting …" (1), checking and downloading
 "Loading game data …" (2), installing "Setting up game data …" (3). Without a connection (outcome offline or failed with nothing
@@ -508,7 +548,8 @@ shell offers app updates.
 SPA, a reactive object `shell` with `available` (the desktop shell is there: pickers and window chrome), `pickFolder()`,
 `pickFile(extensions?)` (both answer null when cancelled or unavailable), `updateAvailable`, `update` (the updater's state),
 `openUpdate()`/`closeUpdate()`/`updateOpen`, `checkUpdate()`, `installUpdate()`, `setChannel(id)`, the window (`maximized`,
-`minimize()`, `toggleMaximize()`, `close()`, `startResize(direction)`). `initShell()` (called in `main.ts` before the first render)
+`minimize()`, `toggleMaximize()`, `close()`, `startResize(direction)`), the settings window (`openSettings()`, `fitSettings(width, height)`,
+`focusMain()`). `initShell()` (called in `main.ts` before the first render)
 binds the global the shell injects; in a browser everything stays "not available". No shell package is imported by the SPA.
 
 **Links that leave the app.** With the shell present, `initShell()` installs one `click` and `auxclick` handler on the document: a primary or
@@ -536,6 +577,9 @@ Commands (`args` is one object, possibly empty; a rejection carries a text):
 | `window_close` | `{}` | nothing |
 | `window_is_maximized` | `{}` | `boolean`; asked at start, after every toggle and at every `resize` of the page |
 | `window_start_resize` | `{ direction: "North" \| "South" \| "East" \| "West" \| "NorthEast" \| "NorthWest" \| "SouthEast" \| "SouthWest" }` | nothing; the window starts a resize drag from that edge or corner |
+| `open_settings` | `{}` | nothing; opens the settings window (label `settings`, the same origin at `/settings?window=settings`, frameless, not resizable, hidden until sized) or brings it to the front. Main window only |
+| `settings_window_fit` | `{ width: number, height: number }` (CSS px) | nothing; sets the settings window's inner size (at most 95 % of its screen), centers and shows it. Settings window only, sent once after its first render |
+| `window_focus_main` | `{}` | nothing; un-minimizes the main window and brings it to the front. Settings window only |
 | `update_state` | `{}` | `UpdateState` (below) |
 | `update_check` | `{}` | nothing; starts a check, the progress arrives as `update-changed` |
 | `update_install` | `{}` | nothing; starts download and install of the available version |
@@ -560,18 +604,20 @@ update commands are optional as a group: when `update_state` rejects at start, t
 payload that is not an `UpdateState` is dropped; a command that rejects shows as an error of the updater. What the shell sets in
 the server's environment: `QM_MIGRATIONS_DIR`, `QM_DIST_DIR`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (`docs/app.md` "The sidecar").
 
-**The frameless window.** Only with `shell.available`: the top bar is the title bar (drag region; double click maximizes, the shell's
-doing) with the three window buttons (`WindowButtons.vue`: minimize, maximize or restore, close; 36 px slots, close hovers in the error
-colour) at its right end; where the app bar is not shown (the start tile, the server not reachable) `TitleBar.vue` gives a bar with the
-buttons alone; `WindowEdges.vue` puts eight invisible 6 px strips along the edges (none while maximized). The window buttons sit
-absolutely at the top right (the bar keeps 128 px of right padding), so a wrapped bar keeps them in its first row; up to a window width
-of 1400 px the wordmark, the tab padding and the gaps give way so the bar stays one row at 1280 px.
+**The frameless window.** Only with `shell.available`: in the singleuser variant the slim bar is the title bar (drag region, the chip,
+the window buttons; the logo's row of the side bar is a drag region too); in the online variant the top bar is (drag region; double
+click maximizes, the shell's doing) with the three window buttons (`WindowButtons.vue`: minimize, maximize or restore, close; 36 px
+slots, close hovers in the error colour) at its right end; where the app bar is not shown (the start tile, the server not reachable)
+`TitleBar.vue` gives a bar with the buttons alone; `WindowEdges.vue` puts eight invisible 6 px strips along the edges (none while
+maximized). The top bar's window buttons sit absolutely at the top right (the bar keeps 128 px of right padding), so a wrapped bar keeps
+them in its first row; up to a window width of 1400 px the wordmark, the tab padding and the gaps give way so the bar stays one row at
+1280 px. The settings window has `TitleBar.vue` with its title and the close button, no edges.
 
 **The app footer and the update dialog.** With `login: 'none'` the footer starts with the app version (mono, 22 px high). Where the shell
 offers updates it is a button opening the dialog and a mark (the download arrow in the accent colour; its room is kept when empty) follows
 it while a version was found (`available`, `downloading`, `installing`); in a browser the version is plain text. The dialog
-(`UpdateDialog.vue`, "App Update"; also opened by the bold notice's button and the App panel's "App Update" row in the settings
-view, which exists only with the shell) shows the channel select in the head (disabled while busy), the current and available version as
+(`UpdateDialog.vue`, "App Update"; also opened by the bold notice's button and the App group's "App Update" button in the settings,
+which exists only with the shell; from the settings window the main window opens it, "The two windows") shows the channel select in the head (disabled while busy), the current and available version as
 chips, the notes in a box of fixed height (kept when empty) and one status line of fixed height ("Checking …", "Downloading …" with the
 percent and a progress bar, "Installing …", or the error text in the error colour). Buttons (`updateButtons` in `shellLogic.ts`):
 Close always first on the left; then "Check Update" in idle, current, checking and error (disabled while checking) or "Install" in
@@ -609,8 +655,8 @@ decisions, time formatting, both languages having the same texts).
 - Dialog buttons always sit in the footer (`ConfirmDialog`); a `ConfirmButton` with `form` submits a form in
   the body (Enter works). Pickers: `webapp/src/components/Picker.vue` (lists every match, the list scrolls);
   `Dropdown.vue` is BindSight's with prefixed variant classes (`dd-chip`, …: ui.css has global
-  `.chip`/`.outline`/`.small`). Toasts top right below the top bar (`TopBar.vue` measures its height into
-  `layout.ts` `topbarHeight`, `Toasts.vue` sets `top` from it; a CSS variable failed after a full reload).
+  `.chip`/`.outline`/`.small`). Toasts top right below the top bar (`TopBar.vue`, in the singleuser variant `SlimBar.vue` and the settings
+  window's title bar measure their height into `layout.ts` `topbarHeight`, `Toasts.vue` sets `top` from it; a CSS variable failed after a full reload).
   Error codes mapped in `i18n.ts`; amounts validated with the server's own `parseAmount`.
 - Icons on tabs, buttons and panel heads like BindSight (extra icons in the shared
   `adminapp/src/components/Icon.vue`); no counters in panel heads (only next to filters).

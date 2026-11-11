@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The settings of the singleuser variant (/settings): the game folder, the game data, the UEX trade data and the app.
+// The settings of the singleuser variant (/settings, and the desktop shell's settings window): one panel with four groups, in the
+// look of the companion's settings dialog: the game folder (Star Citizen), the game data, the UEX trade data and the app.
 // Everything comes from /api/local/*; the decisions (tags, what a field commit does) are in settingsLogic.ts.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
@@ -9,15 +10,16 @@ import ImportDialog from "../components/ImportDialog.vue";
 import LangSelect from "../components/LangSelect.vue";
 import { ApiError } from "../api";
 import { lang, t } from "../i18n";
-import { checkData, data, loadSettings, refreshData, refreshUex, saveSettings, settings, uex } from "../local";
+import { checkData, data, loadSettings, pullUex, refreshData, refreshUex, saveSettings, settings, uex } from "../local";
 import { dayTime, megabytes, shortTime } from "../localTime";
 import { me, saveProfile } from "../session";
 import {
-  dataTag, folderView, gameDirChange, isBusy, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag,
+  canFetchNow, dataTag, folderView, gameDirChange, isBusy, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag,
   type TagModel,
 } from "../settingsLogic";
 import { shell } from "../shell";
 import { toastError } from "../toasts";
+import { announceChange, post, settingsWindow } from "../windows";
 
 const s = computed(() => settings.value);
 const tagClass = (tag: TagModel) => (tag.kind === "off" ? "" : tag.kind);
@@ -129,6 +131,14 @@ async function setIntervalMinutes(value: string) {
   }
 }
 
+async function fetchNow() {
+  try {
+    await pullUex();
+  } catch (e) {
+    toastError(e);
+  }
+}
+
 // The pull's state: quickly while one runs, else now and then (the times move on)
 let timer: ReturnType<typeof setTimeout> | undefined;
 function pollUex() {
@@ -149,10 +159,19 @@ async function setAuto(e: Event) {
   }
 }
 
+/** The update dialog belongs to the main window: from the settings window it is asked for there (windows.ts) and brought to the front. */
+function openUpdate() {
+  if (settingsWindow) {
+    post({ type: "open-update" });
+    shell.focusMain();
+  } else shell.openUpdate();
+}
+
 const langChoice = computed(() => me.value?.langOverride ?? "auto");
 async function setLang(value: string) {
   try {
     await saveProfile({ langOverride: value === "de" || value === "en" ? value : null });
+    announceChange();
   } catch (e) {
     toastError(e);
   }
@@ -169,71 +188,73 @@ onUnmounted(() => clearTimeout(timer));
 <template>
   <div class="page">
     <div v-if="!s || !folder" class="empty-line">{{ t("common.loading") }}</div>
-    <div v-else class="grid">
-      <!-- Game folder -->
-      <section class="panel unclipped" aria-labelledby="h-game">
-        <div class="head">
-          <Icon name="folder" :size="16" />
-          <h2 id="h-game" class="head-title">{{ t("folder.title") }}</h2>
-          <span v-if="folder.tag" class="tag" :class="tagClass(folder.tag)">{{ t(folder.tag.text) }}</span>
-        </div>
-        <div class="body">
-          <div class="srow nowrap">
-            <label class="k" for="game-dir">{{ t("folder.folder") }}</label>
-            <input
-              id="game-dir"
-              v-model="dirDraft"
-              class="input mono grow"
-              :class="{ invalid: folder.message, 'call-out': folder.needsFolder && !shell.available }"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              :disabled="s.overridden.gameDir"
-              @input="rejected = false"
-              @keydown.enter.prevent="commitDir"
-              @blur="commitDir"
-            />
-            <button v-if="shell.available" class="btn" :class="folder.needsFolder ? 'primary' : 'outline'" type="button" :disabled="s.overridden.gameDir" @click="browse">
-              <Icon name="folder" :size="14" /> {{ t("folder.browse") }}
-            </button>
+    <section v-else class="panel unclipped settings" aria-labelledby="h-settings">
+      <div class="head">
+        <Icon name="settings" :size="16" />
+        <h2 id="h-settings" class="head-title">{{ t("nav.settings") }}</h2>
+      </div>
+      <div class="groups">
+        <!-- Star Citizen: the game folder -->
+        <div class="group" role="group" aria-labelledby="g-game">
+          <div id="g-game" class="group-title">
+            {{ t("settings.game") }}
+            <span v-if="folder.tag" class="tag" :class="tagClass(folder.tag)">{{ t(folder.tag.text) }}</span>
           </div>
-          <div class="srow msg" :class="{ hidden: !folder.message }" :aria-hidden="!folder.message">
-            <span class="k" />
+          <div class="field">
+            <label class="label" for="game-dir">{{ t("folder.title") }}</label>
+            <div class="line">
+              <input
+                id="game-dir"
+                v-model="dirDraft"
+                class="input mono"
+                :class="{ invalid: folder.message, 'call-out': folder.needsFolder && !shell.available }"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="s.overridden.gameDir"
+                @input="rejected = false"
+                @keydown.enter.prevent="commitDir"
+                @blur="commitDir"
+              />
+              <button v-if="shell.available" class="btn" :class="folder.needsFolder ? 'primary' : 'outline'" type="button" :disabled="s.overridden.gameDir" @click="browse">
+                <Icon name="folder" :size="14" /> {{ t("folder.browse") }}
+              </button>
+            </div>
+          </div>
+          <!-- The message keeps its room: nothing moves when it appears -->
+          <div class="msg" :class="{ hidden: !folder.message }" :aria-hidden="!folder.message">
             <span class="err-text">{{ t("folder.message") }}</span>
           </div>
-          <div class="srow">
-            <span class="k">{{ t("folder.version") }}</span>
+          <div class="line between">
+            <span class="label">{{ t("folder.version") }}</span>
             <span class="ver-chip" :class="{ none: !s.gameFolder.gameVersion }">{{ s.gameFolder.gameVersion ?? "–" }}</span>
           </div>
-          <div class="srow">
-            <span class="k">{{ t("folder.pack") }}</span>
+          <div class="line between">
+            <span class="label">{{ t("folder.pack") }}</span>
             <span class="tag" :class="tagClass(packTag(s.languagePack))">{{ t(packTag(s.languagePack).text) }}</span>
           </div>
         </div>
-      </section>
 
-      <!-- Game data -->
-      <section class="panel unclipped" aria-labelledby="h-data">
-        <div class="head">
-          <Icon name="database" :size="16" />
-          <h2 id="h-data" class="head-title">{{ t("data.title") }}</h2>
-          <span v-if="dataTag(data)" class="tag" :class="tagClass(dataTag(data)!)">{{ t(dataTag(data)!.text) }}</span>
-        </div>
-        <div class="body">
-          <div class="srow">
-            <span class="k">{{ t("data.installed") }}</span>
+        <!-- Game data -->
+        <div class="group" role="group" aria-labelledby="g-data">
+          <div id="g-data" class="group-title">
+            {{ t("data.title") }}
+            <span v-if="dataTag(data)" class="tag" :class="tagClass(dataTag(data)!)">{{ t(dataTag(data)!.text) }}</span>
+          </div>
+          <div class="line between">
+            <span class="label">{{ t("data.installed") }}</span>
             <span class="ver-chip" :class="{ none: !data?.installed }">{{ data?.installed?.gameLabel ?? "–" }}</span>
           </div>
           <!-- While busy the amount in place of the check time: one row either way -->
-          <div v-if="busy" class="srow">
-            <span class="k">{{ t("data.new") }}</span>
+          <div v-if="busy" class="line between">
+            <span class="label">{{ t("data.new") }}</span>
             <span class="amount mono">{{ newAmount || "–" }}</span>
           </div>
-          <div v-else class="srow">
-            <span class="k">{{ t("data.checked") }}</span>
+          <div v-else class="line between">
+            <span class="label">{{ t("data.checked") }}</span>
             <span class="v">{{ dayTime(data?.last?.at, new Date(), lang) || "–" }}</span>
           </div>
-          <div class="srow end">
+          <div class="line end">
             <button class="btn outline" type="button" :disabled="busy" @click="importing = true">
               <Icon name="imports" :size="14" /> {{ t("data.import") }}
             </button>
@@ -242,81 +263,79 @@ onUnmounted(() => clearTimeout(timer));
             </button>
           </div>
         </div>
-      </section>
 
-      <!-- UEX -->
-      <section class="panel unclipped" aria-labelledby="h-uex">
-        <div class="head">
-          <Icon name="trend" :size="16" />
-          <h2 id="h-uex" class="head-title">{{ t("uex.title") }}</h2>
-          <span class="tag" :class="tagClass(uexTag(s, uex))">{{ t(uexTag(s, uex).text) }}</span>
-        </div>
-        <form class="body" @submit.prevent="submitKey">
-          <div class="srow nowrap">
-            <label class="k" for="uex-key">{{ t("uex.key") }}</label>
-            <input
-              id="uex-key"
-              v-model="keyDraft"
-              class="input mono grow"
-              :class="{ invalid: refused }"
-              type="password"
-              autocomplete="off"
-              spellcheck="false"
-              :disabled="s.overridden.uexKey"
-              @focus="($event.target as HTMLInputElement).select()"
-            />
-            <button class="btn outline" type="submit" :disabled="decision === 'none' || keyBusy || s.overridden.uexKey">
-              <Icon name="check" :size="14" /> {{ t("common.save") }}
-            </button>
+        <!-- UEX -->
+        <form class="group" aria-labelledby="g-uex" @submit.prevent="submitKey">
+          <div id="g-uex" class="group-title">
+            {{ t("uex.title") }}
+            <span class="tag" :class="tagClass(uexTag(s, uex))">{{ t(uexTag(s, uex).text) }}</span>
           </div>
-          <div class="srow msg" :class="{ hidden: !refused }" :aria-hidden="!refused">
-            <span class="k" />
+          <div class="field">
+            <label class="label" for="uex-key">{{ t("uex.key") }}</label>
+            <div class="line">
+              <input
+                id="uex-key"
+                v-model="keyDraft"
+                class="input mono"
+                :class="{ invalid: refused }"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="s.overridden.uexKey"
+                @focus="($event.target as HTMLInputElement).select()"
+              />
+              <button class="btn outline" type="submit" :disabled="decision === 'none' || keyBusy || s.overridden.uexKey">
+                <Icon name="check" :size="14" /> {{ t("common.save") }}
+              </button>
+            </div>
+          </div>
+          <div class="msg" :class="{ hidden: !refused }" :aria-hidden="!refused">
             <span class="err-text">{{ t("uex.rejected") }}</span>
           </div>
-          <div class="srow">
-            <span class="k">{{ t("uex.every") }}</span>
+          <div class="line between">
+            <span class="label">{{ t("uex.every") }}</span>
             <Dropdown :model-value="String(s.uexIntervalMinutes)" variant="outline" :options="intervals" :disabled="!s.uexKeySet" :title="t('uex.every')" @update:model-value="setIntervalMinutes" />
           </div>
-          <div class="srow">
-            <span class="k">{{ t("uex.last") }}</span>
-            <span class="v time">{{ shortTime(uex?.lastPull, new Date(), lang) || "–" }}</span>
-            <span class="k2">{{ t("uex.next") }}</span>
-            <span class="v time">{{ shortTime(nextFetch(uex), new Date(), lang) || "–" }}</span>
+          <div class="line between">
+            <span class="label">{{ t("uex.lastNext") }}</span>
+            <span class="times">
+              <span class="v time">{{ shortTime(uex?.lastPull, new Date(), lang) || "–" }}</span>
+              <span class="slash">/</span>
+              <span class="v time">{{ shortTime(nextFetch(uex), new Date(), lang) || "–" }}</span>
+            </span>
           </div>
-          <div class="srow">
+          <div class="line between">
             <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer" class="ext"><Icon name="external" :size="14" /> uexcorp.space</a>
-          </div>
-        </form>
-      </section>
-
-      <!-- App -->
-      <section class="panel unclipped" aria-labelledby="h-app">
-        <div class="head">
-          <Icon name="settings" :size="16" />
-          <h2 id="h-app" class="head-title">{{ t("app.title") }}</h2>
-        </div>
-        <div class="body">
-          <div class="srow">
-            <span class="k">{{ t("app.version") }}</span>
-            <span class="ver-chip">v{{ s.appVersion }}</span>
-          </div>
-          <div class="srow">
-            <label class="k" for="auto-update">{{ t("app.autoUpdate") }}</label>
-            <input id="auto-update" class="switch" type="checkbox" role="switch" :checked="s.autoUpdate" :disabled="s.overridden.autoUpdate" @change="setAuto" />
-          </div>
-          <!-- Only where the desktop shell offers app updates -->
-          <div v-if="shell.updateAvailable" class="srow end">
-            <button class="btn outline" type="button" @click="shell.openUpdate()">
-              <Icon name="imports" :size="14" /> {{ t("update.button") }}
+            <button class="btn outline" type="button" :disabled="!canFetchNow(s, uex)" @click="fetchNow">
+              <Icon name="refresh" :size="14" /> {{ t("uex.fetch") }}
             </button>
           </div>
-          <div class="srow">
-            <span class="k">{{ t("lang.title") }}</span>
-            <LangSelect :model-value="langChoice" variant="outline" @update:model-value="setLang" />
+        </form>
+
+        <!-- App -->
+        <div class="group" role="group" aria-labelledby="g-app">
+          <div id="g-app" class="group-title">{{ t("app.title") }}</div>
+          <div class="line between">
+            <span class="label">{{ t("app.version") }}</span>
+            <span class="with">
+              <span class="ver-chip">v{{ s.appVersion }}</span>
+              <!-- Only where the desktop shell offers app updates -->
+              <button v-if="shell.updateAvailable" class="btn outline" type="button" @click="openUpdate">
+                <Icon name="imports" :size="14" /> {{ t("update.button") }}
+              </button>
+            </span>
+          </div>
+          <div class="line between">
+            <label class="label" for="auto-update">{{ t("app.autoUpdate") }}</label>
+            <input id="auto-update" class="switch" type="checkbox" role="switch" :checked="s.autoUpdate" :disabled="s.overridden.autoUpdate" @change="setAuto" />
+          </div>
+          <div class="line between">
+            <span class="label">{{ t("lang.title") }}</span>
+            <LangSelect :model-value="langChoice" variant="outline" up @update:model-value="setLang" />
           </div>
         </div>
-      </section>
-    </div>
+      </div>
+    </section>
 
     <ImportDialog v-if="importing" @close="importing = false" />
     <ConfirmDialog v-if="removing" :title="t('uex.removeTitle')" icon="lock" :buttons="removeButtons" @choose="removeChoice" />
@@ -324,47 +343,94 @@ onUnmounted(() => clearTimeout(timer));
 </template>
 
 <style scoped>
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr));
-  gap: 12px;
-  align-items: start;
-}
-
-/* The head is as high with a tag as without one (a tag appearing must not move anything) */
-.head {
-  min-height: 53px;
-  box-sizing: border-box;
+.settings {
+  width: 640px;
+  max-width: 100%;
 }
 
 .head-title {
   margin: 0;
 }
 
-.body {
+/* Room for the group titles straddling the tiles' top edges */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 24px 16px 16px;
+}
+
+/* Each group is a tile with its title on the top edge, like a fieldset legend (as in the companion's settings dialog); the state
+   tags sit in the title, which takes no room of its own: a tag appearing moves nothing */
+.group {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
+  padding: 18px 16px 14px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-panel);
 }
 
-.srow {
+.group-title {
+  position: absolute;
+  top: 0;
+  left: 12px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  /* The panel's own ground, to break the tile's top border under the label */
+  background: var(--bg-surface);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.line {
   min-height: 32px;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
 }
 
-.srow.nowrap {
-  flex-wrap: nowrap;
+.line .input {
+  flex: 1;
+  min-width: 0;
 }
 
-.srow.end {
+/* A setting's name in a row: like a field's label above its control */
+.label {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+/* A setting on the left, its control pushed to the right edge */
+.line.between {
+  justify-content: space-between;
+}
+
+.line.end {
   justify-content: flex-end;
 }
 
-.srow.msg {
+.with {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.msg {
   min-height: 18px;
   margin-top: -4px;
 }
@@ -373,36 +439,30 @@ onUnmounted(() => clearTimeout(timer));
   visibility: hidden;
 }
 
-.k {
-  width: 132px;
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--text-2);
-}
-
-.k2 {
-  font-size: 12px;
-  color: var(--text-2);
-}
-
 .v {
   font-size: 13px;
-  min-width: 0;
 }
 
 /* Times in a row: room for "Gestern, 21:05" so the second one does not move */
+.times {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .time {
   min-width: 11ch;
+  text-align: right;
+}
+
+.slash {
+  color: var(--text-2);
 }
 
 .amount {
   font-size: 13px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
-}
-
-.grow {
-  flex: 1;
 }
 
 .err-text {

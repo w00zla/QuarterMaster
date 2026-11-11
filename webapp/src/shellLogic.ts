@@ -17,6 +17,11 @@
 //   window_close      {}                              -> void
 //   window_is_maximized {}                            -> boolean
 //   window_start_resize { direction: ResizeDirection } -> void           the window starts a resize drag from that edge or corner
+//   open_settings     {}                              -> void            opens the settings window (label `settings`, the same origin at
+//                                                                        `/settings?window=settings`), or brings it to the front
+//   settings_window_fit { width, height }             -> void            the settings window's content size in CSS px, sent once after
+//                                                                        its first render: the window gets that inner size and is shown
+//   window_focus_main {}                              -> void            brings the main window to the front (from the settings window)
 //   update_state      {}                              -> UpdateState
 //   update_check      {}                              -> void            starts a check; the progress is `update-changed` events
 //   update_install    {}                              -> void            starts the download and install of the available version
@@ -60,6 +65,9 @@ export const COMMANDS = {
   close: "window_close",
   isMaximized: "window_is_maximized",
   startResize: "window_start_resize",
+  openSettings: "open_settings",
+  fitSettings: "settings_window_fit",
+  focusMain: "window_focus_main",
   updateState: "update_state",
   updateCheck: "update_check",
   updateInstall: "update_install",
@@ -83,6 +91,9 @@ export interface ShellBinding {
   close(): Promise<void>;
   isMaximized(): Promise<boolean>;
   startResize(direction: ResizeDirection): Promise<void>;
+  openSettings(): Promise<void>;
+  fitSettings(width: number, height: number): Promise<void>;
+  focusMain(): Promise<void>;
   /** The state, or null when the shell has no updater (the command is missing or failed). */
   updateState(): Promise<UpdateState | null>;
   updateCheck(): Promise<void>;
@@ -132,6 +143,9 @@ export function bindShell(tauri: TauriGlobal | undefined | null): ShellBinding |
     close: () => done(COMMANDS.close),
     isMaximized: async () => (await call(COMMANDS.isMaximized)) === true,
     startResize: (direction) => done(COMMANDS.startResize, { direction }),
+    openSettings: () => done(COMMANDS.openSettings),
+    fitSettings: (width, height) => done(COMMANDS.fitSettings, { width, height }),
+    focusMain: () => done(COMMANDS.focusMain),
     updateState: async () => {
       try {
         return parseUpdateState(await call(COMMANDS.updateState));
@@ -151,6 +165,39 @@ export function bindShell(tauri: TauriGlobal | undefined | null): ShellBinding |
       });
     },
   };
+}
+
+// --- the settings window ---
+
+/** Which window this page is: the shell opens the settings window at `/settings?window=settings` (read once at start). */
+export type WindowMode = "main" | "settings";
+
+export function windowMode(search: string): WindowMode {
+  return new URLSearchParams(search).get("window") === "settings" ? "settings" : "main";
+}
+
+/** The settings window's width (CSS px): the panel (640) and the page's gutters; the dialogs it opens (560 wide at most) fit in it. */
+export const SETTINGS_WIDTH = 672;
+/** At least this high, so the dialogs (a dialog is about 230 px high and starts 10 % down) fit whatever the content is. */
+export const SETTINGS_MIN_HEIGHT = 400;
+/** A little more than measured: a fractional scale must not make the content a pixel too high for the window (a scroll bar). */
+const SETTINGS_SLACK = 2;
+
+/** The size to ask for from the measured content height: whole pixels, never below the minimum; null for a measurement that is no height. */
+export function settingsFitSize(contentHeight: number): { width: number; height: number } | null {
+  if (!Number.isFinite(contentHeight) || contentHeight <= 0) return null;
+  return { width: SETTINGS_WIDTH, height: Math.max(SETTINGS_MIN_HEIGHT, Math.ceil(contentHeight) + SETTINGS_SLACK) };
+}
+
+/** What the two windows tell each other (same origin, one BroadcastChannel; windows.ts). */
+export type WindowMessage = { type: "changed" } | { type: "open-update" };
+
+export const WINDOW_CHANNEL = "quartermaster-windows";
+
+/** Reads a message from the channel; null when it is none of ours. */
+export function parseWindowMessage(value: unknown): WindowMessage | null {
+  const type = typeof value === "object" && value !== null ? (value as { type?: unknown }).type : null;
+  return type === "changed" || type === "open-update" ? { type } : null;
 }
 
 // --- links that leave the app ---

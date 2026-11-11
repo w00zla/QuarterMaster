@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  bindShell, externalLinkUrl, failedUpdate, parseUpdateState, statusLine, updateBusy, updateButtons, updateFound,
+  bindShell, externalLinkUrl, failedUpdate, parseUpdateState, parseWindowMessage, settingsFitSize, statusLine, updateBusy, updateButtons,
+  updateFound, windowMode,
   type LinkClick, type TauriGlobal, type UpdatePhase, type UpdateState,
 } from '../webapp/src/shellLogic.ts';
 
@@ -100,6 +101,38 @@ describe('shell contract: commands and payloads', () => {
   it('passes a refused URL on to the caller', async () => {
     const refusing = bindShell(fakeShell({ open_external: new Error('only https URLs are opened') }).tauri)!;
     await assert.rejects(refusing.openExternal('http://example.com/'), /only https/);
+  });
+});
+
+describe('shell contract: the settings window', () => {
+  it('sends open_settings, settings_window_fit and window_focus_main', async () => {
+    const { tauri, calls } = fakeShell();
+    const shell = bindShell(tauri)!;
+    await shell.openSettings();
+    await shell.fitSettings(672, 812);
+    await shell.focusMain();
+    assert.deepEqual(calls, [['open_settings', {}], ['settings_window_fit', { width: 672, height: 812 }], ['window_focus_main', {}]]);
+  });
+
+  it('knows the settings window by its query, once; anything else is the main window', () => {
+    assert.equal(windowMode('?window=settings'), 'settings');
+    assert.equal(windowMode('?a=1&window=settings'), 'settings');
+    assert.equal(windowMode(''), 'main');
+    assert.equal(windowMode('?window=main'), 'main');
+    assert.equal(windowMode('?window=Settings'), 'main');
+  });
+
+  it('asks for the measured height with the fixed width, never below the minimum, with a little slack, and never for no size', () => {
+    assert.deepEqual(settingsFitSize(800), { width: 672, height: 802 });
+    assert.deepEqual(settingsFitSize(799.2), { width: 672, height: 802 });
+    assert.deepEqual(settingsFitSize(100), { width: 672, height: 400 });
+    for (const bad of [0, -5, NaN, Infinity]) assert.equal(settingsFitSize(bad), null);
+  });
+
+  it('reads only its own messages from the channel', () => {
+    assert.deepEqual(parseWindowMessage({ type: 'changed' }), { type: 'changed' });
+    assert.deepEqual(parseWindowMessage({ type: 'open-update', extra: 1 }), { type: 'open-update' });
+    for (const other of [null, undefined, 'changed', 5, {}, { type: 'x' }, { type: 1 }]) assert.equal(parseWindowMessage(other), null);
   });
 });
 

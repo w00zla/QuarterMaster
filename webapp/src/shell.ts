@@ -32,6 +32,12 @@ export interface Shell {
   toggleMaximize(): void;
   close(): void;
   startResize(direction: ResizeDirection): void;
+  /** Opens the settings window, or brings it to the front. */
+  openSettings(): void;
+  /** The settings window's content size (once, after its first render): the shell sizes and shows the window. */
+  fitSettings(width: number, height: number): void;
+  /** Brings the main window to the front (asked from the settings window). */
+  focusMain(): void;
 }
 
 // Reactive: the shell sets its functions once it is up, and the buttons that depend on them appear
@@ -52,6 +58,9 @@ export const shell: Shell = reactive<Shell>({
   toggleMaximize: () => {},
   close: () => {},
   startResize: () => {},
+  openSettings: () => {},
+  fitSettings: () => {},
+  focusMain: () => {},
 });
 
 /** Binds the shell's global (default `window.__TAURI__`). Without it nothing changes: everything stays "not available". */
@@ -118,4 +127,7 @@ function wire(bound: ShellBinding): void {
   shell.toggleMaximize = () => quiet(bound.toggleMaximize().then(() => bound.isMaximized()).then((m) => (shell.maximized = m)));
   shell.close = () => quiet(bound.close());
   shell.startResize = (direction) => quiet(bound.startResize(direction));
+  shell.openSettings = () => bound.openSettings().catch((e) => toast(e instanceof Error ? e.message : String(e), "error"));
+  shell.fitSettings = (width, height) => quiet(bound.fitSettings(width, height));
+  shell.focusMain = () => quiet(bound.focusMain());
 }

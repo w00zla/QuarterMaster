@@ -1,12 +1,15 @@
 // The singleuser variant's own state: the game data update (GET /api/local/data), the settings and the UEX pull. The data
 // state is polled (every second while it is busy or a request failed, else rarely) because the browser is not told: it
-// feeds the start tile, the bold notice and the settings view. Only started with `login: 'none'`.
+// feeds the start tile, the bold notice and the settings view. Only started with `login: 'none'`. In the desktop shell the
+// settings window changes things the main window shows: the changes are announced (windows.ts) and `reloadAll` reads them again.
 import { computed, ref, watch } from "vue";
 import type { DataUpdateState, LocalSettingsState, LocalSettingsUpdate, UexState } from "../../src/webapp/api-types";
 import { api } from "./api";
 import { loadCapabilities, loginNone } from "./capabilities";
+import { loadMe } from "./session";
 import { appTooOld, isBusy } from "./settingsLogic";
 import { tileModel } from "./startTile";
+import { announceChange } from "./windows";
 
 /** The last state that came in; a failed request leaves it as it was. */
 export const data = ref<DataUpdateState | null>(null);
@@ -68,17 +71,32 @@ export async function saveSettings(update: LocalSettingsUpdate): Promise<void> {
     void loadCapabilities();
     await refreshUex();
   } else if (update.uexIntervalMinutes !== undefined) await refreshUex();
+  announceChange();
+}
+
+export async function pullUex(): Promise<void> {
+  uex.value = await api<UexState>("/local/uex/pull", { method: "POST", body: {} });
+  announceChange();
 }
 
 export async function checkData(): Promise<void> {
   data.value = await api<DataUpdateState>("/local/data/check", { method: "POST", body: {} });
   failedPolls.value = 0;
   kick();
+  announceChange();
 }
 
 export async function importData(path: string): Promise<void> {
   data.value = await api<DataUpdateState>("/local/data/import", { method: "POST", body: { path } });
   failedPolls.value = 0;
+  kick();
+  announceChange();
+}
+
+/** The settings window changed something (windows.ts): everything the main window shows from it is read again, and the data polling
+ *  goes to its quick pace once, so a check or import that is running shows soon. */
+export async function reloadAll(): Promise<void> {
+  await Promise.all([loadSettings(), refreshData(), refreshUex(), loadCapabilities(), loadMe()]);
   kick();
 }
 

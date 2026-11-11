@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import type { DataUpdateState, LocalSettingsState, UexState } from '../src/webapp/api-types.ts';
-import { navGroups, routeAllowed, userControls, type NavCaps } from '../webapp/src/navigation.ts';
-import { dataTag, appTooOld, firstRun, folderView, gameDirChange, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag } from '../webapp/src/settingsLogic.ts';
+import { navGroups, parseSideMode, routeAllowed, sideGroups, sideModeFor, userControls, type NavCaps } from '../webapp/src/navigation.ts';
+import { dataTag, appTooOld, canFetchNow, firstRun, folderView, gameDirChange, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag } from '../webapp/src/settingsLogic.ts';
 import { progressShare, tileModel, UNREACHABLE_AFTER, type TileInput } from '../webapp/src/startTile.ts';
 import { dayTime, megabytes, shortTime } from '../webapp/src/localTime.ts';
 
@@ -89,6 +89,26 @@ describe('navigation per capability', () => {
   it('offers the settings button instead of the user, profile, logout and companion controls without a login', () => {
     assert.deepEqual(userControls(online), { settings: false, companion: true, user: true, profile: true, logout: true, history: true });
     assert.deepEqual(userControls(single), { settings: true, companion: false, user: false, profile: false, logout: false, history: true });
+  });
+
+  it('gives the side bar the top bar\'s groups and the history as a group of its own, quieter', () => {
+    const groups = sideGroups(single);
+    assert.deepEqual(groups.map((g) => g.map((i) => i.to)), [...keys(single), ['/history']]);
+    assert.equal(groups[3]![0]!.secondary, true);
+    assert.equal(groups.slice(0, 3).flat().some((i) => i.secondary), false);
+    // The top bar's groups do not carry it
+    assert.equal(navGroups(single).length, 3);
+  });
+
+  it('keeps the side bar wide or narrow as chosen, narrow below 1000 px whatever the choice, wide for anything stored but "narrow"', () => {
+    assert.equal(parseSideMode('narrow'), 'narrow');
+    assert.equal(parseSideMode('wide'), 'wide');
+    assert.equal(parseSideMode(null), 'wide');
+    assert.equal(parseSideMode('x'), 'wide');
+    assert.equal(sideModeFor('wide', 1280), 'wide');
+    assert.equal(sideModeFor('wide', 1000), 'wide');
+    assert.equal(sideModeFor('wide', 999), 'narrow');
+    assert.equal(sideModeFor('narrow', 1920), 'narrow');
   });
 
   it('lets the settings route exist only without a login and the trade route only with UEX', () => {
@@ -176,8 +196,12 @@ describe('settings decisions', () => {
     assert.equal(uexRefused({ uexKeySet: false }, u({ last: { outcome: 'refused', at } })), false);
   });
 
-  it('names the next fetch only while one is planned', () => {
+  it('lets "fetch now" work with a key and no pull running; the next fetch exists only while one is planned', () => {
     const u = (phase: UexState['phase']): UexState => ({ phase, lastPull: null, nextPull: at, last: null });
+    assert.equal(canFetchNow({ uexKeySet: true }, u('idle')), true);
+    assert.equal(canFetchNow({ uexKeySet: true }, u('pulling')), false);
+    assert.equal(canFetchNow({ uexKeySet: false }, u('off')), false);
+    assert.equal(canFetchNow({ uexKeySet: true }, null), false);
     assert.equal(nextFetch(u('idle')), at);
     assert.equal(nextFetch(u('pulling')), null);
     assert.equal(nextFetch(u('off')), null);
