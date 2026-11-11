@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseSideMode, SIDE_WIDE_FROM, sideModeFor, WINDOW_MIN } from '../companion/src/sideTabs.ts';
+import { minWidthFor, parseSideMode, WINDOW_MIN, WINDOW_MIN_WIDE } from '../companion/src/sideTabs.ts';
 
-test('thresholds: the window keeps the tables 640 px wide with the narrow panel', () => {
+test('thresholds: the window keeps the tables 640 px wide with either panel', () => {
   assert.equal(WINDOW_MIN, 696);
-  assert.equal(SIDE_WIDE_FROM, 840);
+  assert.equal(WINDOW_MIN_WIDE, 840);
 });
 
 test('parseSideMode: narrow unless "wide" is stored', () => {
@@ -14,8 +14,7 @@ test('parseSideMode: narrow unless "wide" is stored', () => {
   assert.equal(parseSideMode('wide'), 'wide');
 });
 
-test('sideModeFor: narrow below 840 px whatever the choice', () => {
-  assert.equal(sideModeFor('wide', 839), 'narrow');
-  assert.equal(sideModeFor('wide', 840), 'wide');
-  assert.equal(sideModeFor('narrow', 2000), 'narrow');
+test('minWidthFor: the window minimum per mode', () => {
+  assert.equal(minWidthFor('narrow'), 696);
+  assert.equal(minWidthFor('wide'), 840);
 });

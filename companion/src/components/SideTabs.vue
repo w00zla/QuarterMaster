@@ -3,14 +3,16 @@
 // that one is router based) but below the title bar and the scan row, down to the window's bottom. Two groups with a divider: the
 // scan modes (also the scan overlay's modes), then the look-up tabs; a new tab is one more entry in a group. Narrow (56 px): the
 // icon with the row count below it, the tab's name in a tooltip; wide (200 px): icon, name, the count at the right. A small button
-// half over the panel's right edge toggles the two; the choice is remembered (default narrow) and below SIDE_WIDE_FROM of window
-// width the panel is narrow whatever the choice (the choice is not overwritten).
-import { computed, onMounted, onUnmounted, ref } from "vue";
+// half over the panel's right edge toggles the two (always possible); the choice is remembered (default narrow). Wide raises the
+// window's minimum width by the difference and widens a narrower window to it, so the tables keep their width.
+import { computed, onMounted, ref } from "vue";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import { t, type Key } from "../i18n";
 import { pickTab, tab, TAB_ICONS, tabCounts, type Tab } from "../overlay";
-import { parseSideMode, sideModeFor, SIDE_WIDE_FROM, type SideMode } from "../sideTabs";
+import { minWidthFor, parseSideMode, type SideMode } from "../sideTabs";
+import { toastError } from "../toasts";
 
 interface Entry {
   id: Tab;
@@ -38,20 +40,32 @@ function stored(): SideMode {
 }
 
 const choice = ref<SideMode>(stored());
-const width = ref(window.innerWidth);
-const forced = computed(() => width.value < SIDE_WIDE_FROM);
-const narrow = computed(() => sideModeFor(choice.value, width.value) === "narrow");
+const narrow = computed(() => choice.value === "narrow");
+
+// The window's minimum height, as in tauri.conf.json (setMinSize wants both)
+const MIN_HEIGHT = 780;
+const win = getCurrentWindow();
+
+// Sets the window's minimum width for the mode; wide: a narrower window is widened to it (position and height stay). Collapsing
+// only lowers the minimum. Runs once mounted (after the window-state plugin restored the stored size) and on every toggle.
+async function fitWindow(mode: SideMode) {
+  const min = minWidthFor(mode);
+  await win.setMinSize(new LogicalSize(min, MIN_HEIGHT));
+  if (mode !== "wide") return;
+  const size = (await win.innerSize()).toLogical(await win.scaleFactor());
+  if (size.width < min) await win.setSize(new LogicalSize(min, size.height));
+}
+const fit = () => void fitWindow(choice.value).catch(toastError);
 
 function toggle() {
   choice.value = choice.value === "wide" ? "narrow" : "wide";
   try {
     localStorage.setItem(STORE_KEY, choice.value);
   } catch { /* the choice holds for this run */ }
+  fit();
 }
 
-const onResize = () => (width.value = window.innerWidth);
-onMounted(() => window.addEventListener("resize", onResize));
-onUnmounted(() => window.removeEventListener("resize", onResize));
+onMounted(fit);
 </script>
 
 <template>
@@ -72,7 +86,7 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
     <!-- Centred on the panel's right edge, above the main area -->
     <div class="toggle-wrap">
       <Tooltip side="right" :text="t(narrow ? 'side.expand' : 'side.collapse')">
-        <button type="button" class="toggle" :disabled="forced" :aria-label="t(narrow ? 'side.expand' : 'side.collapse')" @click="toggle">
+        <button type="button" class="toggle" :aria-label="t(narrow ? 'side.expand' : 'side.collapse')" @click="toggle">
           <Icon :name="narrow ? 'chevron-right' : 'chevron-left'" :size="14" />
         </button>
       </Tooltip>

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "The main window sets its own minimum width and widens itself when the side panel expands (SideTabs.vue)",
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size"
+  ]
+}

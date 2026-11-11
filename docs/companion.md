@@ -204,8 +204,11 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   tabular, in a fixed room: it never changes an entry's size); the last tab kept in localStorage `qm.companion.tab`; it never
   switches by itself: the scan row's tag names the screen. **Narrow** (56 px, the default): the icon with the count below it
   in mono, the tab's name in a tooltip to the right; **wide** (200 px): icon, name, count at the right. A small chevron
-  button half over the panel's right edge at its top toggles them (choice in localStorage `qm.companion.sideMode`); below
-  840 px of window width (`sideTabs.ts`: 696 - 56 + 200) the panel is narrow whatever the choice and the button is disabled.
+  button half over the panel's right edge at its top toggles them (always possible; choice in localStorage
+  `qm.companion.sideMode`). Wide raises the window's minimum width to 840 px (`sideTabs.ts`: 696 - 56 + 200; `setMinSize`
+  from the frontend, capability `main-window.json`; the minimum height is the constant `MIN_HEIGHT`, as in `tauri.conf.json`)
+  and widens a narrower window to it, keeping position and height; this also runs at start, after the window-state plugin
+  restored the stored size. Collapsing lowers the minimum to 696 px and does not shrink the window.
   The outdated state shows no panel. The tabs with the panels
   Gear and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`) and
   Blueprints (`UnlocksPanel.vue`), like the web app's navigation (order, names "Ausrüstung" (until 2026-10-20 "Komponenten")/"Ressourcen"/
