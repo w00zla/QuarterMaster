@@ -1,0 +1,138 @@
+# Pull request CI: every pull request to main gets this run, and its three jobs are the required status checks of
+# the ruleset on main (docs/releasing.md "ci.yml"). Required checks must report on every pull request, so a
+# workflow-level `paths:` filter is not used; each job always starts and asks scripts/ci-scope.mjs, from the
+# pull request's changed files, whether it has anything to do. If not, its heavy steps are skipped and the job ends
+# green (the log says why). A manual run (any branch) runs everything.
+#
+# The test steps repeat those of build-app.yml / build-companion.yml (their "Tests" jobs run on a tag and need the
+# version/tag check and the version output; a reusable workflow for these few lines would cost more than the copy).
+# Keep them in step.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# A new push to the pull request replaces the run in progress
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  LINUX_DEPS: libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+jobs:
+  node:
+    name: Node tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Anything to test?
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)' | node scripts/ci-scope.mjs node >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: pnpm/action-setup@v6
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - if: steps.scope.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        if: steps.scope.outputs.run == 'true'
+        run: pnpm typecheck
+      - name: Typecheck (companion SPA)
+        if: steps.scope.outputs.run == 'true'
+        run: pnpm --filter sc-quartermaster-companion typecheck
+      # The whole suite on PGlite in the process (test/pglite.env): no Postgres, no game data. It includes
+      # test/release-scripts.test.ts (the release and feed scripts) and test/companion-*.test.ts.
+      - name: Node tests
+        if: steps.scope.outputs.run == 'true'
+        run: pnpm test:pglite
+
+  app-rust:
+    name: App Rust tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Anything to test?
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)' | node scripts/ci-scope.mjs app-rust >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Linux packages
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      - if: steps.scope.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - if: steps.scope.outputs.run == 'true'
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - name: Rust tests
+        if: steps.scope.outputs.run == 'true'
+        run: cargo test --manifest-path app/src-tauri/Cargo.toml
+      - name: Clippy
+        if: steps.scope.outputs.run == 'true'
+        run: cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+  companion-rust:
+    name: Companion Rust tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Anything to test?
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)' | node scripts/ci-scope.mjs companion-rust >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Linux packages
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      - if: steps.scope.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - if: steps.scope.outputs.run == 'true'
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: companion/src-tauri
+      # Pure Rust tests only; the readers' screenshot tests are sc-ohseearr's. The OCR crates come from GitHub by tag.
+      # --release like build-companion.yml (the OCR stack is slow in debug).
+      - name: Rust tests
+        if: steps.scope.outputs.run == 'true'
+        run: cargo test --release --manifest-path companion/src-tauri/Cargo.toml

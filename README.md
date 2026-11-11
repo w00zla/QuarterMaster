@@ -29,21 +29,17 @@ The bot and the web app run as one hosted service; how it is deployed is describ
 
 Two desktop apps come from the [GitHub releases](https://github.com/w00zla/quartermaster/releases) of this repository:
 **Quartermaster** (the app: the whole thing on your PC for one player, no server, no Discord; [docs/app.md](docs/app.md))
-and the **Quartermaster Companion** (reads the game and feeds the hosted web app or the local app; see below). The table
-lists the newest version of each, stable and the test channels:
+and the **Quartermaster Companion** (reads the game and feeds the hosted web app or the local app; see below).
 
-<div id="release_dls">
-
-| Product | Channel | Version | Windows | Linux |
-| --- | --- | --- | --- | --- |
-| Quartermaster | stable | not released yet | | |
-| Quartermaster Companion | stable | not released yet | | |
-
-</div>
+Pick the newest release whose tag starts with `app-v` (Quartermaster) or `companion-v` (Companion); a version with a
+`-beta.1`-style ending is a test channel, a plain one is stable (`data-…` releases are the game data, which the app fetches itself). On Windows download the `…-setup.exe` of that release
+(`Quartermaster_<version>_x64-setup.exe`, `Quartermaster-Companion_<version>_x64-setup.exe`), on Linux the `…AppImage`
+(`Quartermaster_<version>_amd64.AppImage`, `Quartermaster-Companion_<version>_amd64.AppImage`). The other files of a
+release (`.sig`, `latest.json`) are for the updater.
 
 **Updates are automatic by default.** Both apps and the game data (the app's catalog and item pictures) update
 themselves; nothing needs installing by hand after the first install. To do that they ask GitHub, without a login and
-without sending anything about you: `channels.json` from `raw.githubusercontent.com/w00zla/quartermaster/main`, then
+without sending anything about you: `channels.json` from `raw.githubusercontent.com/w00zla/quartermaster/channels`, then
 the files of the release it names from `github.com/w00zla/quartermaster/releases`. An app update is checked against
 the maintainer's signature before it is installed. To switch it off: in the app's settings, "Automatic updates"
 ("Automatische Updates"; it covers the app's own update and the game data's check at start); the companion has its own

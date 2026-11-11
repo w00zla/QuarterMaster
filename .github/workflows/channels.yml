@@ -1,0 +1,75 @@
+# Edits channels.json on the `channels` branch by hand, so that only CI ever
+# writes the feed. Today one action: `remove` takes a test channel out of the
+# feed (its users fall back to stable at their next check). Run from the
+# Actions tab, or `gh workflow run channels.yml -f product=app -f channel=beta
+# -f action=remove` (the release tool does). docs/releasing.md.
+name: Channels
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "Product"
+        required: true
+        type: choice
+        options: [app, companion]
+      channel:
+        description: "Channel id (lower case letters, digits, '-'; not 'stable')"
+        required: true
+        type: string
+      action:
+        description: "Action"
+        required: true
+        type: choice
+        options: [remove]
+
+permissions:
+  contents: write
+
+# The same group as release.yml: nothing pushes to the channels branch at the same time
+concurrency:
+  group: channels-json
+  cancel-in-progress: false
+
+env:
+  PRODUCT: ${{ inputs.product }}
+  CHANNEL: ${{ inputs.channel }}
+  ACTION: ${{ inputs.action }}
+
+jobs:
+  edit:
+    name: channels.json
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check the inputs
+        run: |
+          [[ "$PRODUCT" =~ ^(app|companion)$ ]] || { echo "product must be app or companion" >&2; exit 1; }
+          [[ "$ACTION" == remove ]] || { echo "action must be remove" >&2; exit 1; }
+          [[ "$CHANNEL" =~ ^[a-z][a-z0-9-]{0,31}$ && "$CHANNEL" != stable ]] || { echo "not a channel id: $CHANNEL" >&2; exit 1; }
+      # The scripts always come from main
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Switch to the channels branch
+        run: |
+          mkdir -p "$RUNNER_TEMP/qm-scripts"
+          cp scripts/*.mjs "$RUNNER_TEMP/qm-scripts/"
+          if ! git ls-remote --exit-code --heads origin channels > /dev/null; then
+            echo "There is no channels branch yet: nothing to remove" >&2
+            exit 1
+          fi
+          git fetch --depth=1 origin channels
+          git checkout -B channels FETCH_HEAD
+      - name: Remove the channel
+        run: node "$RUNNER_TEMP/qm-scripts/channels-remove.mjs" "$PRODUCT" "$CHANNEL" channels.json
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- channels.json; then
+            echo "channels.json unchanged (the channel was not listed)"
+            exit 0
+          fi
+          git add channels.json
+          git commit -m "Remove ${PRODUCT} channel ${CHANNEL}"
+          git push origin channels

@@ -162,8 +162,8 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
 `update_check`, `update_install`, `update_set_channel { id }` and the event `update-changed` (payload `UpdateState`,
 `webapp/src/shellLogic.ts`) are the shell contract's, the state logic (buttons, status line, mark) is that file's too.
 
-- **Feed:** `channels.json` on the repository's main branch
-  (`https://raw.githubusercontent.com/w00zla/quartermaster/main/channels.json`), its `companion` entry:
+- **Feed:** `channels.json` on the repository's `channels` branch (only CI writes it)
+  (`https://raw.githubusercontent.com/w00zla/quartermaster/channels/channels.json`), its `companion` entry:
   `{ "companion": { "stable": "companion-v2.1.0", "channels": [{ "id": "beta", "tag": "companion-v2.2.0-beta.1" }] } }`.
   The tag of the channel in effect names a GitHub release whose asset `latest.json` is Tauri's updater manifest
   (`https://github.com/w00zla/quartermaster/releases/download/<tag>/latest.json`). Tags are `companion-vX.Y.Z` and

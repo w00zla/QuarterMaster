@@ -1,17 +1,17 @@
 # After a release is published (a draft made public, as a pre-release or a full
 # one), by the tag's prefix:
-# - `app-v…` / `companion-v…`: channels.json on main points at the tag — the
-#   product's `stable` for a plain version, its channel entry for
+# - `app-v…` / `companion-v…`: channels.json on the `channels` branch points at
+#   the tag — the product's `stable` for a plain version, its channel entry for
 #   `x.y.z-<channel>.<n>` (created on the channel's first version). A tag that
 #   is not newer than the one listed leaves the file alone.
 # - `data-<game label>-<n>`: `data.stable` in channels.json.
-# - then the README's download table is written again from channels.json.
 # Any other tag (this repository's releases are nothing else) is skipped.
-# Removing a channel after its merge stays a manual step (docs/releasing.md).
 #
-# The commit goes to main as the GitHub Actions bot: a ruleset on main must let
-# that bot push (docs/releasing.md). A manual run with a tag redoes the update
-# for a release already published.
+# `channels` is the feed branch: only CI writes it (this workflow and
+# channels.yml), as the GitHub Actions bot; it is created here, as an orphan
+# with the file as its only content, when it does not exist yet. `main` is not
+# touched (it takes pull requests only). A manual run with a tag redoes the
+# update for a release already published. docs/releasing.md.
 name: Release published
 
 on:
@@ -27,7 +27,7 @@ on:
 permissions:
   contents: write
 
-# Two releases published close together must not push at the same time
+# Releases published close together, and channels.yml, must not push at the same time
 concurrency:
   group: channels-json
   cancel-in-progress: false
@@ -37,25 +37,37 @@ env:
 
 jobs:
   channels:
-    name: channels.json and README
+    name: channels.json
     if: startsWith(github.event.release.tag_name || inputs.tag, 'app-v') || startsWith(github.event.release.tag_name || inputs.tag, 'companion-v') || startsWith(github.event.release.tag_name || inputs.tag, 'data-')
     runs-on: ubuntu-24.04
     steps:
+      # The scripts always come from main (not from whatever commit the tag sits on)
       - uses: actions/checkout@v7
         with:
           ref: main
+      - name: Switch to the channels branch
+        run: |
+          mkdir -p "$RUNNER_TEMP/qm-scripts"
+          cp scripts/*.mjs "$RUNNER_TEMP/qm-scripts/"
+          if git ls-remote --exit-code --heads origin channels > /dev/null; then
+            git fetch --depth=1 origin channels
+            git checkout -B channels FETCH_HEAD
+          else
+            echo "No channels branch yet: creating it as an orphan"
+            git checkout --orphan channels
+            git rm -rf --quiet .
+          fi
+          ls -la
       - name: Point channels.json at ${{ github.event.release.tag_name || inputs.tag }}
-        run: node scripts/channels-set.mjs "$TAG"
-      - name: README download table
-        run: node scripts/readme-downloads.mjs
-      - name: Commit
+        run: node "$RUNNER_TEMP/qm-scripts/channels-set.mjs" "$TAG" channels.json
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- channels.json README.md; then
-            echo "channels.json and README.md already up to date"
+          git add channels.json
+          if git diff --cached --quiet && git rev-parse --verify --quiet HEAD > /dev/null; then
+            echo "channels.json already up to date"
             exit 0
           fi
-          git add channels.json README.md
           git commit -m "Point channels.json at ${TAG}"
-          git push origin main
+          git push origin channels

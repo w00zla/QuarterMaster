@@ -464,11 +464,11 @@ included.
 `src/singleuser/data-routes.ts` (the endpoints); `main.ts` builds the feed and the updater. Dependencies are passed in: the
 updater gets the connection, the folders, the feed, the app's schema version and a log function.
 
-**The feed.** `channels.json` on the repository's `main` branch holds, per product, the stable tag; the data entry is
+**The feed.** `channels.json` on the repository's `channels` branch (only CI writes it) holds, per product, the stable tag; the data entry is
 `"data": { "stable": "<tag>" }` (other entries are ignored; the whole file and who writes it: `docs/releasing.md`). A missing file, entry or a `null` stable is "no data channel", not an error. The
 repository is the constant `DATA_REPO` in `feed.ts` (`w00zla/quartermaster`). What is fetched, and nothing else:
 
-- `https://raw.githubusercontent.com/<owner>/<repo>/main/channels.json`
+- `https://raw.githubusercontent.com/<owner>/<repo>/channels/channels.json`
 - `https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>` for the `manifest.json` of a release and the assets the plan
   needs (the full pack, `catalog.json.gz`, `thumbs-update.zip`)
 

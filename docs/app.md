@@ -158,9 +158,9 @@ for Linux follows Tauri's scheme there and was not run.
 
 ## Updates and channels
 
-The model is BindSight's, read from this repository's `channels.json` (the `app` product) and GitHub releases:
+The model is BindSight's, read from this repository's `channels.json` (the `app` product, on the `channels` branch that only CI writes) and GitHub releases:
 
-- `https://raw.githubusercontent.com/w00zla/quartermaster/main/channels.json`:
+- `https://raw.githubusercontent.com/w00zla/quartermaster/channels/channels.json`:
   `{ "app": { "stable": "app-v1.0.0", "channels": [{ "id": "beta", "tag": "app-v1.1.0-beta.1" }] }, … }` (the whole file, the
   companion's and the data entry, and who writes it: `docs/releasing.md`; nothing released is `"stable": null, "channels": []`)
 - `https://github.com/w00zla/quartermaster/releases/download/<tag>/latest.json` (Tauri's updater format) of the channel's tag, and the
