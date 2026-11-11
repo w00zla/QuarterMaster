@@ -474,20 +474,24 @@ routes for which capabilities).
 **The side bar** (`SideNav.vue`, singleuser only; the online variant keeps `TopBar.vue` unchanged) runs from the top of the window down
 to the footer (sticky, `calc(100vh - 28px)`; the page scrolls beside it). From the top: the logo (with the wordmark when wide; the
 logo's row is a drag region in the shell), the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
-quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups, and at the bottom Settings, a divider and the
-toggle. Two modes: *wide* (icon and text, 208 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
+quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups; nothing below them. The toggle is a small
+button at the top right of the bar, half over its right edge (chevron, tooltip). Two modes: *wide* (icon and text, 208 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
 opens above or below the button). The choice is stored in `localStorage` (`qm.sideMode`, in a try/catch); below 1000 px of window
 width the bar is narrow whatever the choice (`sideModeFor`; the stored choice is not touched, the toggle is disabled then). The two
 modes differ in width only: buttons are 36 px high either way, icons and logo sit at the same place, the tooltip wrapper exists in both.
 
 **The slim bar** (`SlimBar.vue`) is the top row of the content beside it (44 px, never wraps): the drag region, the game version chip
-(`.ver-chip.fixed` with the quiet "Game:" label) and, in the shell, the window buttons. In a plain browser it is the same bar without
+(`.ver-chip.fixed` with the quiet "Game:" label), the settings button (gear `icon-btn`, as the top bar had it: the shell's settings
+window, in a plain browser the `/settings` page, accent on that route) and, in the shell, the window buttons. In a plain browser it is the same bar without
 window buttons and drag attributes. It measures its height into `layout.ts` `topbarHeight`, so the toasts sit below it. The footer
 (`AppFooter.vue`) stays across the full width.
 
-**The settings** (`SettingsView.vue`) are one panel (640 px wide, head "Settings" with the settings icon) with four groups in the look of
-the companion's settings dialog (a tile on the base background, its title straddling the top border, label left and control right).
-Each state tag sits in its group's title (a word, never colour alone); the title is positioned absolutely, so a tag appearing moves
+**The settings** (`SettingsView.vue`) are built like the companion's settings window (`companion/src/SettingsApp.vue`): one tile 560 px wide that
+grows downward, a head (settings icon, title, the app's version small in mono), a body with four groups (a tile on the base background,
+its title straddling the top border, a field's label above its input, other rows label left and control right) and, in the settings
+window only, a foot with "Close" (everything applies at once: no save button). On the page the tile has the panels' corners; in the
+window it is the window's content, with no margin around it.
+Each state tag sits in its group's title next to the name (a word, never colour alone); the title is positioned absolutely, so a tag appearing moves
 nothing. The decisions are in `settingsLogic.ts`:
 
 - *Star Citizen* (`/api/local/settings`): the path field applies on Enter or when it loses focus with a changed value. A refusal (422) shows
@@ -512,7 +516,7 @@ first run) calls `open_settings`; the shell opens a second window, label `settin
 `windowMode`): in that mode `App.vue` renders only `TitleBar.vue` (with the title and the close button alone: `WindowButtons`
 `closeOnly`) and `SettingsView` (no side bar, footer, start tile, realtime or routes; the window works without game data, as the panel
 needs no catalog). The window cannot be resized: once its panel and the fonts are rendered, the page measures its height and calls
-`settings_window_fit` (`settingsFitSize`: 672 px wide, the height of the content plus 2 px, at least 400 px, which leaves the dialogs
+`settings_window_fit` (`settingsFitSize`: 560 px wide, the height of the content plus 2 px, at least 400 px, which leaves the dialogs
 the panel opens, `ImportDialog` and the remove-key `ConfirmDialog`, room); the shell sizes and shows it. The settings window waits for
 the shell's update state before it renders (`main.ts`), so the height with or without the "App Update" row is known when it measures.
 In a plain browser the entry is the `/settings` page inside the normal layout.
@@ -531,8 +535,8 @@ once per page load and only after the app is shown (not over the start tile); th
 pack is installed: the app-icon slot (empty, reserved), the wordmark, the app version, four segments and one line of text; a
 download adds the amount ("12 / 45 MB") and a bar. Phases map to the steps: nothing known yet "Starting …" (1), checking and downloading
 "Loading game data …" (2), installing "Setting up game data …" (3). Without a connection (outcome offline or failed with nothing
-installed) the tile shows the "No connection" tag, "Game data missing." and two buttons, "Import file" (the same dialog as in the settings)
-and "Try again" (posts a check); the same layout with "Game data missing." alone where nothing will fetch the data (updates off, no
+installed) the tile shows the "No connection" tag, "Game data missing." and two buttons, "Try again" first and then "Import file" (primary; the same dialog as in the settings;
+"Try again" posts a check); everything on the tile is centred; the same layout with "Game data missing." alone where nothing will fetch the data (updates off, no
 data channel), and with the "App update needed" tag where the newest data needs a newer app. The state (`local.ts`) is polled every
 second while it is busy and rarely while idle, each request with a 3 s limit. **A request that fails or times out while a check, a
 download or an installation was last seen counts as "still installing"** (the catalog import blocks the whole process for seconds, the

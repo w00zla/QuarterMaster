@@ -176,8 +176,8 @@ export function windowMode(search: string): WindowMode {
   return new URLSearchParams(search).get("window") === "settings" ? "settings" : "main";
 }
 
-/** The settings window's width (CSS px): the panel (640) and the page's gutters; the dialogs it opens (560 wide at most) fit in it. */
-export const SETTINGS_WIDTH = 672;
+/** The settings window's width (CSS px): the companion's settings window's (the tile is the window's content); the dialogs it opens (560 wide at most) fit in it. */
+export const SETTINGS_WIDTH = 560;
 /** At least this high, so the dialogs (a dialog is about 230 px high and starts 10 % down) fit whatever the content is. */
 export const SETTINGS_MIN_HEIGHT = 400;
 /** A little more than measured: a fractional scale must not make the content a pixel too high for the window (a scroll bar). */

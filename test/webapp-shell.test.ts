@@ -123,9 +123,9 @@ describe('shell contract: the settings window', () => {
   });
 
   it('asks for the measured height with the fixed width, never below the minimum, with a little slack, and never for no size', () => {
-    assert.deepEqual(settingsFitSize(800), { width: 672, height: 802 });
-    assert.deepEqual(settingsFitSize(799.2), { width: 672, height: 802 });
-    assert.deepEqual(settingsFitSize(100), { width: 672, height: 400 });
+    assert.deepEqual(settingsFitSize(800), { width: 560, height: 802 });
+    assert.deepEqual(settingsFitSize(799.2), { width: 560, height: 802 });
+    assert.deepEqual(settingsFitSize(100), { width: 560, height: 400 });
     for (const bad of [0, -5, NaN, Infinity]) assert.equal(settingsFitSize(bad), null);
   });
 

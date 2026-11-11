@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // The singleuser variant's navigation: a bar at the left edge from the window's top down to the footer (the online variant keeps
 // the top bar). The logo (with the wordmark when wide), the nav groups of navigation.ts one below the other with a divider
-// between them, the history as a group of its own (quieter), at the bottom the settings, a divider and the toggle between
-// wide (icon and text, 208 px) and narrow (icons with a tooltip, 56 px). The choice is remembered; below 1000 px of window width
-// the bar is narrow whatever the choice (it is not overwritten). The settings open the desktop shell's own window, in a plain
-// browser they are the /settings page.
+// between them, the history as the last group (quieter); nothing below it. At the top right, half over the bar's right edge, a small
+// button toggles between wide (icon and text, 208 px) and narrow (icons with a tooltip, 56 px). The choice is remembered; below
+// 1000 px of window width the bar is narrow whatever the choice (it is not overwritten). The settings are not here: their button
+// is in the slim bar (SlimBar.vue).
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import Icon from "../../../adminapp/src/components/Icon.vue";
@@ -66,24 +66,11 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
       </template>
     </nav>
 
-    <div class="grow" />
-
-    <div class="nav">
-      <Tooltip :text="narrow ? t('nav.settings') : null">
-        <button v-if="shell.available" type="button" class="item" :class="{ narrow }" :aria-label="t('nav.settings')" @click="shell.openSettings()">
-          <Icon name="settings" :size="16" />
-          <span v-if="!narrow">{{ t("nav.settings") }}</span>
-        </button>
-        <RouterLink v-else to="/settings" class="item" :class="{ narrow, active: route.path === '/settings' }" :aria-label="t('nav.settings')">
-          <Icon name="settings" :size="16" />
-          <span v-if="!narrow">{{ t("nav.settings") }}</span>
-        </RouterLink>
-      </Tooltip>
-      <div class="sep" />
-      <Tooltip :text="narrow ? t('nav.expand') : null">
-        <button type="button" class="item toggle" :class="{ narrow }" :disabled="forced" :aria-label="t(narrow ? 'nav.expand' : 'nav.collapse')" @click="toggle">
-          <Icon :name="narrow ? 'chevron-right' : 'chevron-left'" :size="16" />
-          <span v-if="!narrow">{{ t("nav.collapse") }}</span>
+    <!-- Centred on the bar's right edge, above the content -->
+    <div class="toggle-wrap">
+      <Tooltip :text="t(narrow ? 'nav.expand' : 'nav.collapse')">
+        <button type="button" class="toggle" :disabled="forced" :aria-label="t(narrow ? 'nav.expand' : 'nav.collapse')" @click="toggle">
+          <Icon :name="narrow ? 'chevron-right' : 'chevron-left'" :size="14" />
         </button>
       </Tooltip>
     </div>
@@ -91,12 +78,13 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 </template>
 
 <style scoped>
-/* From the window's top to the footer (28 px, AppFooter): sticky, the page itself scrolls beside it */
+/* From the window's top to the footer (28 px, AppFooter): sticky, the page itself scrolls beside it. Above the slim bar (z 30), so the
+   toggle that reaches over the edge stays on top */
 .side {
   position: sticky;
   top: 0;
   align-self: flex-start;
-  z-index: 30;
+  z-index: 31;
   width: 208px;
   height: calc(100vh - 28px);
   flex-shrink: 0;
@@ -133,7 +121,7 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 .wordmark {
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.16em;
   white-space: nowrap;
   color: var(--text);
 }
@@ -148,14 +136,41 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
   gap: 2px;
 }
 
-.grow {
-  flex: 1;
-}
-
 .sep {
   height: 1px;
   margin: 6px 4px;
   background: var(--border-dim);
+}
+
+/* 20 px wide, 24 high: the middle of it is the border line (the bar's width is the border box: 208 or 56) */
+.toggle-wrap {
+  position: absolute;
+  top: 16px;
+  right: -11px;
+}
+
+.toggle {
+  width: 20px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.toggle:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .item {
@@ -199,20 +214,6 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 
 .item.secondary:hover {
   color: var(--text);
-}
-
-.item.toggle {
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.item:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.item:disabled:hover {
-  color: var(--text-2);
 }
 
 .item.active,

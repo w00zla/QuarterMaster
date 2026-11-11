@@ -1,7 +1,10 @@
 <script setup lang="ts">
-// The settings of the singleuser variant (/settings, and the desktop shell's settings window): one panel with four groups, in the
-// look of the companion's settings dialog: the game folder (Star Citizen), the game data, the UEX trade data and the app.
-// Everything comes from /api/local/*; the decisions (tags, what a field commit does) are in settingsLogic.ts.
+// The settings of the singleuser variant (/settings, and the desktop shell's settings window): ONE tile that grows downward, built
+// like the companion's settings window (companion/src/SettingsApp.vue): a head (icon, title, the app's version small), a body of
+// groups (a tile on the base background, the group's title on its top border, label left and control right, a field's label above
+// its input) and, in the window only, a foot with "Close". Groups: the game folder (Star Citizen), the game data, the UEX trade data
+// and the app. Everything applies at once (no save button). Everything comes from /api/local/*; the decisions (tags, what a field
+// commit does) are in settingsLogic.ts. In the window the tile is the window's content (App.vue), on the page a tile of the same width.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import ConfirmDialog, { type ConfirmButton } from "../components/ConfirmDialog.vue";
@@ -186,156 +189,165 @@ onUnmounted(() => clearTimeout(timer));
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" :class="{ win: settingsWindow }">
     <div v-if="!s || !folder" class="empty-line">{{ t("common.loading") }}</div>
-    <section v-else class="panel unclipped settings" aria-labelledby="h-settings">
+    <div v-else class="settings" :class="{ win: settingsWindow }">
       <div class="head">
-        <Icon name="settings" :size="16" />
-        <h2 id="h-settings" class="head-title">{{ t("nav.settings") }}</h2>
+        <Icon name="settings" :size="18" />
+        <div class="titles">
+          <span class="title">{{ t("nav.settings") }}</span>
+        </div>
+        <span class="version mono">v{{ s.appVersion }}</span>
       </div>
-      <div class="groups">
-        <!-- Star Citizen: the game folder -->
-        <div class="group" role="group" aria-labelledby="g-game">
-          <div id="g-game" class="group-title">
-            {{ t("settings.game") }}
-            <span v-if="folder.tag" class="tag" :class="tagClass(folder.tag)">{{ t(folder.tag.text) }}</span>
-          </div>
-          <div class="field">
-            <label class="label" for="game-dir">{{ t("folder.title") }}</label>
-            <div class="line">
-              <input
-                id="game-dir"
-                v-model="dirDraft"
-                class="input mono"
-                :class="{ invalid: folder.message, 'call-out': folder.needsFolder && !shell.available }"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                :disabled="s.overridden.gameDir"
-                @input="rejected = false"
-                @keydown.enter.prevent="commitDir"
-                @blur="commitDir"
-              />
-              <button v-if="shell.available" class="btn" :class="folder.needsFolder ? 'primary' : 'outline'" type="button" :disabled="s.overridden.gameDir" @click="browse">
-                <Icon name="folder" :size="14" /> {{ t("folder.browse") }}
+      <div class="body">
+        <form class="form single flush groups" @submit.prevent="submitKey">
+          <!-- Star Citizen: the game folder -->
+          <section class="group">
+            <div class="group-title">
+              {{ t("settings.game") }}
+              <span v-if="folder.tag" class="tag" :class="tagClass(folder.tag)">{{ t(folder.tag.text) }}</span>
+            </div>
+            <div class="field">
+              <label for="game-dir">{{ t("folder.title") }}</label>
+              <div class="line">
+                <input
+                  id="game-dir"
+                  v-model="dirDraft"
+                  class="input"
+                  :class="{ invalid: folder.message, 'call-out': folder.needsFolder && !shell.available }"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="s.overridden.gameDir"
+                  @input="rejected = false"
+                  @keydown.enter.prevent="commitDir"
+                  @blur="commitDir"
+                />
+                <button v-if="shell.available" class="btn" :class="folder.needsFolder ? 'primary' : 'outline'" type="button" :disabled="s.overridden.gameDir" @click="browse">
+                  <Icon name="folder" :size="14" /> {{ t("folder.browse") }}
+                </button>
+              </div>
+            </div>
+            <!-- The message keeps its room: nothing moves when it appears -->
+            <div class="msg" :class="{ hidden: !folder.message }" :aria-hidden="!folder.message">
+              <span class="err-text">{{ t("folder.message") }}</span>
+            </div>
+            <div class="line between">
+              <span class="label">{{ t("folder.version") }}</span>
+              <span class="ver-chip" :class="{ none: !s.gameFolder.gameVersion }">{{ s.gameFolder.gameVersion ?? "–" }}</span>
+            </div>
+            <div class="line between">
+              <span class="label">{{ t("folder.pack") }}</span>
+              <span class="tag" :class="tagClass(packTag(s.languagePack))">{{ t(packTag(s.languagePack).text) }}</span>
+            </div>
+          </section>
+
+          <!-- Game data -->
+          <section class="group">
+            <div class="group-title">
+              {{ t("data.title") }}
+              <span v-if="dataTag(data)" class="tag" :class="tagClass(dataTag(data)!)">{{ t(dataTag(data)!.text) }}</span>
+            </div>
+            <div class="line between">
+              <span class="label">{{ t("data.installed") }}</span>
+              <span class="ver-chip" :class="{ none: !data?.installed }">{{ data?.installed?.gameLabel ?? "–" }}</span>
+            </div>
+            <!-- While busy the amount in place of the check time: one row either way -->
+            <div v-if="busy" class="line between">
+              <span class="label">{{ t("data.new") }}</span>
+              <span class="amount mono">{{ newAmount || "–" }}</span>
+            </div>
+            <div v-else class="line between">
+              <span class="label">{{ t("data.checked") }}</span>
+              <span class="v">{{ dayTime(data?.last?.at, new Date(), lang) || "–" }}</span>
+            </div>
+            <div class="line end">
+              <button class="btn outline" type="button" :disabled="busy" @click="importing = true">
+                <Icon name="imports" :size="14" /> {{ t("data.import") }}
+              </button>
+              <button class="btn outline" type="button" :disabled="busy" @click="check">
+                <Icon name="search" :size="14" /> {{ t("data.check") }}
               </button>
             </div>
-          </div>
-          <!-- The message keeps its room: nothing moves when it appears -->
-          <div class="msg" :class="{ hidden: !folder.message }" :aria-hidden="!folder.message">
-            <span class="err-text">{{ t("folder.message") }}</span>
-          </div>
-          <div class="line between">
-            <span class="label">{{ t("folder.version") }}</span>
-            <span class="ver-chip" :class="{ none: !s.gameFolder.gameVersion }">{{ s.gameFolder.gameVersion ?? "–" }}</span>
-          </div>
-          <div class="line between">
-            <span class="label">{{ t("folder.pack") }}</span>
-            <span class="tag" :class="tagClass(packTag(s.languagePack))">{{ t(packTag(s.languagePack).text) }}</span>
-          </div>
-        </div>
+          </section>
 
-        <!-- Game data -->
-        <div class="group" role="group" aria-labelledby="g-data">
-          <div id="g-data" class="group-title">
-            {{ t("data.title") }}
-            <span v-if="dataTag(data)" class="tag" :class="tagClass(dataTag(data)!)">{{ t(dataTag(data)!.text) }}</span>
-          </div>
-          <div class="line between">
-            <span class="label">{{ t("data.installed") }}</span>
-            <span class="ver-chip" :class="{ none: !data?.installed }">{{ data?.installed?.gameLabel ?? "–" }}</span>
-          </div>
-          <!-- While busy the amount in place of the check time: one row either way -->
-          <div v-if="busy" class="line between">
-            <span class="label">{{ t("data.new") }}</span>
-            <span class="amount mono">{{ newAmount || "–" }}</span>
-          </div>
-          <div v-else class="line between">
-            <span class="label">{{ t("data.checked") }}</span>
-            <span class="v">{{ dayTime(data?.last?.at, new Date(), lang) || "–" }}</span>
-          </div>
-          <div class="line end">
-            <button class="btn outline" type="button" :disabled="busy" @click="importing = true">
-              <Icon name="imports" :size="14" /> {{ t("data.import") }}
-            </button>
-            <button class="btn outline" type="button" :disabled="busy" @click="check">
-              <Icon name="search" :size="14" /> {{ t("data.check") }}
-            </button>
-          </div>
-        </div>
-
-        <!-- UEX -->
-        <form class="group" aria-labelledby="g-uex" @submit.prevent="submitKey">
-          <div id="g-uex" class="group-title">
-            {{ t("uex.title") }}
-            <span class="tag" :class="tagClass(uexTag(s, uex))">{{ t(uexTag(s, uex).text) }}</span>
-          </div>
-          <div class="field">
-            <label class="label" for="uex-key">{{ t("uex.key") }}</label>
-            <div class="line">
-              <input
-                id="uex-key"
-                v-model="keyDraft"
-                class="input mono"
-                :class="{ invalid: refused }"
-                type="password"
-                autocomplete="off"
-                spellcheck="false"
-                :disabled="s.overridden.uexKey"
-                @focus="($event.target as HTMLInputElement).select()"
-              />
-              <button class="btn outline" type="submit" :disabled="decision === 'none' || keyBusy || s.overridden.uexKey">
-                <Icon name="check" :size="14" /> {{ t("common.save") }}
+          <!-- UEX -->
+          <section class="group">
+            <div class="group-title">
+              {{ t("uex.title") }}
+              <span class="tag" :class="tagClass(uexTag(s, uex))">{{ t(uexTag(s, uex).text) }}</span>
+            </div>
+            <div class="field">
+              <label for="uex-key">{{ t("uex.key") }}</label>
+              <div class="line">
+                <input
+                  id="uex-key"
+                  v-model="keyDraft"
+                  class="input"
+                  :class="{ invalid: refused }"
+                  type="password"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="s.overridden.uexKey"
+                  @focus="($event.target as HTMLInputElement).select()"
+                />
+                <button class="btn outline" type="submit" :disabled="decision === 'none' || keyBusy || s.overridden.uexKey">
+                  <Icon name="check" :size="14" /> {{ t("common.save") }}
+                </button>
+              </div>
+            </div>
+            <div class="msg" :class="{ hidden: !refused }" :aria-hidden="!refused">
+              <span class="err-text">{{ t("uex.rejected") }}</span>
+            </div>
+            <div class="line between">
+              <span class="label">{{ t("uex.every") }}</span>
+              <Dropdown :model-value="String(s.uexIntervalMinutes)" variant="outline" :options="intervals" :disabled="!s.uexKeySet" :title="t('uex.every')" @update:model-value="setIntervalMinutes" />
+            </div>
+            <div class="line between">
+              <span class="label">{{ t("uex.lastNext") }}</span>
+              <span class="times">
+                <span class="v time">{{ shortTime(uex?.lastPull, new Date(), lang) || "–" }}</span>
+                <span class="slash">/</span>
+                <span class="v time">{{ shortTime(nextFetch(uex), new Date(), lang) || "–" }}</span>
+              </span>
+            </div>
+            <div class="line between">
+              <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer" class="ext"><Icon name="external" :size="14" /> uexcorp.space</a>
+              <button class="btn outline" type="button" :disabled="!canFetchNow(s, uex)" @click="fetchNow">
+                <Icon name="refresh" :size="14" /> {{ t("uex.fetch") }}
               </button>
             </div>
-          </div>
-          <div class="msg" :class="{ hidden: !refused }" :aria-hidden="!refused">
-            <span class="err-text">{{ t("uex.rejected") }}</span>
-          </div>
-          <div class="line between">
-            <span class="label">{{ t("uex.every") }}</span>
-            <Dropdown :model-value="String(s.uexIntervalMinutes)" variant="outline" :options="intervals" :disabled="!s.uexKeySet" :title="t('uex.every')" @update:model-value="setIntervalMinutes" />
-          </div>
-          <div class="line between">
-            <span class="label">{{ t("uex.lastNext") }}</span>
-            <span class="times">
-              <span class="v time">{{ shortTime(uex?.lastPull, new Date(), lang) || "–" }}</span>
-              <span class="slash">/</span>
-              <span class="v time">{{ shortTime(nextFetch(uex), new Date(), lang) || "–" }}</span>
-            </span>
-          </div>
-          <div class="line between">
-            <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer" class="ext"><Icon name="external" :size="14" /> uexcorp.space</a>
-            <button class="btn outline" type="button" :disabled="!canFetchNow(s, uex)" @click="fetchNow">
-              <Icon name="refresh" :size="14" /> {{ t("uex.fetch") }}
-            </button>
-          </div>
+          </section>
+
+          <!-- App -->
+          <section class="group">
+            <div class="group-title">{{ t("app.title") }}</div>
+            <div class="line between">
+              <span class="label">{{ t("app.version") }}</span>
+              <span class="with">
+                <span class="ver-chip">v{{ s.appVersion }}</span>
+                <!-- Only where the desktop shell offers app updates -->
+                <button v-if="shell.updateAvailable" class="btn outline" type="button" @click="openUpdate">
+                  <Icon name="imports" :size="14" /> {{ t("update.button") }}
+                </button>
+              </span>
+            </div>
+            <label class="line between">
+              <span class="label">{{ t("app.autoUpdate") }}</span>
+              <input class="switch" type="checkbox" role="switch" :checked="s.autoUpdate" :disabled="s.overridden.autoUpdate" @change="setAuto" />
+            </label>
+            <div class="line between">
+              <span class="label">{{ t("lang.title") }}</span>
+              <LangSelect :model-value="langChoice" variant="outline" up @update:model-value="setLang" />
+            </div>
+          </section>
         </form>
-
-        <!-- App -->
-        <div class="group" role="group" aria-labelledby="g-app">
-          <div id="g-app" class="group-title">{{ t("app.title") }}</div>
-          <div class="line between">
-            <span class="label">{{ t("app.version") }}</span>
-            <span class="with">
-              <span class="ver-chip">v{{ s.appVersion }}</span>
-              <!-- Only where the desktop shell offers app updates -->
-              <button v-if="shell.updateAvailable" class="btn outline" type="button" @click="openUpdate">
-                <Icon name="imports" :size="14" /> {{ t("update.button") }}
-              </button>
-            </span>
-          </div>
-          <div class="line between">
-            <label class="label" for="auto-update">{{ t("app.autoUpdate") }}</label>
-            <input id="auto-update" class="switch" type="checkbox" role="switch" :checked="s.autoUpdate" :disabled="s.overridden.autoUpdate" @change="setAuto" />
-          </div>
-          <div class="line between">
-            <span class="label">{{ t("lang.title") }}</span>
-            <LangSelect :model-value="langChoice" variant="outline" up @update:model-value="setLang" />
-          </div>
-        </div>
       </div>
-    </section>
+      <!-- Everything applies at once: in the window the foot only closes it; on the page there is none -->
+      <div v-if="settingsWindow" class="foot">
+        <button type="button" class="btn outline" @click="shell.close()">{{ t("common.close") }}</button>
+      </div>
+    </div>
 
     <ImportDialog v-if="importing" @close="importing = false" />
     <ConfirmDialog v-if="removing" :title="t('uex.removeTitle')" icon="lock" :buttons="removeButtons" @choose="removeChoice" />
@@ -343,25 +355,78 @@ onUnmounted(() => clearTimeout(timer));
 </template>
 
 <style scoped>
+/* The tile, as the companion's settings window has it (its head, body and foot as ConfirmDialog.vue's): 560 px wide; in the window it
+   is the window's content, on the page a tile of that width with the panels' corners */
 .settings {
-  width: 640px;
+  width: 560px;
   max-width: 100%;
+  background: var(--bg-surface);
+  border-radius: var(--radius-panel);
 }
 
-.head-title {
-  margin: 0;
+.settings.win {
+  width: auto;
+  max-width: none;
+  border-radius: 0;
+}
+
+.head,
+.foot {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+}
+
+.head {
+  flex-wrap: nowrap;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.titles {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.foot {
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--border-dim);
+}
+
+.foot .btn {
+  height: var(--h-control);
+  font-size: 14px;
+}
+
+.version {
+  font-size: 11px;
+  color: var(--text-2);
 }
 
 /* Room for the group titles straddling the tiles' top edges */
 .groups {
-  display: flex;
-  flex-direction: column;
   gap: 22px;
-  padding: 24px 16px 16px;
+  padding-top: 8px;
 }
 
-/* Each group is a tile with its title on the top edge, like a fieldset legend (as in the companion's settings dialog); the state
-   tags sit in the title, which takes no room of its own: a tag appearing moves nothing */
+/* Each group is a tile with its title on the top edge, like a fieldset legend (as in BindSight); a state tag sits next to the name
+   (the title takes no room of its own: a tag appearing moves nothing) */
 .group {
   position: relative;
   display: flex;
@@ -382,7 +447,7 @@ onUnmounted(() => clearTimeout(timer));
   align-items: center;
   gap: 8px;
   padding: 0 8px;
-  /* The panel's own ground, to break the tile's top border under the label */
+  /* The tile's own ground, to break the group's top border under the label */
   background: var(--bg-surface);
   color: var(--text-2);
   font-size: 13px;
@@ -390,14 +455,7 @@ onUnmounted(() => clearTimeout(timer));
   white-space: nowrap;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .line {
-  min-height: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -415,7 +473,7 @@ onUnmounted(() => clearTimeout(timer));
   color: var(--text-2);
 }
 
-/* A setting on the left, its control pushed to the right edge */
+/* A setting on the left, its control pushed to the right edge (as in BindSight) */
 .line.between {
   justify-content: space-between;
 }
@@ -430,6 +488,7 @@ onUnmounted(() => clearTimeout(timer));
   gap: 8px;
 }
 
+/* The message keeps its room, so nothing moves when it appears */
 .msg {
   min-height: 18px;
   margin-top: -4px;

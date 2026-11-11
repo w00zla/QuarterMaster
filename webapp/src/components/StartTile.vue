@@ -64,11 +64,11 @@ async function retry() {
             }}</span>
           </div>
           <div class="actions" :class="{ hidden: !actions }">
-            <button class="btn primary" type="button" :disabled="!actions" @click="importing = true">
-              <Icon name="imports" :size="14" /> {{ t("data.import") }}
-            </button>
             <button class="btn outline" type="button" :disabled="!actions || retrying" @click="retry">
               <Icon name="refresh" :size="14" /> {{ t("start.retry") }}
+            </button>
+            <button class="btn primary" type="button" :disabled="!actions" @click="importing = true">
+              <Icon name="imports" :size="14" /> {{ t("data.import") }}
             </button>
             <button v-if="model.view === 'tooOld' && shell.updateAvailable" class="btn outline" type="button" @click="shell.openUpdate()">
               <Icon name="imports" :size="14" /> {{ t("update.button") }}
@@ -154,13 +154,19 @@ async function retry() {
   background: var(--accent);
 }
 
+/* Everything on the tile is centred: the text and the amount after it, the tag and the sentence, the buttons */
 .line {
   height: 20px;
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: baseline;
   font-size: 13px;
   color: var(--text-2);
+}
+
+/* The gap only while there is an amount: the text stays in the middle without one */
+.amount:not(:empty) {
+  margin-left: 10px;
 }
 
 .amount {
@@ -188,6 +194,7 @@ async function retry() {
 .state {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   min-height: 20px;
 }
@@ -199,10 +206,12 @@ async function retry() {
 .sentence {
   font-size: 13px;
   color: var(--text);
+  text-align: center;
 }
 
 .actions {
   display: flex;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;

@@ -106,7 +106,7 @@ if (settingsWindow) {
 <template>
   <!-- The settings window: the title bar (the title, the close button) and the panel -->
   <div v-if="settingsWindow" ref="win" class="settings-win">
-    <TitleBar :title="t('nav.settings')" />
+    <TitleBar title="Quartermaster" />
     <main class="settings-main">
       <SettingsView v-if="settingsReady" />
       <div v-else class="empty-line">{{ capabilities ? (status === "error" ? t("error.backend") : "") : (capsFailed ? t("error.backend") : "") }}</div>
@@ -186,7 +186,8 @@ if (settingsWindow) {
   display: block;
 }
 
+/* The settings tile is the window's content: no margin around it */
 .settings-main {
-  padding: 0 16px 16px;
+  padding: 0;
 }
 </style>
