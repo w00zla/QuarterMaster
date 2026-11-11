@@ -1,0 +1,54 @@
+[package]
+name = "quartermaster"
+version = "0.1.0"
+description = "Quartermaster: the desktop app (the singleuser server as a Node sidecar, the web app in a window)"
+authors = ["w00zla"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name apart from the bin name (a Windows issue,
+# https://github.com/rust-lang/cargo/issues/8519); an rlib only: the bin links it (no mobile build)
+name = "quartermaster_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# image-ico/png: without them the bundle icons are not decoded and the window gets no icon (taskbar, Alt-Tab)
+tauri = { version = "2", features = ["image-ico", "image-png"] }
+# `ResizeDirection` for the frameless window's resize drag (Tauri does not re-export it); the version Tauri uses
+tauri-runtime = "2"
+# The folder and file pickers; via xdg-desktop-portal on Linux (the host's native dialog), as in the companion
+tauri-plugin-dialog = { version = "2.7.3", default-features = false, features = ["xdg-portal"] }
+# The log file (the shell's own lines and the server's output), capped by rotation
+tauri-plugin-log = "2"
+log = "0.4"
+# A second start brings the running window to the front
+tauri-plugin-single-instance = "2"
+# Download, signature check and install of an app update; the checks go through update.rs
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# channels.json (update.rs); rustls like the updater, no native-tls
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# Channel versions and the comparison with the running one
+semver = "1"
+# The system language (German or English texts on the splash)
+sys-locale = "0.3"
+# The time limit of the check at start (already a dependency of Tauri)
+tokio = { version = "1", features = ["time"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+# A test build (`tauri build --no-bundle -- --profile fast`): release speed without LTO, incremental
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

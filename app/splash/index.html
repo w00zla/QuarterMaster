@@ -1,0 +1,214 @@
+<!doctype html>
+<!-- The desktop shell's splash: shown from the first frame until the server listens (then the window shows the web app),
+     and again with a message when the start failed. It looks like the web app's start tile (webapp/src/components/StartTile.vue,
+     the tokens of adminapp/src/styles/tokens.css); the shell hands it its whole state (app/src-tauri/src/lib.rs `Splash`). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quartermaster</title>
+    <style>
+      @font-face {
+        font-family: "Bai Jamjuree";
+        font-style: normal;
+        font-weight: 400;
+        src: url("fonts/BaiJamjuree-400.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Bai Jamjuree";
+        font-style: normal;
+        font-weight: 600;
+        src: url("fonts/BaiJamjuree-600.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Bai Jamjuree";
+        font-style: normal;
+        font-weight: 700;
+        src: url("fonts/BaiJamjuree-700.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Share Tech Mono";
+        font-style: normal;
+        font-weight: 400;
+        src: url("fonts/ShareTechMono-400.woff2") format("woff2");
+      }
+
+      :root {
+        --bg-base: #0a1d29;
+        --bg-surface: #0f2c3e;
+        --bg-surface-3: #194967;
+        --accent: #54adf7;
+        --text: #ffffff;
+        --text-2: #add3eb;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        box-sizing: border-box;
+        display: flex;
+        padding: 16px;
+        background: var(--bg-base);
+        color: var(--text);
+        font-family: "Bai Jamjuree", "Segoe UI", system-ui, sans-serif;
+        user-select: none;
+        cursor: default;
+        overflow: hidden;
+      }
+
+      .tile {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 48px;
+        background: var(--bg-surface);
+        border-radius: 8px;
+      }
+
+      .top {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+      }
+
+      /* Room for the app icon (no icon yet), as on the web app's start tile */
+      .icon-slot {
+        width: 128px;
+        height: 128px;
+      }
+
+      .wordmark {
+        font-size: 40px;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        /* The last letter's spacing would push the word off centre */
+        margin-right: -0.22em;
+        white-space: nowrap;
+      }
+
+      .wordmark .accent {
+        color: var(--accent);
+      }
+
+      .version {
+        height: 16px;
+        font-family: "Share Tech Mono", Consolas, monospace;
+        font-size: 13px;
+        color: var(--text-2);
+      }
+
+      /* One block for both states: the tile does not change its size when the state does */
+      .low {
+        width: min(420px, calc(100% - 32px));
+        height: 84px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .segments {
+        display: flex;
+        gap: 6px;
+      }
+
+      .seg {
+        flex: 1;
+        height: 6px;
+        border-radius: 4px;
+        background: var(--bg-surface-3);
+      }
+
+      .seg.on {
+        background: var(--accent);
+      }
+
+      .line {
+        height: 20px;
+        font-size: 13px;
+        color: var(--text-2);
+      }
+
+      .failed {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .sentence {
+        min-height: 20px;
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .btn {
+        height: 32px;
+        padding: 0 16px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        background: transparent;
+        color: var(--text);
+        font-family: inherit;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body data-tauri-drag-region>
+    <div class="tile" data-tauri-drag-region>
+      <div class="top" data-tauri-drag-region>
+        <div class="icon-slot" aria-hidden="true" data-tauri-drag-region></div>
+        <div class="wordmark" data-tauri-drag-region>QUARTER<span class="accent" data-tauri-drag-region>MASTER</span></div>
+        <div id="version" class="version" data-tauri-drag-region></div>
+      </div>
+      <div class="low" data-tauri-drag-region>
+        <div id="steps">
+          <div id="segments" class="segments" role="progressbar" aria-valuemin="0"></div>
+        </div>
+        <div id="line" class="line" data-tauri-drag-region></div>
+        <div id="failed" class="failed hidden">
+          <div id="sentence" class="sentence"></div>
+          <button id="quit" class="btn" type="button"></button>
+        </div>
+      </div>
+    </div>
+    <script>
+      // The shell computes everything (texts in the system's language, the step); this page only shows it
+      const { invoke } = window.__TAURI__.core;
+      const { listen } = window.__TAURI__.event;
+      const el = (id) => document.getElementById(id);
+
+      function render(s) {
+        el("version").textContent = s.version ? `v${s.version}` : "";
+        const segments = el("segments");
+        while (segments.children.length < s.steps) segments.appendChild(document.createElement("span"));
+        [...segments.children].forEach((seg, i) => (seg.className = i < s.step ? "seg on" : "seg"));
+        segments.setAttribute("aria-valuemax", String(s.steps));
+        segments.setAttribute("aria-valuenow", String(s.step));
+        const failed = s.error !== null;
+        el("steps").classList.toggle("hidden", failed);
+        el("line").classList.toggle("hidden", failed);
+        el("failed").classList.toggle("hidden", !failed);
+        el("line").textContent = s.text;
+        el("sentence").textContent = s.error ?? "";
+        el("quit").textContent = s.quit;
+      }
+
+      el("quit").addEventListener("click", () => invoke("quit"));
+      // The event first, then the state as it is now: no step is missed between the two
+      listen("splash-changed", (event) => render(event.payload)).then(() => invoke("splash_state").then(render));
+    </script>
+  </body>
+</html>

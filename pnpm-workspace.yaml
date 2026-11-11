@@ -2,6 +2,7 @@ packages:
   - adminapp
   - webapp
   - companion
+  - app
 
 # pnpm blocks dependency build scripts by default; esbuild (via drizzle-kit) needs its own
 allowBuilds:

@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash",
+  "description": "The splash (the app's own page): its state, the quit button, dragging the frameless window",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:window:allow-start-dragging",
+    "allow-splash-state",
+    "allow-quit"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "webapp",
+  "description": "The web app served by the sidecar on 127.0.0.1: the shell contract's commands, the update event, and what the title bar's drag region calls",
+  "local": false,
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "allow-pick-folder",
+    "allow-pick-file",
+    "allow-window-minimize",
+    "allow-window-toggle-maximize",
+    "allow-window-close",
+    "allow-window-is-maximized",
+    "allow-window-start-resize",
+    "allow-update-state",
+    "allow-update-check",
+    "allow-update-install",
+    "allow-update-set-channel"
+  ]
+}
