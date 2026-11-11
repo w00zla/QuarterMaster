@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The singleuser variant's navigation: a bar at the left edge from the window's top down to the footer (the online variant keeps
-// the top bar). The logo (with the wordmark when wide), the nav groups of navigation.ts one below the other with a divider
+// The singleuser variant's navigation: a bar at the left edge below the header (SlimBar.vue, which carries the logo) down to the
+// footer (the online variant keeps the top bar). The nav groups of navigation.ts one below the other with a divider
 // between them, the history as the last group (quieter); nothing below it. At the middle of its height, half over the bar's right edge, a small
 // button toggles between wide (icon and text, 232 px) and narrow (icons with a tooltip, 56 px). The choice is remembered; below
 // 1000 px of window width the bar is narrow whatever the choice (it is not overwritten). The settings are not here: their button
@@ -9,18 +9,14 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
-import logo from "../../../adminapp/src/assets/logo-128.png";
 import { capabilities } from "../capabilities";
 import { t } from "../i18n";
 import { parseSideMode, sideGroups, sideModeFor, SIDE_NARROW_BELOW, type SideMode } from "../navigation";
-import { shell } from "../shell";
 
 const STORE_KEY = "qm.sideMode";
 const route = useRoute();
 
 const groups = computed(() => sideGroups(capabilities.value));
-// The attribute's mere presence marks a drag region (not in a browser): the logo's row is the window's top left corner
-const drag = computed(() => (shell.available ? "" : undefined));
 
 function stored(): SideMode {
   try {
@@ -49,11 +45,6 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 
 <template>
   <aside class="side" :class="{ narrow }">
-    <div class="brand" :data-tauri-drag-region="drag">
-      <img class="logo" :src="logo" alt="" :data-tauri-drag-region="drag" />
-      <span v-if="!narrow" class="wordmark" :data-tauri-drag-region="drag">QUARTER<span class="accent">MASTER</span></span>
-    </div>
-
     <nav class="nav">
       <template v-for="(group, i) in groups" :key="i">
         <div v-if="i > 0" class="sep" />
@@ -88,13 +79,12 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 .side {
   position: relative;
   z-index: 31;
-  /* Wide enough that the toggle on the edge keeps a gap to the wordmark */
   width: 232px;
   flex-shrink: 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  padding: 0 8px 8px;
+  padding: 8px;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-dim);
   user-select: none;
@@ -102,47 +92,6 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 
 .side.narrow {
   width: 56px;
-}
-
-/* The logo sits at the same place in both modes */
-.brand {
-  height: 56px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 2px;
-}
-
-.logo {
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-  display: block;
-}
-
-/* Narrow: smaller and centred over the icons (the toggle reaches 9 px into the bar: the logo keeps a gap to it) */
-.side.narrow .brand {
-  justify-content: center;
-  padding: 0;
-}
-
-.side.narrow .logo {
-  width: 28px;
-  height: 28px;
-  margin-right: 0;
-}
-
-.wordmark {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  white-space: nowrap;
-  color: var(--text);
-}
-
-.wordmark .accent {
-  color: var(--accent);
 }
 
 .nav {

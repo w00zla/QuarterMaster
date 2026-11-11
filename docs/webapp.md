@@ -471,16 +471,15 @@ routes for which capabilities).
 
 ### The side bar and the settings window
 
-**The side bar** (`SideNav.vue`, singleuser only; the online variant keeps `TopBar.vue` unchanged) runs from the top of the window down
-to the footer (the singleuser app is as high as the window and only the content beside the bar scrolls). From the top: the logo (with the wordmark when wide; the
-logo's row is a drag region in the shell), the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
+**The side bar** (`SideNav.vue`, singleuser only; the online variant keeps `TopBar.vue` unchanged) runs from below the header (the slim bar) down
+to the footer (the singleuser app is as high as the window and only the content beside the bar scrolls). From the top: the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
 quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups; nothing below them. The toggle is a small
 button at the middle of the bar's height, half over its right edge (chevron, tooltip). Two modes: *wide* (icon and text, 232 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
 opens above or below the button). The choice is stored in `localStorage` (`qm.sideMode`, in a try/catch); below 1000 px of window
 width the bar is narrow whatever the choice (`sideModeFor`; the stored choice is not touched, the toggle is disabled then). The two
-modes differ in width only: buttons are 36 px high either way, icons and logo sit at the same place, the tooltip wrapper exists in both.
+modes differ in width only: buttons are 36 px high either way, icons sit at the same place, the tooltip wrapper exists in both.
 
-**The slim bar** (`SlimBar.vue`) is the top row of the content beside it (56 px, the narrow side bar's width; never wraps): the drag region, the game version chip
+**The slim bar** (`SlimBar.vue`) is the header across the window's full width, above the side bar and the content, as the companion's top bar (56 px, the narrow side bar's width; never wraps): the app's logo (36 px) and wordmark at the left, the drag region, the game version chip
 (`.ver-chip.fixed` with the quiet "Game:" label), the settings button (gear `icon-btn`, as the top bar had it: the shell's settings
 window, in a plain browser the `/settings` page, accent on that route) and, in the shell, the window buttons. In a plain browser it is the same bar without
 window buttons and drag attributes. It measures its height into `layout.ts` `topbarHeight`, so the toasts sit below it. The footer

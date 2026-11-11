@@ -122,17 +122,18 @@ if (settingsWindow) {
     <StartTile v-else-if="tile.visible" :model="tile" :version="settings?.appVersion ?? null" />
     <template v-else>
       <template v-if="status === 'in'">
-        <!-- Singleuser: the navigation at the left edge and a slim bar above the content; online: the top bar -->
-        <div v-if="loginNone" class="side-layout">
-          <SideNav />
-          <div class="side-col">
-            <SlimBar />
-            <main class="main">
+        <!-- Singleuser: the header across the full width (logo, game version, settings, window buttons), below it the navigation
+             at the left edge beside the content, as in the companion; online: the top bar -->
+        <template v-if="loginNone">
+          <SlimBar />
+          <div class="side-layout">
+            <SideNav />
+            <main class="main side-main">
               <UpdateNotice v-if="updateNeeded" />
               <RouterView />
             </main>
           </div>
-        </div>
+        </template>
         <template v-else>
           <TopBar />
           <main class="main">
@@ -170,7 +171,7 @@ if (settingsWindow) {
   min-height: 0;
 }
 
-/* The side bar beside the slim bar and the content; the footer below stays across the full width */
+/* Below the header (across the full width): the side bar beside the content; the footer below again across the full width */
 .side-layout {
   flex: 1;
   display: flex;
@@ -178,15 +179,7 @@ if (settingsWindow) {
   min-height: 0;
 }
 
-.side-col {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.side-col .main {
+.side-main {
   min-height: 0;
   overflow: auto;
 }

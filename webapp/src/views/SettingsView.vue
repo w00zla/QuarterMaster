@@ -282,15 +282,12 @@ onUnmounted(() => clearTimeout(timer));
           <section class="settings-group">
             <div class="settings-group-head">
               <Icon name="trend" :size="14" />
-              <span class="settings-group-title">{{ t("uex.title") }}</span>
+              <!-- The name in the title is the link to where the key comes from -->
+              <span class="settings-group-title">{{ t("uex.titleLead") }} <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer">UEX</a></span>
               <span class="tag" :class="tagClass(uexTag(s, uex))">{{ t(uexTag(s, uex).text) }}</span>
             </div>
             <div class="field">
-              <!-- Where the key comes from, right above its field -->
-              <div class="line between">
-                <label for="uex-key">{{ t("uex.key") }}</label>
-                <a href="https://uexcorp.space" target="_blank" rel="noopener noreferrer" class="ext"><Icon name="external" :size="14" /> uexcorp.space</a>
-              </div>
+              <label for="uex-key">{{ t("uex.key") }}</label>
               <div class="line">
                 <input
                   id="uex-key"
@@ -523,11 +520,4 @@ onUnmounted(() => clearTimeout(timer));
   border-color: var(--accent);
 }
 
-.ext {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-}
 </style>
