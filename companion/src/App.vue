@@ -90,7 +90,8 @@ onMounted(async () => {
           <img v-if="meAvatar" class="avatar" :src="meAvatar" alt="" />
           <span v-else class="avatar none"><Icon name="user" :size="14" /></span>
         </Tooltip>
-        <Tooltip :text="t('webapp.open')">
+        <!-- Only online: the local app is its own window on this PC, there is no web page to open -->
+        <Tooltip v-if="connection !== 'local'" :text="t('webapp.open')">
           <button type="button" class="icon-btn" @click="openWebapp().catch(toastError)">
             <Icon name="external" :size="14" />
           </button>

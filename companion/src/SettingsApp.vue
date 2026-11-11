@@ -1,14 +1,15 @@
 <script setup lang="ts">
-// The connection (the online server or the Quartermaster app on this PC), the API token (created in the web
-// app's Companion dialog and pasted here; not needed for the local app: disabled then), game folder (in the
+// The connection (the online server or the Quartermaster app on this PC), the online server's address (the production
+// server unless changed; an emptied field is it again) and the API token (created in the web
+// app's Companion dialog and pasted here; both not needed for the local app: disabled then), game folder (in the
 // local mode the paired app's, shown disabled, when it has one), the UI
 // language; the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
 // by default) with its state as a tag and a dim note below (greyed out, off, when it cannot run there:
-// gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed). The
-// server is fixed (only the config file changes it). The scan overlay group (Windows only):
+// gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed).
+// Two columns keep the window low: the app and Star Citizen at the left, the scan and its overlay at the right. The scan overlay group (Windows only):
 // position (six icon-only buttons on a drawn monitor), display (compact or thumbnails) and hotkeys, saved (on/off is the scan row's
 // toggle and the hotkey). In the foot at the left, secondary for the user: the debug window (opening it closes this
-// window), next to it the app's version.
+// window).
 // The settings window (opened from the main window, Rust `open_settings_window`): fixed width, not resizable,
 // frameless with a title bar of its own (icon, "QM Companion Settings", close), like the desktop app's settings window. This page loads config and pairing itself (its own webview), sizes the window
 // to the content once filled (`fit_settings_window`, which also shows it), and after a save the main window
@@ -20,7 +21,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../adminapp/src/components/Dropdown.vue";
 import Icon from "../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../adminapp/src/components/Tooltip.vue";
-import { appInfo, fitSettingsWindow, getPaired, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "./backend";
+import { fitSettingsWindow, getPaired, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "./backend";
 import type { OverlayDisplay } from "./overlayLayout";
 import { t } from "./i18n";
 import { connectionOf } from "./connection";
@@ -56,12 +57,15 @@ const overlayDisplay = ref<OverlayDisplay>("thumbs");
 const hotkeyOverlay = ref("");
 const hotkeyMode = ref("");
 const busy = ref(false);
-const version = ref("");
+// The online server's address; left empty it is the production server again (the Rust side fills it in)
+const server = ref("");
+const DEFAULT_SERVER = "https://quartermaster.w00z.net";
 
 // The fields from the loaded config
 function fill() {
   const c = config.value;
   connection.value = connectionOf(c);
+  server.value = c?.server ?? "";
   token.value = c?.token ?? "";
   gameDir.value = c?.gameDir ?? "";
   language.value = c?.language ?? "";
@@ -81,7 +85,6 @@ onMounted(async () => {
     await loadConfig();
     paired.value = await getPaired();
     fill();
-    version.value = (await appInfo()).version;
     gpuState.value = (await gpuStatus()).state;
   } catch (e) {
     toastError(e);
@@ -121,6 +124,7 @@ const displayOptions = computed(() => [
 const POSITIONS: OverlayPosition[] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
 const changed = computed(() => connection.value !== connectionOf(config.value)
+  || server.value.trim() !== (config.value?.server ?? "")
   || token.value.trim() !== (config.value?.token ?? "")
   || gameDir.value.trim() !== (config.value?.gameDir ?? "")
   || language.value !== (config.value?.language ?? "")
@@ -137,7 +141,7 @@ async function save() {
   try {
     applyConfig(await setConfig({
       connection: local.value ? "local" : "online",
-      server: config.value?.server ?? "",
+      server: server.value.trim(),
       token: token.value.trim(),
       gameDir: gameDir.value.trim(),
       language: language.value,
@@ -151,6 +155,8 @@ async function save() {
     // This webview's own connection state (the paired app's folder shown above); the main window re-checks
     // on "config-changed" (App.vue)
     await refreshConnection();
+    // As saved (an emptied server field holds the production server again)
+    server.value = config.value?.server ?? "";
     toast(t("settings.saved"));
   } catch (e) {
     // The save itself failed
@@ -180,14 +186,20 @@ async function pickFolder() {
     <!-- The frameless window's title bar, as the desktop app's settings window has it: icon, title, close -->
     <WindowTitleBar icon="settings" :title="t('settings.windowTitle')" close-only />
     <div class="body">
-    <form id="settings" class="settings-groups" @submit.prevent="save">
+    <!-- Two columns, so the window stays low: the app and the game at the left, the scan and its overlay at the right -->
+    <form id="settings" class="cols" @submit.prevent="save">
+      <div class="settings-groups">
       <section class="settings-group">
         <div class="settings-group-head"><Icon name="settings" :size="14" /><span class="settings-group-title">{{ t("settings.app") }}</span></div>
         <div class="line between">
           <span class="label">{{ t("settings.connection") }}</span>
           <Dropdown v-model="connection" class="connection-pick" :options="connectionOptions" variant="outline" />
         </div>
-        <!-- Stays in place for the local app, which needs no key: disabled, nothing moves -->
+        <!-- Server and key stay in place for the local app, which needs neither: disabled, nothing moves -->
+        <label class="field">
+          {{ t("settings.server") }}
+          <input v-model="server" class="input" type="text" autocomplete="off" spellcheck="false" :placeholder="DEFAULT_SERVER" :disabled="local" />
+        </label>
         <label class="field">
           {{ t("settings.token") }}
           <input v-model="token" class="input" type="password" autocomplete="off" spellcheck="false" :disabled="local" />
@@ -197,6 +209,22 @@ async function pickFolder() {
           <Dropdown v-model="language" :options="languageOptions" variant="outline" />
         </div>
       </section>
+      <section class="settings-group">
+        <div class="settings-group-head"><Icon name="folder" :size="14" /><span class="settings-group-title">Star Citizen</span></div>
+        <div class="field">
+          {{ t("settings.gameDir") }}
+          <div class="line">
+            <!-- The paired app's folder is shown instead of the own setting (kept as it is), not editable here -->
+            <input
+              class="input" type="text" autocomplete="off" spellcheck="false" :value="pairedDir ?? gameDir" :disabled="pairedDir !== null"
+              @input="gameDir = ($event.target as HTMLInputElement).value"
+            />
+            <button type="button" class="btn outline" :disabled="pairedDir !== null" @click="pickFolder">{{ t("settings.pick") }}</button>
+          </div>
+        </div>
+      </section>
+      </div>
+      <div class="settings-groups">
       <section class="settings-group">
         <div class="settings-group-head"><Icon name="camera" :size="14" /><span class="settings-group-title">{{ t("settings.scan") }}</span></div>
         <label class="line between">
@@ -212,20 +240,6 @@ async function pickFolder() {
             <input class="switch" type="checkbox" :checked="gpuOk && gpu" :disabled="!gpuOk" @change="gpu = ($event.target as HTMLInputElement).checked" />
           </label>
           <span class="gpu-note">{{ t("settings.gpuNote") }}</span>
-        </div>
-      </section>
-      <section class="settings-group">
-        <div class="settings-group-head"><Icon name="folder" :size="14" /><span class="settings-group-title">Star Citizen</span></div>
-        <div class="field">
-          {{ t("settings.gameDir") }}
-          <div class="line">
-            <!-- The paired app's folder is shown instead of the own setting (kept as it is), not editable here -->
-            <input
-              class="input" type="text" autocomplete="off" spellcheck="false" :value="pairedDir ?? gameDir" :disabled="pairedDir !== null"
-              @input="gameDir = ($event.target as HTMLInputElement).value"
-            />
-            <button type="button" class="btn outline" :disabled="pairedDir !== null" @click="pickFolder">{{ t("settings.pick") }}</button>
-          </div>
         </div>
       </section>
       <section v-if="isWindows" class="settings-group">
@@ -255,16 +269,16 @@ async function pickFolder() {
           <HotkeyInput v-model="hotkeyMode" class="hotkey-field" />
         </div>
       </section>
+      </div>
     </form>
     </div>
     <div class="foot">
-      <!-- Secondary for the user, at the far left: the debug window and the app's version -->
+      <!-- Secondary for the user, at the far left: the debug window -->
       <Tooltip :text="t('settings.debugHint')">
         <button type="button" class="btn small outline" @click="openDebug">
           <Icon name="log" :size="12" /> {{ t("debug.open") }}
         </button>
       </Tooltip>
-      <span class="version mono">{{ version && `v${version}` }}</span>
       <span class="spacer" />
       <button type="button" class="btn outline" @click="close">{{ t("common.close") }}</button>
       <button type="submit" form="settings" class="btn primary" :disabled="!changed || busy">
@@ -277,6 +291,14 @@ async function pickFolder() {
 
 <style scoped>
 /* The window's content, as the dialog was (ConfirmDialog.vue's head, body and foot); the window is as high as it */
+/* Two columns of groups, each as wide as the other, starting at the top */
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
 .settings {
   background: var(--bg-surface);
 }
@@ -417,10 +439,5 @@ async function pickFolder() {
 /* As wide for either choice: the field does not change size with what is picked */
 .connection-pick {
   width: 150px;
-}
-
-.version {
-  font-size: 11px;
-  color: var(--text-2);
 }
 </style>

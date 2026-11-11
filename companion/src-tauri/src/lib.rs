@@ -49,10 +49,10 @@ const REPO_URL: &str = "https://github.com/w00zla/quartermaster";
 const DEBUG_WINDOW: &str = "debug";
 /// The settings window's label (capabilities/default.json lists it) and its fixed inner width (logical px)
 const SETTINGS_WINDOW: &str = "settings";
-const SETTINGS_WIDTH: f64 = 560.0;
+const SETTINGS_WIDTH: f64 = 800.0;
 /// The main window's WebView2 arguments (tauri.conf.json `additionalBrowserArgs`), for every further window
 #[cfg(windows)]
-pub(crate) const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
+pub(crate) const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu --force-color-profile=srgb";
 
 struct AppData {
     config: Config,
@@ -217,13 +217,17 @@ fn get_config(state: State) -> Config {
     state.lock().unwrap().config.clone()
 }
 
-/// Saves the connection, token, game folder, language and the overlay's position, display and hotkeys; the server
-/// stays as loaded (only the config file changes it). Invalid hotkeys refuse the save (the ones before stay).
+/// Saves the connection, the online server's address, token, game folder, language and the overlay's position, display
+/// and hotkeys. An unusable server address or invalid hotkeys refuse the save (what was set before stays).
 /// Every window hears about it (`config-changed`).
 #[tauri::command]
 fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config, String> {
-    let before = state.lock().unwrap().config.clone();
-    config.server = before.server.clone();
+    // The online server's address: empty = the production server; one that cannot be used refuses the save
+    config.server = config.server.trim().to_string();
+    if config.server.is_empty() {
+        config.server = Config::default().server;
+    }
+    server::origin(&config.server)?;
     config.token = config.token.trim().to_string();
     config.game_dir = config.game_dir.trim().to_string();
     if config.connection != config::LOCAL {

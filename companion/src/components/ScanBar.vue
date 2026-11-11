@@ -78,6 +78,7 @@ const logTip = computed(() => (log.value ? t("log.notFound", { path: log.value.p
         <Icon name="locate" :size="13" />
       </button>
     </Tooltip>
+    <span class="location-label">{{ t("scan.location") }}</span>
     <span class="location">
       <Tooltip :text="locationTip">
         <Picker
@@ -95,7 +96,7 @@ const logTip = computed(() => (log.value ? t("log.notFound", { path: log.value.p
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
+  height: 48px;
   flex-shrink: 0;
   padding: 0 16px;
   background: var(--bg-surface);
@@ -178,6 +179,14 @@ const logTip = computed(() => (log.value ? t("log.notFound", { path: log.value.p
 
 /* A fixed width: the state and loading tags to the left change their width without moving it (the
    state tag clips when room runs out) */
+/* Names the picker, quietly */
+.location-label {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
 .location {
   flex: none;
   width: 240px;

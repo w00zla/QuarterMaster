@@ -75,7 +75,7 @@ onMounted(fit);
         <div v-if="i > 0" class="sep" />
         <Tooltip v-for="x in group" :key="x.id" side="right" :text="narrow ? t(x.label) : null">
           <button type="button" class="item" :class="{ narrow, active: tab === x.id }" :aria-label="t(x.label)" @click="pickTab(x.id)">
-            <Icon :name="TAB_ICONS[x.id]" :size="16" />
+            <Icon :name="TAB_ICONS[x.id]" :size="20" />
             <span v-if="!narrow" class="name">{{ t(x.label) }}</span>
             <span class="count">{{ tabCounts[x.id] }}</span>
           </button>
@@ -203,7 +203,7 @@ onMounted(fit);
   min-width: 3ch;
   text-align: right;
   font-weight: 400;
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
@@ -216,7 +216,7 @@ onMounted(fit);
 /* Narrow: the icon over the small count in mono, both centred (the entry is 40 px wide, the same height in every state) */
 .item.narrow {
   width: 40px;
-  height: 46px;
+  height: 52px;
   flex: none;
   flex-direction: column;
   justify-content: center;
@@ -229,7 +229,7 @@ onMounted(fit);
   width: 100%;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 12px;
+  font-size: 12px;
+  line-height: 14px;
 }
 </style>

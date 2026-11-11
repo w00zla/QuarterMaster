@@ -85,9 +85,9 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 
 - **Two connections** (config `connection`, the settings' "Verbindung" / "Connection"; `connection.ts` holds the
   decisions, `lib.rs` `target` resolves the server per call):
-  - **Online** (`online`, the default; files without the entry are online): the server origin is fixed
-    (`https://quartermaster.w00z.net`; missing or empty in the file = that; only a `server` entry in the config file
-    changes it, e.g. `http://localhost:5174` for dev, read at start; plain http only for localhost) and every call
+  - **Online** (`online`, the default; files without the entry are online): the server origin defaults to
+    `https://quartermaster.w00z.net` (missing or empty = that); the settings' "Serveradresse" / "Server address" sets another one
+    (written to the config file only then; plain http only for localhost, anything unusable refuses the save) and every call
     carries the Access Key (`Authorization: Bearer`, pasted from the web app's Companion dialog).
   - **Local app** (`local`): the Quartermaster app on this PC. `pairing.rs` reads its pairing file
     (`%LOCALAPPDATA%\QuarterMaster\pairing.json` on Windows, `${XDG_DATA_HOME:-~/.local/share}/quartermaster/pairing.json`
@@ -219,7 +219,7 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   and scroll only their rows (head and column titles stay).
 - Settings window (`settings.html` + `SettingsApp.vue`, no longer a dialog in the main window): opened from the main
   window (Rust `open_settings_window`, async, with the main window's WebView2 arguments; one instance, a second call
-  focuses it), frameless with a title bar of its own (settings icon, "QM Companion Settings" / "QM Companion Einstellungen", a close button; the debug window and the app version sit at the left of its foot), 560 px wide, not resizable, centered (excluded from the window state
+  focuses it), frameless with a title bar of its own (settings icon, "QM Companion Settings" / "QM Companion Einstellungen", a close button; the debug window and the app version sit at the left of its foot), 800 px wide (two columns of groups), not resizable, centered (excluded from the window state
   plugin). Created hidden; the page loads config and pairing itself (own webview), then reports its content height
   and Rust `fit_settings_window` sets the inner height, centers and shows it (so the Windows-only overlay group
   needs no hard-coded height). After a save Rust emits `config-changed`: the main window re-reads the config, re-checks
