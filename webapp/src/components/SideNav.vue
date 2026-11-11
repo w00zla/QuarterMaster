@@ -86,7 +86,8 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
   align-self: flex-start;
   z-index: 31;
   width: 208px;
-  height: calc(100vh - 28px);
+  /* The footer is 28 px plus its 1 px top border; one pixel more here and the page always scrolls */
+  height: calc(100vh - 29px);
   flex-shrink: 0;
   box-sizing: border-box;
   display: flex;
