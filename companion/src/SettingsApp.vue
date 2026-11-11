@@ -3,7 +3,7 @@
 // server unless changed; an emptied field is it again) and the API token (created in the web
 // app's Companion dialog and pasted here; both not needed for the local app: disabled then), game folder (in the
 // local mode the paired app's, shown disabled, when it has one), the UI
-// language; the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
+// language, the switch "Automatic updates" (the channel is the update dialog's); the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
 // by default) with its state as a tag and a dim note below (greyed out, off, when it cannot run there:
 // gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed).
 // Two columns keep the window low: the app and Star Citizen at the left, the scan and its overlay at the right. The scan overlay group (Windows only):
@@ -42,6 +42,7 @@ const token = ref("");
 const gameDir = ref("");
 const language = ref("");
 const autoTab = ref(true);
+const autoUpdate = ref(true);
 const gpu = ref(false);
 // Until the Rust side answered: as if it can
 const gpuState = ref<GpuStatus["state"]>("ready");
@@ -70,6 +71,7 @@ function fill() {
   gameDir.value = c?.gameDir ?? "";
   language.value = c?.language ?? "";
   autoTab.value = c?.autoTab ?? true;
+  autoUpdate.value = c?.autoUpdate ?? true;
   gpu.value = c?.gpu ?? false;
   overlayPosition.value = c?.overlayPosition ?? "top-left";
   overlayDisplay.value = c?.overlayDisplay ?? "thumbs";
@@ -148,6 +150,7 @@ const changed = computed(() => connection.value !== connectionOf(config.value)
   || gameDir.value.trim() !== (config.value?.gameDir ?? "")
   || language.value !== (config.value?.language ?? "")
   || autoTab.value !== (config.value?.autoTab ?? true)
+  || autoUpdate.value !== (config.value?.autoUpdate ?? true)
   || gpu.value !== (config.value?.gpu ?? false)
   || overlayPosition.value !== config.value?.overlayPosition
   || overlayDisplay.value !== (config.value?.overlayDisplay ?? "thumbs")
@@ -169,6 +172,9 @@ async function save() {
       hotkeyOverlay: hotkeyOverlay.value,
       hotkeyMode: hotkeyMode.value,
       autoTab: autoTab.value,
+      autoUpdate: autoUpdate.value,
+      // Not this window's to change (the update dialog's); the Rust side keeps the stored one
+      updateChannel: config.value?.updateChannel ?? "",
       gpu: gpu.value,
     }));
     // This webview's own connection state (the paired app's folder shown above); the main window re-checks
@@ -227,6 +233,10 @@ async function pickFolder() {
           <span class="label">{{ t("settings.language") }}</span>
           <Dropdown v-model="language" :options="languageOptions" variant="outline" />
         </div>
+        <label class="line between">
+          <span class="label">{{ t("settings.autoUpdate") }}</span>
+          <input v-model="autoUpdate" class="switch" type="checkbox" />
+        </label>
       </section>
       <section class="settings-group">
         <div class="settings-group-head"><Icon name="folder" :size="14" /><span class="settings-group-title">Star Citizen</span></div>

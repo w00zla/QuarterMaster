@@ -30,7 +30,7 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 
 ## Structure
 
-- Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `logwatch`, `gamelog`, `server`, `pairing` (the local
+- Rust (`src-tauri/src/`): `lib` (commands, setup), `config`, `update` (app updates by channel from GitHub), `logwatch`, `gamelog`, `server`, `pairing` (the local
   app's pairing file), `ocr` (loads the
   OCR), `inventory` (warehouse), `components` (character inventory), `refinery` (the three: the companion's payloads
   and the adapters from sc-ohseearr's readers, `to_legacy`), `ocrwatch` (scan worker), `capture` (the capture loop on
@@ -106,7 +106,8 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 - Config as JSON in the app config dir like BindSight
   (`%APPDATA%\com.w00zla.quartermaster.companion\config.json`): the connection, Access Key, LIVE folder, UI language
   (`de`, `en` or empty = the system's; `langRef` in `i18n.ts` is reactive, the debug window re-reads it on
-  `config-changed`), the overlay's position, display and hotkeys. Saving keeps the file's `server` entry as it is: the
+  `config-changed`), the overlay's position, display and hotkeys, `autoUpdate` and `updateChannel` ("Updates and
+  channels"). Saving keeps the file's `server` entry as it is: the
   default is never written, a hand edit while the app runs is not overwritten.
 - Every API call goes through the Rust `api` command (only `/api/…`, GET/POST; no CORS) with two headers:
   `X-QM-Companion` = the Cargo version (a label) and `X-QM-Companion-Api` = the API contract number, which the
@@ -120,9 +121,9 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   the server's maximum: the server, or the local app, is older than the companion; any other 409 is a route's own
   refusal). Either sets `outdated` and the app does no work: it shows only the update panel (`UpdatePanel.vue`): the
   state ("Update erforderlich", "Server veraltet" or "App veraltet" with its sentence), the installed version and,
-  for an outdated companion, one button "Releases auf GitHub" that opens
-  https://github.com/w00zla/quartermaster/releases in the browser (Rust `open_releases`, the URL fixed there). The
-  app downloads and installs nothing itself; a successful connection check clears the state. The range is also in
+  for an outdated companion, one button: "App Update" (the update dialog) while the updater has a version waiting, else
+  "Releases auf GitHub", which opens https://github.com/w00zla/quartermaster/releases in the browser (Rust
+  `open_releases`, the URL fixed there). A successful connection check clears the state. The range is also in
   `GET /api/capabilities` (`companionApi`); the server serves no companion files, no update feed and no release info.
 - **The game's English texts** come from the server: `GET /api/companion/locale` (`global.ini` lines, ETag, gzip, 404
   `noCatalog`) through Rust `refresh_locale` (`server::cached_text`), kept in the app cache dir as
@@ -148,8 +149,48 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   "Not in catalog". The HTTP client has no total timeout (the catalog is ~2.5 MB per language): 10 s to
   connect, 30 s without data at most (`server::client`).
 - Installed app (Windows NSIS setup, per user, no admin) or the bare exe: `app_info.setup` says which build runs
-  (the bundler stamps the exe it packs into the setup, `bundle_type()` = NSIS; the debug window shows it). Neither
-  updates itself.
+  (the bundler stamps the exe it packs into the setup, `bundle_type()` = NSIS; the debug window shows it). Only the
+  installed one (and the Linux AppImage) updates itself ("Updates and channels").
+- **The footer** (`AppFooter.vue`, the desktop app's with BindSight's right end): logo and version are buttons that open
+  the App Update dialog; while the updater has a version waiting, an update mark (the download icon, accent colour)
+  sits before the logo. Its room is reserved (hidden, not absent), so nothing moves when it appears.
+
+## Updates and channels
+
+The model is the desktop app's (`docs/app.md` "Updates and channels"), for the product `companion`; the Rust side is
+`src-tauri/src/update.rs` (the same code, the product and the tag prefix differ), the commands `update_state`,
+`update_check`, `update_install`, `update_set_channel { id }` and the event `update-changed` (payload `UpdateState`,
+`webapp/src/shellLogic.ts`) are the shell contract's, the state logic (buttons, status line, mark) is that file's too.
+
+- **Feed:** `channels.json` on the repository's main branch
+  (`https://raw.githubusercontent.com/w00zla/quartermaster/main/channels.json`), its `companion` entry:
+  `{ "companion": { "stable": "companion-v2.1.0", "channels": [{ "id": "beta", "tag": "companion-v2.2.0-beta.1" }] } }`.
+  The tag of the channel in effect names a GitHub release whose asset `latest.json` is Tauri's updater manifest
+  (`https://github.com/w00zla/quartermaster/releases/download/<tag>/latest.json`). Tags are `companion-vX.Y.Z` and
+  `companion-vX.Y.Z-<channel>.<n>`; the validation, "no file / no entry / no tag is no update, not an error", the channel
+  in effect (chosen, else the build's own, else stable) and "only a newer version, any other right after a switch" are
+  the app's. The feed is GitHub's only: no override, no `dangerousInsecureTransportProtocol` (a release build refuses
+  http); the pure parts are Rust unit tests in `update.rs`.
+- **Signing:** the updater's public key in `tauri.conf.json` (`plugins.updater.pubkey`) is the desktop app's: one key pair
+  serves both apps. `createUpdaterArtifacts` is in `src-tauri/tauri.updater.conf.json`, which `scripts/build.mjs` adds
+  only for the release build with `TAURI_SIGNING_PRIVATE_KEY` set (`build:windows`, `build:linux`); `build:fast:*` never
+  makes updater artifacts and needs no key. Without the key the installer is built but has no `.sig`, so it cannot be
+  published as an update.
+- **Who updates itself:** the Windows setup's exe and the Linux AppImage (`bundle_type()` is `Nsis` or `AppImage`). The
+  bare exe, and any other Linux package, only compares versions: a newer one is shown as the error "Version X is
+  available. This installation cannot update itself." (the Rust side sends the code `cannot-update:<version>`,
+  `updateLogic.ts` words it in the UI language).
+- **Config:** `autoUpdate` (default on; the settings window's switch "Automatische Updates" in the "App" group) and
+  `updateChannel` (empty = none chosen: the build's own channel, else stable). The channel is picked in the update
+  dialog only (`update_set_channel` stores it); saving the settings keeps the stored one. With `autoUpdate` on, the start
+  checks the feed once and, when a newer version is found, downloads and installs it at once and restarts into it (as
+  the desktop app does at its start; there is no check at an interval). With it off nothing is asked until the dialog's
+  "Nach Update suchen".
+- **The dialog** (`UpdateDialog.vue`, state in `appUpdate.ts`): "App Update", the desktop app's: channel in the head,
+  current and available version, the notes in a box of fixed height, one status line with the progress, Close and Check
+  Update / Install in the foot (each button reserves the other's text). It opens from the footer, and from the update
+  panel's button, which shows "App Update" instead of "Releases auf GitHub" (same size) while the updater has a version
+  waiting and keeps opening the releases page otherwise.
 
 ## Release
 
@@ -157,7 +198,8 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   Windows `pnpm companion:build` (`build:windows`) gives the setup (with `DirectML.dll` next to the exe, from
   `pnpm directml`) `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and
   `target/release/quartermaster-companion.exe`; Linux the AppImage. The build needs network access for the OCR
-  crates (git, by tag) and nothing next to this repository.
+  crates (git, by tag) and nothing next to this repository. All of it runs through `scripts/build.mjs`; with
+  `TAURI_SIGNING_PRIVATE_KEY` set it also makes the updater's artifacts ("Updates and channels").
 - The server hosts no companion files: the downloads are the GitHub releases of this repository
   (https://github.com/w00zla/quartermaster/releases), which the web app's Companion dialog and the companion's update
   panel link to. The server side (the API contract number, the locale route): `docs/webapp.md` "Companion API".
@@ -717,6 +759,6 @@ process competes with the game is not measured.
 - "[CS2] StrikeForce Missile" stays unknown (the catalog says "StrikeForce II Missile"); which tooltips show
   stats at all; Quantum Fuel Burn (a lower value is the improvement, the bounds run 0…+20 %).
 - The readers on sc-ohseearr (2026-11-06) are verified in game (2026-11-08) except the refinery.
-- Not built: the Linux screen capture (xdg portal), a self-update, CI, tray/autostart; the API
+- Not built: the Linux screen capture (xdg portal), CI, tray/autostart; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.

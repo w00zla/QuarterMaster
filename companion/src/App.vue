@@ -7,7 +7,8 @@
 // while the app is not connected (the red chip says why). After a
 // save ("config-changed") this window re-reads the config, re-checks the connection and the log state. While the server refuses
 // the app's API contract number (the companion or the server is too old) only the update panel shows
-// (no work until that changed). The local app's user has no name or avatar: nothing is shown for it.
+// (no work until that changed). The local app's user has no name or avatar: nothing is shown for it. The footer's logo and
+// version (and the update mark) open the App Update dialog (UpdateDialog.vue, appUpdate.ts), also over the update panel.
 import { computed, onMounted, provide, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import Icon from "../../adminapp/src/components/Icon.vue";
@@ -21,8 +22,10 @@ import Toasts from "./components/Toasts.vue";
 import ClipTip from "./components/ClipTip.vue";
 import TopBar from "./components/TopBar.vue";
 import UnlocksPanel from "./components/UnlocksPanel.vue";
+import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdatePanel from "./components/UpdatePanel.vue";
 import WindowEdges from "./components/WindowEdges.vue";
+import { updateOpen, watchUpdate } from "./appUpdate";
 import { AppError, appInfo, openSettingsWindow, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
 import { outdatedKeys } from "./connection";
@@ -63,6 +66,7 @@ onMounted(async () => {
     toastError(e);
   }
   watchConnection();
+  await watchUpdate().catch(toastError);
   // The settings window saved: its new config, the connection check and the log state (the game folder may differ)
   await listen("config-changed", () => void loadConfig().then(() => Promise.all([refreshConnection(), loadLog()])).catch(toastError))
     .catch(toastError);
@@ -116,6 +120,7 @@ onMounted(async () => {
     </template>
     <!-- Below everything, also while loading or outdated: the footer never moves -->
     <AppFooter class="app-foot" :version="info?.version ?? null" />
+    <UpdateDialog v-if="updateOpen" />
     <Toasts />
     <ClipTip />    <WindowEdges />
   </div>

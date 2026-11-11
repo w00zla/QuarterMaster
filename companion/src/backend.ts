@@ -26,6 +26,10 @@ export interface Config {
   autoTab: boolean;
   // The screen scan's OCR on the GPU where it can (GpuStatus), else on the CPU
   gpu: boolean;
+  // Updates by themselves: a check at start installs a newer version at once
+  autoUpdate: boolean;
+  // The update channel chosen in the update dialog ("" = none: the build's own, else stable); only the dialog changes it
+  updateChannel: string;
 }
 
 // Whether the OCR can run on the GPU: ready, DirectML.dll not next to the exe, or failed in this run
