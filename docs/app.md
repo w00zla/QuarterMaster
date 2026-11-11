@@ -10,7 +10,7 @@ bundle", "The start protocol", "Stdin control", "One process per data folder"); 
 |---|---|
 | `app/src-tauri/` | the Rust program (`quartermaster`): `lib.rs` (the start, the window, the commands), `protocol.rs` (the start protocol's lines), `bundle.rs` (`bundle.json`), `sidecar.rs` (the server process), `settings.rs` (`autoUpdate`), `update.rs` (app updates), `config.rs` (the chosen channel), `texts.rs` (the shell's own texts) |
 | `app/src-tauri/capabilities/` | `splash.json` (the app's own page), `webapp.json` (the web app's origin in the main window) and `settings.json` (the settings window) |
-| `app/src-tauri/tauri.conf.json` | the window, the splash's CSP, the updater's public key; `tauri.windows.conf.json` (NSIS), `tauri.bundle.conf.json` (the sidecar and the server bundle, passed by the build script), `tauri.updater.conf.json` (updater artifacts, passed when the signing key is there) |
+| `app/src-tauri/tauri.conf.json` | the window, the splash's CSP, the updater's public key; `tauri.windows.conf.json` (NSIS), `tauri.bundle.conf.json` (the sidecar and the server bundle, passed by the build script), `tauri.updater.conf.json` (updater artifacts, passed when the signing key is there), `tauri.testfeed.conf.json` (the updater's http switch, only for the smoke test's build) |
 | `app/splash/` | the splash: one `index.html` with inline CSS and JS and the fonts (copies of `adminapp/src/assets/fonts/`); no framework, no build step |
 | `app/scripts/` | `fetch-node.mjs` (the sidecar binary), `build.mjs` (the build), `smoke.mjs` (the smoke test) |
 
@@ -161,7 +161,8 @@ for Linux follows Tauri's scheme there and was not run.
 The model is BindSight's, read from this repository's `channels.json` (the `app` product) and GitHub releases:
 
 - `https://raw.githubusercontent.com/w00zla/quartermaster/main/channels.json`:
-  `{ "app": { "stable": "app-v1.0.0", "channels": [{ "id": "beta", "tag": "app-v1.1.0-beta.1" }] }, … }`
+  `{ "app": { "stable": "app-v1.0.0", "channels": [{ "id": "beta", "tag": "app-v1.1.0-beta.1" }] }, … }` (the whole file, the
+  companion's and the data entry, and who writes it: `docs/releasing.md`; nothing released is `"stable": null, "channels": []`)
 - `https://github.com/w00zla/quartermaster/releases/download/<tag>/latest.json` (Tauri's updater format) of the channel's tag, and the
   installer that file names.
 
@@ -195,9 +196,12 @@ The private key is the maintainer's and is in no repository. A build without `TA
 makes no `.sig` and so cannot be published as an update (a `latest.json` needs the signature). With the key set, `pnpm app:build` adds
 `tauri.updater.conf.json` (`createUpdaterArtifacts`). The installer and the executables carry no Authenticode signature either.
 
-The updater plugin's `dangerousInsecureTransportProtocol` is on so that a local test feed over http can be used; the shell itself takes
-only GitHub's https addresses or `QM_APP_FEED` of the form `http://127.0.0.1:<port>` (`Feed::from_env`), and whatever the feed
-delivers must carry a valid signature to be installed.
+The updater plugin refuses an http endpoint in a release build unless `dangerousInsecureTransportProtocol` is on. `tauri.conf.json` has it
+off (a release talks to GitHub over https only); `tauri.testfeed.conf.json` turns it on and `build.mjs` passes that file only with
+`QM_TEST_FEED=1` in the environment, which `pnpm app:smoke` sets for its own build (the local http feed). The shell itself takes only
+GitHub's https addresses or `QM_APP_FEED` of the form `http://127.0.0.1:<port>` (`Feed::from_env`), and whatever the feed delivers must
+carry a valid signature to be installed. The endpoint comes from `update.rs` per check, never from the plugin's configuration (which
+holds the public key only).
 
 ## Single instance
 
