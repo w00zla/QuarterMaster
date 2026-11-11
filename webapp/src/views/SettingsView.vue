@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The settings of the singleuser variant (/settings, and the desktop shell's settings window): ONE tile that grows downward, built
 // like the companion's settings window (companion/src/SettingsApp.vue): a head (icon, title; on the page only, the window's title bar names it), a body of
-// groups (a tile on the base background, the group's title on its top border, label left and control right, a field's label above
-// its input) and, in the window only, a foot with "Close". Groups: the game folder (Star Citizen), the game data, the UEX trade data
+// groups (styles.css `.settings-group`: a tile on the base background with a head row, label left and control right, a field's
+// label above its input) and, in the window only, a foot with "Close". Groups: the game folder (Star Citizen), the game data, the UEX trade data
 // and the app. Everything applies at once (no save button). Everything comes from /api/local/*; the decisions (tags, what a field
 // commit does) are in settingsLogic.ts. In the window the tile is the window's content (App.vue), on the page a tile of the same width.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -198,11 +198,12 @@ onUnmounted(() => clearTimeout(timer));
         <span class="title">{{ t("nav.settings") }}</span>
       </div>
       <div class="body">
-        <form class="form single flush groups" @submit.prevent="submitKey">
+        <form class="settings-groups" @submit.prevent="submitKey">
           <!-- Star Citizen: the game folder -->
-          <section class="group">
-            <div class="group-title">
-              {{ t("settings.game") }}
+          <section class="settings-group">
+            <div class="settings-group-head">
+              <Icon name="folder" :size="14" />
+              <span class="settings-group-title">{{ t("settings.game") }}</span>
               <span v-if="folder.tag" class="tag" :class="tagClass(folder.tag)">{{ t(folder.tag.text) }}</span>
             </div>
             <div class="field">
@@ -245,9 +246,10 @@ onUnmounted(() => clearTimeout(timer));
           </section>
 
           <!-- Game data -->
-          <section class="group">
-            <div class="group-title">
-              {{ t("data.title") }}
+          <section class="settings-group">
+            <div class="settings-group-head">
+              <Icon name="database" :size="14" />
+              <span class="settings-group-title">{{ t("data.title") }}</span>
               <span v-if="dataTag(data)" class="tag" :class="tagClass(dataTag(data)!)">{{ t(dataTag(data)!.text) }}</span>
             </div>
             <div class="line between">
@@ -274,9 +276,10 @@ onUnmounted(() => clearTimeout(timer));
           </section>
 
           <!-- UEX -->
-          <section class="group">
-            <div class="group-title">
-              {{ t("uex.title") }}
+          <section class="settings-group">
+            <div class="settings-group-head">
+              <Icon name="trend" :size="14" />
+              <span class="settings-group-title">{{ t("uex.title") }}</span>
               <span class="tag" :class="tagClass(uexTag(s, uex))">{{ t(uexTag(s, uex).text) }}</span>
             </div>
             <div class="field">
@@ -325,8 +328,11 @@ onUnmounted(() => clearTimeout(timer));
           </section>
 
           <!-- App -->
-          <section class="group">
-            <div class="group-title">{{ t("app.title") }}</div>
+          <section class="settings-group">
+            <div class="settings-group-head">
+              <Icon name="settings" :size="14" />
+              <span class="settings-group-title">{{ t("app.title") }}</span>
+            </div>
             <div class="line between">
               <span class="label">{{ t("app.version") }}</span>
               <span class="with">
@@ -411,42 +417,8 @@ onUnmounted(() => clearTimeout(timer));
   font-size: 14px;
 }
 
-/* Room for the group titles straddling the tiles' top edges */
-.groups {
-  gap: 22px;
-  padding-top: 8px;
-}
-
-/* Each group is a tile with its title on the top edge, like a fieldset legend (as in BindSight); a state tag sits next to the name
-   (the title takes no room of its own: a tag appearing moves nothing) */
-.group {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 18px 16px 14px;
-  background: var(--bg-base);
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-panel);
-}
-
-.group-title {
-  position: absolute;
-  top: 0;
-  left: 12px;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  /* The tile's own ground, to break the group's top border under the label */
-  background: var(--bg-surface);
-  color: var(--text-2);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
+/* The groups: styles.css `.settings-group` (head row with icon, title and the state tag; the head is as high with a tag as
+   without one, so a tag appearing moves nothing) */
 .line {
   display: flex;
   align-items: center;

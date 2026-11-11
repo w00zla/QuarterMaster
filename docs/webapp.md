@@ -488,7 +488,7 @@ window buttons and drag attributes. It measures its height into `layout.ts` `top
 
 **The settings** (`SettingsView.vue`) are built like the companion's settings window (`companion/src/SettingsApp.vue`): one tile 560 px wide that
 grows downward, a head (settings icon, title, the app's version small in mono), a body with four groups (a tile on the base background,
-its title straddling the top border, a field's label above its input, other rows label left and control right) and, in the settings
+a head row of its own (icon, title, state tag; `styles.css` `.settings-group`, shared with the companion), a field's label above its input, other rows label left and control right) and, in the settings
 window only, a foot with "Close" (everything applies at once: no save button). On the page the tile has the panels' corners; in the
 window it is the window's content, with no margin around it.
 Each state tag sits in its group's title next to the name (a word, never colour alone); the title is positioned absolutely, so a tag appearing moves

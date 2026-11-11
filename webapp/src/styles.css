@@ -36,6 +36,52 @@
   padding: 0;
 }
 
+/* A group of settings (the web app's settings tile, the companion's settings window; design system "SettingsGroup"): a tile on
+   the base ground with a head row of its own (icon, title, a state tag at the right end) and one setting per row below. The rows
+   are the tile's direct children; the head reaches to the tile's edges. No `overflow: hidden`: a dropdown's list may leave the tile. */
+.settings-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 14px 14px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-panel);
+}
+
+.settings-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  /* To the tile's edges, and a little air before the first row */
+  margin: 0 -14px 2px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-dim);
+  border-radius: calc(var(--radius-panel) - 1px) calc(var(--radius-panel) - 1px) 0 0;
+  background: color-mix(in srgb, var(--bg-surface-2) 45%, transparent);
+  color: var(--text-2);
+}
+
+.settings-group-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .field {
   display: flex;
   flex-direction: column;

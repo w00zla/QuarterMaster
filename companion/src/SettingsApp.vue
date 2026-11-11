@@ -189,9 +189,9 @@ async function pickFolder() {
       </Tooltip>
     </div>
     <div class="body">
-    <form id="settings" class="form single flush groups" @submit.prevent="save">
-      <section class="group">
-        <div class="group-title">{{ t("settings.app") }}</div>
+    <form id="settings" class="settings-groups" @submit.prevent="save">
+      <section class="settings-group">
+        <div class="settings-group-head"><Icon name="settings" :size="14" /><span class="settings-group-title">{{ t("settings.app") }}</span></div>
         <div class="line between">
           <span class="label">{{ t("settings.connection") }}</span>
           <Dropdown v-model="connection" class="connection-pick" :options="connectionOptions" variant="outline" />
@@ -206,8 +206,8 @@ async function pickFolder() {
           <Dropdown v-model="language" :options="languageOptions" variant="outline" />
         </div>
       </section>
-      <section class="group">
-        <div class="group-title">{{ t("settings.scan") }}</div>
+      <section class="settings-group">
+        <div class="settings-group-head"><Icon name="camera" :size="14" /><span class="settings-group-title">{{ t("settings.scan") }}</span></div>
         <label class="line between">
           <span class="label">{{ t("settings.autoTab") }}</span>
           <input v-model="autoTab" class="switch" type="checkbox" />
@@ -223,8 +223,8 @@ async function pickFolder() {
           <span class="gpu-note">{{ t("settings.gpuNote") }}</span>
         </div>
       </section>
-      <section class="group">
-        <div class="group-title">Star Citizen</div>
+      <section class="settings-group">
+        <div class="settings-group-head"><Icon name="folder" :size="14" /><span class="settings-group-title">Star Citizen</span></div>
         <div class="field">
           {{ t("settings.gameDir") }}
           <div class="line">
@@ -237,8 +237,8 @@ async function pickFolder() {
           </div>
         </div>
       </section>
-      <section v-if="isWindows" class="group">
-        <div class="group-title">{{ t("settings.overlay") }}</div>
+      <section v-if="isWindows" class="settings-group">
+        <div class="settings-group-head"><Icon name="desktop" :size="14" /><span class="settings-group-title">{{ t("settings.overlay") }}</span></div>
         <div class="line between">
           <span class="label">{{ t("settings.overlayPosition") }}</span>
           <!-- A small monitor with the six places where they are on the screen -->
@@ -325,36 +325,7 @@ async function pickFolder() {
   font-size: 14px;
 }
 
-/* Room for the group titles straddling the tiles' top edges */
-.groups {
-  gap: 22px;
-  padding-top: 8px;
-}
-
-/* Each group is a tile with its title on the top edge, like a fieldset legend (as in BindSight) */
-.group {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 18px 16px 14px;
-  background: var(--bg-base);
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-panel);
-}
-
-.group-title {
-  position: absolute;
-  top: 0;
-  left: 12px;
-  transform: translateY(-50%);
-  padding: 0 8px;
-  /* The dialog's own ground, to break the tile's top border under the label */
-  background: var(--bg-surface);
-  color: var(--text-2);
-  font-size: 13px;
-  font-weight: 600;
-}
+/* The groups: webapp/src/styles.css `.settings-group` (a tile with a head row: icon and title) */
 
 .line {
   display: flex;
