@@ -15,7 +15,7 @@ import Dropdown from "../components/Dropdown.vue";
 import Thumb from "../components/Thumb.vue";
 import ViewToggle from "../components/ViewToggle.vue";
 import { actionLabel, actionText, categoryText, detailsText, personText, sourceText, when } from "../history";
-import { singleUser } from "../capabilities";
+import { orgsOn, singleUser } from "../capabilities";
 import { lang, t, viewTexts } from "../i18n";
 import { blueprintThumb, materialThumb, thumbColumnFlag } from "../thumbs";
 import { coalesced, onServerMessage } from "../realtime";
@@ -34,6 +34,9 @@ const ACTIONS: Record<HistoryEntry["category"], string[]> = {
   refinery: ["start", "done", "remove", "adjust"],
   blueprint: ["add", "remove"],
 };
+// What cannot happen here is not offered: sharing needs orgs, giving a second user
+const actionPossible = (category: string, action: string) =>
+  category !== "stock" || ((orgsOn.value || (action !== "share" && action !== "unshare")) && (!singleUser.value || action !== "give"));
 const sourceOptions = computed(() => [
   { value: "", label: t("history.allSources") },
   ...(["bot", "webapp", "companion"] as const).map((s) => ({ value: s, label: t(`history.source.${s}`) })),
@@ -47,7 +50,7 @@ const actionOptions = computed(() => [
   { value: "", label: t("history.allActions") },
   ...(Object.entries(ACTIONS) as Array<[HistoryEntry["category"], string[]]>)
     .filter(([c]) => !categoryFilter.value || c === categoryFilter.value)
-    .flatMap(([c, actions]) => actions.map((a) => ({
+    .flatMap(([c, actions]) => actions.filter((a) => actionPossible(c, a)).map((a) => ({
       value: `${c}.${a}`,
       label: categoryFilter.value ? actionLabel(c, a) : `${t(`history.category.${c}`)} · ${actionLabel(c, a)}`,
     }))),

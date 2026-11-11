@@ -6,6 +6,7 @@
 // count. Notices stay until dismissed.
 import type { HistoryEntry, HistoryPerson, HistoryResponse } from "../../src/webapp/api-types";
 import { api } from "./api";
+import { singleUser } from "./capabilities";
 import { hm, qText, qty } from "./format";
 import { isKey, lang, t } from "./i18n";
 import { coalesced, onServerMessage } from "./realtime";
@@ -43,7 +44,8 @@ export function detailsText(e: HistoryEntry): string {
   if (e.location) parts.push(e.toLocation ? `${e.location} → ${e.toLocation}` : e.location);
   // Sharing names the org only (who did it is in the title or the "by" column, the action says which way)
   if (e.category === "stock" && (e.action === "share" || e.action === "unshare")) parts.push(e.org ?? "Org");
-  else if (e.category === "stock") {
+  // With one user only there is no owner to name: it is always that user
+  else if (e.category === "stock" && !singleUser.value) {
     const from = ownerText(e.designation, e.org, e.holder);
     const changed = e.toDesignation !== null || e.toHolder !== null;
     const to = ownerText(e.toDesignation ?? e.designation, e.org, e.toHolder ?? e.holder);
