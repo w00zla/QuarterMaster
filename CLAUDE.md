@@ -71,7 +71,8 @@ pnpm app:bundle [--out <dir>]    # the desktop shell's server: ONE folder (defau
 pnpm data:pack --snapshot <f> --thumbs <dir> --n <n> --out <dir> [--previous <dir>]   # builds a data release (4 assets; docs/singleuser.md "The data pack")
 pnpm app:fetch-node           # desktop app: the pinned Node as the sidecar -> app/src-tauri/binaries/ (not in git; copies the running Node when its version is the pin, else downloads the official build and checks its sha256)
 pnpm app:build                # desktop app, release build for this OS: app:bundle -> app:fetch-node -> tauri build (Windows: the NSIS setup, and the bare exe in app/src-tauri/target/release/ with node.exe and server/ beside it); unsigned for updating without TAURI_SIGNING_PRIVATE_KEY (docs/app.md)
-pnpm app:dev                  # desktop app: tauri dev (set QM_DATA_DIR, or it uses the real data folder)
+pnpm app:start                # desktop app: tauri dev (set QM_DATA_DIR, or it uses the real data folder)
+pnpm app:fast                 # desktop app: test build without installer (profile fast -> app/src-tauri/target/fast/quartermaster.exe)
 pnpm app:smoke [--no-build] [--only <scenario>,...]   # builds and starts the built exe on temp folders: start, close, kill, the shell contract, updates against a local feed, single instance (docs/app.md "Tests"; the app's window opens several times)
 cargo test --manifest-path app/src-tauri/Cargo.toml   # desktop app: Rust tests (pure); clippy: cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets
 pnpm bot                      # Discord bot (needs DISCORD_TOKEN)

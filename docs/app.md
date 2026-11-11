@@ -227,8 +227,9 @@ files kept), the config `%APPDATA%\com.w00zla.quartermaster\config.json`, the we
 ```sh
 pnpm app:fetch-node   # the pinned Node -> app/src-tauri/binaries/node-<target triple>[.exe] (not in git)
 pnpm app:build        # app:bundle -> app:fetch-node -> tauri build: the NSIS setup (Windows) or the AppImage (Linux)
-pnpm app:dev          # the same preparation, then tauri dev (set QM_DATA_DIR: it uses the real data folder otherwise)
-node app/scripts/build.mjs --fast   # a test build without installer: profile `fast` -> app/src-tauri/target/fast/quartermaster.exe
+pnpm app:start        # the same preparation, then tauri dev (set QM_DATA_DIR: it uses the real data folder otherwise)
+pnpm app:fast         # a test build without installer: profile `fast` -> app/src-tauri/target/fast/quartermaster.exe
+# (the same three as the companion: companion:start, companion:build, companion:fast)
 ```
 
 `fetch-node.mjs`: when the Node running the script has exactly the pinned version, its executable is copied; otherwise the official
