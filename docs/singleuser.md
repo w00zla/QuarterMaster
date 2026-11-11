@@ -112,7 +112,38 @@ is inside `Data.p4k`) are the normal English case; `iniMissing` (another languag
 
 **Read at start only:** no watcher, no button; a changed game folder or `user.cfg` applies at the next start. The start logs
 one line each for the folder (state, version) and the pack (language, number of texts or why none), with their durations.
-The composition root holds the result as `languagePack`; the pack's texts are not used by any query yet.
+The composition root holds the result as `languagePack`.
+
+### How the pack reaches the texts
+
+`syncLanguagePack` (`language-pack.ts`) stores the pack as the localization source `language-pack` (`catalog-sources.md`
+"Localization") and runs at every start after the migrations, **before the server listens**: no request is answered with
+a stale state, and nothing computed at start has cached texts before it. The source has priority 500 (above `game` = 0, below
+`app` = 1000), `origin` = the pack's file, the content hash `textsSha256` of all its texts. It is reserved: `loc:import`
+refuses the name. The `loc:import` guards (overlap, mass removal) do not apply; the player's file is taken as it is, minus what
+`readLanguagePack` already drops (placeholders, the app's `qm_` keys). In one transaction the outcome is one of:
+
+| Outcome | When | Writes |
+|---|---|---|
+| `unchanged` | the stored hash equals the pack's | nothing at all |
+| `written` | no source yet, or another hash | only the added and changed texts, the vanished ones deleted, the source row updated; then `maintain()` |
+| `removed` | no pack: game folder unset or invalid, no file, or an unusable one | the source (its texts go with it); then `maintain()` |
+| `none` | no pack and no source | nothing |
+
+The start logs one line (`language pack sync: <outcome>, <n> texts (<added/changed/removed>) (<ms> ms)`). The first sync of a
+full English pack (about 91,000 texts) took about 3 s and added about 25 MB to the data folder; a start with an unchanged file
+takes under 0.1 s.
+
+**The language rule:** the pack's texts are stored under `en` whatever the pack's language, because `locText` asks the effective
+texts of the requested language first and those of `en` second, and the snapshot holds English game texts only. A `de` lookup
+finds no `de` text (but the app's own `qm_` ones) and falls back to the effective `en` text, so the pack wins in both UI
+languages, and a key the pack lacks shows the game's English in both. No query knows the source. The app's own texts (source
+`app`, German and English) are not touched and follow the UI language. A catalog import (data pack install) writes the `game`
+source only and leaves the pack alone.
+
+`GET /api/local/settings` reports `languagePack.active` (the loaded pack is in effect) beside `language` and `texts`; a UI says
+"active with N texts in language X" for `loaded` and `active`, nothing for `none`, a problem sentence for `problem`.
+Tests: `test/singleuser-language-pack.test.ts` (PGlite, the real routes for both `lang` values), the process in `test/singleuser.test.ts`.
 
 ## Pairing with the companion
 
@@ -128,7 +159,7 @@ Singleuser only, mounted through `WebappConfig.mountApi` (types in `src/webapp/a
 
 | Request | Answer |
 |---|---|
-| `GET /api/local/settings` | `{ gameDir, autoUpdate, overridden: { gameDir, autoUpdate }, gameFolder: { state, problem?, gameVersion? }, languagePack: { state, language?, texts?, problem?, pending } }` with `gameFolder.state` one of `unset`, `invalid`, `ok` and `languagePack.state` one of `none`, `loaded`, `problem` |
+| `GET /api/local/settings` | `{ gameDir, autoUpdate, overridden: { gameDir, autoUpdate }, gameFolder: { state, problem?, gameVersion? }, languagePack: { state, language?, texts?, active?, problem?, pending } }` with `gameFolder.state` one of `unset`, `invalid`, `ok` and `languagePack.state` one of `none`, `loaded`, `problem` |
 | `PUT /api/local/settings` `{ gameDir?, autoUpdate? }` | stores, answers the new state like the GET. `gameDir` must pass the check or be `null`, else 422 `{ error: 'gameFolderInvalid', problem }` and nothing changes; an overridden value is 409 `{ error: 'overridden', keys }`; anything else wrong is 400. A changed `gameDir` re-checks the folder and its version at once and rewrites the pairing file |
 
 `languagePack.pending` is true when the game folder is no longer the one the pack was read for: it is read again at the next

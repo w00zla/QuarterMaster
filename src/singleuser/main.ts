@@ -15,6 +15,7 @@ import { localIdentity } from '../webapp/identity-local.ts';
 import { RealtimeHub, listenForChanges } from '../webapp/realtime.ts';
 import { mountDataRoutes } from './data-routes.ts';
 import { describeGameFolder, readLanguagePack } from './game-folder.ts';
+import { syncLanguagePack } from './language-pack.ts';
 import { dataDir, dbDir, thumbsDir } from './paths.ts';
 import { pairingFile, removePairing, writePairing } from './pairing.ts';
 import { choosePort } from './port.ts';
@@ -49,8 +50,8 @@ async function main() {
   const gameFolder = describeGameFolder(gameDir);
   console.log(`game folder: ${gameDir ?? 'not set'}: ${gameFolder.state}${gameFolder.problem ? ` (${gameFolder.problem})` : ''}${gameFolder.gameVersion ? `, game ${gameFolder.gameVersion}` : ''} (${Math.round(performance.now() - t)} ms)`);
   t = performance.now();
-  // The pack's texts are held here for the change that puts them into the queries; nothing uses them yet
-  const languagePack: LoadedPack = { gameDir, pack: gameFolder.state === 'ok' && gameDir !== null ? readLanguagePack(gameDir) : null };
+  // The pack's texts are synced into the database before the server listens (below)
+  const languagePack: LoadedPack = { gameDir, pack: gameFolder.state === 'ok' && gameDir !== null ? readLanguagePack(gameDir) : null, active: false };
   const pack = languagePack.pack;
   console.log(`language pack: ${pack === null ? 'not read' : pack.texts ? `${pack.language}, ${pack.texts.size} texts` : `none (${pack.problem})`} (${Math.round(performance.now() - t)} ms)`);
   const pairing = pairingFile(process.env, process.platform, homedir());
@@ -62,6 +63,9 @@ async function main() {
     await step('open database', () => db.execute(sql`SELECT 1`));
     await step('migrations', () => migrate(fileURLToPath(new URL('../../drizzle', import.meta.url))));
     await step('checkpoint', () => db.execute(sql`CHECKPOINT`));
+    // The language pack: stored as a source above the game's English, before any request is answered
+    await syncLanguagePack(connection, pack, log);
+    languagePack.active = pack?.texts != null;
     const identity = await localIdentity(db);
 
     // The data update: the only thing in this process that uses the network (the GitHub feed, or QM_DATA_FEED: a folder)

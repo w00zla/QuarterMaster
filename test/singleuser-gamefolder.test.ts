@@ -247,7 +247,7 @@ describe('settings routes', () => {
     const file = join(scratch('r'), 'settings.json');
     const store = createSettingsStore(file, env, () => {});
     const gameDir = store.get().gameDir;
-    const loaded: LoadedPack = { gameDir, pack: gameDir ? readLanguagePack(gameDir) : null };
+    const loaded: LoadedPack = { gameDir, pack: gameDir ? readLanguagePack(gameDir) : null, active: true };
     const pairings: (string | null)[] = [];
     const api = new Hono() as unknown as ApiApp;
     mountSettingsRoutes({ store, loaded, onGameDirChange: (d) => pairings.push(d) })(api);
@@ -288,7 +288,7 @@ describe('settings routes', () => {
     packFile(dir, 'german_(germany)', 'ui_a=Hallo\nui_b=Welt\n');
     const { call } = setup({ QM_GAME_DIR: dir });
     const res = await call('GET');
-    assert.deepEqual(res.body.languagePack, { state: 'loaded', language: 'german_(germany)', texts: 2, pending: false });
+    assert.deepEqual(res.body.languagePack, { state: 'loaded', language: 'german_(germany)', texts: 2, active: true, pending: false });
   });
 
   it('PUT: an invalid folder answers 422 with the problem and changes nothing', async () => {

@@ -10,6 +10,8 @@ import type { SettingsStore } from './settings.ts';
 export interface LoadedPack {
   gameDir: string | null;
   pack: LanguagePack | null;
+  /** The pack's texts are stored as a localization source and in effect (the start's sync did that). */
+  active: boolean;
 }
 
 const NORMAL_ENGLISH = new Set(['noUserCfg', 'noLanguage', 'builtInEnglish']);
@@ -19,7 +21,7 @@ export function languagePackState(loaded: LoadedPack, gameDir: string | null): L
   const pending = loaded.gameDir !== gameDir;
   const { pack } = loaded;
   if (pack === null) return { state: 'none', pending };
-  if (pack.texts !== null) return { state: 'loaded', language: pack.language ?? undefined, texts: pack.texts.size, pending };
+  if (pack.texts !== null) return { state: 'loaded', language: pack.language ?? undefined, texts: pack.texts.size, active: loaded.active, pending };
   const problem = pack.problem!;
   return { state: NORMAL_ENGLISH.has(problem) ? 'none' : 'problem', ...(pack.language ? { language: pack.language } : {}), problem, pending };
 }

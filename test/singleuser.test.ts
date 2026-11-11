@@ -155,7 +155,7 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
       assert.deepEqual(state, {
         gameDir: game, autoUpdate: false, overridden: { gameDir: true, autoUpdate: true },
         gameFolder: { state: 'ok', gameVersion: '4.10.2.12913470' },
-        languagePack: { state: 'loaded', language: 'german_(germany)', texts: 3, pending: false },
+        languagePack: { state: 'loaded', language: 'german_(germany)', texts: 3, active: true, pending: false },
       });
       assert.deepEqual(JSON.parse(readFileSync(pairing, 'utf8')), { format: 1, origin: base, gameDir: game });
       assert.equal(existsSync(join(dir, 'settings.json')), false); // overrides are never written
@@ -165,6 +165,55 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
       assert.equal(existsSync(pairing), false);
     } finally {
       child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('syncs the language pack before listening: a real route answers with a pack text, the next start finds it unchanged', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'qm-singleuser-pack-'));
+    const dir = join(root, 'data');
+    const game = join(root, 'LIVE');
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    mkdirSync(join(game, 'data', 'Localization', 'german_(germany)'), { recursive: true });
+    writeFileSync(join(game, 'Data.p4k'), '');
+    writeFileSync(join(game, 'build_manifest.id'), JSON.stringify({ Data: { Branch: 'sc-alpha-4.10.2', RequestedP4ChangeNum: '12913470' } }));
+    writeFileSync(join(game, 'user.cfg'), 'g_language = german_(germany)\n');
+    writeFileSync(join(game, 'data', 'Localization', 'german_(germany)', 'global.ini'), 'items_commodities_testmetal=Testmetall\n');
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_AUTO_UPDATE: '0', QM_GAME_DIR: game, QM_PAIRING_FILE: join(root, 'pairing.json') };
+    mkdirSync(dir, { recursive: true });
+    const seed = connectPglite(dbDir(dir));
+    try {
+      await seed.migrate(fileURLToPath(new URL('drizzle', ROOT)));
+      const snap = fixtureSnapshot();
+      delete snap.localization.de; // the data pack holds English game texts only
+      await runImport(seed.db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
+    } finally {
+      await seed.close();
+    }
+    const run = async (expected: RegExp) => {
+      const c = start(RUNNER, env);
+      try {
+        await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+        assert.match(c.out(), expected);
+        // The sync's line comes before the server listens
+        assert.ok(c.out().indexOf('language pack sync:') < c.out().indexOf('listening on '));
+        for (const lang of ['de', 'en']) {
+          const res = await fetch(`${base}/api/catalog?lang=${lang}`, { signal: AbortSignal.timeout(20_000) });
+          const catalog = (await res.json()) as { materials: Array<{ uuid: string; name: string }> };
+          assert.equal(catalog.materials.find((m) => m.uuid === U.metal)!.name, 'Testmetall', lang);
+        }
+      } finally {
+        c.proc.stdin!.write('stop\n');
+        await within(8_000, 'the process ends', c.exited);
+        c.proc.kill();
+      }
+    };
+    try {
+      await run(/language pack sync: written, 1 texts \(1 added, 0 changed, 0 removed\) \(\d+ ms\)/);
+      await run(/language pack sync: unchanged, 1 texts \(\d+ ms\)/);
+    } finally {
       await new Promise((r) => setTimeout(r, 200));
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }

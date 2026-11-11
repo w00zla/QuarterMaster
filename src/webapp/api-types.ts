@@ -897,6 +897,8 @@ export interface LanguagePackState {
   language?: string;
   /** Number of texts of a loaded pack. */
   texts?: number;
+  /** A loaded pack is in effect: its texts show instead of the game's English (`loaded` and `active`: "active with N texts in language X"). */
+  active?: boolean;
   problem?: LanguagePackProblem;
   /** The game folder changed since the start: the pack is read again at the next start only. */
   pending: boolean;

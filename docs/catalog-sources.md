@@ -319,6 +319,7 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
   - `localization_source` (source, lang, priority, origin, hash, key count; lang `de` or `en`): `game` = priority 0, written by the catalog import; external sources default to 100.
   - `localization` (source, lang, key, value).
   - View `localization_effective`: per language and key the text of the highest-priority source. Priority applies per source, not per key.
+  - Source `language-pack` (priority 500, lang `en`): written only by the singleuser variant, from the player's own `global.ini` (`docs/singleuser.md` "The language pack"); reserved like `game` and `app`, so `loc:import` refuses the name.
   - Source `app` (priority 1000): the app's own texts for names the game lacks, keys with the reserved prefix `qm_`: blueprint category groups (`qm_blueprint_category_<group>`, the category without its size: `VehicleComponentS1` → `VehicleComponent`) and item classes (`qm_item_class_<class>`, e.g. `energy_laser`). Seeded by the migration (24 texts per language: de/en), maintained via the admin UI later. Never taken from a `global.ini`.
 - Loc keys are stored lower case without `@`; `LOC_EMPTY`/`LOC_PLACEHOLDER`/`LOC_UNINITIALIZED` become `NULL`; texts have literal `\n` converted and "TRANSLATION NOT FOUND" placeholders removed. Some items have no name in any language → display code falls back to `class_name`.
 - Display names (`src/catalog/labels.ts`): game key `item_type<type>`/`item_subtype<subtype>` for types; `qm_blueprint_category_<group>` (`blueprintCategoryGroup`) and `qm_item_class_<normalized class>` for app texts; otherwise a name derived from the technical key (`labelFromKey`). SQL helpers (`locText`, `categoryText`, `itemClassText`) in `src/db/query.ts`.
@@ -327,7 +328,7 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 ### Import safeguards
 
 - Catalog import: one transaction with advisory lock; dry run = full run + rollback. Hard errors on schema/integrity failures (dangling references, duplicates). Identical snapshot = no-op. Blocked (exit 2, overridable): downgrade (`--allow-downgrade`), >10% of an entity retired or >50% changed (`--force`, ratios configurable). Retire count is cross-checked against the diff.
-- Localization import: same lock; identical texts + priority = no-op. Blocked: >50% of the source's texts would disappear, <50% of the file's keys known to the game (wrong file). Source names `game` and `app` are reserved; keys with the prefix `qm_` are skipped. UTF-8 and UTF-16 with BOM.
+- Localization import: same lock; identical texts + priority = no-op. Blocked: >50% of the source's texts would disappear, <50% of the file's keys known to the game (wrong file). Source names `game`, `app` and `language-pack` are reserved; keys with the prefix `qm_` are skipped. UTF-8 and UTF-16 with BOM.
 - Both also run from the admin web UI (file upload, dry run first; Import only after a passed dry run of the same file and options).
 
 ### External texts
