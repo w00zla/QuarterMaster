@@ -4,7 +4,7 @@
 //! updater plugin's own IPC commands are not used (the window has no permission for them): only this side picks the
 //! endpoint per check.
 //!
-//! `channels.json` on the repository's main branch holds, for the product `companion`, the stable tag and the channels:
+//! `channels.json` on the repository's `channels` branch holds, for the product `companion`, the stable tag and the channels:
 //! `{ "companion": { "stable": "companion-v2.1.0", "channels": [{ "id": "beta", "tag": "companion-v2.2.0-beta.1" }] } }`.
 //! A check reads it, takes the tag of the channel in effect and asks that release's `latest.json` (Tauri's updater
 //! format). No file, no `companion` entry or no tag for the channel is "no update", never an error. No channel chosen =
@@ -44,7 +44,7 @@ pub struct Feed {
 impl Feed {
     pub fn github() -> Feed {
         Feed {
-            channels: format!("https://raw.githubusercontent.com/{GITHUB_REPO}/main/channels.json"),
+            channels: format!("https://raw.githubusercontent.com/{GITHUB_REPO}/channels/channels.json"),
             releases: format!("https://github.com/{GITHUB_REPO}/releases/download"),
         }
     }
@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn the_feed_is_github() {
         let github = Feed::github();
-        assert_eq!(github.channels_url(), "https://raw.githubusercontent.com/w00zla/quartermaster/main/channels.json");
+        assert_eq!(github.channels_url(), "https://raw.githubusercontent.com/w00zla/quartermaster/channels/channels.json");
         assert_eq!(github.latest("companion-v2.1.0"), "https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/latest.json");
         assert_eq!(github.latest("companion-v2.2.0-beta.1"), "https://github.com/w00zla/quartermaster/releases/download/companion-v2.2.0-beta.1/latest.json");
     }

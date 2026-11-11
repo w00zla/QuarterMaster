@@ -1,9 +1,11 @@
 // Shared by the release scripts (docs/releasing.md): tags, versions, the asset names a release carries and the
-// update of channels.json. Plain Node (no dependencies, no TypeScript): CI runs these without `pnpm install`.
+// updates of channels.json (the feed file on the `channels` branch). Plain Node (no dependencies, no TypeScript): CI runs these without `pnpm install`.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 export const REPO = process.env.GITHUB_REPOSITORY || 'w00zla/quartermaster';
 
+// A channel id: the same pattern the version regexp takes for its channel part
+const CHANNEL_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const NUM = '(0|[1-9][0-9]*)';
 const VERSION = new RegExp(`^${NUM}\\.${NUM}\\.${NUM}(?:-([a-z][a-z0-9-]{0,31})\\.${NUM})?$`);
 // The same pattern as src/datapack/manifest.ts (TAG)
@@ -116,20 +118,16 @@ export function pointAt(json, tag) {
   return { changed: true, message: `${t.product} channel ${t.channel} -> ${tag}` };
 }
 
-/** The README's download table for the products' current tags in channels.json. */
-export function downloadTable(json) {
-  const rows = [];
-  for (const [product, { title }] of Object.entries(PRODUCTS)) {
-    const entries = [['stable', json[product].stable], ...json[product].channels.map((c) => [`channel ${c.id}`, c.tag])];
-    for (const [label, tag] of entries) {
-      const t = tag ? parseTag(tag) : null;
-      if (!t) {
-        rows.push(`| ${title} | ${label} | not released yet | | |`);
-        continue;
-      }
-      const names = assetNames(product, t.version);
-      rows.push(`| ${title} | ${label} | ${t.version} | **[Installer](${releaseUrl(tag, names.windows)})** | **[AppImage](${releaseUrl(tag, names.linux)})** |`);
-    }
-  }
-  return ['| Product | Channel | Version | Windows | Linux |', '| --- | --- | --- | --- | --- |', ...rows].join('\n');
+/**
+ * Removes a channel's entry of app / companion (channels.json on the `channels` branch; channels.yml). `stable` cannot be
+ * removed. Returns `{ changed, message }`; an entry that is not there leaves the file alone.
+ */
+export function removeChannel(json, product, id) {
+  if (!Object.hasOwn(PRODUCTS, product)) throw new Error(`product must be one of ${Object.keys(PRODUCTS).join(', ')}, not ${product}`);
+  if (!CHANNEL_ID.test(id) || id === 'stable') throw new Error(`${id} is no channel id`);
+  const channels = json[product].channels;
+  const at = channels.findIndex((c) => c.id === id);
+  if (at < 0) return { changed: false, message: `${product} has no channel ${id}` };
+  const [gone] = channels.splice(at, 1);
+  return { changed: true, message: `${product} channel ${id} removed (was ${gone.tag})` };
 }

@@ -126,7 +126,7 @@ const githubHost = (host: string) => host === 'github.com' || host.endsWith('.gi
 
 export function githubFeed(options: GithubFeedOptions): DataFeed {
   const { fetch: doFetch, repo = DATA_REPO, connectTimeoutMs = 20_000, stallTimeoutMs = 30_000 } = options;
-  const channelsUrl = `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/main/${CHANNELS_FILE}`;
+  const channelsUrl = `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/channels/${CHANNELS_FILE}`;
   const assetUrl = (tag: string, asset: string) => `https://github.com/${repo.owner}/${repo.repo}/releases/download/${checkTag(tag)}/${checkAsset(asset)}`;
 
   /** A GET with a timeout until the headers; the timer is cleared by the caller's `finish`. `null` = 404. */

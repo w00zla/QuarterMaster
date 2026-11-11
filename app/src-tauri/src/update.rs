@@ -2,7 +2,7 @@
 //! install with the state the web app's dialog shows (`UpdateState`, event `update-changed`). The updater plugin's own
 //! IPC commands are not used: only this side picks the endpoint per check.
 //!
-//! `channels.json` on the repository's main branch holds, for the product `app`, the stable tag and the channels:
+//! `channels.json` on the repository's `channels` branch holds, for the product `app`, the stable tag and the channels:
 //! `{ "app": { "stable": "app-v1.0.0", "channels": [{ "id": "beta", "tag": "app-v1.1.0-beta.1" }] } }`. A check reads
 //! it, takes the tag of the channel in effect and asks that release's `latest.json` (Tauri's updater format). No file,
 //! no `app` entry or no tag for the channel is "no update", never an error. No channel chosen = the running build's own
@@ -42,7 +42,7 @@ pub struct Feed {
 impl Feed {
     pub fn github() -> Feed {
         Feed {
-            channels: format!("https://raw.githubusercontent.com/{GITHUB_REPO}/main/channels.json"),
+            channels: format!("https://raw.githubusercontent.com/{GITHUB_REPO}/channels/channels.json"),
             releases: format!("https://github.com/{GITHUB_REPO}/releases/download"),
         }
     }
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn the_feed_is_github_or_a_local_server() {
         let github = Feed::from_env(None).unwrap();
-        assert_eq!(github.channels_url(), "https://raw.githubusercontent.com/w00zla/quartermaster/main/channels.json");
+        assert_eq!(github.channels_url(), "https://raw.githubusercontent.com/w00zla/quartermaster/channels/channels.json");
         assert_eq!(github.latest("app-v1.0.0"), "https://github.com/w00zla/quartermaster/releases/download/app-v1.0.0/latest.json");
         assert_eq!(Feed::from_env(Some("")).unwrap(), github);
 

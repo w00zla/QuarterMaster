@@ -1,9 +1,9 @@
-// The release scripts (scripts/release-lib.mjs, latest-json.mjs; docs/releasing.md): tags, channels.json updates, the
-// README table and the updater feed. channels.json must stay in the shape the readers expect (app/src-tauri/src/update.rs,
-// src/datapack/feed.ts).
+// The release scripts (scripts/release-lib.mjs, channels-*.mjs, latest-json.mjs; docs/releasing.md): tags, channels.json
+// updates and the updater feed. channels.json (on the `channels` branch) must stay in the shape the readers expect
+// (app/src-tauri/src/update.rs, src/datapack/feed.ts); test/release-feed/channels.json is the "nothing released" file.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -15,19 +15,24 @@ interface Channels {
   companion: { stable: string | null; channels: { id: string; tag: string }[] };
   data: { stable: string | null };
 }
+interface Scope {
+  decide(job: string, files: string[]): { run: boolean; reason: string };
+}
 interface Lib {
   parseTag(tag: string): Record<string, unknown> | null;
   compareVersions(a: string, b: string): number;
   assetNames(product: 'app' | 'companion', version: string): { windows: string; linux: string };
   readChannels(path: string): Channels;
   pointAt(json: Channels, tag: string): { changed: boolean; message: string };
-  downloadTable(json: Channels): string;
+  removeChannel(json: Channels, product: string, id: string): { changed: boolean; message: string };
 }
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const feedDir = join(root, 'test', 'release-feed');
 const lib = new URL('../scripts/release-lib.mjs', import.meta.url).href;
-const { assetNames, compareVersions, downloadTable, parseTag, pointAt, readChannels } = (await import(lib)) as Lib;
-const empty = () => readChannels(join(root, 'channels.json'));
+const { assetNames, compareVersions, parseTag, pointAt, readChannels, removeChannel } = (await import(lib)) as Lib;
+const { decide } = (await import(new URL('../scripts/ci-scope.mjs', import.meta.url).href)) as Scope;
+const empty = () => readChannels(join(feedDir, 'channels.json'));
 
 describe('release tags', () => {
   it('parses the three kinds and refuses the rest', () => {
@@ -52,8 +57,8 @@ describe('channels.json', () => {
     assert.deepEqual(empty(), { app: { stable: null, channels: [] }, companion: { stable: null, channels: [] }, data: { stable: null } });
   });
 
-  it('the committed file is "no data channel" for the data feed reader', async () => {
-    assert.equal(await folderFeed(root).stableTag(), null);
+  it('the "nothing released" file is "no data channel" for the data feed reader', async () => {
+    assert.equal(await folderFeed(feedDir).stableTag(), null);
   });
 
   it('points stable, a channel and the data tag, and never moves back', () => {
@@ -75,13 +80,29 @@ describe('channels.json', () => {
     assert.throws(() => pointAt(json, 'v1.0.0'));
   });
 
-  it('writes the README table from it', () => {
+  it('removes a channel entry, never stable, and leaves the rest alone', () => {
     const json = empty();
+    pointAt(json, 'app-v1.0.0');
     pointAt(json, 'app-v1.1.0-beta.1');
-    const table = downloadTable(json);
-    assert.match(table, /\| Quartermaster \| stable \| not released yet \|/);
-    assert.match(table, /releases\/download\/app-v1\.1\.0-beta\.1\/Quartermaster_1\.1\.0-beta\.1_x64-setup\.exe/);
-    assert.match(table, /\| Quartermaster Companion \| stable \| not released yet \|/);
+    pointAt(json, 'app-v1.1.0-rc.1');
+    assert.equal(removeChannel(json, 'app', 'beta').changed, true);
+    assert.equal(removeChannel(json, 'app', 'beta').changed, false);
+    assert.equal(removeChannel(json, 'companion', 'beta').changed, false);
+    assert.deepEqual(json.app, { stable: 'app-v1.0.0', channels: [{ id: 'rc', tag: 'app-v1.1.0-rc.1' }] });
+    assert.throws(() => removeChannel(json, 'app', 'stable'));
+    assert.throws(() => removeChannel(json, 'app', 'Bad Id'));
+    assert.throws(() => removeChannel(json, 'data', 'beta'));
+  });
+
+  it('the scripts edit a file: channels-set creates the file when it is missing, channels-remove edits it', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'qm-channels-')), 'channels.json');
+    const run = (script: string, ...args: string[]) => execFileSync(process.execPath, [join(root, 'scripts', script), ...args, file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    run('channels-set.mjs', 'app-v1.1.0-beta.1');
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).app.channels, [{ id: 'beta', tag: 'app-v1.1.0-beta.1' }]);
+    assert.match(run('channels-remove.mjs', 'app', 'beta'), /removed/);
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).app.channels, []);
+    assert.match(run('channels-remove.mjs', 'app', 'beta'), /unchanged/);
+    assert.throws(() => run('channels-remove.mjs', 'app', 'stable'));
   });
 });
 
@@ -98,5 +119,28 @@ describe('latest.json', () => {
     assert.equal(feed.platforms['windows-x86_64'].signature, 'SIGNATURE');
     assert.ok(feed.platforms['windows-x86_64'].url.endsWith(`/releases/download/companion-v2.2.0-beta.1/${names.windows}`));
     assert.throws(() => execFileSync(process.execPath, [join(root, 'scripts', 'latest-json.mjs'), 'app-v1.0.0', dir], { stdio: 'ignore' }));
+  });
+});
+
+describe('ci.yml scope (scripts/ci-scope.mjs)', () => {
+  it('the node job skips docs-only pull requests and runs for anything else', () => {
+    assert.equal(decide('node', ['docs/app.md', 'README.md', 'tools/releasectl/run.py', '.github/workflows/build-app.yml']).run, false);
+    assert.equal(decide('node', ['docs/app.md', 'src/stock/service.ts']).run, true);
+    assert.equal(decide('node', ['.github/workflows/ci.yml']).run, true);
+    assert.equal(decide('node', ['scripts/ci-scope.mjs']).run, true);
+  });
+
+  it('the Rust jobs run for their own folders, the workflow and (app) the root package.json only', () => {
+    assert.equal(decide('app-rust', ['app/src-tauri/src/update.rs']).run, true);
+    assert.equal(decide('app-rust', ['package.json']).run, true);
+    assert.equal(decide('app-rust', ['companion/src-tauri/src/update.rs', 'src/datapack/feed.ts']).run, false);
+    assert.equal(decide('companion-rust', ['companion/src-tauri/Cargo.toml']).run, true);
+    assert.equal(decide('companion-rust', ['package.json', 'app/src-tauri/src/update.rs']).run, false);
+    assert.equal(decide('companion-rust', ['.github/workflows/ci.yml']).run, true);
+  });
+
+  it('an empty list runs the job; an unknown job is an error', () => {
+    assert.equal(decide('app-rust', []).run, true);
+    assert.throws(() => decide('nope', ['x']));
   });
 });

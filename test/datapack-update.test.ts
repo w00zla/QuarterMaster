@@ -170,7 +170,7 @@ describe('data feed and updater', { timeout: 280_000 }, () => {
       }) as typeof fetch;
       return { fetch: impl, urls };
     };
-    const CHANNELS = 'https://raw.githubusercontent.com/w00zla/quartermaster/main/channels.json';
+    const CHANNELS = 'https://raw.githubusercontent.com/w00zla/quartermaster/channels/channels.json';
     const asset = (t: string, a: string) => `https://github.com/w00zla/quartermaster/releases/download/${t}/${a}`;
 
     it('builds the URLs from the repository constant', async () => {
