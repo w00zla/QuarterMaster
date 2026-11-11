@@ -112,10 +112,11 @@ class Snapshot:
     gh_error: str | None = None
     channels_doc: dict = field(default_factory=dict)
     channels_error: str | None = None
-    channels_file: bool = False  # channels.json exists on origin/main
+    channels_file: bool = False  # channels.json exists on origin/channels
     views: dict[str, ProductView] = field(default_factory=dict)
     data: core.DataInfo | None = None
     drafts: list[core.Draft] = field(default_factory=list)
+    pending: list[core.Pending] = field(default_factory=list)  # open PRs, untagged bumps
 
     def view(self, key: str) -> ProductView:
         return self.views.get(key) or ProductView()
@@ -142,7 +143,8 @@ def gather(root: Path) -> Snapshot:
         snap.tags |= {t for t in snap.releases
                       if core.product_of_tag(t) or core.parse_data_tag(t)}
 
-    text = show_file(root, "origin/main", "channels.json")
+    # The feed is on its own branch; no branch or no file is "nothing released yet".
+    text = show_file(root, core.CHANNELS_REF, core.CHANNELS_FILE)
     snap.channels_file = text is not None
     try:
         snap.channels_doc = core.load_channels(text)
@@ -154,7 +156,7 @@ def gather(root: Path) -> Snapshot:
     counts = {}
     for cid in local | remote:
         ref = core.branch_of(cid) if cid in local else f"origin/{core.branch_of(cid)}"
-        ab = ahead_behind(root, ref, core.MAIN)
+        ab = ahead_behind(root, ref, core.ORIGIN_MAIN)
         if ab:
             counts[cid] = ab
     for key, prod in core.PRODUCTS.items():
@@ -163,12 +165,102 @@ def gather(root: Path) -> Snapshot:
             rows=core.build_rows(prod, snap.channels_doc, tags, snap.releases, local, remote, counts),
             live=core.build_live(prod, snap.channels_doc, tags, snap.releases))
         if view.live.latest and prod.tag(view.live.latest) in snap.tags:
-            n = git(root, "rev-list", "--count", f"{prod.tag(view.live.latest)}..{core.MAIN}")
+            n = git(root, "rev-list", "--count", f"{prod.tag(view.live.latest)}..{core.ORIGIN_MAIN}")
             view.main_ahead_live = int(n) if n else None
         snap.views[key] = view
     snap.data = core.build_data(snap.channels_doc, snap.tags, snap.releases)
     snap.drafts = core.list_drafts(snap.releases)
+    snap.pending = pending_releases(root, snap.tags)
     return snap
+
+
+# --- pull requests and bumps merged to main ------------------------------------
+
+
+def pull_requests(root: Path) -> list[dict] | None:
+    """Every pull request (newest 100) as gh reports it, None when gh fails."""
+    out = query(root, "gh", "pr", "list", "--state", "all", "--limit", "100",
+                "--json", "number,state,headRefName,baseRefName")
+    try:
+        return json.loads(out) if out else None
+    except ValueError:
+        return None
+
+
+def pr_view(root: Path, branch: str) -> core.PrView | None:
+    """The pull request of `branch` with its checks, None when there is none."""
+    out = query(root, "gh", "pr", "view", branch, "--json",
+                "number,state,url,title,mergeStateStatus,statusCheckRollup")
+    try:
+        return core.parse_pr(json.loads(out)) if out else None
+    except ValueError:
+        return None
+
+
+def merged_pr_heads(root: Path, branch: str) -> set[str]:
+    """The head commits of merged pull requests from `branch` (a squash merge
+    leaves the branch outside main's history, this is how to tell it is done)."""
+    out = query(root, "gh", "pr", "list", "--head", branch, "--state", "merged",
+                "--json", "headRefOid")
+    try:
+        return {str(x["headRefOid"]) for x in json.loads(out)} if out else set()
+    except (ValueError, KeyError, TypeError):
+        return set()
+
+
+def branch_merged(root: Path, ref: str, branch: str) -> bool:
+    """`ref` (a local or origin branch) is merged into origin/main: an
+    ancestor, or exactly the head of a pull request that was merged."""
+    if is_ancestor(root, ref, core.ORIGIN_MAIN):
+        return True
+    tip = git(root, "rev-parse", ref)
+    return bool(tip) and tip in merged_pr_heads(root, branch)
+
+
+def _version_at(root: Path, ref: str, prod: core.Product) -> core.Version | None:
+    text = show_file(root, ref, prod.cargo_toml)
+    current = core.cargo_toml_version(text) if text else None
+    return core.Version.parse(current, v_prefix=False) if current else None
+
+
+def bump_commit(root: Path, prod: core.Product, ref: str = core.ORIGIN_MAIN) -> tuple[core.Version, str] | None:
+    """The version `ref` carries for `prod` and the commit that introduced it
+    (the oldest one of the run of commits on the Cargo.toml that carry it): the
+    squash commit of a bump. None when it cannot be read."""
+    version = _version_at(root, ref, prod)
+    if version is None:
+        return None
+    shas = (git(root, "log", "--format=%H", "-n", "30", ref, "--", prod.cargo_toml) or "").split()
+    found = None
+    for sha in shas:
+        if _version_at(root, sha, prod) != version:
+            break
+        found = sha
+    return (version, found) if found else None
+
+
+def untagged_bumps(root: Path, tags: set[str]) -> list[core.Pending]:
+    """Live versions on origin/main that are above every live tag of the app and
+    have no tag: a bump merged, the tagging not done."""
+    out = []
+    for prod in core.PRODUCTS.values():
+        found = bump_commit(root, prod)
+        if not found:
+            continue
+        version, sha = found
+        known = core.versions_in(prod, tags)
+        newest_live = max((v for v in known if not v.is_channel), default=None)
+        if version.is_channel or prod.tag(version) in tags or (newest_live and version <= newest_live):
+            continue
+        out.append(core.Pending("untagged", prod.key, version, commit=sha))
+    return out
+
+
+def pending_releases(root: Path, tags: set[str]) -> list[core.Pending]:
+    prs = pull_requests(root)
+    remote = {name for name in _channel_ids(root, "refs/remotes/origin/release/")}
+    remote = {core.RELEASE_PREFIX + name for name in remote}
+    return core.build_pending(prs, remote, untagged_bumps(root, tags))
 
 
 # --- CI build runs -----------------------------------------------------------
@@ -179,6 +271,15 @@ def run_for_tag(root: Path, tag: str, workflow: str) -> str | None:
     jq = f'map(select(.headBranch == "{tag}")) | .[0].databaseId // empty'
     out = query(root, "gh", "run", "list", "--workflow", workflow, "--event",
                 "push", "--json", "databaseId,headBranch", "--jq", jq)
+    return out.strip() or None if out else None
+
+
+def run_for_dispatch(root: Path, workflow: str, since: str) -> str | None:
+    """The id of the newest manually started run of `workflow` created at or
+    after `since` (an ISO UTC time)."""
+    jq = f'map(select(.createdAt >= "{since}")) | .[0].databaseId // empty'
+    out = query(root, "gh", "run", "list", "--workflow", workflow, "--event",
+                "workflow_dispatch", "--json", "databaseId,createdAt", "--jq", jq)
     return out.strip() or None if out else None
 
 

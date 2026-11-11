@@ -44,7 +44,7 @@ class ConfirmScreen(ModalScreen[bool]):
         dialog.border_title = escape(self.title_text)
         if self.sensitive:
             dialog.border_subtitle = ("writes to origin / GitHub" if any(map(remote_write, self.cmds))
-                                      else "commits on main, nothing leaves the repo")
+                                      else "changes the local repo only")
         with dialog:
             text = "\n".join("$ " + show(c) for c in self.cmds)
             yield Static(escape(text), classes="cmds")
@@ -346,7 +346,7 @@ class ReleaseCtl(App):
                 (f" [{n['red']}](dirty)[/]" if snap.dirty else "")]
         if snap.main_vs_origin:
             a, b = snap.main_vs_origin
-            head.append(f"{dim}main vs origin[/] +{a}/-{b}")
+            head.append(f"{dim}local main vs origin[/] +{a}/-{b}")
         lines = [f"  {dim}·[/]  ".join(head)]
         for key, prod in core.PRODUCTS.items():
             view = snap.view(key)
@@ -380,7 +380,9 @@ class ReleaseCtl(App):
         if snap.channels_error:
             lines.append(f"[{n['red']}]{escape(snap.channels_error)}[/]")
         elif not snap.channels_file:
-            lines.append(f"{dim}No channels.json on origin/main[/]")
+            lines.append(f"{dim}Nothing released yet (no channels.json on {core.CHANNELS_REF})[/]")
+        for item in snap.pending:
+            lines.append(f"[{n['yellow']}]unfinished[/] {escape(item.label)}")
         return lines
 
     def active_rows(self) -> list[core.ChannelRow]:
@@ -528,7 +530,7 @@ class ReleaseCtl(App):
         self.log_line(f"$ {show(cmd)}", "cyan")
         if isinstance(cmd, FileWrite):
             try:
-                (self.root / cmd.path).write_text(cmd.text, encoding="utf-8")
+                (self.root / cmd.path).write_text(cmd.text, encoding="utf-8", newline="\n")  # LF: the repository is LF in every tree
             except OSError as e:
                 self.log_line(str(e), "red")
                 return False, str(e)
@@ -545,10 +547,11 @@ class ReleaseCtl(App):
 
     # --- the Build tab ---
 
-    def watch_build(self, tag: str, workflow: str) -> None:
-        """Follow the build run of a pushed tag in the Build tab; runs in the
-        background, the app stays usable."""
-        self._watch_build(tag, workflow)
+    def watch_build(self, tag: str, workflow: str, since: str | None = None) -> None:
+        """Follow the build run of a pushed tag (or, with `since`, the manually
+        started run of a workflow created after that time) in the Build tab; runs
+        in the background, the app stays usable."""
+        self._watch_build(tag, workflow, since)
 
     def _build_marker(self, state: str | None) -> None:
         """The Build tab's title carries the run's state, seen from the Log too."""
@@ -556,14 +559,16 @@ class ReleaseCtl(App):
         self.tabs.get_tab("build-tab").label = f"Build {icon}".strip()
 
     @work(exclusive=True, group="build")
-    async def _watch_build(self, tag: str, workflow: str) -> None:
+    async def _watch_build(self, tag: str, workflow: str, since: str | None = None) -> None:
         self.tabs.active = "build-tab"
         self._build_marker("queued")
         self.build_table.clear()
         self.build_head.update(f"[{NORD['dim']}]waiting for the run of {escape(tag)}…[/]")
         run_id = None
         for _ in range(40):  # the run shows up a few seconds after the push
-            run_id = await asyncio.to_thread(repo.run_for_tag, self.root, tag, workflow)
+            run_id = await asyncio.to_thread(
+                repo.run_for_tag if since is None else repo.run_for_dispatch, self.root,
+                *((tag, workflow) if since is None else (workflow, since)))
             if run_id:
                 break
             await asyncio.sleep(3)
@@ -583,10 +588,10 @@ class ReleaseCtl(App):
             await asyncio.sleep(5)
         self.tabs.active = "log-tab"
         if run.state == "success":
-            self.log_line(f"Build of {tag} succeeded; its draft is in Drafts (refresh with r if it is not there yet).", "green")
+            self.log_line(f"Run of {tag} succeeded; drafts and the feed show it after a refresh (r).", "green")
             self.reload()
             return
-        self.log_line(f"Build of {tag}: {run.state}. {run.url}", "red")
+        self.log_line(f"Run of {tag}: {run.state}. {run.url}", "red")
         if run.state == "failure":
             tail = await asyncio.to_thread(repo.run_failed_log, self.root, run_id)
             if tail:

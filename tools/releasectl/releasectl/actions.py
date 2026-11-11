@@ -2,7 +2,15 @@
 
 Rules kept here: no force, no history rewrite, no tag or release deletion,
 no branch switch on a dirty tree, back to the starting branch afterwards.
-Pushes, GitHub release edits and commits on main get their own confirmation.
+Pushes, GitHub changes and workflow runs get their own (sensitive)
+confirmation.
+
+`main` is protected (pull requests only, squash merge, no bypass): nothing
+here pushes to it. A live version goes through a pull request (`release/...`
+or the channel's own branch), is merged by squash on the user's explicit
+yes, and is tagged on the squash commit afterwards; every release step is
+based on `origin/main`, the local main is never touched. The feed
+(`channels.json` on the `channels` branch) is written by CI only.
 
 Most actions work on the active app (`ctx.product`: app or companion); the
 data release is a third kind with its own action.
@@ -20,11 +28,12 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol
 
 from . import core, repo
-from .core import DATA, MAIN, Product, Version, branch_of
+from .core import DATA, MAIN, ORIGIN_MAIN, Product, Version, branch_of
 
 
 @dataclass
@@ -60,7 +69,7 @@ class Ctx(Protocol):
     async def pick(self, title: str, options: list[str]) -> str | None: ...
     async def execute(self, cmd: Cmd) -> tuple[bool, str]: ...
     async def suspended(self, title: str, func) -> None: ...
-    def watch_build(self, tag: str, workflow: str) -> None: ...
+    def watch_build(self, tag: str, workflow: str, since: str | None = None) -> None: ...
 
 
 class Stop(Exception):
@@ -81,6 +90,15 @@ async def run_all(ctx: Ctx, cmds: list[Cmd]) -> bool:
         if not ok:
             return False
     return True
+
+
+def git_push(*refs: str, upstream: bool = False, delete: bool = False) -> list[str]:
+    """The one place a push command is built. It refuses main: the default
+    branch only changes through a merged pull request."""
+    for ref in refs:
+        if core.is_default_branch(ref):
+            raise ValueError(f"refusing to push {ref}: main takes pull requests only")
+    return ["git", "push", *(["-u"] if upstream else []), "origin", *(["--delete"] if delete else []), *refs]
 
 
 # --- branch handling ---------------------------------------------------------
@@ -115,9 +133,8 @@ async def switch_back(ctx: Ctx, start: str, target: str) -> None:
 
 
 async def pull(ctx: Ctx, branch: str) -> None:
-    """Pull the checked-out `branch` from origin. A plain pull: CI commits
-    to main after a publish (channels.json, README), so a local main often
-    has diverged; git merges or rebases as configured. On a conflict the
+    """Pull the checked-out channel `branch` from origin (a plain pull: the
+    branch may have been pushed from another machine). On a conflict the
     pull is undone and reported."""
     ok, _ = await ctx.execute(["git", "pull", "--no-edit", "origin", branch])
     if ok:
@@ -132,45 +149,20 @@ async def pull(ctx: Ctx, branch: str) -> None:
     raise Stop(f"Pulling {branch} failed; resolve by hand: git checkout {branch} && git pull origin {branch}")
 
 
-async def update_main_here(ctx: Ctx) -> None:
-    """Offer a pull of the checked-out main from origin."""
-    cmd = ["git", "pull", "--no-edit", "origin", MAIN]
-    if await ctx.confirm("Update main from origin?", [cmd],
-                         note="No = continue with the local main."):
-        await pull(ctx, MAIN)
+async def fetch_origin(ctx: Ctx, why: str) -> None:
+    """Offer a fetch, so that origin/main and the channel branches are current.
+    Release steps start from origin/main; the local main is not used."""
+    cmd = ["git", "fetch", "--prune", "origin"]
+    if await ctx.confirm("Fetch origin?", [cmd], note=why + "\nNo = use the remote refs as fetched last."):
+        await run_all(ctx, [cmd])
 
 
-async def update_main_elsewhere(ctx: Ctx) -> None:
-    """Offer an update of main without checking it out: a fast-forward via
-    fetch; if main has diverged, a pull on main (switch there and back)."""
-    if repo.current_branch(ctx.root) == MAIN:
-        return await update_main_here(ctx)
-    cmd = ["git", "fetch", "origin", f"{MAIN}:{MAIN}"]
-    if not await ctx.confirm("Update main from origin?", [cmd],
-                             note="No = use the local main."):
-        return
-    if await run_all(ctx, [cmd]):
-        return
-    pull_cmd = ["git", "pull", "--no-edit", "origin", MAIN]
-    if not await ctx.confirm("main has diverged from origin; switch to main and pull?",
-                             [["git", "checkout", MAIN], pull_cmd],
-                             note="No = use the local main."):
-        return
-    start = await switch_to(ctx, MAIN, "pulling main")
-    if start is None:
-        return
-    try:
-        await pull(ctx, MAIN)
-    finally:
-        await switch_back(ctx, start, MAIN)
-
-
-async def merge(ctx: Ctx, ref: str, into: str, sensitive: bool) -> bool:
-    """Merge `ref` into the checked-out `into`; on a conflict abort and report."""
+async def merge(ctx: Ctx, ref: str, into: str) -> bool:
+    """Merge `ref` into the checked-out channel branch `into`; on a conflict
+    abort and report."""
     cmd = ["git", "merge", "--no-ff", "--no-edit", ref]
     note = "A merge commit. On a conflict the merge is aborted and reported."
-    if not await ctx.confirm(f"Merge {ref} into {into}", [cmd], note=note,
-                             sensitive=sensitive):
+    if not await ctx.confirm(f"Merge {ref} into {into}", [cmd], note=note):
         return False
     ok, _ = await ctx.execute(cmd)
     if ok:
@@ -185,18 +177,20 @@ async def merge(ctx: Ctx, ref: str, into: str, sensitive: bool) -> bool:
 
 
 async def offer_push(ctx: Ctx, branch: str) -> None:
-    cmd = ["git", "push", "origin", branch]
+    cmd = git_push(branch)
     if await ctx.confirm(f"Push {branch}?", [cmd], sensitive=True):
         await ctx.execute(cmd)
 
 
-# --- bump: set the version, commit, tag, push, watch -------------------------
+# --- bump of a channel version: set the version, commit, tag, push, watch ---
 
 
-def _read_version_files(ctx: Ctx, prod: Product, branch: str) -> dict[str, str]:
+def _read_version_files(ctx: Ctx, prod: Product, branch: str, from_ref: bool = False) -> dict[str, str]:
+    """The version files' texts: of the checked-out working tree, or of `branch`
+    as a ref (a dry run, or `from_ref` when nothing is checked out)."""
     texts = {}
     for path in core.version_files(prod):
-        if ctx.dry_run:  # nothing was checked out: read the branch's copy
+        if ctx.dry_run or from_ref:
             text = repo.show_file(ctx.root, branch, path)
         else:
             try:
@@ -210,7 +204,8 @@ def _read_version_files(ctx: Ctx, prod: Product, branch: str) -> dict[str, str]:
 
 
 async def bump(ctx: Ctx, prod: Product, version: Version, branch: str) -> None:
-    """The out-of-app version bump: files, commit, tag, then push and watch.
+    """The out-of-app version bump of a channel version: files, commit, tag,
+    then push (the channel branch is not under the main ruleset) and watch.
 
     `branch` is the checked-out branch (in a dry run the one that would be).
     """
@@ -224,8 +219,8 @@ async def bump(ctx: Ctx, prod: Product, version: Version, branch: str) -> None:
     if repo.is_dirty(ctx.root):
         dirty_stop(ctx, "The working tree is not clean, commit or stash first.")
 
-    # Always tag the state origin has too: without the pull a bot commit on
-    # origin would be missing from the tag and the branch push rejected.
+    # Always tag the state origin has too: without the pull a commit pushed
+    # from elsewhere would be missing from the tag and the branch push rejected.
     if repo.ref_exists(ctx.root, f"refs/remotes/origin/{branch}"):
         await pull(ctx, branch)
 
@@ -242,9 +237,7 @@ async def bump(ctx: Ctx, prod: Product, version: Version, branch: str) -> None:
     cmds += [["git", "add", *files],
              ["git", "commit", "-q", "-m", core.commit_message(prod, version)],
              ["git", "tag", "-a", tag, "-m", core.tag_message(prod, version)]]
-    on_main = branch == MAIN
-    if not await ctx.confirm(f"Bump {prod.title} to {version}", cmds, sensitive=on_main,
-                             note="Commits on main." if on_main else ""):
+    if not await ctx.confirm(f"Bump {prod.title} to {version}", cmds):
         return
     for cmd in cmds:
         ok, _ = await ctx.execute(cmd)
@@ -258,10 +251,9 @@ async def bump(ctx: Ctx, prod: Product, version: Version, branch: str) -> None:
             raise Stop("Bump failed.")
     ctx.note(("[dry-run] " if ctx.dry_run else "") + f"Committed and tagged {tag}.", "green")
 
-    push = [["git", "push", "origin", branch], ["git", "push", "origin", tag]]
-    kind = f"pre-release (channel {version.channel})" if version.is_channel else "full release"
+    push = [git_push(branch), git_push(tag)]
     if not await ctx.confirm(f"Push {branch} and {tag}?", push, sensitive=True,
-                             note=f"CI builds a draft; publish it as a {kind}."):
+                             note=f"CI builds a draft; publish it as a pre-release (channel {version.channel})."):
         ctx.note("Not pushed. Later: " + " && ".join(map(show, push)))
         return
     if not await run_all(ctx, push):
@@ -282,6 +274,25 @@ async def offer_watch(ctx: Ctx, prod: Product, tag: str) -> None:
     ctx.watch_build(tag, prod.workflow)
 
 
+def dispatch_since() -> str:
+    """A time just before a workflow was started (with room for clock skew), to
+    find its run afterwards."""
+    return (datetime.now(timezone.utc) - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def offer_watch_dispatch(ctx: Ctx, workflow: str, label: str, since: str) -> None:
+    watch = [["gh", "run", "list", "--workflow", workflow, "--event", "workflow_dispatch"],
+             ["gh", "run", "view", "<run>", "--json", "status,conclusion,url,jobs"]]
+    if not await ctx.confirm(f"Watch the {workflow} run?", watch,
+                             note="Read-only; the Build tab follows the run."):
+        return
+    if ctx.dry_run:
+        for cmd in watch:
+            ctx.note(f"[dry-run] $ {show(cmd)}", "yellow")
+        return
+    ctx.watch_build(label, workflow, since)
+
+
 async def watch(ctx: Ctx) -> None:
     """Follow the build of a pushed app tag in the Build tab (read-only)."""
     prod = prod_of(ctx)
@@ -298,51 +309,196 @@ async def watch(ctx: Ctx) -> None:
         ctx.watch_build(text, core.product_of_tag(text).workflow)
 
 
-# --- channels.json on main ---------------------------------------------------
+# --- live versions through a pull request ---------------------------------------
+
+REFRESH = "Refresh the state and checks"
+MERGE = "Merge now (squash)"
+LATER = "Leave it for later (Bump live continues it)"
 
 
-def _main_channels(ctx: Ctx) -> tuple[dict, str | None]:
-    """channels.json of the local main: (document, old text or None)."""
+async def pr_gate(ctx: Ctx, branch: str, what: str, delete_branch: bool = True) -> bool:
+    """Show the pull request of `branch` (state, checks), let the user wait and
+    refresh, and on an explicit yes merge it by squash. True when it is merged,
+    False when it was left open. Never --auto, never --admin. A release branch
+    is deleted by the merge; a channel branch is not (its deletion is offered
+    afterwards: the channel is not over until the user says so)."""
+    merge_cmd = ["gh", "pr", "merge", branch, "--squash", *(["--delete-branch"] if delete_branch else [])]
+    after = ", then the branch is deleted" if delete_branch else ""
     if ctx.dry_run:
-        text = repo.show_file(ctx.root, MAIN, "channels.json")
+        ctx.note(f"[dry-run] then: show the pull request (gh pr view {branch} --json "
+                 "number,state,url,title,mergeStateStatus,statusCheckRollup) until the user merges it.", "yellow")
+        if await ctx.confirm(f"Merge {branch}", [merge_cmd], sensitive=True,
+                             note=f"{what}\nSquash merge{after}."):
+            await ctx.execute(merge_cmd)
+        return True
+    while True:
+        view = await asyncio.to_thread(repo.pr_view, ctx.root, branch)
+        if view is None:
+            raise Stop(f"No pull request found for {branch} (gh pr view failed).")
+        ctx.note(core.pr_summary(view))
+        if view.state == "MERGED":
+            ctx.note(f"#{view.number} is merged already.", "green")
+            return True
+        if view.state != "OPEN":
+            raise Stop(f"Pull request #{view.number} is {view.state.lower()} without a merge.")
+        choice = await ctx.pick(f"{what}: PR #{view.number}, {view.checks_line}", [REFRESH, MERGE, LATER])
+        if choice is None or choice == LATER:
+            ctx.note(f"Left open: {view.url}\nBump live (or Finalize) continues it later: merge, then tag.")
+            return False
+        if choice == REFRESH:
+            continue
+        warn = ""
+        if view.failed or view.pending or view.merge_state not in ("CLEAN", "HAS_HOOKS", ""):
+            warn = (f"Not clean: {view.checks_line}, merge state {view.merge_state.lower() or '?'}. "
+                    "GitHub refuses the merge while required checks are not satisfied.\n")
+        if await ctx.confirm(f"Merge PR #{view.number} ({branch})", [merge_cmd], sensitive=True,
+                             note=f"{warn}{view.title}\nSquash merge{after}. Nothing is merged automatically."):
+            ok, _ = await ctx.execute(merge_cmd)
+            if ok:
+                return True
+            ctx.note("The merge did not go through; the state is shown again.", "red")
+
+
+def _local_tags(ctx: Ctx) -> set[str]:
+    patterns = [f"{p.tag_prefix}*" for p in core.PRODUCTS.values()]
+    return set((repo.git(ctx.root, "tag", "-l", *patterns) or "").split()) | ctx.snap.tags
+
+
+async def tag_squash(ctx: Ctx, expected: list[tuple[Product, Version]] | None) -> None:
+    """After the merge: fetch, find the squash commit on origin/main, check it
+    carries exactly the bumped version, tag it (annotated) and push the tag.
+
+    `expected` lists what must be found; None tags every untagged bump on
+    origin/main (resuming a channel's pull request, whose versions are not known).
+    """
+    fetch = [["git", "fetch", "--prune", "origin"], ["git", "fetch", "--tags", "origin"]]
+    ctx.note("Fetching the merge result (read-only).")
+    if not await run_all(ctx, fetch):
+        raise Stop("Fetch failed; Bump live continues from here once origin is reachable.")
+    if ctx.dry_run:
+        for prod, version in expected or []:
+            tag = prod.tag(version)
+            for cmd in (["git", "tag", "-a", tag, "-m", core.tag_message(prod, version), "<squash commit on origin/main>"],
+                        git_push(tag)):
+                ctx.note(f"[dry-run] $ {show(cmd)}", "yellow")
+            ctx.note(f"[dry-run] first: find the squash commit on origin/main and verify that every file of the "
+                     f"{prod.title} carries {version}.", "yellow")
+        return
+    found = repo.untagged_bumps(ctx.root, _local_tags(ctx))
+    if expected is not None:
+        todo = []
+        for prod, version in expected:
+            item = next((p for p in found if p.product == prod.key and p.version == version), None)
+            if item is None:
+                raise Stop(f"The squash commit of {prod.title} {version} is not on origin/main (or it is tagged "
+                           "already). Bump live picks it up when it shows.")
+            todo.append(item)
     else:
-        path = ctx.root / "channels.json"
-        text = path.read_text(encoding="utf-8") if path.exists() else None
+        todo = found
+    if not todo:
+        ctx.note("Nothing to tag on origin/main.")
+    for item in todo:
+        prod = core.PRODUCTS[item.product]
+        version, sha = item.version, item.commit
+        texts = {p: repo.show_file(ctx.root, sha, p) for p in core.version_files(prod)}
+        bad = core.files_not_carrying(prod, texts, str(version))
+        if bad:
+            raise Stop(f"{sha[:8]} does not carry exactly {version} in {', '.join(bad)}; not tagging it.")
+        changed = (repo.git(ctx.root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha) or "").split()
+        extra = [f for f in changed if f not in core.version_files(prod)]
+        tag = prod.tag(version)
+        cmds = [["git", "tag", "-a", tag, "-m", core.tag_message(prod, version), sha], git_push(tag)]
+        note = (f"{sha[:8]} on origin/main: {repo.git(ctx.root, 'log', '-1', '--format=%s', sha)}\n"
+                f"Every file of the {prod.title} carries {version}. CI builds a draft; publish it as a full release.")
+        if extra:
+            note += "\nAlso changed in that commit: " + ", ".join(extra)
+        if not await ctx.confirm(f"Tag {tag} on {sha[:8]}", cmds, sensitive=True, note=note):
+            ctx.note(f"Not tagged. Bump live offers it again (the version is on main, the tag is missing).")
+            continue
+        if not await run_all(ctx, cmds):
+            raise Stop(f"Tagging {tag} failed; Bump live offers it again.")
+        await offer_watch(ctx, prod, tag)
+
+
+async def release_pr(ctx: Ctx, prod: Product, version: Version) -> None:
+    """A live bump: a branch from origin/main with the version files changed,
+    pushed, with a pull request; then the gate (checks, merge on a yes) and
+    the tag on the squash commit."""
+    tag = prod.tag(version)
+    if repo.ref_exists(ctx.root, f"refs/tags/{tag}") or tag in ctx.snap.tags:
+        raise Stop(f"Tag {tag} exists already.")
+    branch = core.release_branch(prod, version)
+    if any(repo.ref_exists(ctx.root, ref) for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}")):
+        raise Stop(f"{branch} exists already: a bump in progress? It is listed as unfinished work in Bump live.")
+    if repo.is_dirty(ctx.root):
+        dirty_stop(ctx, "The working tree is not clean, commit or stash first.")
+    await fetch_origin(ctx, f"The bump branch is cut from {ORIGIN_MAIN}.")
+    if not repo.ref_exists(ctx.root, ORIGIN_MAIN):
+        raise Stop(f"No {ORIGIN_MAIN}: fetch first.")
     try:
-        return core.load_channels(text), text
+        new = core.bump_texts(prod, _read_version_files(ctx, prod, ORIGIN_MAIN, from_ref=True), str(version))
     except ValueError as e:
         raise Stop(str(e))
-
-
-async def edit_channels_on_main(ctx: Ctx, edit, message: str) -> None:
-    """Switch to main, apply `edit(doc)`, commit, offer the push, go back."""
-    start = await switch_to(ctx, MAIN, "editing channels.json")
-    if start is None:
+    files = core.version_files(prod)
+    title = core.commit_message(prod, version)
+    pr = ["gh", "pr", "create", "--base", MAIN, "--head", branch, "--title", title,
+          "--body", core.pr_body_bump(prod, version)]
+    cmds: list[Cmd] = [["git", "checkout", "--no-track", "-b", branch, ORIGIN_MAIN]]
+    cmds += [FileWrite(p, t, f"version {version}") for p, t in new.items()]
+    cmds += [["git", "add", *files], ["git", "commit", "-q", "-m", title],
+             git_push(branch, upstream=True), pr]
+    note = (f"A branch {branch} from {ORIGIN_MAIN} with the bump, a pull request to main. Main itself is not pushed to.\n"
+            f"Next: the checks, then your yes to the squash merge; the tag {tag} goes on the squash commit.")
+    if not await ctx.confirm(f"Bump {prod.title} to {version} (pull request)", cmds, note=note, sensitive=True):
         return
+    start = repo.current_branch(ctx.root)
+    push_at = cmds.index(git_push(branch, upstream=True))
     try:
-        await update_main_here(ctx)
-        doc, old = _main_channels(ctx)
-        try:
-            new = core.dump_channels(edit(doc))
-        except KeyError as e:
-            raise Stop(f"Channel {e} is not listed on main.")
-        if new == old:
-            raise Stop("Nothing to change.")
-        cmds: list[Cmd] = [FileWrite("channels.json", new, "see below"),
-                           ["git", "add", "channels.json"],
-                           ["git", "commit", "-q", "-m", message]]
-        if not await ctx.confirm("Commit on main", cmds, note=new, sensitive=True):
-            return
-        for cmd in cmds:
+        for i, cmd in enumerate(cmds):
             ok, _ = await ctx.execute(cmd)
-            if not ok:
-                await ctx.execute(["git", "checkout", "HEAD", "--", "channels.json"]
-                                  if old is not None else ["git", "rm", "-q", "--cached",
-                                                           "--ignore-unmatch", "channels.json"])
-                raise Stop("Commit failed.")
-        await offer_push(ctx, MAIN)
+            if ok:
+                continue
+            if i == 0:
+                raise Stop(f"Could not create {branch}.")
+            if i < push_at:  # nothing pushed yet: undo the local part
+                await ctx.execute(["git", "checkout", "HEAD", "--", *files])
+                await ctx.execute(["git", "checkout", start])
+                await ctx.execute(["git", "branch", "-D", branch])
+                raise Stop("Bump failed; the local branch is removed again.")
+            if i == push_at:
+                raise Stop(f"Push failed; {branch} exists locally with the commit: fix the cause, then "
+                           f"git push -u origin {branch} and gh pr create, or delete the branch.")
+            raise Stop(f"{branch} is pushed but the pull request was not created: "
+                       f"gh pr create --base main --head {branch} (Bump live offers it as unfinished work).")
     finally:
-        await switch_back(ctx, start, MAIN)
+        await switch_back(ctx, start, branch)
+    ctx.note(("[dry-run] " if ctx.dry_run else "") + f"Pull request for {branch} created.", "green")
+    if await pr_gate(ctx, branch, f"Bump {prod.title} to {version}"):
+        await tag_squash(ctx, [(prod, version)])
+
+
+UNFINISHED_NEW = "Start a new bump"
+
+
+async def resume(ctx: Ctx, item: core.Pending) -> None:
+    """Pick up unfinished work: merge an open pull request and tag, open the
+    missing pull request of a pushed release branch, or tag a merged bump."""
+    prod = core.PRODUCTS[item.product] if item.product else None
+    expected = [(prod, item.version)] if prod else None
+    if item.kind == "untagged":
+        return await tag_squash(ctx, expected)
+    if item.kind == "branch":
+        title = core.commit_message(prod, item.version)
+        pr = ["gh", "pr", "create", "--base", MAIN, "--head", item.branch, "--title", title,
+              "--body", core.pr_body_bump(prod, item.version)]
+        if not await ctx.confirm(f"Open the pull request of {item.branch}", [pr], sensitive=True):
+            return
+        if not await run_all(ctx, [pr]):
+            raise Stop("The pull request was not created.")
+    if await pr_gate(ctx, item.branch, f"Continue {item.branch}", delete_branch=prod is not None):
+        await tag_squash(ctx, expected)
+        if not prod and item.branch.startswith(core.BRANCH_PREFIX):
+            await offer_branch_delete(ctx, item.branch[len(core.BRANCH_PREFIX):])
 
 
 # --- the actions -------------------------------------------------------------
@@ -369,15 +525,15 @@ async def new_channel(ctx: Ctx) -> None:
     cid = await ctx.ask("New channel", "Id", validate=check)
     if cid is None:
         return
-    await update_main_elsewhere(ctx)
+    await fetch_origin(ctx, f"The channel is cut from {ORIGIN_MAIN}.")
     branch = branch_of(cid)
-    cmds: list[Cmd] = [["git", "branch", branch, MAIN]]
+    cmds: list[Cmd] = [["git", "branch", "--no-track", branch, ORIGIN_MAIN]]
     if not await ctx.confirm(f"Create {branch}", cmds,
                              note="The branch serves both apps; each gets its versions with Bump channel."):
         return
     if not await run_all(ctx, cmds):
         raise Stop("Branch not created.")
-    push = ["git", "push", "-u", "origin", branch]
+    push = git_push(branch, upstream=True)
     if await ctx.confirm(f"Push {branch}?", [push], sensitive=True):
         await ctx.execute(push)
 
@@ -432,7 +588,17 @@ def _check_live_version(prod: Product, text: str, snap: repo.Snapshot) -> str | 
 
 
 async def bump_live(ctx: Ctx) -> None:
+    """A new live version through a pull request, or the continuation of an
+    unfinished one (an open pull request, a merged bump without its tag)."""
     prod = prod_of(ctx)
+    pending = ctx.snap.pending
+    if pending:
+        options = [p.label for p in pending] + [UNFINISHED_NEW]
+        choice = await ctx.pick("Unfinished release work", options)
+        if choice is None:
+            return
+        if choice != UNFINISHED_NEW:
+            return await resume(ctx, pending[options.index(choice)])
     live = view_of(ctx).live
     proposal = core.live_proposal(live.latest if live else None,
                                   live.newest_tag if live else None)
@@ -440,13 +606,7 @@ async def bump_live(ctx: Ctx) -> None:
                          validate=lambda t: _check_live_version(prod, t, ctx.snap))
     if text is None:
         return
-    start = await switch_to(ctx, MAIN, "bumping live")
-    if start is None:
-        return
-    try:
-        await bump(ctx, prod, Version.parse(text), MAIN)
-    finally:
-        await switch_back(ctx, start, MAIN)
+    await release_pr(ctx, prod, Version.parse(text))
 
 
 def _selected_draft(ctx: Ctx) -> core.Draft:
@@ -520,7 +680,7 @@ async def publish(ctx: Ctx) -> None:
     if draft.kind == DATA:
         # Data releases are never "latest": the repository's latest release is the apps' business.
         cmd = ["gh", "release", "edit", tag, "--draft=false", "--prerelease=false", "--latest=false"]
-        note = "Full release; CI points data.stable in channels.json at it."
+        note = "Full release; CI points data.stable in the feed (channels branch) at it."
         if await ctx.confirm(f"Publish {tag}", [cmd], note=note, sensitive=True):
             await ctx.execute(cmd)
         return
@@ -536,76 +696,149 @@ async def publish(ctx: Ctx) -> None:
         if live and v <= live:
             raise Stop(f"{tag} is not above the latest release {prod.tag(live)}.")
         cmd = ["gh", "release", "edit", tag, "--draft=false", "--prerelease=false"]
-        note = ("Full release; CI points stable in channels.json at it. "
+        note = ("Full release; CI points stable in the feed (channels branch) at it. "
                 "Not forced to 'latest': the updaters read tags, not GitHub's latest.")
     if await ctx.confirm(f"Publish {tag}", [cmd], note=note, sensitive=True):
         await ctx.execute(cmd)
 
 
 async def sync(ctx: Ctx) -> None:
+    """Merge origin/main into the channel branch (the branch is not protected)."""
     row = _need_row(ctx)
     _need_branch(row)
     branch = branch_of(row.id)
     if repo.is_dirty(ctx.root):
         dirty_stop(ctx, "Working tree has changes; commit or stash first.")
-    await update_main_elsewhere(ctx)
+    await fetch_origin(ctx, f"The channel gets {ORIGIN_MAIN} merged in.")
     start = await switch_to(ctx, branch, "syncing")
     if start is None:
         return
     try:
-        merged = await merge(ctx, MAIN, branch, sensitive=False)
-        if merged:
+        if await merge(ctx, ORIGIN_MAIN, branch):
             await offer_push(ctx, branch)
     finally:
         await switch_back(ctx, start, branch)
 
 
 async def finalize(ctx: Ctx) -> None:
-    """Merge the channel into main, then offer Bump live for each app the
-    channel has versions of (the active one first)."""
+    """Bring a channel to main: the live version bump of every app the channel
+    carried is committed on the channel branch as its last commits, the branch
+    is pushed and a pull request to main opened; after the user's yes it is
+    merged by squash, and each app's tag goes on the squash commit.
+
+    One pull request and one merge do everything (the alternative, the channel
+    merge first and one bump pull request per app, costs a CI run each and
+    leaves a main that carries the channel's pre-release version in between).
+    The checks of the pull request run on exactly what is released. After a
+    squash merge the branch is not an ancestor of main: the channel ends here,
+    its branch is offered for deletion.
+    """
     row = _need_row(ctx)
     _need_branch(row)
+    snap = ctx.snap
     branch = branch_of(row.id)
-    ref = branch if row.local else f"origin/{branch}"
-    start = await switch_to(ctx, MAIN, "finalizing")
+    if repo.is_dirty(ctx.root):
+        dirty_stop(ctx, "Working tree has changes; commit or stash first.")
+
+    open_pr = next((p for p in snap.pending if p.kind == "pr" and p.branch == branch), None)
+    if open_pr:
+        ctx.note(f"A pull request of {branch} is open already (#{open_pr.number}); continuing it.")
+        return await resume(ctx, open_pr)
+
+    await fetch_origin(ctx, f"{branch} and {ORIGIN_MAIN} should be current.")
+
+    # The apps the channel carried, the active one first; each needs a live version.
+    carried: list[tuple[Product, Version]] = []
+    for key in [ctx.product, *(k for k in core.PRODUCTS if k != ctx.product)]:
+        prod = core.PRODUCTS[key]
+        view = snap.view(key)
+        own = next((r for r in view.rows if r.id == row.id), None)
+        if own is None or own.newest is None:
+            continue
+        proposal = core.next_live(view.live.latest if view.live else None, own.newest)
+        text = await ctx.ask(f"Finalize {row.id}: {prod.title} live version", "Version (Esc = cancel the finalize)",
+                             str(proposal), validate=lambda t, p=prod: _check_live_version(p, t, snap))
+        if text is None:
+            return
+        carried.append((prod, Version.parse(text)))
+    if not carried:
+        ctx.note(f"{row.id} carries no app version: the pull request brings the branch to main without a bump.")
+
+    start = await switch_to(ctx, branch, "finalizing")
     if start is None:
         return
     try:
-        await update_main_here(ctx)
-        if not await merge(ctx, ref, MAIN, sensitive=True):
+        if repo.ref_exists(ctx.root, f"refs/remotes/origin/{branch}"):
+            await pull(ctx, branch)
+        cmds: list[Cmd] = []
+        files_all: list[str] = []
+        for prod, version in carried:
+            try:
+                new = core.bump_texts(prod, _read_version_files(ctx, prod, branch), str(version))
+            except ValueError as e:
+                raise Stop(str(e))
+            files = core.version_files(prod)
+            files_all += files
+            cmds += [FileWrite(p, t, f"version {version}") for p, t in new.items()]
+            cmds += [["git", "add", *files], ["git", "commit", "-q", "-m", core.commit_message(prod, version)]]
+        has_origin = repo.ref_exists(ctx.root, f"refs/remotes/origin/{branch}")
+        push_at = len(cmds)
+        cmds.append(git_push(branch, upstream=not has_origin))
+        title = core.finalize_title(row.id, carried)
+        cmds.append(["gh", "pr", "create", "--base", MAIN, "--head", branch, "--title", title,
+                     "--body", core.finalize_body(row.id, carried)])
+        note = (f"The version bump(s) become the last commit(s) of {branch}; the pull request to main carries them "
+                "together with the channel's work. Main itself is not pushed to.\n"
+                "Next: the checks, then your yes to the squash merge, then the tags on the squash commit. "
+                "A squash merge leaves the branch outside main's history; the channel ends here.")
+        ab = repo.ahead_behind(ctx.root, branch, ORIGIN_MAIN)
+        if ab and ab[1]:
+            note += (f"\nThe branch is {ab[1]} commit(s) behind {ORIGIN_MAIN}: if the pull request cannot merge "
+                     "cleanly or the checks want an up-to-date branch, run Sync first.")
+        if not await ctx.confirm(f"Finalize {row.id}: bump, push, pull request", cmds, note=note, sensitive=True):
             return
-        order = [ctx.product, *(k for k in core.PRODUCTS if k != ctx.product)]
-        bumped = False
-        for key in order:
-            prod = core.PRODUCTS[key]
-            view = ctx.snap.view(key)
-            own = next((r for r in view.rows if r.id == row.id), None)
-            if key != ctx.product and (own is None or own.newest is None):
-                continue  # the channel never covered this app
-            proposal = core.next_live(view.live.latest if view.live else None,
-                                      own.newest if own else None)
-            text = await ctx.ask(f"Bump {prod.title} live?", "Version (Esc = not now)",
-                                 str(proposal),
-                                 validate=lambda t, p=prod: _check_live_version(p, t, ctx.snap))
-            if text is None:
+        for i, cmd in enumerate(cmds):
+            ok, _ = await ctx.execute(cmd)
+            if ok:
                 continue
-            await bump(ctx, prod, Version.parse(text), MAIN)
-            bumped = True
-        if not bumped:
-            await offer_push(ctx, MAIN)
-        else:
-            ctx.note(f"Next: remove the {row.id} channel (per app) once the releases are published.")
+            if i < push_at:
+                await ctx.execute(["git", "checkout", "HEAD", "--", *files_all])
+                raise Stop(f"Bump failed; commits already made stay on {branch} (git log), the rest was undone.")
+            if i == push_at:
+                raise Stop(f"Push of {branch} failed; the bump commits are local. Fix the cause and finalize again "
+                           "(the bump will be offered again, so drop the local commits first if it refuses).")
+            raise Stop(f"{branch} is pushed but the pull request was not created: gh pr create --base main "
+                       f"--head {branch}. Finalize continues it once it exists.")
     finally:
-        await switch_back(ctx, start, MAIN)
+        await switch_back(ctx, start, branch)
+    ctx.note(("[dry-run] " if ctx.dry_run else "") + f"Pull request for {branch} created.", "green")
+    if not await pr_gate(ctx, branch, f"Finalize {row.id}", delete_branch=False):
+        return
+    await tag_squash(ctx, carried)
+    await offer_branch_delete(ctx, row.id)
+    ctx.note(f"The {row.id} channel is finished. Next: publish the drafts, then remove the channel (per app).")
 
 
 async def remove_channel(ctx: Ctx) -> None:
+    """Take the channel out of the feed. The feed is written by CI only: the
+    `channels.yml` workflow does it, this starts that run."""
     prod = prod_of(ctx)
     row = _need_row(ctx)
     if not row.listed:
         raise Stop(f"{row.id} is not in channels.json for the {prod.title}.")
-    await edit_channels_on_main(ctx, lambda doc: core.remove_channel(doc, prod.key, row.id),
-                                f"Remove the {row.id} channel of the {prod.title}")
+    cmd = ["gh", "workflow", "run", "channels.yml", "-f", f"product={prod.key}", "-f", f"channel={row.id}",
+           "-f", "action=remove"]
+    note = (f"Starts the Channels workflow, which removes {row.id} from the {prod.title}'s list in channels.json "
+            "on the channels branch. The feed changes when that run is through; the testers fall back to stable "
+            "at their next check.")
+    since = dispatch_since()
+    if not await ctx.confirm(f"Remove the {row.id} channel of the {prod.title}", [cmd], note=note, sensitive=True):
+        return
+    ok, _ = await ctx.execute(cmd)
+    if not ok:
+        raise Stop("The workflow was not started.")
+    ctx.note("Started. The feed changes when the run is through (r refreshes the view afterwards).")
+    await offer_watch_dispatch(ctx, "channels.yml", f"channels.yml: remove {row.id} ({prod.key})", since)
     others = [k for k in core.PRODUCTS if k != prod.key
               and core.find_channel(ctx.snap.channels_doc, k, row.id)]
     if others:
@@ -615,23 +848,27 @@ async def remove_channel(ctx: Ctx) -> None:
 
 
 async def offer_branch_delete(ctx: Ctx, cid: str) -> None:
-    """Delete channel/<id> locally / on origin, each only when merged into main."""
+    """Delete channel/<id> locally / on origin, each only when it is merged
+    into main: an ancestor, or (squash merge) the head of a merged pull request.
+    Channel branches are not under the main ruleset."""
     branch = branch_of(cid)
     root = ctx.root
     if repo.ref_exists(root, f"refs/heads/{branch}"):
         if repo.current_branch(root) == branch:
             ctx.note(f"{branch} is checked out; not deleting it.")
-        elif not repo.is_ancestor(root, branch, MAIN):
+        elif not repo.branch_merged(root, branch, branch):
             ctx.note(f"{branch} is not merged into main; kept.")
         else:
-            cmd = ["git", "branch", "-d", branch]
-            if await ctx.confirm(f"Delete local {branch}?", [cmd]):
+            force = not repo.is_ancestor(root, branch, ORIGIN_MAIN)
+            cmd = ["git", "branch", "-D" if force else "-d", branch]
+            if await ctx.confirm(f"Delete local {branch}?", [cmd],
+                                 note="Squash-merged: its content is on main under another commit." if force else ""):
                 await ctx.execute(cmd)
     if repo.ref_exists(root, f"refs/remotes/origin/{branch}"):
-        if not repo.is_ancestor(root, f"origin/{branch}", "origin/main"):
+        if not repo.branch_merged(root, f"origin/{branch}", branch):
             ctx.note(f"origin/{branch} is not merged into origin/main; kept.")
         else:
-            cmd = ["git", "push", "origin", "--delete", branch]
+            cmd = git_push(branch, delete=True)
             if await ctx.confirm(f"Delete {branch} on origin?", [cmd], sensitive=True):
                 await ctx.execute(cmd)
 
@@ -722,7 +959,7 @@ async def data_release(ctx: Ctx) -> None:
 
     previous = core.stable_of(snap.channels_doc, DATA)
     if previous and previous not in snap.releases:
-        raise Stop(f"channels.json names {previous} as data.stable, but GitHub has no such release.")
+        raise Stop(f"the feed names {previous} as data.stable, but GitHub has no such release.")
     if previous == tag:
         raise Stop(f"{tag} is the current data.stable; use a higher n.")
 
@@ -740,7 +977,7 @@ async def data_release(ctx: Ctx) -> None:
     cmds.append(pack)
     note = (f"Builds {tag}" + (f" on top of {previous} (data.stable): its manifest and thumbs-update.zip are "
                               "downloaded first, the delta is what is new against it." if previous else
-                              ": no data.stable in channels.json, so this is a first release holding every picture.") +
+                              ": no data.stable in the feed, so this is a first release holding every picture.") +
             f"\nOutput: {out_dir}. Nothing is created on GitHub yet.")
     if not await ctx.confirm(f"Build {tag}", cmds, note=note):
         return

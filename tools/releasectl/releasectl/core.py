@@ -12,7 +12,6 @@ data releases have their own small helpers further down.
 
 from __future__ import annotations
 
-import copy
 import json
 import re
 from dataclasses import dataclass, field
@@ -25,7 +24,14 @@ VERSION_RE = re.compile(rf"^{_NUM}\.{_NUM}\.{_NUM}(?:-({_ID})\.{_NUM})?$")
 CHANNEL_ID_RE = re.compile(rf"^{_ID}$")
 
 MAIN = "main"
+ORIGIN_MAIN = "origin/main"  # what every release step is based on: the local main is never touched
 BRANCH_PREFIX = "channel/"
+RELEASE_PREFIX = "release/"  # the branch of a live version bump: release/<app>-v<version>
+# The feed lives on a branch of its own that only CI writes.
+CHANNELS_BRANCH = "channels"
+CHANNELS_REF = f"origin/{CHANNELS_BRANCH}"
+CHANNELS_FILE = "channels.json"
+DEFAULT_BRANCHES = (MAIN, "master", f"refs/heads/{MAIN}")
 
 
 # --- versions ---------------------------------------------------------------
@@ -184,16 +190,43 @@ def product_of_tag(tag: str) -> Product | None:
 
 # --- bump (the version in the product's files) --------------------------------
 
-# A live version is tagged only on main, a channel version only on channel/<id>.
+# A channel version is committed and tagged on channel/<id>. A live version is
+# never committed on main by the tool: it goes through a pull request (the branch
+# `release/<app>-v<version>`, or the channel branch itself when a channel is
+# finalized) and is tagged on the squash commit afterwards.
 
 
 def branch_guard(version: Version, branch: str) -> str | None:
-    if not version.is_channel and branch != MAIN:
-        return f"a live version is tagged on main, this is '{branch}'"
-    if version.is_channel and branch != branch_of(version.channel):
+    """The check for a direct commit (channel versions only)."""
+    if not version.is_channel:
+        return "a live version goes through a pull request, never a direct commit"
+    if branch != branch_of(version.channel):
         return (f"a {version.channel} version is tagged on "
                 f"{branch_of(version.channel)}, this is '{branch}'")
     return None
+
+
+def release_branch(prod: Product, version: Version) -> str:
+    return f"{RELEASE_PREFIX}{prod.key}-v{version}"
+
+
+def parse_release_branch(branch: str) -> tuple[str, Version] | None:
+    """`release/app-v1.0.0` -> ("app", 1.0.0); anything else None."""
+    if not branch.startswith(RELEASE_PREFIX):
+        return None
+    for key, prod in PRODUCTS.items():
+        head = f"{RELEASE_PREFIX}{key}-v"
+        if branch.startswith(head):
+            v = Version.parse(branch[len(head):], v_prefix=False)
+            return (key, v) if v and not v.is_channel else None
+    return None
+
+
+def is_default_branch(ref: str) -> bool:
+    """main, in any spelling a push could carry (the tool never pushes there)."""
+    ref = ref.lstrip("+")
+    return (ref in DEFAULT_BRANCHES or ref.endswith(f":{MAIN}") or ref.endswith(f":refs/heads/{MAIN}")
+            or ref in ("HEAD", f"origin/{MAIN}"))
 
 
 _CARGO_VERSION_RE = re.compile(r'^version = "(.*)"$', re.M)
@@ -225,6 +258,23 @@ def set_package_json(text: str, current: str, new: str, package: str = "") -> st
 
 
 _SETTERS = {CARGO: set_cargo_toml, LOCK: set_cargo_lock, JSON: set_package_json}
+
+
+def read_version(kind: str, text: str, package: str) -> str | None:
+    """The version one file carries (the counterpart of the setters)."""
+    if kind == CARGO:
+        return cargo_toml_version(text)
+    if kind == LOCK:
+        m = re.search(rf'^name = "{re.escape(package)}"\nversion = "(.*)"$', text, re.M)
+    else:
+        m = re.search(r'^  "version": "(.*)",$', text, re.M)
+    return m.group(1) if m else None
+
+
+def files_not_carrying(prod: Product, texts: dict[str, str | None], version: str) -> list[str]:
+    """The files of `prod` (path -> text, None = missing) that do not carry exactly `version`."""
+    return [path for path, kind in prod.files
+            if texts.get(path) is None or read_version(kind, texts[path], prod.cargo_package) != version]
 
 
 def version_files(prod: Product) -> list[str]:
@@ -261,15 +311,32 @@ def tag_message(prod: Product, version: Version) -> str:
     return f"Quartermaster {prod.title} {version}"
 
 
+def pr_body_bump(prod: Product, version: Version) -> str:
+    files = ', '.join(f'`{p}`' for p in version_files(prod))
+    return (f"Bump the {prod.title} to {version} in {files}." + "\n\n"
+            f"After the squash merge releasectl tags `{prod.tag(version)}` on the merge commit; "
+            f"that tag starts `{prod.workflow}`." + "\n")
+
+
+def finalize_title(channel_id: str, versions: list[tuple[Product, Version]]) -> str:
+    what = ", ".join(f"{p.title} {v}" for p, v in versions)
+    return f"Finalize channel {channel_id}" + (f": {what}" if what else "")
+
+
+def finalize_body(channel_id: str, versions: list[tuple[Product, Version]]) -> str:
+    lines = [f"Brings the `{branch_of(channel_id)}` branch to main (squash merge)."]
+    for p, v in versions:
+        lines.append(f"- {p.title}: version bumped to {v} on the branch, tagged `{p.tag(v)}` after the merge.")
+    lines.append("\nThe channel ends here; its branch is not an ancestor of main after a squash merge.")
+    return "\n".join(lines) + "\n"
+
+
 # --- channels.json -----------------------------------------------------------
+# On the `channels` branch (file `channels.json` at its root), written only by CI:
 # { "app":       { "stable": "app-v1.0.0", "channels": [{ "id": "beta", "tag": "app-v1.1.0-beta.1" }] },
 #   "companion": { the same },
 #   "data":      { "stable": "data-4.10.2.12913470-1" } }
-# CI writes it when a release is published; releasectl only removes a channel.
-
-_TOP_ORDER = ("app", "companion", "data")
-_SECTION_ORDER = ("stable", "channels")
-_ENTRY_ORDER = ("id", "tag")
+# releasectl only reads it; a channel is removed through the `channels.yml` workflow.
 
 
 def load_channels(text: str | None) -> dict:
@@ -296,30 +363,6 @@ def load_channels(text: str | None) -> dict:
     return doc
 
 
-def dump_channels(doc: dict) -> str:
-    """Serialize with 2-space indent and a trailing newline; products first
-    (app, companion, data), `stable` before `channels`, `id` before `tag`."""
-    out: dict = {}
-    for key in (*_TOP_ORDER, *(k for k in doc if k not in _TOP_ORDER)):
-        if key not in doc:
-            continue
-        section = doc[key]
-        if not isinstance(section, dict):
-            out[key] = section
-            continue
-        ordered = {k: section[k] for k in _SECTION_ORDER if k in section}
-        ordered.update({k: v for k, v in section.items() if k not in _SECTION_ORDER})
-        if isinstance(ordered.get("channels"), list):
-            entries = []
-            for entry in ordered["channels"]:
-                e = {k: entry[k] for k in _ENTRY_ORDER if k in entry}
-                e.update({k: v for k, v in entry.items() if k not in _ENTRY_ORDER})
-                entries.append(e)
-            ordered["channels"] = entries
-        out[key] = ordered
-    return json.dumps(out, indent=2, ensure_ascii=False) + "\n"
-
-
 def channel_entries(doc: dict, key: str) -> list[dict]:
     return (doc.get(key) or {}).get("channels") or []
 
@@ -333,13 +376,6 @@ def stable_of(doc: dict, key: str) -> str | None:
 def find_channel(doc: dict, key: str, channel_id: str) -> dict | None:
     return next((e for e in channel_entries(doc, key) if e["id"] == channel_id), None)
 
-
-def remove_channel(doc: dict, key: str, channel_id: str) -> dict:
-    if find_channel(doc, key, channel_id) is None:
-        raise KeyError(channel_id)
-    new = copy.deepcopy(doc)
-    new[key]["channels"] = [e for e in new[key]["channels"] if e["id"] != channel_id]
-    return new
 
 
 # --- overview ----------------------------------------------------------------
@@ -678,3 +714,124 @@ def parse_run(data: dict, now) -> RunView:
 
 def duration(seconds: int | None) -> str:
     return "" if seconds is None else f"{seconds // 60}:{seconds % 60:02d}"
+
+
+# --- pull requests -----------------------------------------------------------
+
+# What a status check rollup entry of `gh pr view --json statusCheckRollup` can say.
+_CHECK_PASS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
+_CHECK_FAIL = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+
+
+@dataclass
+class PrView:
+    number: int
+    state: str  # OPEN / MERGED / CLOSED
+    url: str
+    title: str
+    merge_state: str  # mergeStateStatus: CLEAN, BLOCKED, BEHIND, DIRTY, UNSTABLE, ...
+    passed: int = 0
+    failed: int = 0
+    pending: int = 0
+    failing: list[str] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return self.passed + self.failed + self.pending
+
+    @property
+    def checks_line(self) -> str:
+        if not self.total:
+            return "no checks reported"
+        parts = [f"{self.passed} passed"]
+        if self.pending:
+            parts.append(f"{self.pending} pending")
+        if self.failed:
+            parts.append(f"{self.failed} failed")
+        return ", ".join(parts)
+
+
+def parse_pr(data: dict) -> PrView:
+    """`gh pr view <branch> --json number,state,url,title,mergeStateStatus,statusCheckRollup`."""
+    view = PrView(number=int(data.get("number", 0)), state=str(data.get("state", "")).upper(),
+                  url=str(data.get("url", "")), title=str(data.get("title", "")),
+                  merge_state=str(data.get("mergeStateStatus") or "").upper())
+    for item in data.get("statusCheckRollup") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("context") or "?")
+        if "status" in item:  # a check run: only a completed one has a verdict
+            verdict = str(item.get("conclusion") or "").upper() if str(item["status"]).upper() == "COMPLETED" else ""
+        else:  # a commit status
+            verdict = str(item.get("state") or "").upper()
+        if verdict in _CHECK_PASS:
+            view.passed += 1
+        elif verdict in _CHECK_FAIL:
+            view.failed += 1
+            view.failing.append(name)
+        else:
+            view.pending += 1
+    return view
+
+
+def pr_summary(view: PrView) -> str:
+    text = f"PR #{view.number} {view.state.lower()}: {view.checks_line}"
+    if view.state == "OPEN" and view.merge_state:
+        text += f", merge state {view.merge_state.lower()}"
+    if view.failing:
+        text += f" (failing: {', '.join(view.failing)})"
+    return text + f"  {view.url}"
+
+
+# --- pending releases: what a leave-and-come-back has to pick up --------------
+
+# kind: "pr" (an open pull request), "branch" (a pushed release branch without
+# a pull request), "untagged" (a bump merged to main whose tag is missing).
+
+
+@dataclass(frozen=True)
+class Pending:
+    kind: str
+    product: str | None = None  # key; None for a channel's pull request (it may carry both apps)
+    version: Version | None = None
+    branch: str | None = None
+    number: int | None = None
+    commit: str | None = None  # untagged: the commit that introduced the version
+
+    @property
+    def label(self) -> str:
+        if self.kind == "untagged":
+            prod = PRODUCTS[self.product]
+            return f"{prod.title} {self.version} is on main ({self.commit[:8]}) but {prod.tag(self.version)} is not tagged"
+        if self.kind == "branch":
+            return f"{self.branch} is pushed, no pull request yet"
+        return f"pull request #{self.number} ({self.branch}) is open: merge it, then tag"
+
+
+def build_pending(prs: list[dict] | None, remote_branches: set[str],
+                  untagged: list[Pending]) -> list[Pending]:
+    """Open release / channel pull requests, pushed `release/*` branches no
+    pull request exists for, and the untagged bumps.
+
+    `prs` is `gh pr list --state all --json number,state,headRefName,baseRefName`
+    (None: GitHub not reachable, the pull request part is left out).
+    """
+    out: list[Pending] = []
+    newest: dict[str, dict] = {}
+    for pr in prs or []:
+        head = pr.get("headRefName", "")
+        if head not in newest or pr.get("number", 0) > newest[head].get("number", 0):
+            newest[head] = pr
+    for head, pr in sorted(newest.items()):
+        if str(pr.get("state", "")).upper() != "OPEN" or pr.get("baseRefName", MAIN) != MAIN:
+            continue
+        parsed = parse_release_branch(head)
+        if parsed or head.startswith(BRANCH_PREFIX):
+            out.append(Pending("pr", parsed[0] if parsed else None, parsed[1] if parsed else None,
+                               head, pr.get("number")))
+    if prs is not None:
+        for branch in sorted(remote_branches):
+            parsed = parse_release_branch(branch)
+            if parsed and branch not in newest:
+                out.append(Pending("branch", parsed[0], parsed[1], branch))
+    return out + untagged
