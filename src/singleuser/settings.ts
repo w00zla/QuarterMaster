@@ -10,6 +10,10 @@ const settingsSchema = z.object({
   gameDir: z.string().min(1).nullable().default(null),
   /** The automatic update of app and data. */
   autoUpdate: z.boolean().default(true),
+  /** The user's own UEX key (plain text in the settings file); null = none: then no UEX request is ever made. */
+  uexKey: z.string().transform((s) => s.trim()).transform((s) => (s === '' ? null : s)).nullable().default(null),
+  /** Minutes between two UEX pulls. */
+  uexIntervalMinutes: z.union([z.literal(15), z.literal(30), z.literal(60)]).default(15),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;
@@ -29,7 +33,7 @@ export interface SettingsStore {
 /**
  * Reads the file once. A missing file is the defaults; a broken one (not JSON, wrong types) is the defaults and one
  * logged warning. `QM_GAME_DIR` overrides `gameDir`; `QM_AUTO_UPDATE=0` overrides `autoUpdate` to off (anything else
- * leaves it to the file).
+ * leaves it to the file); `QM_UEX_KEY` overrides `uexKey` (trimmed; empty = not overridden).
  */
 export function createSettingsStore(file: string, env: Record<string, string | undefined>, log: (message: string) => void): SettingsStore {
   let stored: Settings = settingsSchema.parse({});
@@ -50,10 +54,13 @@ export function createSettingsStore(file: string, env: Record<string, string | u
   const overrides: Partial<Settings> = {};
   if (env.QM_GAME_DIR) overrides.gameDir = env.QM_GAME_DIR;
   if (env.QM_AUTO_UPDATE === '0') overrides.autoUpdate = false;
+  if (env.QM_UEX_KEY?.trim()) overrides.uexKey = env.QM_UEX_KEY.trim();
 
   return {
     get: () => ({ ...stored, ...overrides }),
-    overridden: () => ({ gameDir: 'gameDir' in overrides, autoUpdate: 'autoUpdate' in overrides }),
+    overridden: () => ({
+      gameDir: 'gameDir' in overrides, autoUpdate: 'autoUpdate' in overrides, uexKey: 'uexKey' in overrides, uexIntervalMinutes: false,
+    }),
     update(patch) {
       const next = settingsSchema.parse({ ...stored, ...patch });
       mkdirSync(dirname(file), { recursive: true });

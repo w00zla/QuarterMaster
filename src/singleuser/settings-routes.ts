@@ -29,6 +29,8 @@ export function languagePackState(loaded: LoadedPack, gameDir: string | null): L
 const updateSchema = z.strictObject({
   gameDir: z.string().min(1).nullable().optional(),
   autoUpdate: z.boolean().optional(),
+  uexKey: z.string().max(512).nullable().optional(),
+  uexIntervalMinutes: z.union([z.literal(15), z.literal(30), z.literal(60)]).optional(),
 });
 
 export interface SettingsRoutesDeps {
@@ -36,14 +38,18 @@ export interface SettingsRoutesDeps {
   loaded: LoadedPack;
   /** Called after the game folder setting changed (the pairing file is rewritten). */
   onGameDirChange: (gameDir: string | null) => void;
+  /** Called after the UEX key or interval changed (the puller reconfigures). */
+  onUexChange: () => void;
+  /** The app's version (package.json). */
+  appVersion: string;
 }
 
 export function mountSettingsRoutes(deps: SettingsRoutesDeps): (api: ApiApp) => void {
   const { store, loaded } = deps;
   let gameFolder: GameFolderState = describeGameFolder(store.get().gameDir);
   const state = (): LocalSettingsState => {
-    const settings = store.get();
-    return { ...settings, overridden: store.overridden(), gameFolder, languagePack: languagePackState(loaded, settings.gameDir) };
+    const { uexKey, ...settings } = store.get();
+    return { ...settings, uexKeySet: uexKey !== null, appVersion: deps.appVersion, overridden: store.overridden(), gameFolder, languagePack: languagePackState(loaded, settings.gameDir) };
   };
 
   return (api) => {
@@ -60,13 +66,17 @@ export function mountSettingsRoutes(deps: SettingsRoutesDeps): (api: ApiApp) => 
         const check = checkGameFolder(patch.gameDir);
         if (!check.ok) return c.json({ error: 'gameFolderInvalid', problem: check.problem }, 422);
       }
-      const before = store.get().gameDir;
+      const before = store.get();
       const next = store.update({
         ...(patch.gameDir !== undefined ? { gameDir: patch.gameDir } : {}),
         ...(patch.autoUpdate !== undefined ? { autoUpdate: patch.autoUpdate } : {}),
+        // Trimmed and empty = none by the store's schema
+        ...(patch.uexKey !== undefined ? { uexKey: patch.uexKey ?? '' } : {}),
+        ...(patch.uexIntervalMinutes !== undefined ? { uexIntervalMinutes: patch.uexIntervalMinutes } : {}),
       });
       if (patch.gameDir !== undefined) gameFolder = describeGameFolder(next.gameDir);
-      if (next.gameDir !== before) deps.onGameDirChange(next.gameDir);
+      if (next.gameDir !== before.gameDir) deps.onGameDirChange(next.gameDir);
+      if (next.uexKey !== before.uexKey || next.uexIntervalMinutes !== before.uexIntervalMinutes) deps.onUexChange();
       return c.json(state());
     });
   };

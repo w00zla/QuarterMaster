@@ -28,8 +28,15 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   user check (the identity's `authenticate`; online 401 for every route, unknown ones too), JSON-only
   writes (415, `DELETE` included) and a 16 KB body limit (a feature's image upload: its own, see
   "Features and privileges").
-- `GET /api/capabilities` → `Capabilities` `{ login: 'discord' | 'none', orgs, uex }` (`api-types.ts`): what this
-  server offers, the value `WebappConfig.capabilities` of the composition root. The one API route answered without
+- `GET /api/capabilities` → `Capabilities` `{ login: 'discord' | 'none', orgs, uex, game }` (`api-types.ts`): what this
+  server offers (`ServerCapabilities`: `WebappConfig.capabilities` of the composition root, **a value or a function** returning it,
+  asked at every request: the singleuser variant's `uex` follows the user's key; online passes a value; `orgs` is read once, when
+  the app is built, because it decides which routes are mounted, so it cannot change at runtime) and the installed game data:
+  `game` = `{ label, build }` of the latest catalog import (`label` like `4.10.2.12913470`, may be null for an old import), `null`
+  while no catalog is installed. It lives here because both variants' top bars need it once at load, the route is public and
+  already asked first, and it costs no extra request; the query (`game-version.ts`) is cached for 5 seconds and shared by concurrent
+  requests, so a data pack install shows without a restart and the public route is no query per request. A failing query answers
+  the last value (or null). The one API route answered without
   a user (the SPA and the companion ask before they have one); it sits before the user check, behind the
   per-address rate limit, `no-store`. Only this exact path and `GET`. `orgs: false` also leaves the org routes
   (`/api/orgs/…`) unmounted (`registerRoutes`' option; the API's 404). Every other route that takes a guild id
@@ -86,7 +93,8 @@ yields no usable session); 14 days idle, 30 days absolute; a login replaces this
 validation re-creates a missing `app_user` row (sessions have no FK to it: the roster cleanup deletes
 `app_user` once it holds no data); expired rows deleted hourly. The Discord profile (name, avatar) lives in
 the session only, refreshed by each login; `/api/me` returns it for every user, also without any org
-(default avatar from the ID). Rights are never cached: `me.ts` reads the roster per request (active member
+(default avatar from the ID). `MeResponse.name`, `username` and `avatarUrl` are nullable: `null` for a user without a Discord profile
+(`Session.noProfile`, the singleuser variant's local user); a Discord user's answer is unchanged. Rights are never cached: `me.ts` reads the roster per request (active member
 rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deactivate its members).
 
 ### Features (`routes.ts`; the contract with all paths and shapes in `api-types.ts`)

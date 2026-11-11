@@ -12,9 +12,10 @@ import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from 'hono-rate-limiter';
 import type { Db } from '../db/client.ts';
-import type { Capabilities, CompanionInfo } from './api-types.ts';
+import type { Capabilities, CompanionInfo, ServerCapabilities } from './api-types.ts';
 import { PLATFORMS, UPDATE_FEED, companionRelease, downloadPath, updateFeed } from './companion.ts';
 import { BLOB_BODY_LIMIT, BLOB_ROUTE } from './features.ts';
+import { gameVersionReader } from './game-version.ts';
 import type { Identity, IdentityHost } from './identity.ts';
 import { clientAddress, rateKey } from './ip.ts';
 import { getMe } from './me.ts';
@@ -36,8 +37,10 @@ export interface WebappConfig {
   thumbsDir?: string | null;
   // Per window: auth and apiIp per client address (IPv6 per /64), apiUser per logged-in user
   rateLimit?: { windowMs: number; auth: number; apiIp: number; apiUser: number };
-  // What this server offers (GET /api/capabilities); `orgs` also decides whether the org routes exist
-  capabilities: Capabilities;
+  // What this server offers (GET /api/capabilities): a value, or a function asked at every request (the singleuser variant:
+  // UEX follows the user's key). `orgs` is read once, when the app is built (it also decides whether the org routes
+  // exist), so it cannot change at runtime.
+  capabilities: ServerCapabilities | (() => ServerCapabilities);
   // The Host header values a request may carry (e.g. 127.0.0.1:28460), lower case; any other request is refused (421).
   // Against DNS rebinding: a page whose domain was re-pointed to this machine is same-origin to the browser. A host of
   // the list that is not the origin's own is sent to the origin (GET pages only). Unset = no check (online: Caddy
@@ -137,7 +140,9 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
   identity.mountRoutes(app, host);
 
   // What this server offers: before the user check (the SPA asks before it has a session)
-  app.get('/api/capabilities', (c) => c.json(config.capabilities satisfies Capabilities));
+  const capabilities = typeof config.capabilities === 'function' ? config.capabilities : () => config.capabilities as ServerCapabilities;
+  const gameVersion = gameVersionReader(db);
+  app.get('/api/capabilities', async (c) => c.json({ ...capabilities(), game: await gameVersion() } satisfies Capabilities));
 
   // --- API --------------------------------------------------------------------------------
   const api = new Hono<Env>();
@@ -158,7 +163,7 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
   api.use('*', (c, next) => (BLOB_ROUTE.test(c.req.path) ? blobBody : smallBody)(c, next));
 
   api.get('/me', async (c) => c.json(await getMe(db, c.get('session'))));
-  registerRoutes(api, db, thumbs, { orgs: config.capabilities.orgs });
+  registerRoutes(api, db, thumbs, { orgs: capabilities().orgs });
 
   api.get('/companion', (c) => {
     const current = release();

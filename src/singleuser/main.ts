@@ -1,6 +1,6 @@
 // The singleuser variant: one local process serving the web app and its API on PGlite for one fixed user (the local
 // identity). Binds to 127.0.0.1 only. One process per data folder (PGlite has no second opener): docs/singleuser.md.
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +21,8 @@ import { pairingFile, removePairing, writePairing } from './pairing.ts';
 import { choosePort } from './port.ts';
 import { createSettingsStore, settingsFile } from './settings.ts';
 import { mountSettingsRoutes, type LoadedPack } from './settings-routes.ts';
+import { createUexPuller } from './uex.ts';
+import { mountUexRoutes } from './uex-routes.ts';
 
 const HOST = '127.0.0.1';
 
@@ -71,6 +73,9 @@ async function main() {
     // The data update: the only thing in this process that uses the network (the GitHub feed, or QM_DATA_FEED: a folder)
     const feed = process.env.QM_DATA_FEED ? folderFeed(process.env.QM_DATA_FEED) : githubFeed({ fetch });
     const updater = createDataUpdater({ connection, dataDir: data, thumbsDir: join(data, 'thumbs'), feed, log: (m) => log(m) });
+    // UEX, the only optional network use: the puller runs only while the user's key is set (docs/singleuser.md "UEX")
+    const uex = createUexPuller({ db, maintain: connection.maintain, settings: () => settings.get(), fetch, log: (m) => log(m) });
+    const appVersion = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
     // The Host guard (DNS rebinding): only the names of this machine, with the port
     const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
@@ -79,16 +84,20 @@ async function main() {
       trustProxy: false,
       distDir: fileURLToPath(new URL('../../webapp/dist', import.meta.url)),
       thumbsDir: thumbsDir(process.env, data),
-      capabilities: { login: 'none', orgs: false, uex: false },
+      // UEX follows the key at runtime; orgs never change
+      capabilities: () => ({ login: 'none', orgs: false, uex: settings.get().uexKey !== null }),
       // One local user: the limits must never bite (the mechanism stays)
       rateLimit: { windowMs: 60_000, auth: 100_000, apiIp: 100_000, apiUser: 100_000 },
       allowedHosts,
       mountApi: (api) => {
         mountDataRoutes(updater)(api);
+        mountUexRoutes(uex)(api);
         mountSettingsRoutes({
           store: settings,
           loaded: languagePack,
           onGameDirChange: (dir) => writePairingFile(origin, dir),
+          onUexChange: () => void uex.reconfigure(),
+          appVersion,
         })(api);
       },
     });
@@ -115,6 +124,9 @@ async function main() {
     // In the background: the start never waits for the network
     if (autoUpdate) void updater.check();
     else console.log('automatic update: off');
+    // Also in the background; without a key it requests nothing
+    void uex.start();
+    console.log(`uex: ${uex.state().phase === 'off' ? 'off (no key)' : `pull at start, then every ${settings.get().uexIntervalMinutes} minutes`}`);
 
     let stopping = false;
     const shutdown = (signal: string) => {
@@ -133,7 +145,7 @@ async function main() {
       // Keep-alive connections would hold the server open
       server.closeAllConnections();
       // A download is aborted (its partial file deleted), an install is waited for
-      closed.then(() => updater.stop()).then(() => close()).then(() => {
+      closed.then(() => Promise.all([updater.stop(), uex.stop()])).then(() => close()).then(() => {
         console.log('stopped');
         process.exit(0);
       }, (err: unknown) => {

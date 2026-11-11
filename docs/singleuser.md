@@ -1,7 +1,7 @@
 # Singleuser variant
 
-Five parts are described here: the process (how it starts and what it keeps), the database (PGlite), the settings and the game folder, the data pack (how
-game data gets into the app, and how the app fetches it) and who the user is (the local identity).
+Six parts are described here: the process (how it starts and what it keeps), the database (PGlite), the settings and the game folder, the data pack (how
+game data gets into the app, and how the app fetches it), UEX (the one optional thing) and who the user is (the local identity).
 
 # The process
 
@@ -27,6 +27,7 @@ through `installPack`; anything else is a snapshot for `catalog:import`), then r
 | `QM_AUTO_UPDATE` | `0` = no automatic data update (no request at start), overriding the setting `autoUpdate`; anything else or unset = the setting decides. A check asked for through the API still runs |
 | `QM_GAME_DIR` | the game folder, overriding the setting `gameDir` (development, tests) |
 | `QM_PAIRING_FILE` | the pairing file's path instead of the profile's (development, tests) |
+| `QM_UEX_KEY` | a UEX key for development: overrides the setting `uexKey` (trimmed; empty or unset = no override); never written to the file |
 | `QM_DATA_FEED` | a folder (`channels.json`, `<tag>/<asset>`) the data update reads instead of GitHub; for development and tests |
 
 (`src/singleuser/paths.ts`, `port.ts`: pure, passed the environment; tested in `test/singleuser-helpers.test.ts`.)
@@ -81,9 +82,11 @@ the admin UI, the UEX pull.
 |---|---|---|
 | `gameDir` | `null` | the game folder: the channel folder, e.g. `...\StarCitizen\LIVE` |
 | `autoUpdate` | `true` | the one switch for the automatic update of app and data (read at start) |
+| `uexKey` | `null` | the user's own UEX key, plain text in the file (the data folder is the user's); trimmed, empty = `null` = no key |
+| `uexIntervalMinutes` | `15` | minutes between two UEX pulls: 15, 30 or 60 (anything else makes the file "broken", below) |
 
 A missing file is the defaults; a broken one (not JSON, wrong types) is the defaults and one logged warning. A write goes
-through a temp file and a rename. `QM_GAME_DIR` and `QM_AUTO_UPDATE=0` override the values (development, tests): they are
+through a temp file and a rename. `QM_GAME_DIR`, `QM_AUTO_UPDATE=0` and `QM_UEX_KEY` override the values (development, tests): they are
 reported as overridden, never written to the file, and the API refuses to change an overridden value (409).
 
 ## The game folder
@@ -159,12 +162,56 @@ Singleuser only, mounted through `WebappConfig.mountApi` (types in `src/webapp/a
 
 | Request | Answer |
 |---|---|
-| `GET /api/local/settings` | `{ gameDir, autoUpdate, overridden: { gameDir, autoUpdate }, gameFolder: { state, problem?, gameVersion? }, languagePack: { state, language?, texts?, active?, problem?, pending } }` with `gameFolder.state` one of `unset`, `invalid`, `ok` and `languagePack.state` one of `none`, `loaded`, `problem` |
-| `PUT /api/local/settings` `{ gameDir?, autoUpdate? }` | stores, answers the new state like the GET. `gameDir` must pass the check or be `null`, else 422 `{ error: 'gameFolderInvalid', problem }` and nothing changes; an overridden value is 409 `{ error: 'overridden', keys }`; anything else wrong is 400. A changed `gameDir` re-checks the folder and its version at once and rewrites the pairing file |
+| `GET /api/local/settings` | `{ gameDir, autoUpdate, uexKeySet, uexIntervalMinutes, appVersion, overridden: { gameDir, autoUpdate, uexKey, uexIntervalMinutes }, gameFolder: { state, problem?, gameVersion? }, languagePack: { state, language?, texts?, active?, problem?, pending } }` with `gameFolder.state` one of `unset`, `invalid`, `ok` and `languagePack.state` one of `none`, `loaded`, `problem`. **The UEX key itself is never sent**, only `uexKeySet` (the UI shows a masked field); `appVersion` is the `version` of package.json, read once at start; `overridden.uexIntervalMinutes` is always false |
+| `PUT /api/local/settings` `{ gameDir?, autoUpdate?, uexKey?, uexIntervalMinutes? }` | stores, answers the new state like the GET. `uexKey` is a string (trimmed; empty = removed) or `null`, `uexIntervalMinutes` is 15, 30 or 60 (else 400); a changed key or interval reconfigures the UEX pull at once ("UEX"). `gameDir` must pass the check or be `null`, else 422 `{ error: 'gameFolderInvalid', problem }` and nothing changes; an overridden value is 409 `{ error: 'overridden', keys }`; anything else wrong is 400. A changed `gameDir` re-checks the folder and its version at once and rewrites the pairing file |
 
 `languagePack.pending` is true when the game folder is no longer the one the pack was read for: it is read again at the next
 start (a UI says so in one sentence). `autoUpdate` applies at the next start too. Tests: `test/singleuser-gamefolder.test.ts`,
 the process in `test/singleuser.test.ts`.
+
+# UEX
+
+The only optional thing in the app: community trade data (prices, terminals; what it is and which endpoints: `docs/ext.md`).
+It is on when the user has entered **his own UEX key** in the settings; without a key the buy/sell (trade) part of the app is
+hidden. **The singleuser server makes no network request the user does not expect: no UEX request is ever made without a key**
+(besides the data update, "Updating the data"). Scheduled work is not announced in the normal GUI; its state is shown in the
+settings view only.
+
+`src/singleuser/uex.ts` (`createUexPuller`), `uex-routes.ts`. Everything is passed in (`db`, `maintain`, a function returning
+the current settings, `fetch`, the log function, a clock and timers that tests replace). It reuses `pullUex` of `src/ext/uex.ts`
+(the same endpoint list and storing as the online puller, the same `ext.snapshot`); the schedule, the state and the mapping of
+the result are the puller's own.
+
+- **Schedule:** `start()` (called by `main.ts` after "listening", never awaited: the start does not wait for the network) pulls at
+  once when a key is set, then every `uexIntervalMinutes` (15, 30 or 60) after the end of the previous pull. `POST /api/local/uex/pull`
+  pulls now. One pull at a time (single flight: a request during a pull gets the running state). Shutdown calls `stop()`
+  before PGlite closes: the timer is cleared, running requests are aborted and awaited.
+- **Reconfiguring (`reconfigure()`, called after a settings change):** a key set or replaced pulls now (a pull running with the old key
+  is aborted and the new one follows); a removed key stops everything at once (phase `off`, timer cleared, a running pull aborted and its
+  result dropped); a changed interval restarts the wait with the new interval.
+- **`maintain()`** (`CHECKPOINT`, `VACUUM`) runs after a pull that stored something new, not after an unchanged one; a failure of it is
+  logged only.
+- **Log:** one compact line per pull, `uex pull: <outcome>, <n> changed, <ms> ms`; `pullUex` also logs its endpoints, and a failure's
+  details (never the key) go to the log only.
+
+| Request | Answer |
+|---|---|
+| `GET /api/local/uex` | the state, from memory (`UexState`): `{ phase: 'off' \| 'idle' \| 'pulling', lastPull, nextPull, last: null \| { outcome, at, changed? } }` |
+| `POST /api/local/uex/pull` `{}` | starts a pull and answers the state at once (`pulling`, or the running pull's); 409 `{ error: 'noKey' }` without a key |
+
+`phase`: `off` = no key, `idle` = waiting for `nextPull`, `pulling`. Times are ISO strings; `lastPull` = when the last pull started,
+`last.at` = when it ended. `last.outcome`: `ok` (every endpoint answered and was stored; `changed` = endpoints whose data changed),
+`refused` (UEX answered 401 or 403 on every endpoint: the key is not accepted), `offline` (the failed endpoints got no answer at all),
+`failed` (anything else, also a partly failed pull; what arrived is stored). `last` is `null` until the first pull ended; the result
+of a pull whose key was removed or replaced meanwhile is dropped.
+
+**Capabilities follow the key:** `WebappConfig.capabilities` is a value or a function (`docs/webapp.md`); the singleuser composition
+root passes `() => ({ login: 'none', orgs: false, uex: settings.get().uexKey !== null })`, so `GET /api/capabilities` shows `uex` as soon as a
+key is set or removed, without a restart. The trade routes (`/api/trade/…`, the finder's prices) stay mounted in both variants and answer
+empty while there is no data; the SPA hides the trade part by `uex`. Data pulled earlier stays in the database when the key is removed.
+
+Tests: `test/singleuser-uex.db.test.ts` (fake `fetch`, manual timers and clock, PGlite or Postgres; no request leaves the process),
+the settings in `test/singleuser-gamefolder.test.ts`, the process without a key (fetch blocked, state `off`) in `test/singleuser.test.ts`.
 
 # The database
 
@@ -217,7 +264,7 @@ The settings are written into the data dir at every open. In-memory instances ig
 
 Nothing checkpoints or vacuums by itself in PGlite (no background writer, no autovacuum). `maintain()` runs `CHECKPOINT`,
 then `VACUUM` (two statements: `VACUUM` does not run in a multi-statement exec). Callers invoke it after big writes
-(imports); there are no timers, and it must not be called inside a transaction. On Postgres, `connectUrl(...).maintain()`
+(imports, a UEX pull that changed something); there are no timers of its own, and it must not be called inside a transaction. On Postgres, `connectUrl(...).maintain()`
 does nothing (autovacuum).
 
 An instance that ran `CHECKPOINT` or `VACUUM` and is not closed keeps the process alive for about 10 seconds: close the
@@ -387,7 +434,7 @@ online implementation: `docs/webapp.md` "Identity"). The singleuser one is made 
 - **One fixed user, whatever the database holds:** `LOCAL_USER_ID` = `00000000000000000` (seventeen zeros). User ids
   are Discord snowflakes as text and must match `^[0-9]{17,20}$` (CHECKs in the schema, the same pattern in the code);
   a real snowflake is the decimal form of a number and never starts with a zero, so the id cannot collide with a
-  user of an imported database. Name "Local", no avatar. `localIdentity` inserts the `app.app_user` row when it is
+  user of an imported database. No name and no avatar (`/api/me` answers `name`, `username` and `avatarUrl` as `null`: the session carries `noProfile`). `localIdentity` inserts the `app.app_user` row when it is
   missing (once, when it is made: call it after the migrations, outside a transaction).
 - **No login, no sessions, no tokens:** every `/api/*` request and every WebSocket handshake is that user;
   cookies and `Authorization` are not looked at. `/auth/*` and `/api/token` do not exist; the companion release
@@ -395,7 +442,7 @@ online implementation: `docs/webapp.md` "Identity"). The singleuser one is made 
 - **No orgs:** the schema is there, the org routes (`/api/orgs/…`) are not mounted (`orgs: false`); the fixed user is
   a member of nothing, so every route that takes a guild id refuses through its normal membership check (403
   `notMember`, the stock service's `holderNotMember`).
-- `GET /api/capabilities` tells the SPA and the companion what the server is (`login: 'none'`).
+- `GET /api/capabilities` tells the SPA and the companion what the server is (`login: 'none'`, `uex` by the key: "UEX") and which game version is installed (`game`: `docs/webapp.md`).
 
 ## The open API and what still protects it
 

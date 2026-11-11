@@ -16,7 +16,7 @@ import type { Session } from './session.ts';
  */
 export const LOCAL_USER_ID = '00000000000000000';
 
-const LOCAL_SESSION: Session = { userId: LOCAL_USER_ID, username: 'local', globalName: 'Local', avatar: null };
+const LOCAL_SESSION: Session = { userId: LOCAL_USER_ID, username: 'local', globalName: 'Local', avatar: null, noProfile: true };
 
 /**
  * Makes sure the user's app.app_user row exists (once, here: nothing in this variant deletes it) and returns the

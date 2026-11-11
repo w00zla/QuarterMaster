@@ -50,8 +50,8 @@ describe('settings store', () => {
     const file = join(scratch('s'), 'settings.json');
     const { lines, log } = quiet();
     const store = createSettingsStore(file, {}, log);
-    assert.deepEqual(store.get(), { gameDir: null, autoUpdate: true });
-    assert.deepEqual(store.overridden(), { gameDir: false, autoUpdate: false });
+    assert.deepEqual(store.get(), { gameDir: null, autoUpdate: true, uexKey: null, uexIntervalMinutes: 15 });
+    assert.deepEqual(store.overridden(), { gameDir: false, autoUpdate: false, uexKey: false, uexIntervalMinutes: false });
     assert.deepEqual(lines, []);
     assert.equal(existsSync(file), false);
   });
@@ -60,14 +60,14 @@ describe('settings store', () => {
     const dir = scratch('s');
     const file = join(dir, 'nested', 'settings.json');
     const store = createSettingsStore(file, {}, () => {});
-    assert.deepEqual(store.update({ gameDir: 'D:\\Games\\LIVE', autoUpdate: false }), { gameDir: 'D:\\Games\\LIVE', autoUpdate: false });
+    assert.deepEqual(store.update({ gameDir: 'D:\\Games\\LIVE', autoUpdate: false }), { gameDir: 'D:\\Games\\LIVE', autoUpdate: false, uexKey: null, uexIntervalMinutes: 15 });
     assert.deepEqual(readdirSync(join(dir, 'nested')), ['settings.json']); // no temp file left
-    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { gameDir: 'D:\\Games\\LIVE', autoUpdate: false });
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { gameDir: 'D:\\Games\\LIVE', autoUpdate: false, uexKey: null, uexIntervalMinutes: 15 });
     writeFileSync(file, JSON.stringify({ gameDir: '/x', autoUpdate: true, surprise: 1 }));
     const again = createSettingsStore(file, {}, () => {});
-    assert.deepEqual(again.get(), { gameDir: '/x', autoUpdate: true });
+    assert.deepEqual(again.get(), { gameDir: '/x', autoUpdate: true, uexKey: null, uexIntervalMinutes: 15 });
     again.update({ autoUpdate: false });
-    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { gameDir: '/x', autoUpdate: false });
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { gameDir: '/x', autoUpdate: false, uexKey: null, uexIntervalMinutes: 15 });
   });
 
   it('a broken file is the defaults plus one warning', () => {
@@ -75,7 +75,7 @@ describe('settings store', () => {
       const file = join(scratch('s'), 'settings.json');
       writeFileSync(file, content);
       const { lines, log } = quiet();
-      assert.deepEqual(createSettingsStore(file, {}, log).get(), { gameDir: null, autoUpdate: true }, content);
+      assert.deepEqual(createSettingsStore(file, {}, log).get(), { gameDir: null, autoUpdate: true, uexKey: null, uexIntervalMinutes: 15 }, content);
       assert.equal(lines.length, 1, content);
       assert.match(lines[0]!, /broken/);
     }
@@ -84,14 +84,32 @@ describe('settings store', () => {
   it('the environment overrides, is reported, and is never written to the file', () => {
     const file = join(scratch('s'), 'settings.json');
     const store = createSettingsStore(file, { QM_GAME_DIR: 'E:\\Env\\LIVE', QM_AUTO_UPDATE: '0' }, () => {});
-    assert.deepEqual(store.get(), { gameDir: 'E:\\Env\\LIVE', autoUpdate: false });
-    assert.deepEqual(store.overridden(), { gameDir: true, autoUpdate: true });
+    assert.deepEqual(store.get(), { gameDir: 'E:\\Env\\LIVE', autoUpdate: false, uexKey: null, uexIntervalMinutes: 15 });
+    assert.deepEqual(store.overridden(), { gameDir: true, autoUpdate: true, uexKey: false, uexIntervalMinutes: false });
     store.update({});
-    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { gameDir: null, autoUpdate: true });
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { gameDir: null, autoUpdate: true, uexKey: null, uexIntervalMinutes: 15 });
     // Anything but 0 is no override
     const other = createSettingsStore(file, { QM_AUTO_UPDATE: '1', QM_GAME_DIR: '' }, () => {});
-    assert.deepEqual(other.get(), { gameDir: null, autoUpdate: true });
-    assert.deepEqual(other.overridden(), { gameDir: false, autoUpdate: false });
+    assert.deepEqual(other.get(), { gameDir: null, autoUpdate: true, uexKey: null, uexIntervalMinutes: 15 });
+    assert.deepEqual(other.overridden(), { gameDir: false, autoUpdate: false, uexKey: false, uexIntervalMinutes: false });
+  });
+});
+
+describe('UEX settings', () => {
+  it('the key is trimmed, empty = none; the interval takes 15, 30 or 60; QM_UEX_KEY overrides and is not written', () => {
+    const file = join(scratch('u'), 'settings.json');
+    const store = createSettingsStore(file, {}, () => {});
+    assert.equal(store.update({ uexKey: '  abc  ' }).uexKey, 'abc');
+    assert.equal(store.update({ uexKey: '   ' }).uexKey, null);
+    assert.equal(store.update({ uexIntervalMinutes: 60 }).uexIntervalMinutes, 60);
+    assert.throws(() => store.update({ uexIntervalMinutes: 20 as 15 }));
+    assert.equal(createSettingsStore(file, {}, () => {}).get().uexIntervalMinutes, 60);
+    const env = createSettingsStore(file, { QM_UEX_KEY: ' dev ' }, () => {});
+    assert.equal(env.get().uexKey, 'dev');
+    assert.equal(env.overridden().uexKey, true);
+    env.update({});
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).uexKey, null);
+    assert.equal(createSettingsStore(file, { QM_UEX_KEY: '' }, () => {}).overridden().uexKey, false);
   });
 });
 
@@ -249,20 +267,24 @@ describe('settings routes', () => {
     const gameDir = store.get().gameDir;
     const loaded: LoadedPack = { gameDir, pack: gameDir ? readLanguagePack(gameDir) : null, active: true };
     const pairings: (string | null)[] = [];
+    const uexChanges: (string | null)[] = [];
     const api = new Hono() as unknown as ApiApp;
-    mountSettingsRoutes({ store, loaded, onGameDirChange: (d) => pairings.push(d) })(api);
+    mountSettingsRoutes({ store, loaded, onGameDirChange: (d) => pairings.push(d), onUexChange: () => { uexChanges.push(store.get().uexKey); }, appVersion: '9.9.9' })(api);
     const call = async (method: string, body?: unknown) => {
       const res = await api.request('/local/settings', { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
       return { status: res.status, body: (await res.json()) as LocalSettingsState & { error?: string; problem?: string } };
     };
-    return { call, pairings, file };
+    return { call, pairings, file, uexChanges };
   }
 
   it('GET: nothing set', async () => {
     const { call } = setup();
     assert.deepEqual(await call('GET'), {
       status: 200,
-      body: { gameDir: null, autoUpdate: true, overridden: { gameDir: false, autoUpdate: false }, gameFolder: { state: 'unset' }, languagePack: { state: 'none', pending: false } },
+      body: {
+        gameDir: null, autoUpdate: true, uexKeySet: false, uexIntervalMinutes: 15, appVersion: '9.9.9',
+        overridden: { gameDir: false, autoUpdate: false, uexKey: false, uexIntervalMinutes: false }, gameFolder: { state: 'unset' }, languagePack: { state: 'none', pending: false },
+      },
     });
   });
 
@@ -310,9 +332,40 @@ describe('settings routes', () => {
     const dir = gameFolder();
     const env = setup({ QM_GAME_DIR: dir, QM_AUTO_UPDATE: '0' });
     const got = await env.call('GET');
-    assert.deepEqual([got.body.gameDir, got.body.autoUpdate, got.body.overridden], [dir, false, { gameDir: true, autoUpdate: true }]);
+    assert.deepEqual([got.body.gameDir, got.body.autoUpdate, got.body.overridden], [dir, false, { gameDir: true, autoUpdate: true, uexKey: false, uexIntervalMinutes: false }]);
     assert.equal(got.body.languagePack.pending, false);
     assert.deepEqual([(await env.call('PUT', { autoUpdate: true })).status, (await env.call('PUT', { gameDir: null })).status], [409, 409]);
     assert.equal(existsSync(env.file), false);
+  });
+
+  it('UEX: the key never leaves through GET or PUT, a change is announced, the interval is validated', async () => {
+    const { call, file, uexChanges } = setup();
+    const put = await call('PUT', { uexKey: ' secret-key ' });
+    assert.equal(put.status, 200);
+    assert.equal(put.body.uexKeySet, true);
+    assert.equal(JSON.stringify(put.body).includes('secret-key'), false);
+    assert.equal(JSON.stringify((await call('GET')).body).includes('secret-key'), false);
+    assert.equal('uexKey' in (await call('GET')).body, false);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).uexKey, 'secret-key');
+    assert.deepEqual(uexChanges, ['secret-key']);
+    // The same key again changes nothing
+    await call('PUT', { uexKey: 'secret-key' });
+    assert.equal(uexChanges.length, 1);
+    assert.equal((await call('PUT', { uexIntervalMinutes: 30 })).body.uexIntervalMinutes, 30);
+    assert.equal(uexChanges.length, 2);
+    for (const body of [{ uexIntervalMinutes: 20 }, { uexIntervalMinutes: '15' }, { uexKey: 5 }]) assert.equal((await call('PUT', body)).status, 400, JSON.stringify(body));
+    const removed = await call('PUT', { uexKey: null });
+    assert.deepEqual([removed.body.uexKeySet, uexChanges.length, uexChanges.at(-1)], [false, 3, null]);
+    assert.equal((await call('PUT', { uexKey: '' })).body.uexKeySet, false);
+    assert.equal(uexChanges.length, 3);
+  });
+
+  it('UEX: QM_UEX_KEY is reported as set and overridden, and cannot be changed through the API', async () => {
+    const { call, file } = setup({ QM_UEX_KEY: 'from-env' });
+    const got = await call('GET');
+    assert.deepEqual([got.body.uexKeySet, got.body.overridden.uexKey], [true, true]);
+    assert.equal(JSON.stringify(got.body).includes('from-env'), false);
+    assert.deepEqual([(await call('PUT', { uexKey: null })).status, (await call('PUT', { uexKey: 'x' })).status], [409, 409]);
+    assert.equal(existsSync(file), false);
   });
 });

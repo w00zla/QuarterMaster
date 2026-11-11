@@ -10,10 +10,11 @@ export interface MeOrg {
 
 export interface MeResponse {
   userId: string;
-  // Discord display name (global name, else username) and username, as of the last login
-  name: string;
-  username: string;
-  avatarUrl: string;
+  // Discord display name (global name, else username) and username, as of the last login; avatar: the Discord avatar
+  // URL. All three are null for a user without a Discord profile (the singleuser variant's local user)
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
   // Active memberships only
   orgs: MeOrg[];
   // Star Citizen account name, shown to the user's orgs; null = not set
@@ -29,7 +30,8 @@ export type Lang = 'de' | 'en';
 
 // --- capabilities (GET /api/capabilities, the one API route without a login) -----------------------
 // What this server offers; the SPA and the companion ask before anything else.
-export interface Capabilities {
+/** What a server offers, as its composition root states it (`WebappConfig.capabilities`). */
+export interface ServerCapabilities {
   // How a user gets in: 'discord' = the Discord login (/auth/login, sessions, API tokens for the companion);
   // 'none' = no login at all, every request is the one local user's (no /auth/*, no /api/token)
   login: 'discord' | 'none';
@@ -37,6 +39,12 @@ export interface Capabilities {
   orgs: boolean;
   // UEX trading data (prices, terminals) is offered
   uex: boolean;
+}
+
+/** The answer of GET /api/capabilities: the server's capabilities and the installed game data. */
+export interface Capabilities extends ServerCapabilities {
+  // The latest catalog import's game version (label `4.10.2.12913470`, and its build number); null = no catalog installed
+  game: { label: string | null; build: number } | null;
 }
 
 // --- errors -----------------------------------------------------------------------------------
@@ -907,8 +915,14 @@ export interface LanguagePackState {
 export interface LocalSettingsState {
   gameDir: string | null;
   autoUpdate: boolean;
-  /** Values the environment overrides (development): they cannot be changed here. */
-  overridden: { gameDir: boolean; autoUpdate: boolean };
+  /** The UEX key is never sent back: only whether one is set (settings file or QM_UEX_KEY). */
+  uexKeySet: boolean;
+  /** Minutes between two UEX pulls: 15, 30 or 60. */
+  uexIntervalMinutes: 15 | 30 | 60;
+  /** Values the environment overrides (development): they cannot be changed here. `uexIntervalMinutes` is never overridden. */
+  overridden: { gameDir: boolean; autoUpdate: boolean; uexKey: boolean; uexIntervalMinutes: boolean };
+  /** The app's own version (package.json). */
+  appVersion: string;
   gameFolder: GameFolderState;
   languagePack: LanguagePackState;
 }
@@ -917,4 +931,24 @@ export interface LocalSettingsState {
 export interface LocalSettingsUpdate {
   gameDir?: string | null;
   autoUpdate?: boolean;
+  /** The user's own UEX key; null or an empty string removes it. */
+  uexKey?: string | null;
+  uexIntervalMinutes?: 15 | 30 | 60;
+}
+
+// --- singleuser: the UEX pull (GET /api/local/uex, docs/singleuser.md "UEX") ---
+
+export type UexOutcome = 'ok' | 'refused' | 'offline' | 'failed';
+
+/**
+ * The state of the UEX pull, kept in memory. `off` = no key (nothing is ever requested), `idle` = waiting for `nextPull`,
+ * `pulling`. The times are ISO strings; `lastPull` is when the last pull started, `last.at` when it ended. `refused` =
+ * UEX does not accept the key, `offline` = no answer, `failed` = anything else (details in the log); `changed` = the
+ * number of endpoints whose data changed.
+ */
+export interface UexState {
+  phase: 'off' | 'idle' | 'pulling';
+  lastPull: string | null;
+  nextPull: string | null;
+  last: { outcome: UexOutcome; at: string; changed?: number } | null;
 }

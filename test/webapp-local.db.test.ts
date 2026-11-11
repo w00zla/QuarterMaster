@@ -13,7 +13,7 @@ import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings } from '../src/bot/settings.ts';
-import type { Capabilities, MeResponse, ServerMessage, StockListResponse } from '../src/webapp/api-types.ts';
+import type { Capabilities, MeResponse, ServerCapabilities, ServerMessage, StockListResponse } from '../src/webapp/api-types.ts';
 import { createApp, type WebappConfig } from '../src/webapp/app.ts';
 import type { Identity } from '../src/webapp/identity.ts';
 import { LOCAL_USER_ID, localIdentity } from '../src/webapp/identity-local.ts';
@@ -22,7 +22,7 @@ import { U, fixtureSnapshot } from './fixtures.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const ORIGIN = 'http://127.0.0.1:3002';
-const CAPS: Capabilities = { login: 'none', orgs: false, uex: false };
+const CAPS: ServerCapabilities = { login: 'none', orgs: false, uex: false };
 // An org with a member, as an imported database could hold: the local user is none of it
 const G = '700000000000000071';
 const MEMBER_ROLE = '710000000000000071';
@@ -76,7 +76,7 @@ describe('web app, local identity (database)', { skip: url ? false : 'TEST_DATAB
     const { status, body } = await get<MeResponse>('/me');
     assert.equal(status, 200);
     assert.equal(body.userId, LOCAL_USER_ID);
-    assert.equal(body.name, 'Local');
+    assert.deepEqual([body.name, body.username, body.avatarUrl], [null, null, null]);
     assert.deepEqual(body.orgs, []);
     assert.deepEqual(body.privileges, []);
     for (const headers of [{ cookie: '__Host-qm_session=nope' }, { authorization: 'Bearer qmt_wrong' }, { authorization: 'Bearer qmt_wrong', 'x-qm-companion': '0.0.1' }]) {
@@ -90,7 +90,7 @@ describe('web app, local identity (database)', { skip: url ? false : 'TEST_DATAB
   it('capabilities: answered without a login, never cached, within the rate limit per address', async () => {
     const res = await app.request('/api/capabilities');
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), CAPS);
+    assert.deepEqual(await res.json(), { ...CAPS, game: { label: null, build: 1000 } });
     assert.equal(res.headers.get('cache-control'), 'no-store');
     const limited = build({ rateLimit: { windowMs: 60_000, auth: 100, apiIp: 2, apiUser: 100 } });
     const codes = [];

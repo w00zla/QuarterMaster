@@ -133,7 +133,7 @@ describe('user web app (database)', { skip: url ? false : 'TEST_DATABASE_URL not
     assert.ok(routes.length > 0);
     const caps = await app.request('/api/capabilities');
     assert.equal(caps.status, 200);
-    assert.deepEqual(await caps.json(), { login: 'discord', orgs: true, uex: true });
+    assert.deepEqual(await caps.json(), { login: 'discord', orgs: true, uex: true, game: null });
     assert.equal(caps.headers.get('cache-control'), 'no-store');
     // Nothing else of that path is open
     assert.equal((await app.request('/api/capabilities', { method: 'POST', body: '{}', headers: { ...sameOrigin, 'content-type': 'application/json' } })).status, 401);

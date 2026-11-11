@@ -7,14 +7,14 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it } from 'node:test';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { buildRelease, gzipStable } from '../src/datapack/build.ts';
 import { connectPglite } from '../src/db/pglite.ts';
 import { dbDir } from '../src/singleuser/paths.ts';
-import type { Capabilities, DataUpdateState, LocalSettingsState, MeResponse, StockListResponse } from '../src/webapp/api-types.ts';
+import type { Capabilities, DataUpdateState, LocalSettingsState, MeResponse, StockListResponse, UexState } from '../src/webapp/api-types.ts';
 import { LOCAL_USER_ID } from '../src/webapp/identity-local.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
@@ -24,6 +24,7 @@ const MAIN = fileURLToPath(new URL('src/singleuser/main.ts', ROOT));
 // Never the real pairing file in the user profile: every child gets one in a temp folder (and no game folder of the environment)
 const PAIRING_ROOT = mkdtempSync(join(tmpdir(), 'qm-singleuser-pairing-'));
 process.on('exit', () => rmSync(PAIRING_ROOT, { recursive: true, force: true }));
+const PACKAGE_VERSION = (JSON.parse(readFileSync(new URL('package.json', ROOT), 'utf8')) as { version: string }).version;
 const JSON_TYPE = { 'content-type': 'application/json' };
 
 const freePort = () => new Promise<number>((resolve, reject) => {
@@ -37,7 +38,7 @@ const freePort = () => new Promise<number>((resolve, reject) => {
 
 type Child = { proc: ChildProcess; out: () => string; exited: Promise<number | null> };
 function start(script: string, env: Record<string, string>): Child {
-  const proc = spawn(process.execPath, [script], { env: { ...process.env, DATABASE_URL: '', QM_GAME_DIR: '', QM_PAIRING_FILE: join(PAIRING_ROOT, 'default', 'pairing.json'), ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc = spawn(process.execPath, [script], { env: { ...process.env, DATABASE_URL: '', QM_GAME_DIR: '', QM_PAIRING_FILE: join(PAIRING_ROOT, 'default', 'pairing.json'), QM_UEX_KEY: '', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let text = '';
   proc.stdout!.on('data', (d: Buffer) => (text += d));
   proc.stderr!.on('data', (d: Buffer) => (text += d));
@@ -67,7 +68,8 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
     const dir = mkdtempSync(join(tmpdir(), 'qm-singleuser-'));
     const port = await freePort();
     // QM_AUTO_UPDATE=0: no feed is asked (this test must not touch the network)
-    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_THUMBS_DIR: join(dir, 'no-thumbs'), QM_AUTO_UPDATE: '0' };
+    // fetch is blocked in the process, and no UEX key is set: nothing may be requested
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_THUMBS_DIR: join(dir, 'no-thumbs'), QM_AUTO_UPDATE: '0', NODE_OPTIONS: `--import ${pathToFileURL(fileURLToPath(new URL('block-fetch.mjs', import.meta.url))).href}` };
     const base = `http://127.0.0.1:${port}`;
     let child: Child | undefined;
     try {
@@ -91,11 +93,17 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
         const res = await fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(10_000) });
         return { status: res.status, body: (await res.json()) as T };
       };
-      assert.deepEqual(await json<Capabilities>('/api/capabilities'), { status: 200, body: { login: 'none', orgs: false, uex: false } });
+      assert.deepEqual(await json<Capabilities>('/api/capabilities'), { status: 200, body: { login: 'none', orgs: false, uex: false, game: { label: null, build: 1000 } } });
       // The data update is off: nothing installed, nothing asked
       assert.deepEqual(await json<DataUpdateState>('/api/local/data'), { status: 200, body: { phase: 'idle', installed: null, progress: null, last: null } });
+      // No key: the UEX pull is off, nothing was requested, and the trade part stays hidden
+      assert.deepEqual(await json<UexState>('/api/local/uex'), { status: 200, body: { phase: 'off', lastPull: null, nextPull: null, last: null } });
+      assert.deepEqual(await json('/api/local/uex/pull', { method: 'POST', headers: JSON_TYPE, body: '{}' }), { status: 409, body: { error: 'noKey' } });
+      assert.match(c.out(), /uex: off [(]no key[)]/);
+      assert.doesNotMatch(c.out(), /BLOCKED FETCH|uex pull/);
       const me = await json<MeResponse>('/api/me');
       assert.equal(me.status, 200);
+      assert.deepEqual([me.body.name, me.body.avatarUrl], [null, null]);
       assert.equal(me.body.userId, LOCAL_USER_ID);
       const add = await json('/api/stock/add', { method: 'POST', headers: JSON_TYPE, body: JSON.stringify({ subjectUuid: U.metal, locationUuid: U.station, quality: 640, amount: '3' }) });
       assert.deepEqual(add, { status: 200, body: { ok: true } });
@@ -153,7 +161,8 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
 
       const state = (await (await fetch(`${base}/api/local/settings`, { signal: AbortSignal.timeout(10_000) })).json()) as LocalSettingsState;
       assert.deepEqual(state, {
-        gameDir: game, autoUpdate: false, overridden: { gameDir: true, autoUpdate: true },
+        gameDir: game, autoUpdate: false, uexKeySet: false, uexIntervalMinutes: 15, appVersion: PACKAGE_VERSION,
+        overridden: { gameDir: true, autoUpdate: true, uexKey: false, uexIntervalMinutes: false },
         gameFolder: { state: 'ok', gameVersion: '4.10.2.12913470' },
         languagePack: { state: 'loaded', language: 'german_(germany)', texts: 3, active: true, pending: false },
       });

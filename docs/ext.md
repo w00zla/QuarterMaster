@@ -4,7 +4,7 @@ Requirements: `docs/requirements.md` "Third-party data". UEX data are community 
 the app uses them for trading only.
 
 - `src/ext/` (own process, `main.ts`; compose service `ext`): `uex.ts` pulls from the UEX API
-  (`api.uexcorp.uk/2.0`, bearer `UEX_TOKEN`) at start and every 15 minutes, only endpoints that need no ID:
+  (`api.uexcorp.uk/2.0`, bearer `UEX_TOKEN`) at start and every 15 minutes (the singleuser variant pulls in its own process with the user's key, `docs/singleuser.md` "UEX"; same `pullUex`), only endpoints that need no ID:
   `terminals` (826, with system/planet/moon/station/city/outpost names and flags),
   `commodities` (205, no UUIDs: match by name; average prices, `id_parent` ore ↔ refined, flags),
   `commodities_prices_all` (buy/sell price, SCU in stock and demand, status 1–7 per commodity × terminal; ~1 MB),

@@ -25,9 +25,9 @@ export async function getMe(db: Db, session: Session): Promise<MeResponse> {
   return {
     userId,
     // Shown in the user's own header, also without any org
-    name: session.globalName ?? session.username,
-    username: session.username,
-    avatarUrl: avatarUrl(userId, session.avatar),
+    name: session.noProfile ? null : (session.globalName ?? session.username),
+    username: session.noProfile ? null : session.username,
+    avatarUrl: session.noProfile ? null : avatarUrl(userId, session.avatar),
     orgs: orgs.map((o) => ({ guildId: o.guild_id, name: o.name, displayName: o.display_name })),
     rsiHandle: profile?.rsi_handle ?? null,
     langOverride: profile?.lang ?? null,
