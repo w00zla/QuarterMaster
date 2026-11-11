@@ -4,8 +4,9 @@
 // everything); below it the scan row (ScanBar.vue), then a tab
 // bar (icons like the web app's navigation) with the panels: comps, stock (both InventoryPanel), refinery, unlocks.
 // The chips open the settings; the settings also open by themselves while the app is not connected
-// (no server or token, or the token is refused). An app the server calls outdated shows only the
-// update hint (no work until updated).
+// (no server or token, the token is refused, or the local app is not running). While the server refuses
+// the app's API contract number (the companion or the server is too old) only the update panel shows
+// (no work until that changed). The local app's user has no name or avatar: nothing is shown for it.
 import { computed, onMounted, provide, ref } from "vue";
 import Icon from "../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../adminapp/src/components/Tooltip.vue";
@@ -21,8 +22,10 @@ import UpdatePanel from "./components/UpdatePanel.vue";
 import WindowEdges from "./components/WindowEdges.vue";
 import { AppError, appInfo, openWebapp, outdated } from "./backend";
 import { isKey, t } from "./i18n";
+import { outdatedKeys } from "./connection";
 import {
-  config, connectError, connected, connectionText, loadConfig, meAvatar, meName, refreshConnection, watchConnection, watchLog,
+  config, connectError, connected, connection, connectionText, loadConfig, meAvatar, meName, paired, refreshConnection, watchConnection,
+  watchLog,
 } from "./state";
 import { watchRefinery } from "./refinerySync";
 import { watchInventory } from "./inventorySync";
@@ -43,15 +46,17 @@ const TABS = [
   { id: "refinery", label: "refinery.title" },
   { id: "unlocks", label: "unlocks.title" },
 ] as const;
-const info = ref<{ version: string; platform: "windows" | "linux"; updater: boolean } | null>(null);
-const downloadUrl = computed(() => (info.value && outdated.value?.downloads[info.value.platform]) ?? null);
+const info = ref<{ version: string } | null>(null);
 
 // Why not connected, short (the full text in the tooltip)
 const serverLabel = computed(() => {
+  if (outdated.value) return t(outdatedKeys(outdated.value, connection.value).title);
   const key = `conn.short.${connectError.value instanceof AppError ? connectError.value.message : String(connectError.value)}`;
   return isKey(key) ? t(key) : t("conn.off");
 });
-const serverTip = computed(() => [connectionText.value, config.value?.server].filter(Boolean).join(" · "));
+// With the server in use: the configured one, or the local app's as last paired
+const serverTip = computed(() => [connectionText.value, connection.value === "local" ? paired.value?.origin : config.value?.server]
+  .filter(Boolean).join(" · "));
 
 onMounted(async () => {
   try {
@@ -82,7 +87,7 @@ onMounted(async () => {
         </button>
       </Tooltip>
       <div v-if="connected" class="account">
-        <Tooltip :text="meName">
+        <Tooltip v-if="meName || meAvatar" :text="meName">
           <img v-if="meAvatar" class="avatar" :src="meAvatar" alt="" />
           <span v-else class="avatar none"><Icon name="user" :size="14" /></span>
         </Tooltip>
@@ -95,7 +100,7 @@ onMounted(async () => {
     </TopBar>
     <ScanBar @settings="settingsOpen = true" />
     <main v-if="ready && outdated" class="main">
-      <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :url="downloadUrl" :updater="info?.updater ?? false" />
+      <UpdatePanel :outdated="outdated" :current="info?.version ?? '?'" :connection="connection" />
     </main>
     <template v-else-if="ready">
       <nav class="tabs">

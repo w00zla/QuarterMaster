@@ -1,8 +1,9 @@
 //! Persistent app config (JSON in the app config dir, like BindSight's —
 //! `%APPDATA%\com.w00zla.quartermaster.companion\config.json` on Windows,
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
+//! connection (the online server or the Quartermaster app on this PC), the
 //! Quartermaster server, the user's API token, the SC channel folder whose
-//! `Game.log` is followed, the UI language, the automatic tab switch, the OCR on the GPU and the scan overlay's position, display and hotkeys. The server is fixed in the app; only a `server` entry
+//! `Game.log` is followed (in the local mode the app's folder comes first, `pairing.rs`), the UI language, the automatic tab switch, the OCR on the GPU and the scan overlay's position, display and hotkeys. The server is fixed in the app; only a `server` entry
 //! in the file changes it (e.g. a dev server, read at start), the settings UI
 //! does not show it and saving never writes or overwrites that entry.
 
@@ -29,6 +30,10 @@ fn default_server() -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    /// Which server the app talks to: "online" (`server` with `token`) or "local" (the Quartermaster app on
+    /// this PC, found through its pairing file: no token).
+    #[serde(default = "default_connection")]
+    pub connection: String,
     /// Where the web app runs (origin); missing or empty = the production server.
     #[serde(default = "default_server")]
     pub server: String,
@@ -64,6 +69,13 @@ pub struct Config {
     pub gpu: bool,
 }
 
+pub const ONLINE: &str = "online";
+pub const LOCAL: &str = "local";
+
+fn default_connection() -> String {
+    ONLINE.into()
+}
+
 pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
 pub const OVERLAY_DISPLAYS: [&str; 2] = ["thumbs", "compact"];
@@ -87,6 +99,7 @@ fn default_true() -> bool {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            connection: default_connection(),
             server: default_server(),
             token: String::new(),
             game_dir: default_game_dir(),
@@ -102,13 +115,22 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn game_log(&self) -> PathBuf {
-        PathBuf::from(&self.game_dir).join("Game.log")
+    /// The game folder in use: in the local mode the paired app's (`paired`: its pairing file's `gameDir`, None
+    /// while unknown or not set there), else and online this config's own.
+    pub fn game_dir_with(&self, paired: Option<&str>) -> String {
+        match paired {
+            Some(dir) if self.connection == LOCAL => dir.to_string(),
+            _ => self.game_dir.clone(),
+        }
     }
+}
 
-    pub fn log_backups(&self) -> PathBuf {
-        PathBuf::from(&self.game_dir).join("logbackups")
-    }
+pub fn game_log(game_dir: &str) -> PathBuf {
+    PathBuf::from(game_dir).join("Game.log")
+}
+
+pub fn log_backups(game_dir: &str) -> PathBuf {
+    PathBuf::from(game_dir).join("logbackups")
 }
 
 fn config_path(app: &AppHandle) -> Option<PathBuf> {
@@ -176,6 +198,19 @@ mod tests {
         assert!(c.auto_tab);
         assert!(!c.gpu);
         assert_eq!(c.overlay_display, "thumbs");
+        // Files written before the local mode existed: online
+        assert_eq!(c.connection, ONLINE);
+        assert_eq!(parse(r#"{"connection":"local"}"#).unwrap().connection, LOCAL);
+    }
+
+    #[test]
+    fn the_paired_game_folder_only_in_the_local_mode() {
+        let online = Config { game_dir: "D:/SC/LIVE".into(), ..Config::default() };
+        let local = Config { connection: LOCAL.into(), ..online.clone() };
+        assert_eq!(online.game_dir_with(Some("F:/Games/LIVE")), "D:/SC/LIVE");
+        assert_eq!(local.game_dir_with(Some("F:/Games/LIVE")), "F:/Games/LIVE");
+        // Not set in the app (or the app not seen yet): the companion's own setting
+        assert_eq!(local.game_dir_with(None), "D:/SC/LIVE");
     }
 
     #[test]
@@ -197,7 +232,8 @@ mod tests {
     #[test]
     fn paths_below_the_game_dir() {
         let c = Config { game_dir: "/games/sc/LIVE".into(), ..Config::default() };
-        assert_eq!(c.game_log(), PathBuf::from("/games/sc/LIVE/Game.log"));
-        assert_eq!(c.log_backups(), PathBuf::from("/games/sc/LIVE/logbackups"));
+        let dir = c.game_dir_with(None);
+        assert_eq!(game_log(&dir), PathBuf::from("/games/sc/LIVE/Game.log"));
+        assert_eq!(log_backups(&dir), PathBuf::from("/games/sc/LIVE/logbackups"));
     }
 }

@@ -4,7 +4,10 @@
 import { computed, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import type { MeResponse } from "../../src/webapp/api-types";
-import { api as backendApi, getConfig, isConnectionError, logState, outdated, setUnlockScan, type Config, type LogState } from "./backend";
+import {
+  api as backendApi, getConfig, getPaired, isConnectionError, logState, outdated, refreshLocale, setUnlockScan, type Config, type LogState,
+} from "./backend";
+import { connectionOf, gameDirOf, missingSetting, outdatedKeys, type Paired } from "./connection";
 import { applyLangSetting, t } from "./i18n";
 import { errorText, toastError } from "./toasts";
 
@@ -12,9 +15,16 @@ import { errorText, toastError } from "./toasts";
 const RETRY_MS = 30_000;
 
 export const config = ref<Config | null>(null);
-// Server and token set and accepted (GET /api/me answered)
+// The connection the config asks for: the online server or the Quartermaster app on this PC
+export const connection = computed(() => connectionOf(config.value));
+// The local app as its pairing file last said (origin, its game folder); null online or while never seen
+export const paired = ref<Paired | null>(null);
+// The game folder in use: the paired app's in the local mode, else the config's own (undefined: no config yet)
+export const gameDir = computed(() => (config.value ? gameDirOf(config.value, paired.value) : undefined));
+// The server answered GET /api/me (online: server and token set and accepted; local: the app runs)
 export const connected = ref(false);
-// The token's user (Discord name and avatar as of the login that created the token), null while unknown
+// The user's name and avatar (online: Discord's, as of the login that created the token); null while unknown and
+// for the local app's user, who has neither
 export const meName = ref<string | null>(null);
 export const meAvatar = ref<string | null>(null);
 // The user's active orgs (the inventory scan offers to share registered stacks in them)
@@ -25,8 +35,11 @@ export const connectError = ref<unknown>(null);
 export const log = ref<LogState | null>(null);
 
 /** The connection as one line ("Connection successful" or why not). */
-export const connectionText = computed(() => (connected.value ? t("conn.ok")
-  : connectError.value ? errorText(connectError.value) : t("conn.off")));
+export const connectionText = computed(() => {
+  if (connected.value) return t("conn.ok");
+  if (outdated.value) return t(outdatedKeys(outdated.value, connection.value).text);
+  return connectError.value ? errorText(connectError.value) : t("conn.off");
+});
 
 /** Takes a config in (loaded or saved) and applies its language. */
 export function applyConfig(c: Config) {
@@ -83,26 +96,36 @@ export async function api<T>(method: "GET" | "POST", path: string, body?: unknow
   }
 }
 
-/** Checks server and token with GET /api/me (also clears an update hint the server dropped). */
+/** Checks the connection with GET /api/me (online: server and token; local: the app found through its pairing file
+ * and answering), also clearing an outdated state the server dropped. A new connection brings the game's English
+ * texts up to date. */
 export async function refreshConnection() {
-  if (!config.value?.server || !config.value.token) {
+  const missing = missingSetting(config.value);
+  if (missing) {
     connected.value = false;
     meName.value = null;
     meAvatar.value = null;
-    connectError.value = config.value?.server ? "noToken" : "noServer";
+    paired.value = null;
+    connectError.value = missing;
     return;
   }
+  const was = connected.value;
   try {
     const me = await api<MeResponse>("GET", "/me");
+    // The Rust side read the pairing file for this call: its game folder is the one in use from here on
+    paired.value = connection.value === "local" ? await getPaired() : null;
     meName.value = me.name;
     meAvatar.value = me.avatarUrl;
     meOrgs.value = me.orgs;
     connectError.value = null;
     outdated.value = null;
     connected.value = true;
+    if (!was) void refreshLocale().catch((e) => console.warn("English texts:", e));
   } catch (e) {
     connected.value = false;
     connectError.value = e;
+    // The app may have been found and still refuse (outdated), or be gone: its folder stays as last paired
+    paired.value = connection.value === "local" ? await getPaired().catch(() => null) : null;
   }
 }
 

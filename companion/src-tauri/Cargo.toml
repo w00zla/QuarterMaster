@@ -21,7 +21,7 @@ tauri = { version = "2", features = ["image-ico", "image-png"] }
 # plugin's default is rfd's own GTK3 dialog). Windows is unaffected.
 tauri-plugin-dialog = { version = "2.7.3", default-features = false, features = ["xdg-portal"] }
 tauri-plugin-log = "2"
-# The download link of a newer release, opened in the browser
+# The web app and the releases page, opened in the browser; the app's folders in the file manager
 tauri-plugin-opener = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -32,20 +32,20 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 # Finding the blueprint lines in GBs of old logs
 memchr = "2"
 # The OCR: sc-ohseearr's engine (ONNX Runtime, prebuilt and linked statically) and its model packages, compiled
-# in; the sibling checkout ../sc-ohseearr
-sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core" }
-sc-ohseearr-model-paddle-det-tiny = { path = "../../../sc-ohseearr/models/paddle-det-tiny" }
-sc-ohseearr-model-sc-rec-latin = { path = "../../../sc-ohseearr/models/sc-rec-latin" }
-sc-ohseearr-model-sc-warehouse-layout = { path = "../../../sc-ohseearr/models/sc-warehouse-layout" }
+# in; from its public repository by release tag (one tag for all its crates)
+sc-ohseearr-core = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
+sc-ohseearr-model-paddle-det-tiny = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
+sc-ohseearr-model-sc-rec-latin = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
+sc-ohseearr-model-sc-warehouse-layout = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
 # The readers: sc-ohseearr's Star Citizen layer (reader interface, the game's texts from global.ini) and its
 # readers (the warehouse reader gets its layout detector, `sc-warehouse-layout`, from `ocr::warehouse_reader`)
-sc-ohseearr-sc = { path = "../../../sc-ohseearr/crates/sc" }
-sc-ohseearr-warehouse = { path = "../../../sc-ohseearr/readers/warehouse" }
-sc-ohseearr-gear-inventory = { path = "../../../sc-ohseearr/readers/gear-inventory" }
-sc-ohseearr-refinery = { path = "../../../sc-ohseearr/readers/refinery" }
+sc-ohseearr-sc = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
+sc-ohseearr-warehouse = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
+sc-ohseearr-gear-inventory = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
+sc-ohseearr-refinery = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
 # Screen capture of the game window (DXGI Desktop Duplication, cursor, rest; Windows only) and the parts the
 # platform independent worker uses too (`Pixels`, the change gate `Gate`), which build everywhere
-sc-ohseearr-capture-win = { path = "../../../sc-ohseearr/crates/capture-win" }
+sc-ohseearr-capture-win = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0" }
 # Decoding screenshots (tests, test frames); live frames come as raw pixels; encoding the debug
 # view's frames (JPEG for the event, PNG for the export)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -57,7 +57,7 @@ tauri-plugin-window-state = "2"
 [target.'cfg(windows)'.dependencies]
 # The OCR on the GPU: ONNX Runtime's DirectML API (its Windows binaries have it anyway; the redistributable
 # DirectML.dll comes next to the exe, see scripts/fetch-directml.mjs)
-sc-ohseearr-core = { path = "../../../sc-ohseearr/crates/core", features = ["directml"] }
+sc-ohseearr-core = { git = "https://github.com/w00zla/sc-ohseearr", tag = "v0.1.0", features = ["directml"] }
 # The scan overlay's window (place, DPI, hotkeys); the version Tauri already uses
 windows = { version = "0.62", features = [
     "Win32_Foundation",
@@ -66,8 +66,6 @@ windows = { version = "0.62", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
-# Updates of the installed app (NSIS setup from the own server, signed with the updater key); Windows only
-tauri-plugin-updater = "2"
 
 [profile.release]
 codegen-units = 1

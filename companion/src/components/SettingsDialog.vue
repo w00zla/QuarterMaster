@@ -1,5 +1,7 @@
 <script setup lang="ts">
-// API token (created in the web app's Companion dialog and pasted here), game folder, the UI
+// The connection (the online server or the Quartermaster app on this PC), the API token (created in the web
+// app's Companion dialog and pasted here; not needed for the local app: disabled then), game folder (in the
+// local mode the paired app's, shown disabled, when it has one), the UI
 // language; the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
 // by default) with its state as a tag and a dim note below (greyed out, off, when it cannot run there:
 // gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed). The
@@ -17,12 +19,17 @@ import ConfirmDialog, { type ConfirmButton } from "../../../webapp/src/component
 import { appInfo, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "../backend";
 import type { OverlayDisplay } from "../overlayLayout";
 import { t } from "../i18n";
-import { applyConfig, config, loadLog, refreshConnection } from "../state";
+import { connectionOf } from "../connection";
+import { applyConfig, config, loadLog, paired, refreshConnection } from "../state";
 import { errorText, toast, toastError } from "../toasts";
 import HotkeyInput from "./HotkeyInput.vue";
 
 const emit = defineEmits<{ close: [] }>();
 
+const connection = ref<string>(connectionOf(config.value));
+const local = computed(() => connection.value === "local");
+// The local app's game folder comes first (as paired at the last connection); null: the own setting applies
+const pairedDir = computed(() => (local.value ? paired.value?.gameDir ?? null : null));
 const token = ref(config.value?.token ?? "");
 const gameDir = ref(config.value?.gameDir ?? "");
 const language = ref(config.value?.language ?? "");
@@ -57,6 +64,10 @@ onUnmounted(() => unlisten?.());
 // The overlay needs the screen capture's window tracking (Windows only so far)
 const isWindows = navigator.userAgent.includes("Windows");
 
+const connectionOptions = computed(() => [
+  { value: "online", label: t("settings.connection.online") },
+  { value: "local", label: t("settings.connection.local") },
+]);
 const languageOptions = computed(() => [
   { value: "", label: t("lang.system") },
   { value: "de", label: t("lang.de") },
@@ -69,7 +80,8 @@ const displayOptions = computed(() => [
 // The places where they are: top row, then bottom row
 const POSITIONS: OverlayPosition[] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
-const changed = computed(() => token.value.trim() !== (config.value?.token ?? "")
+const changed = computed(() => connection.value !== connectionOf(config.value)
+  || token.value.trim() !== (config.value?.token ?? "")
   || gameDir.value.trim() !== (config.value?.gameDir ?? "")
   || language.value !== (config.value?.language ?? "")
   || autoTab.value !== (config.value?.autoTab ?? true)
@@ -88,6 +100,7 @@ async function save() {
   busy.value = true;
   try {
     applyConfig(await setConfig({
+      connection: local.value ? "local" : "online",
       server: config.value?.server ?? "",
       token: token.value.trim(),
       gameDir: gameDir.value.trim(),
@@ -137,9 +150,14 @@ async function pickFolder() {
     <form id="settings" class="form single flush groups" @submit.prevent="save">
       <section class="group">
         <div class="group-title">{{ t("settings.app") }}</div>
+        <div class="line between">
+          <span class="label">{{ t("settings.connection") }}</span>
+          <Dropdown v-model="connection" class="connection-pick" :options="connectionOptions" variant="outline" />
+        </div>
+        <!-- Stays in place for the local app, which needs no key: disabled, nothing moves -->
         <label class="field">
           {{ t("settings.token") }}
-          <input v-model="token" class="input" type="password" autocomplete="off" spellcheck="false" />
+          <input v-model="token" class="input" type="password" autocomplete="off" spellcheck="false" :disabled="local" />
         </label>
         <div class="line between">
           <span class="label">{{ t("settings.language") }}</span>
@@ -168,8 +186,12 @@ async function pickFolder() {
         <div class="field">
           {{ t("settings.gameDir") }}
           <div class="line">
-            <input v-model="gameDir" class="input" type="text" autocomplete="off" spellcheck="false" />
-            <button type="button" class="btn outline" @click="pickFolder">{{ t("settings.pick") }}</button>
+            <!-- The paired app's folder is shown instead of the own setting (kept as it is), not editable here -->
+            <input
+              class="input" type="text" autocomplete="off" spellcheck="false" :value="pairedDir ?? gameDir" :disabled="pairedDir !== null"
+              @input="gameDir = ($event.target as HTMLInputElement).value"
+            />
+            <button type="button" class="btn outline" :disabled="pairedDir !== null" @click="pickFolder">{{ t("settings.pick") }}</button>
           </div>
         </div>
       </section>
@@ -337,6 +359,11 @@ async function pickFolder() {
 
 .hotkey-field {
   width: 200px;
+}
+
+/* As wide for either choice: the field does not change size with what is picked */
+.connection-pick {
+  width: 150px;
 }
 
 .version {

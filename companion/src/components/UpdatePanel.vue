@@ -1,91 +1,33 @@
 <script setup lang="ts">
-// Shown instead of everything else while the server calls this version outdated: installed and
-// required version, and the download of the new one to a folder the user picks (with progress);
-// the installed app (updater) installs the new setup itself instead and restarts.
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { downloadDir, join } from "@tauri-apps/api/path";
-import { save } from "@tauri-apps/plugin-dialog";
-import type { CompanionOutdated } from "../../../src/webapp/api-types";
+// Shown instead of everything else while the server refuses this app's API contract number: which side is too old
+// (this companion: 426; the server or the local app: 409), the installed version and, for an outdated companion,
+// the one button that opens the releases page on GitHub in the browser. The app installs nothing itself.
+import { computed } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
-import { downloadUpdate, installUpdate } from "../backend";
-import { langRef, t } from "../i18n";
-import { errorText, toast } from "../toasts";
+import { openReleases } from "../backend";
+import { outdatedKeys, type Connection, type Outdated } from "../connection";
+import { t } from "../i18n";
+import { toastError } from "../toasts";
 
-const props = defineProps<{ outdated: CompanionOutdated; current: string; url: string | null; updater: boolean }>();
+const props = defineProps<{ outdated: Outdated; current: string; connection: Connection }>();
 
-const downloading = ref(false);
-const progress = ref<{ done: number; total: number | null } | null>(null);
-const pct = computed(() => (progress.value?.total ? (progress.value.done / progress.value.total) * 100 : 0));
-const mb = (bytes: number) => (bytes / 1048576).toLocaleString(langRef.value, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const amount = computed(() => {
-  if (!progress.value) return "";
-  const { done, total } = progress.value;
-  return total ? `${mb(done)} / ${mb(total)} MB` : `${mb(done)} MB`;
-});
-
-async function download() {
-  if (!props.url || downloading.value) return;
-  const file = decodeURIComponent(props.url.split("/").pop() ?? "");
-  const dest = await save({ defaultPath: await join(await downloadDir(), file) });
-  if (!dest) return;
-  downloading.value = true;
-  progress.value = null;
-  try {
-    await downloadUpdate(props.url, dest);
-    toast(t("outdated.saved", { path: dest }));
-  } catch (e) {
-    // Also token and network refusals: this download does not go through the connection state
-    toast(errorText(e), "error");
-  } finally {
-    downloading.value = false;
-  }
-}
-
-async function install() {
-  if (downloading.value) return;
-  downloading.value = true;
-  progress.value = null;
-  try {
-    // Ends the app when it worked
-    await installUpdate();
-  } catch (e) {
-    toast(errorText(e), "error");
-  } finally {
-    downloading.value = false;
-  }
-}
-
-let unlisten: UnlistenFn | undefined;
-onMounted(async () => {
-  unlisten = await listen<{ done: number; total: number | null }>("download-progress", (e) => (progress.value = e.payload));
-});
-onUnmounted(() => unlisten?.());
+const keys = computed(() => outdatedKeys(props.outdated, props.connection));
 </script>
 
 <template>
   <section class="panel update">
     <div class="head">
       <Icon name="warning" :size="16" />
-      <span class="head-title">{{ t("outdated.title") }}</span>
+      <span class="head-title">{{ t(keys.title) }}</span>
     </div>
     <div class="body">
+      <span>{{ t(keys.text) }}</span>
       <div class="versions">
         <span class="key">{{ t("outdated.installed") }}</span>
         <span class="mono">{{ current }}</span>
-        <span class="key">{{ t("outdated.required") }}</span>
-        <span class="mono required">{{ outdated.version }}</span>
       </div>
-      <!-- Always there (no jump when a download starts) -->
-      <div class="progress" :class="{ idle: !downloading }">
-        <div class="bar"><div class="fill" :style="{ width: `${pct}%` }" /></div>
-        <span class="amount mono">{{ amount }}</span>
-      </div>
-      <button v-if="updater" type="button" class="btn primary" :disabled="downloading" @click="install">
-        <Icon name="imports" :size="14" /> {{ t("outdated.install") }}
-      </button>
-      <button v-else-if="url" type="button" class="btn primary" :disabled="downloading" @click="download">
-        <Icon name="imports" :size="14" /> {{ t("outdated.download") }}
+      <button v-if="outdated.side === 'companion'" type="button" class="btn primary" @click="openReleases().catch(toastError)">
+        <Icon name="external" :size="14" /> {{ t("outdated.releases") }}
       </button>
     </div>
   </section>
@@ -103,55 +45,17 @@ onUnmounted(() => unlisten?.());
   flex-direction: column;
   gap: 16px;
   padding: 16px;
+  font-size: 13px;
 }
 
 .versions {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 6px 16px;
-  font-size: 13px;
 }
 
 .key {
   color: var(--text-2);
-}
-
-.required {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.progress {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 18px;
-}
-
-.progress.idle {
-  visibility: hidden;
-}
-
-.bar {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--bg-surface-2);
-  overflow: hidden;
-}
-
-.fill {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
-  transition: width 0.15s ease-out;
-}
-
-.amount {
-  font-size: 12px;
-  color: var(--text-2);
-  white-space: nowrap;
 }
 
 .btn {

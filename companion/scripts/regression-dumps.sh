@@ -6,13 +6,13 @@
 #   scripts/regression-dumps.sh <out dir> [repo root]
 #
 # The repo root defaults to the one this script lives in; sc-ohseearr is the sibling checkout
-# <root>/../../sc-ohseearr (the one the companion builds against), the data is read from its data root
-# ($SC_OHSEEARR_DATA, else <root>/../../sc-ohseearr/local). The sets are the folders each reader's
+# <root>/../../sc-ohseearr (for regress-refinery; keep it at the tag the companion builds against, see
+# src-tauri/Cargo.toml), the data is read from its data root ($SC_OHSEEARR_DATA, else <root>/../../sc-ohseearr/local). The sets are the folders each reader's
 # `regression.toml` lists (only `regression/<reader>/`, sc-ohseearr ADR 0014).
 #
-# The refinery reader needs the game's English texts: $REFINERY_ENGLISH (default: the companion's
-# global-english.ini in its local data folder) and optionally a language pack, $REFINERY_PACK. Without the
-# English table the refinery is skipped (noted on stderr).
+# The refinery reader needs the game's English texts: $REFINERY_ENGLISH (default: the table the companion
+# keeps from its server, _api_companion_locale.ini in its cache folder's api/) and optionally a language
+# pack, $REFINERY_PACK. Without the English table the refinery is skipped (noted on stderr).
 set -euo pipefail
 
 out=${1:?usage: regression-dumps.sh <out dir> [repo root]}
@@ -21,7 +21,7 @@ data=${SC_OHSEEARR_DATA:-$root/../../sc-ohseearr/local}
 manifest=$root/src-tauri/Cargo.toml
 ocr_root=$root/../../sc-ohseearr
 ocr_manifest=$ocr_root/Cargo.toml
-english=${REFINERY_ENGLISH:-${LOCALAPPDATA:-$HOME/.local/share}/com.w00zla.quartermaster.companion/global-english.ini}
+english=${REFINERY_ENGLISH:-${LOCALAPPDATA:-$HOME/.cache}/com.w00zla.quartermaster.companion/api/_api_companion_locale.ini}
 
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
