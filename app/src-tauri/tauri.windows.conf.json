@@ -7,7 +7,7 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "installerIcon": "../../companion/src-tauri/icons/icon.ico"
+        "installerIcon": "icons/icon.ico"
       }
     }
   }

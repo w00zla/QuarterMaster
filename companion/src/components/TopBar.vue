@@ -5,8 +5,8 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-// The same file and size as the desktop app's side bar (36 px from the 128 px logo): both headers look alike
-import logo from "../../../adminapp/src/assets/logo-128.png";
+// The companion's own icon (the visor), at the size the desktop app's side bar shows its logo (36 px from a 128 px file)
+import logo from "../assets/logo-128.png";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { t } from "../i18n";
 

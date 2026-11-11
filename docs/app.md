@@ -14,7 +14,7 @@ bundle", "The start protocol", "Stdin control", "One process per data folder"); 
 | `app/splash/` | the splash: one `index.html` with inline CSS and JS and the fonts (copies of `adminapp/src/assets/fonts/`); no framework, no build step |
 | `app/scripts/` | `fetch-node.mjs` (the sidecar binary), `build.mjs` (the build), `smoke.mjs` (the smoke test) |
 
-The app has no icon of its own: the configs point at the companion's icon files (`companion/src-tauri/icons/`) as a placeholder.
+The app's icon files are in `app/src-tauri/icons/` (the chest; the companion has its own, the same chest seen through a helmet visor, in `companion/src-tauri/icons/`).
 Identifier `com.w00zla.quartermaster`, product name and window title "Quartermaster", executable `quartermaster`.
 
 ## The start
