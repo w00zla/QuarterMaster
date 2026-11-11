@@ -57,7 +57,7 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
     <nav class="nav">
       <template v-for="(group, i) in groups" :key="i">
         <div v-if="i > 0" class="sep" />
-        <Tooltip v-for="tab in group" :key="tab.to" :text="tab.disabled ? t('trade.noUex') : narrow ? t(tab.label) : null">
+        <Tooltip v-for="tab in group" :key="tab.to" side="right" :text="tab.disabled ? t('trade.noUex') : narrow ? t(tab.label) : null">
           <!-- Not usable (buy/sell without UEX data): in its place, greyed out, the tooltip says why -->
           <span v-if="tab.disabled" class="item disabled" :class="{ narrow }" aria-disabled="true" :aria-label="t(tab.label)">
             <Icon :name="tab.icon" :size="16" />
@@ -73,7 +73,7 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 
     <!-- Centred on the bar's right edge, above the content -->
     <div class="toggle-wrap">
-      <Tooltip :text="t(narrow ? 'nav.expand' : 'nav.collapse')">
+      <Tooltip side="right" :text="t(narrow ? 'nav.expand' : 'nav.collapse')">
         <button type="button" class="toggle" :disabled="forced" :aria-label="t(narrow ? 'nav.expand' : 'nav.collapse')" @click="toggle">
           <Icon :name="narrow ? 'chevron-right' : 'chevron-left'" :size="14" />
         </button>
