@@ -1,6 +1,5 @@
 """Unit tests for the pure release logic (no git, no network)."""
 
-import json
 import unittest
 from datetime import datetime, timezone
 
@@ -206,12 +205,46 @@ class Bump(unittest.TestCase):
     def test_current_version(self):
         self.assertEqual(core.cargo_toml_version(self.APP_TOML), "0.16.3")
 
-    def test_branch_guard(self):
-        self.assertIsNone(core.branch_guard(v("0.17.0"), "main"))
+    def test_branch_guard_allows_channel_versions_only(self):
+        self.assertIsNotNone(core.branch_guard(v("0.17.0"), "main"))  # a live bump is a pull request
         self.assertIsNotNone(core.branch_guard(v("0.17.0"), "channel/x"))
         self.assertIsNone(core.branch_guard(v("0.17.0-x.1"), "channel/x"))
         self.assertIsNotNone(core.branch_guard(v("0.17.0-x.1"), "channel/y"))
         self.assertIsNotNone(core.branch_guard(v("0.17.0-x.1"), "main"))
+
+    def test_release_branch_names(self):
+        self.assertEqual(core.release_branch(APP, v("1.0.0")), "release/app-v1.0.0")
+        self.assertEqual(core.release_branch(COMPANION, v("2.2.0")), "release/companion-v2.2.0")
+        self.assertEqual(core.parse_release_branch("release/app-v1.0.0"), ("app", v("1.0.0")))
+        self.assertEqual(core.parse_release_branch("release/companion-v2.2.0"), ("companion", v("2.2.0")))
+        for bad in ["release/app-v1.0.0-x.1", "release/other-v1.0.0", "channel/x", "app-v1.0.0", "release/app-1.0.0"]:
+            self.assertIsNone(core.parse_release_branch(bad), bad)
+
+    def test_the_default_branch_in_every_spelling(self):
+        for ref in ["main", "master", "refs/heads/main", "HEAD:main", "HEAD:refs/heads/main", "+main", "HEAD", "origin/main"]:
+            self.assertTrue(core.is_default_branch(ref), ref)
+        for ref in ["channel/main", "release/app-v1.0.0", "app-v1.0.0", "mainline", "channels"]:
+            self.assertFalse(core.is_default_branch(ref), ref)
+
+    def test_read_version_and_files_not_carrying(self):
+        texts = Bump().app_texts()
+        self.assertEqual(core.files_not_carrying(APP, texts, "0.16.3"), [])
+        self.assertEqual(core.files_not_carrying(APP, texts, "0.17.0"), core.version_files(APP))
+        texts["app/package.json"] = texts["app/package.json"].replace("0.16.3", "0.16.2")
+        self.assertEqual(core.files_not_carrying(APP, texts, "0.16.3"), ["app/package.json"])
+        texts["package.json"] = None
+        self.assertEqual(core.files_not_carrying(APP, texts, "0.16.3"), ["package.json", "app/package.json"])
+
+    def test_pull_request_texts(self):
+        self.assertIn("`app-v1.0.0`", core.pr_body_bump(APP, v("1.0.0")))
+        self.assertIn("build-app.yml", core.pr_body_bump(APP, v("1.0.0")))
+        self.assertEqual(core.finalize_title("x", [(APP, v("0.2.0")), (COMPANION, v("2.2.0"))]),
+                         "Finalize channel x: app 0.2.0, companion 2.2.0")
+        self.assertEqual(core.finalize_title("x", []), "Finalize channel x")
+        body = core.finalize_body("x", [(APP, v("0.2.0"))])
+        self.assertIn("channel/x", body)
+        self.assertIn("`app-v0.2.0`", body)
+        self.assertIn("not an ancestor of main", body)
 
 
 CHANNELS = ('{\n  "app": {\n    "stable": "app-v0.17.0",\n    "channels": [\n      {\n'
@@ -226,20 +259,6 @@ class ChannelsJson(unittest.TestCase):
     def test_missing_file(self):
         self.assertEqual(core.load_channels(None), {})
 
-    def test_roundtrip_is_stable(self):
-        self.assertEqual(core.dump_channels(core.load_channels(CHANNELS)), CHANNELS)
-
-    def test_key_order_and_unknown_keys(self):
-        doc = {"data": {"stable": "data-1-1"}, "x": 1,
-               "companion": {"channels": [], "stable": "companion-v1.0.0"},
-               "app": {"channels": [{"tag": "app-v1.0.0-a.1", "extra": 1, "id": "a"}], "stable": "app-v0.9.0"}}
-        out = core.dump_channels(doc)
-        parsed = json.loads(out)
-        self.assertEqual(list(parsed), ["app", "companion", "data", "x"])
-        self.assertEqual(list(parsed["app"]), ["stable", "channels"])
-        self.assertEqual(list(parsed["app"]["channels"][0]), ["id", "tag", "extra"])
-        self.assertTrue(out.endswith("}\n"))
-
     def test_accessors(self):
         doc = core.load_channels(CHANNELS)
         self.assertEqual(core.stable_of(doc, "app"), "app-v0.17.0")
@@ -248,23 +267,6 @@ class ChannelsJson(unittest.TestCase):
         self.assertEqual(core.channel_entries({}, "app"), [])
         self.assertIsNone(core.stable_of({}, "app"))
         self.assertIsNone(core.stable_of({"data": {"stable": 5}}, "data"))
-
-    def test_remove_touches_one_product_only(self):
-        doc = core.load_channels(CHANNELS)
-        out = core.remove_channel(doc, "app", "joysticks")
-        self.assertEqual([e["id"] for e in out["app"]["channels"]], ["other"])
-        self.assertEqual([e["id"] for e in out["companion"]["channels"]], ["joysticks"])
-        self.assertEqual(out["data"], doc["data"])
-        self.assertEqual(len(doc["app"]["channels"]), 2)  # input untouched
-        with self.assertRaises(KeyError):
-            core.remove_channel(doc, "app", "nope")
-        with self.assertRaises(KeyError):
-            core.remove_channel({"app": {"stable": "app-v1.0.0"}}, "app", "x")
-
-    def test_remove_last_keeps_empty_list(self):
-        doc = core.load_channels('{"app": {"stable": "app-v1.0.0", "channels": [{"id": "a", "tag": "app-v1.1.0-a.1"}]}}')
-        self.assertEqual(core.dump_channels(core.remove_channel(doc, "app", "a")),
-                         '{\n  "app": {\n    "stable": "app-v1.0.0",\n    "channels": []\n  }\n}\n')
 
     def test_invalid(self):
         for bad in ["[]", '{"app": []}', '{"app": {"channels": {}}}', '{"app": {"channels": [{"tag": "x"}]}}',
@@ -498,6 +500,79 @@ class BuildRuns(unittest.TestCase):
         self.assertEqual([(s.name, s.state, core.duration(s.seconds)) for s in linux.steps],
                          [("Set up job", "success", "0:03"), ("Build bundles", "running", "1:00"),
                           ("Upload", "queued", "")])
+
+
+
+
+CHECK_RUNS = [
+    {"__typename": "CheckRun", "name": "tests", "status": "COMPLETED", "conclusion": "SUCCESS"},
+    {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SKIPPED"},
+    {"__typename": "CheckRun", "name": "build", "status": "IN_PROGRESS", "conclusion": ""},
+    {"__typename": "CheckRun", "name": "e2e", "status": "COMPLETED", "conclusion": "FAILURE"},
+    {"__typename": "StatusContext", "context": "ci/legacy", "state": "PENDING"},
+    {"__typename": "StatusContext", "context": "ci/ok", "state": "SUCCESS"},
+]
+
+
+class PullRequests(unittest.TestCase):
+    def test_parse_counts_checks(self):
+        view = core.parse_pr({"number": 12, "state": "open", "url": "https://x/12", "title": "t",
+                              "mergeStateStatus": "blocked", "statusCheckRollup": CHECK_RUNS})
+        self.assertEqual((view.number, view.state, view.merge_state), (12, "OPEN", "BLOCKED"))
+        self.assertEqual((view.passed, view.pending, view.failed), (3, 2, 1))
+        self.assertEqual(view.failing, ["e2e"])
+        self.assertEqual(view.checks_line, "3 passed, 2 pending, 1 failed")
+        self.assertIn("failing: e2e", core.pr_summary(view))
+        self.assertIn("merge state blocked", core.pr_summary(view))
+
+    def test_no_checks(self):
+        view = core.parse_pr({"number": 1, "state": "MERGED", "statusCheckRollup": None})
+        self.assertEqual(view.checks_line, "no checks reported")
+        self.assertNotIn("merge state", core.pr_summary(view))
+
+
+def untagged(key, ver, sha="a" * 40):
+    return core.Pending("untagged", key, v(ver), commit=sha)
+
+
+class PendingReleases(unittest.TestCase):
+    def pr(self, number, head, state="OPEN", base="main"):
+        return {"number": number, "headRefName": head, "state": state, "baseRefName": base}
+
+    def test_open_release_and_channel_pull_requests(self):
+        out = core.build_pending([self.pr(3, "release/app-v1.0.0"), self.pr(4, "channel/x"),
+                                  self.pr(5, "feature/y"), self.pr(6, "release/app-v0.9.0", "MERGED"),
+                                  self.pr(7, "release/companion-v2.2.0", base="other")], set(), [])
+        self.assertEqual([(p.kind, p.product, p.branch, p.number) for p in out],
+                         [("pr", None, "channel/x", 4), ("pr", "app", "release/app-v1.0.0", 3)])
+        self.assertIn("#4", out[0].label)
+
+    def test_a_pushed_release_branch_without_a_pull_request(self):
+        out = core.build_pending([self.pr(1, "release/app-v0.9.0", "MERGED")],
+                                 {"release/app-v1.0.0", "release/app-v0.9.0"}, [])
+        self.assertEqual([(p.kind, p.branch) for p in out], [("branch", "release/app-v1.0.0")])
+
+    def test_the_newest_pull_request_of_a_branch_decides(self):
+        out = core.build_pending([self.pr(1, "release/app-v1.0.0", "CLOSED"), self.pr(2, "release/app-v1.0.0")],
+                                 {"release/app-v1.0.0"}, [])
+        self.assertEqual([(p.kind, p.number) for p in out], [("pr", 2)])
+
+    def test_gh_not_reachable_leaves_the_pull_request_part_out(self):
+        out = core.build_pending(None, {"release/app-v1.0.0"}, [untagged("app", "1.0.0")])
+        self.assertEqual([p.kind for p in out], ["untagged"])
+
+    def test_untagged_label(self):
+        label = untagged("companion", "2.2.0", "b" * 40).label
+        self.assertIn("companion 2.2.0", label)
+        self.assertIn("companion-v2.2.0", label)
+        self.assertIn("bbbbbbbb", label)
+
+
+class PathsOfTheFeed(unittest.TestCase):
+    def test_the_feed_is_read_from_the_channels_branch(self):
+        self.assertEqual(core.CHANNELS_REF, "origin/channels")
+        self.assertEqual(core.CHANNELS_FILE, "channels.json")
+        self.assertEqual(core.ORIGIN_MAIN, "origin/main")
 
 
 if __name__ == "__main__":
