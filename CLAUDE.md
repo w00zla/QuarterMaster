@@ -89,6 +89,7 @@ cargo test --release --manifest-path companion/src-tauri/Cargo.toml   # Rust tes
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example inventory_dump -- <out dir> <dir>... [--threads n] [--gpu]   # warehouse read over screenshots/recordings, overlays per frame
 cargo run --release --manifest-path companion/src-tauri/Cargo.toml --example components_dump -- <[set=]dir>... [--threads n] [--gpu] [--dataset <out dir>]   # character inventory read; --dataset: the tooltip lines as a line-crop dataset (companion/tools/dataset-export/README.md)
 cargo run --release --manifest-path ../sc-ohseearr/Cargo.toml --example ocr_dump -- <image> [max_height] [threads]   # raw OCR of an image (sc-ohseearr's; needs its checkout next to this repo)
+tools/releasectl/.venv/Scripts/python.exe -I tools/releasectl/run.py [--dry-run]   # release TUI: version bumps, tags, channels, drafts, data releases for app and companion (tools/releasectl/README.md; own uv venv, never bare python)
 companion/scripts/regression-dumps.sh <out dir> [repo root]   # inventory_dump, components_dump and sc-ohseearr's regress-refinery (its checkout next to this repo) over the readers' regression sets (recordings in its data root's regression/<reader>/), normalized: compare with a baseline before and after any OCR/reader change (byte-identical is the bar)
 ```
 
