@@ -32,7 +32,7 @@ through `installPack`; anything else is a snapshot for `catalog:import`), then r
 | `QM_MIGRATIONS_DIR` | the migrations folder; else `drizzle/` of the repository (the bundle has no repository: the shell sets it) |
 | `QM_DIST_DIR` | the built SPA's folder; else `webapp/dist` of the repository (the shell sets it to the bundle's `web/`) |
 | `QM_STDIN_CONTROL` | `1` = a line `stop` on stdin shuts the server down like SIGINT, and so does a closed stdin ("Stdin control") |
-| `QM_CSP_CONNECT` | extra `connect-src` sources for the Content-Security-Policy, space or comma separated, plain source expressions only (anything with a quote or semicolon is `QM_FATAL config`); the desktop shell sets what its IPC needs; unset = none (`docs/webapp.md` "Security measures") |
+| `QM_CSP_CONNECT` | extra `connect-src` sources for the Content-Security-Policy, space or comma separated, plain source expressions only (anything with a quote or semicolon is `QM_FATAL config`); the desktop shell sets the one origin its IPC needs (`http://ipc.localhost` on Windows: `docs/app.md` "IPC and the Content-Security-Policy"); unset = none (`docs/webapp.md` "Security measures") |
 
 (`src/singleuser/paths.ts`, `port.ts`: pure, passed the environment; tested in `test/singleuser-helpers.test.ts`.)
 
@@ -81,6 +81,7 @@ the admin UI, the UEX pull.
 `pnpm app:bundle [--out <dir>]` (`src/singleuser/app-bundle.ts`) writes ONE folder, `local/app-bundle/` by default (an existing folder
 is replaced only if it holds a `bundle.json`), that runs with the official `node.exe` alone: no `node_modules`, no repository. It builds
 the SPA first when `webapp/dist` is missing or older than its sources. Development stays build-free (`pnpm singleuser` runs the `.ts` sources).
+The program that ships and runs the bundle is the desktop shell, `app/` (`docs/app.md`): its build copies the folder into the app's resources.
 
 | File | What |
 |---|---|
@@ -88,14 +89,15 @@ the SPA first when `webapp/dist` is missing or older than its sources. Developme
 | `pglite.wasm`, `pglite.data`, `initdb.wasm` | PGlite's runtime files from `@electric-sql/pglite/dist`, found beside `server.mjs`; all three are needed (without `initdb.wasm` or `pglite.data` the start fails with `QM_FATAL database`) |
 | `drizzle/` | the migrations |
 | `web/` | the built SPA |
-| `bundle.json` | `app.version`, `node.version` (the pinned Node the shell downloads: `NODE_VERSION` in `app-bundle.ts`), `nodeFlags`, `startTexts` and `files` (every other file with its size) |
+| `bundle.json` | `app.version`, `node.version` (the pinned Node the shell ships as its sidecar: `NODE_VERSION` in `app-bundle.ts`, fetched by `pnpm app:fetch-node`), `nodeFlags`, `startTexts` and `files` (every other file with its size) |
 
 `startTexts` holds the splash texts per language (`de`, `en`; `starting` and `languagePack`, read from `webapp/src/i18n.ts`'s
 `start.starting` and `start.languagePack`), so the shell's splash shows the same words as the app without a copy by hand.
 
 **Running it:** `node <nodeFlags> server.mjs` with the environment the shell sets: `QM_MIGRATIONS_DIR=<bundle>/drizzle`,
-`QM_DIST_DIR=<bundle>/web`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (what its IPC needs), usually `QM_DATA_DIR` and `QM_PORT` (without them:
-the profile folder and the first free port of 28460-28469), and stdin and stdout piped (the start protocol, "Stdin control"). Tests:
+`QM_DIST_DIR=<bundle>/web`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (what its IPC needs), and stdin and stdout piped (the start protocol,
+"Stdin control"). The shell sets neither `QM_DATA_DIR` nor `QM_PORT` (so: the profile folder and the first free port of 28460-28469); it hands
+them on when they are in its own environment (`docs/app.md` "The sidecar"). Tests:
 `test/singleuser-bundle.test.ts` builds a bundle into a temp folder, copies it to another place, starts it and asks for the
 capabilities, the index and a script of the SPA.
 
@@ -152,7 +154,8 @@ PGlite has no second opener, so the process takes a lock in the data folder befo
 is created complete or not at all (written aside, hard-linked into place), and is removed after the database is closed at a clean
 exit, at a failed start, and at process exit.
 
-A second start finds the lock and asks whether its holder is still there. **The holder is live** when its pid exists and either
+The desktop shell adds its own guard in front: with the default data folder a second start of the app only brings the running
+window to the front (`docs/app.md` "Single instance"). A second start of the server finds the lock and asks whether its holder is still there. **The holder is live** when its pid exists and either
 something listens on the recorded port, or the lock is younger than two minutes (it may still be starting). Otherwise the lock is
 **stale** (the process is gone, or the pid was reused by an unrelated program after a crash: it does not listen on the recorded port)
 and is taken over. A file that is not a lock is stale too. A live holder ends the second start at once with `QM_FATAL locked` and
@@ -171,7 +174,7 @@ and is taken over. A file that is not a lock is stale too. A live holder ends th
 | Key | Default | |
 |---|---|---|
 | `gameDir` | `null` | the game folder: the channel folder, e.g. `...\StarCitizen\LIVE` |
-| `autoUpdate` | `true` | the one switch for the automatic update of app and data (read at start) |
+| `autoUpdate` | `true` | the one switch for the automatic update of app and data (read at start; the desktop shell reads it from the file before it starts the server, for the app update: `docs/app.md` "The start") |
 | `uexKey` | `null` | the user's own UEX key, plain text in the file (the data folder is the user's); trimmed, empty = `null` = no key |
 | `uexIntervalMinutes` | `15` | minutes between two UEX pulls: 15, 30 or 60 (anything else makes the file "broken", below) |
 

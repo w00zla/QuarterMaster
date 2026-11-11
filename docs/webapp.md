@@ -513,8 +513,8 @@ binds the global the shell injects; in a browser everything stays "not available
 
 ### The desktop shell (the contract)
 
-The desktop app is its own Tauri program: it starts the server as a sidecar ("The app bundle" in `docs/singleuser.md`), waits for
-`QM_READY`, and shows `http://127.0.0.1:<port>` in its window. The SPA talks to it through the global `window.__TAURI__`
+The desktop app is its own Tauri program (`app/`; how it implements this contract, its capabilities and its updater: `docs/app.md`): it starts
+the server as a sidecar ("The app bundle" in `docs/singleuser.md`), waits for `QM_READY`, and shows `http://127.0.0.1:<port>` in its window. The SPA talks to it through the global `window.__TAURI__`
 (Tauri's `withGlobalTauri`): `__TAURI__.core.invoke(command, args)` and `__TAURI__.event.listen(event, handler)`. Without that global (or
 without `core.invoke`) nothing below exists: pickers answer null, no window chrome, no footer button, no app update.
 
@@ -551,7 +551,7 @@ Event `update-changed`, payload `UpdateState`: at every change, progress include
 carries the standard `data-tauri-drag-region` attribute (on the bar and on its non-interactive parts, never on a button or link). The
 update commands are optional as a group: when `update_state` rejects at start, the SPA treats the shell as one without updates. A
 payload that is not an `UpdateState` is dropped; a command that rejects shows as an error of the updater. What the shell sets in
-the server's environment: `QM_DATA_DIR`, `QM_PORT`, `QM_MIGRATIONS_DIR`, `QM_DIST_DIR`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (`docs/singleuser.md`).
+the server's environment: `QM_MIGRATIONS_DIR`, `QM_DIST_DIR`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (`docs/app.md` "The sidecar").
 
 **The frameless window.** Only with `shell.available`: the top bar is the title bar (drag region; double click maximizes, the shell's
 doing) with the three window buttons (`WindowButtons.vue`: minimize, maximize or restore, close; 36 px slots, close hovers in the error
@@ -634,7 +634,7 @@ decisions, time formatting, both languages having the same texts).
 | Vector | Measure |
 |---|---|
 | CSRF | Session cookie SameSite=Lax; own same-origin check on every non-GET; writes accept `application/json` only (a JSON body cross-origin needs a CORS preflight, never answered); no state change on GET. Same-site is not enough: admin (`:8443`) and user app are the same site. |
-| XSS | Vue escapes; no `v-html` except `Icon.vue` (constants; enforced by `test/spa-sources.test.ts`). Untrusted texts: external `global.ini` files, Discord names. Strict CSP from the app (`connect-src` is `'self'` and the WebSocket; `WebappConfig.extraConnectSrc` adds sources, unset online; the singleuser entry fills it from `QM_CSP_CONNECT`, which the desktop shell sets to what its IPC needs). |
+| XSS | Vue escapes; no `v-html` except `Icon.vue` (constants; enforced by `test/spa-sources.test.ts`). Untrusted texts: external `global.ini` files, Discord names. Strict CSP from the app (`connect-src` is `'self'` and the WebSocket; `WebappConfig.extraConnectSrc` adds sources, unset online; the singleuser entry fills it from `QM_CSP_CONNECT`, which the desktop shell sets to the one origin its IPC needs, `http://ipc.localhost` on Windows: `docs/app.md`). |
 | Clickjacking | `frame-ancestors 'none'`, `X-Frame-Options: DENY`. |
 | Access control / IDOR | `Actor` only from the session + roster; a `guildId` from the request only with an active member row there; reads through functions that take the `Actor`, never "load by ID"; writes through the stock service only. DB tests cover other users' stock, other orgs, inactive members. |
 | Missing auth | Auth middleware on everything except `/auth/*`, `GET /api/capabilities` (no user data: what the server offers) and static files; a test asserts 401 for every other route without a session. |
