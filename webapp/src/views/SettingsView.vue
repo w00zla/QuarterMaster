@@ -17,7 +17,7 @@ import { checkData, data, loadSettings, pullUex, refreshData, refreshUex, saveSe
 import { dayTime, megabytes, shortTime } from "../localTime";
 import { me, saveProfile } from "../session";
 import {
-  canFetchNow, dataTag, folderView, gameDirChange, isBusy, KEY_MASK, keyDecision, nextFetch, packTag, uexRefused, uexTag,
+  canFetchNow, dataTag, folderView, gameDirChange, isBusy, KEY_MASK, keyDecision, nextFetch, uexRefused, uexTag,
   type TagModel,
 } from "../settingsLogic";
 import { shell } from "../shell";
@@ -162,11 +162,16 @@ async function setAuto(e: Event) {
   }
 }
 
-/** The update dialog belongs to the main window: from the settings window it is asked for there (windows.ts) and brought to the front. */
+/**
+ * The update dialog belongs to the main window: from the settings window it is asked for there (windows.ts), the main window
+ * comes to the front and this window closes (it is owned by the main window and would stay on top of the dialog).
+ */
 function openUpdate() {
   if (settingsWindow) {
     post({ type: "open-update" });
     shell.focusMain();
+    // A moment later: the message to the main window must be out before this page goes
+    setTimeout(() => shell.close(), 150);
   } else shell.openUpdate();
 }
 
@@ -237,11 +242,9 @@ onUnmounted(() => clearTimeout(timer));
             </div>
             <div class="line between">
               <span class="label">{{ t("folder.pack") }}</span>
-              <span class="with pack">
-                <!-- The loaded pack's file below the game folder -->
-                <span v-if="s.languagePack.file" class="v path" :title="s.languagePack.file">{{ s.languagePack.file }}</span>
-                <span class="tag" :class="tagClass(packTag(s.languagePack))">{{ t(packTag(s.languagePack).text) }}</span>
-              </span>
+              <!-- The loaded pack's file below the game folder, or that there is none: plain information, no tag -->
+              <span v-if="s.languagePack.file" class="v path" :title="s.languagePack.file">{{ s.languagePack.file }}</span>
+              <span v-else class="v">{{ t("pack.none") }}</span>
             </div>
           </section>
 
@@ -480,10 +483,6 @@ onUnmounted(() => clearTimeout(timer));
 }
 
 /* The pack's path gives way before the row breaks */
-.pack {
-  min-width: 0;
-}
-
 .path {
   min-width: 0;
   overflow: hidden;
