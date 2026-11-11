@@ -171,10 +171,11 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
+  /* Quiet until pointed at: the bar's own ground, a dim frame, a dim chevron */
+  border: 1px solid var(--border-dim);
   border-radius: var(--radius-control);
-  background: var(--bg-surface-2);
-  color: var(--text-2);
+  background: var(--bg-surface);
+  color: var(--text-3);
   cursor: pointer;
 }
 
