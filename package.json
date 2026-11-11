@@ -31,6 +31,7 @@
     "webapp:build": "pnpm --filter sc-quartermaster-webapp build",
     "singleuser": "node --env-file-if-exists=.env src/singleuser/main.ts",
     "singleuser:import": "node --env-file-if-exists=.env src/singleuser/import.ts",
+    "app:bundle": "node src/singleuser/app-bundle.ts",
     "bot": "node --env-file-if-exists=.env src/bot/main.ts",
     "bot:register": "node --env-file-if-exists=.env src/bot/register.ts",
     "ext": "node --env-file-if-exists=.env src/ext/main.ts",
@@ -55,6 +56,7 @@
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "drizzle-kit": "^0.31.11",
+    "esbuild": "0.28.2",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@12.16.1"

@@ -18,3 +18,15 @@ export const dbDir = (data: string) => join(data, 'db');
 
 /** The thumbnails: `QM_THUMBS_DIR` if set, else `thumbs` in the data folder (it may be missing: no thumbnails then). */
 export const thumbsDir = (env: Record<string, string | undefined>, data: string) => env.QM_THUMBS_DIR || join(data, 'thumbs');
+
+/**
+ * `QM_CSP_CONNECT`: extra `connect-src` sources the desktop shell needs for its own IPC (space or comma separated). Only plain
+ * source expressions: a token that could end the directive or add another one is an error, not a guess.
+ */
+export function cspConnect(value: string | undefined): string[] {
+  const sources = (value ?? '').split(/[\s,]+/).filter(Boolean);
+  for (const source of sources) {
+    if (!/^[A-Za-z0-9:/.*_\-[\]]+$/.test(source)) throw new Error(`QM_CSP_CONNECT: "${source}" is not a plain connect-src source`);
+  }
+  return sources;
+}

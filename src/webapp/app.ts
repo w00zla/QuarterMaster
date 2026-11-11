@@ -47,6 +47,9 @@ export interface WebappConfig {
   // Routes only one variant has (singleuser: the data update): called with the API router after the regular routes and
   // the identity's, before the 404 catch-all. Online passes none.
   mountApi?: (api: ApiApp) => void;
+  // More `connect-src` sources next to 'self' and the WebSocket: what the singleuser desktop shell needs for its own IPC
+  // (QM_CSP_CONNECT, docs/webapp.md). Unset online; nothing is added on a guess.
+  extraConnectSrc?: string[];
 }
 
 // apiToken: the request authenticated with the user's API token (companion app), not a session
@@ -100,7 +103,7 @@ export function createApp(db: Db, identity: Identity, config: WebappConfig) {
       imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com'],
       fontSrc: ["'self'"],
       // The realtime WebSocket, explicitly: older browsers do not count ws(s) as 'self'
-      connectSrc: ["'self'", config.origin.replace(/^http/, 'ws')],
+      connectSrc: ["'self'", config.origin.replace(/^http/, 'ws'), ...(config.extraConnectSrc ?? [])],
       objectSrc: ["'none'"],
       baseUri: ["'none'"],
       formAction: ["'self'"],

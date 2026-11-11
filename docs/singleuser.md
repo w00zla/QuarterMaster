@@ -1,6 +1,6 @@
 # Singleuser variant
 
-Six parts are described here: the process (how it starts and what it keeps), the database (PGlite), the settings and the game folder, the data pack (how
+Seven parts are described here: the process (how it starts and what it keeps), the app bundle (what the desktop shell runs), the database (PGlite), the settings and the game folder, the data pack (how
 game data gets into the app, and how the app fetches it), UEX (the one optional thing) and who the user is (the local identity).
 
 # The process
@@ -29,24 +29,28 @@ through `installPack`; anything else is a snapshot for `catalog:import`), then r
 | `QM_PAIRING_FILE` | the pairing file's path instead of the profile's (development, tests) |
 | `QM_UEX_KEY` | a UEX key for development: overrides the setting `uexKey` (trimmed; empty or unset = no override); never written to the file |
 | `QM_DATA_FEED` | a folder (`channels.json`, `<tag>/<asset>`) the data update reads instead of GitHub; for development and tests |
+| `QM_MIGRATIONS_DIR` | the migrations folder; else `drizzle/` of the repository (the bundle has no repository: the shell sets it) |
+| `QM_DIST_DIR` | the built SPA's folder; else `webapp/dist` of the repository (the shell sets it to the bundle's `web/`) |
+| `QM_STDIN_CONTROL` | `1` = a line `stop` on stdin shuts the server down like SIGINT, and so does a closed stdin ("Stdin control") |
+| `QM_CSP_CONNECT` | extra `connect-src` sources for the Content-Security-Policy, space or comma separated, plain source expressions only (anything with a quote or semicolon is `QM_FATAL config`); the desktop shell sets what its IPC needs; unset = none (`docs/webapp.md` "Security measures") |
 
 (`src/singleuser/paths.ts`, `port.ts`: pure, passed the environment; tested in `test/singleuser-helpers.test.ts`.)
 
-**Data folder:** `settings.json` (the settings, "Settings and the game folder"), `db/` (the PGlite database, with its `pg_wal/`), `thumbs/` (`s/`, `m/`, `l/`, `thumbs.json`) and `data-pack.json`
+**Data folder:** `server.lock` (the lock, "One process per data folder"), `settings.json` (the settings, "Settings and the game folder"), `db/` (the PGlite database, with its `pg_wal/`), `thumbs/` (`s/`, `m/`, `l/`, `thumbs.json`) and `data-pack.json`
 (the manifest of the installed data pack); the last two are written by the data pack's install. `downloads/` exists only
 while the data update downloads (deleted afterwards and at the next start). Nothing else.
 
 **Start:** the server binds to `127.0.0.1` only; its origin is `http://127.0.0.1:<port>`. It logs one line per loading
 step with its duration (`open database`, `migrations`, `checkpoint`, `listen`) and then
-`listening on <origin>`. The migrations run at every start (a no-op when current), then one `CHECKPOINT`; there are no
+`listening on <origin>`; beside these human lines it prints the machine-readable ones of "The start protocol". The migrations run at every start (a no-op when current), then one `CHECKPOINT`; there are no
 timers. Capabilities: `{ login: 'none', orgs: false, uex: false }`. The rate limits are set so high that one local user
 never meets them. Realtime is the online mechanism: the same triggers and `listenForChanges`, with the PGlite
 connection as the change source.
 
 **Stop:** SIGINT or SIGTERM stops accepting, closes the realtime sockets and the server, awaits the PGlite close and
-exits (at most 10 s, then it leaves anyway). `test/singleuser.test.ts` starts the real process on a temp folder (no
-Postgres) and drives it, through `test/singleuser-runner.mjs`, which turns a line on stdin into SIGINT because a
-Windows child cannot be sent a catchable signal.
+exits (at most 10 s, then it leaves anyway). A Windows child cannot be sent a catchable signal, so the shell (and
+`test/singleuser.test.ts`, which starts the real process on a temp folder, no Postgres) stops it through stdin
+("Stdin control").
 
 **Host guard (DNS rebinding):** a web page whose domain is re-pointed to 127.0.0.1 is same-origin to the browser, and
 would reach everything the open local API offers. The app therefore answers 421 `{"error":"host not allowed"}` to every
@@ -71,6 +75,89 @@ waited for (up to 120 s instead of 10).
 
 **What the variant does not have:** orgs (no org routes, no membership), login and sessions, API tokens, the Discord bot,
 the admin UI, the UEX pull.
+
+# The app bundle
+
+`pnpm app:bundle [--out <dir>]` (`src/singleuser/app-bundle.ts`) writes ONE folder, `local/app-bundle/` by default (an existing folder
+is replaced only if it holds a `bundle.json`), that runs with the official `node.exe` alone: no `node_modules`, no repository. It builds
+the SPA first when `webapp/dist` is missing or older than its sources. Development stays build-free (`pnpm singleuser` runs the `.ts` sources).
+
+| File | What |
+|---|---|
+| `server.mjs` | `src/singleuser/main.ts` bundled by esbuild (ESM for Node, one file; the package.json version is compiled in) |
+| `pglite.wasm`, `pglite.data`, `initdb.wasm` | PGlite's runtime files from `@electric-sql/pglite/dist`, found beside `server.mjs`; all three are needed (without `initdb.wasm` or `pglite.data` the start fails with `QM_FATAL database`) |
+| `drizzle/` | the migrations |
+| `web/` | the built SPA |
+| `bundle.json` | `app.version`, `node.version` (the pinned Node the shell downloads: `NODE_VERSION` in `app-bundle.ts`), `nodeFlags`, `startTexts` and `files` (every other file with its size) |
+
+`startTexts` holds the splash texts per language (`de`, `en`; `starting` and `languagePack`, read from `webapp/src/i18n.ts`'s
+`start.starting` and `start.languagePack`), so the shell's splash shows the same words as the app without a copy by hand.
+
+**Running it:** `node <nodeFlags> server.mjs` with the environment the shell sets: `QM_MIGRATIONS_DIR=<bundle>/drizzle`,
+`QM_DIST_DIR=<bundle>/web`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (what its IPC needs), usually `QM_DATA_DIR` and `QM_PORT` (without them:
+the profile folder and the first free port of 28460-28469), and stdin and stdout piped (the start protocol, "Stdin control"). Tests:
+`test/singleuser-bundle.test.ts` builds a bundle into a temp folder, copies it to another place, starts it and asks for the
+capabilities, the index and a script of the SPA.
+
+**Memory (`nodeFlags`).** Measured with the bundle on a first data install from a folder feed into an empty data folder (the ~28 MB catalog JSON is
+parsed; 17 s), then normal requests (`/api/catalog` in both languages, the companion's catalog and locale, a stock write and read; every
+one answered 200 in every run that survived the install). RSS is the working set in MB (Windows, Node 26.13.0); "peak" is the peak
+working set of the whole run.
+
+| Flags | First install | RSS idle | after install | after requests (second round) | peak |
+|---|---|---|---|---|---|
+| none | ok | 220 | 288 | 361 (383) | 582 |
+| `--max-semi-space-size=1` | ok | 487 | 236 | 319 (291) | 565 |
+| + `--max-old-space-size=48` | **V8 out-of-memory abort in the import** (exit 134) | | | | |
+| + `--max-old-space-size=96` | **V8 out-of-memory abort in the import** (exit 134) | | | | |
+| + `--max-old-space-size=128` (2 runs) | ok | 483 / 150 | 251 / 264 | 281 / 300 (269 / 287) | 523 |
+| + `--max-old-space-size=160` | ok | 366 | 259 | 298 (288) | 523 |
+| + `--max-old-space-size=192` (2 runs) | ok | 367 / 152 | 272 / 268 | 276 / 278 (266 / 266) | 538 / 523 |
+
+"Idle" is sampled 13 s after the start of a first, empty data folder and scatters between ~150 and ~490 MB whatever the flags: it
+depends on when Windows trims the working set after PGlite created the database, so it says nothing about a flag. What the flags
+change is the steady state after the install (about 250-300 MB with them, 290-380 MB without) and, above all, whether the import survives.
+The old-space cap changes the RSS little: 48 and 96 MB abort in the catalog import, 128 MB survives, so the cap is generous:
+`nodeFlags` is `--max-semi-space-size=1 --max-old-space-size=192` (a clear distance above the smallest survivor, because the import grows with the catalog).
+
+## The start protocol
+
+Beside its log lines the process prints stable lines on stdout, each on a line of its own, for the shell (its splash shows the
+steps; the texts for them: "The app bundle", `startTexts`):
+
+| Line | When |
+|---|---|
+| `QM_STEP database` | the data folder is locked and the database is being opened |
+| `QM_STEP migrations` | the migrations run |
+| `QM_STEP languagePack` | the game's language pack is read into the database |
+| `QM_STEP listen` | the server is about to listen |
+| `QM_READY <origin>` | it listens; `<origin>` is `http://127.0.0.1:<port>` |
+| `QM_FATAL <code>` | the start failed; the process exits with 1 right after, the human message (`Start failed: …`) goes to stderr |
+
+The steps come in this order, once each, then `QM_READY`. `QM_FATAL` codes: `portsBusy` (`QM_PORT` taken, or no free port in 28460-28469),
+`locked` (another process holds the data folder), `database` (the database cannot be opened or migrated), `config` (an environment
+value is invalid, e.g. `QM_CSP_CONNECT`), `internal` (anything else). A failure before the first step (port, lock, configuration) prints
+`QM_FATAL` alone. Tests: `test/singleuser.test.ts`.
+
+## Stdin control
+
+The shell cannot signal a child on Windows. With `QM_STDIN_CONTROL=1` the process reads stdin line by line: the line `stop` runs the
+clean shutdown ("Stop"), and so does the end of stdin (the shell is gone, nobody is left to stop the server). Without the variable stdin
+is not read.
+
+## One process per data folder
+
+PGlite has no second opener, so the process takes a lock in the data folder before it opens the database: `server.lock`, JSON
+`{ pid, port, startedAt }` (`src/singleuser/lock.ts`). It comes after the port is chosen (so a taken `QM_PORT` is `portsBusy` first),
+is created complete or not at all (written aside, hard-linked into place), and is removed after the database is closed at a clean
+exit, at a failed start, and at process exit.
+
+A second start finds the lock and asks whether its holder is still there. **The holder is live** when its pid exists and either
+something listens on the recorded port, or the lock is younger than two minutes (it may still be starting). Otherwise the lock is
+**stale** (the process is gone, or the pid was reused by an unrelated program after a crash: it does not listen on the recorded port)
+and is taken over. A file that is not a lock is stale too. A live holder ends the second start at once with `QM_FATAL locked` and
+`Quartermaster is already running on this data folder (process <pid>, port <port>)`; the first process is not touched. Tests:
+`test/singleuser-lock.test.ts` (the decisions), `test/singleuser.test.ts` (second start refused, stale lock taken over, lock gone after a clean stop).
 
 # Settings and the game folder
 

@@ -19,7 +19,6 @@ import { LOCAL_USER_ID } from '../src/webapp/identity-local.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
 
 const ROOT = new URL('../', import.meta.url);
-const RUNNER = fileURLToPath(new URL('test/singleuser-runner.mjs', ROOT));
 const MAIN = fileURLToPath(new URL('src/singleuser/main.ts', ROOT));
 // Never the real pairing file in the user profile: every child gets one in a temp folder (and no game folder of the environment)
 const PAIRING_ROOT = mkdtempSync(join(tmpdir(), 'qm-singleuser-pairing-'));
@@ -38,7 +37,7 @@ const freePort = () => new Promise<number>((resolve, reject) => {
 
 type Child = { proc: ChildProcess; out: () => string; exited: Promise<number | null> };
 function start(script: string, env: Record<string, string>): Child {
-  const proc = spawn(process.execPath, [script], { env: { ...process.env, DATABASE_URL: '', QM_GAME_DIR: '', QM_PAIRING_FILE: join(PAIRING_ROOT, 'default', 'pairing.json'), QM_UEX_KEY: '', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc = spawn(process.execPath, [script], { env: { ...process.env, DATABASE_URL: '', QM_GAME_DIR: '', QM_PAIRING_FILE: join(PAIRING_ROOT, 'default', 'pairing.json'), QM_UEX_KEY: '', QM_STDIN_CONTROL: '1', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let text = '';
   proc.stdout!.on('data', (d: Buffer) => (text += d));
   proc.stderr!.on('data', (d: Buffer) => (text += d));
@@ -83,7 +82,7 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
         await seed.close();
       }
 
-      child = start(RUNNER, env);
+      child = start(MAIN, env);
       const c = child;
       await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
       assert.match(c.out(), new RegExp(`listening on ${base}`));
@@ -153,7 +152,7 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
     const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_AUTO_UPDATE: '0', QM_GAME_DIR: game, QM_PAIRING_FILE: pairing };
     let child: Child | undefined;
     try {
-      child = start(RUNNER, env);
+      child = start(MAIN, env);
       const c = child;
       await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
       assert.match(c.out(), /game folder: .*: ok, game 4\.10\.2\.12913470 \(\d+ ms\)/);
@@ -202,7 +201,7 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
       await seed.close();
     }
     const run = async (expected: RegExp) => {
-      const c = start(RUNNER, env);
+      const c = start(MAIN, env);
       try {
         await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
         assert.match(c.out(), expected);
@@ -261,7 +260,7 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
       const channel = (n: number) => writeFileSync(join(feed, 'channels.json'), JSON.stringify({ data: { stable: `data-1.0.1000-${n}` } }));
       channel(1);
 
-      child = start(RUNNER, env);
+      child = start(MAIN, env);
       const c = child;
       await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
       const state = async () => (await (await fetch(`${base}/api/local/data`, { signal: AbortSignal.timeout(10_000) })).json()) as DataUpdateState;
@@ -306,6 +305,167 @@ describe('singleuser: the process', { timeout: 120_000 }, () => {
       child?.proc.kill();
       await new Promise((r) => setTimeout(r, 200));
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+});
+
+describe('singleuser: start protocol, stdin control and the lock', { timeout: 120_000 }, () => {
+  const lines = (out: string) => out.split(/\r?\n/).filter((l) => l.startsWith('QM_'));
+  const setup = () => mkdtempSync(join(tmpdir(), 'qm-singleuser-lock-'));
+  const envFor = (dir: string, port: number) => ({ QM_DATA_DIR: dir, QM_PORT: String(port), QM_AUTO_UPDATE: '0' });
+  const listening = (c: Child) => until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+  const stop = async (c: Child) => {
+    c.proc.stdin!.write('stop\n');
+    assert.equal(await within(10_000, 'the process ends', c.exited), 0, c.out());
+  };
+
+  it('prints the steps in order, then ready; a closed stdin stops the server like "stop"', async () => {
+    const dir = setup();
+    const port = await freePort();
+    let child: Child | undefined;
+    try {
+      child = start(MAIN, envFor(dir, port));
+      const c = child;
+      await listening(c);
+      assert.deepEqual(lines(c.out()), ['QM_STEP database', 'QM_STEP migrations', 'QM_STEP languagePack', 'QM_STEP listen', `QM_READY http://127.0.0.1:${port}`]);
+      assert.equal(existsSync(join(dir, 'server.lock')), true);
+      assert.deepEqual(JSON.parse(readFileSync(join(dir, 'server.lock'), 'utf8')).port, port);
+      // The shell is gone: stdin ends, the server shuts down cleanly and lets go of the folder
+      c.proc.stdin!.end();
+      assert.equal(await within(10_000, 'the process ends', c.exited), 0, c.out());
+      assert.match(c.out(), /stdin closed: shutting down/);
+      assert.equal(existsSync(join(dir, 'server.lock')), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('ignores stdin unless the shell asked for the control', async () => {
+    const dir = setup();
+    const port = await freePort();
+    let child: Child | undefined;
+    try {
+      child = start(MAIN, { ...envFor(dir, port), QM_STDIN_CONTROL: '' });
+      const c = child;
+      await listening(c);
+      c.proc.stdin!.write('stop\n');
+      c.proc.stdin!.end();
+      await new Promise((r) => setTimeout(r, 1000));
+      assert.equal(c.proc.exitCode, null);
+      assert.equal((await fetch(`http://127.0.0.1:${port}/api/capabilities`, { signal: AbortSignal.timeout(10_000) })).status, 200);
+      c.proc.kill();
+      await within(10_000, 'the process ends', c.exited);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('refuses a second process on the same data folder with QM_FATAL locked, and the first is not disturbed', async () => {
+    const dir = setup();
+    const [port, other] = [await freePort(), await freePort()];
+    let child: Child | undefined;
+    try {
+      child = start(MAIN, envFor(dir, port));
+      const c = child;
+      await listening(c);
+      const second = start(MAIN, envFor(dir, other));
+      try {
+        assert.equal(await within(30_000, 'second start exits', second.exited), 1);
+        assert.deepEqual(lines(second.out()), ['QM_FATAL locked']);
+        assert.match(second.out(), /Start failed: Quartermaster is already running on this data folder \(process \d+, port \d+\)/);
+      } finally {
+        second.proc.kill();
+      }
+      // The refused start left the first one's lock alone
+      assert.equal(JSON.parse(readFileSync(join(dir, 'server.lock'), 'utf8')).pid, c.proc.pid);
+      assert.equal((await fetch(`http://127.0.0.1:${port}/api/capabilities`, { signal: AbortSignal.timeout(10_000) })).status, 200);
+      await stop(c);
+      // Clean stop: the lock is gone, the folder is free for the next start
+      assert.equal(existsSync(join(dir, 'server.lock')), false);
+      const third = start(MAIN, envFor(dir, other));
+      try {
+        await listening(third);
+        assert.match(third.out(), /QM_READY /);
+        await stop(third);
+      } finally {
+        third.proc.kill();
+      }
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('takes over a stale lock (its process is gone), and reports a taken port as QM_FATAL portsBusy', async () => {
+    const dir = setup();
+    const port = await freePort();
+    let child: Child | undefined;
+    try {
+      // A pid that existed a moment ago
+      const gone = spawn(process.execPath, ['-e', '']);
+      await new Promise((r) => gone.once('exit', r));
+      writeFileSync(join(dir, 'server.lock'), JSON.stringify({ pid: gone.pid, port, startedAt: Date.now() }));
+      child = start(MAIN, envFor(dir, port));
+      const c = child;
+      await listening(c);
+      assert.match(c.out(), /QM_READY /);
+      assert.equal(JSON.parse(readFileSync(join(dir, 'server.lock'), 'utf8')).pid, c.proc.pid);
+
+      // The port is taken (by the first process): the folder is not touched, the code says so
+      const busy = start(MAIN, envFor(setup(), port));
+      try {
+        assert.equal(await within(30_000, 'busy start exits', busy.exited), 1);
+        assert.deepEqual(lines(busy.out()), ['QM_FATAL portsBusy']);
+      } finally {
+        busy.proc.kill();
+      }
+      await stop(c);
+      assert.equal(existsSync(join(dir, 'server.lock')), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('reports a database that cannot be opened as QM_FATAL database and lets go of the lock', async () => {
+    const dir = setup();
+    const port = await freePort();
+    try {
+      // A file where the database folder should be
+      writeFileSync(join(dir, 'db'), 'not a folder');
+      const c = start(MAIN, envFor(dir, port));
+      try {
+        assert.equal(await within(60_000, 'the start fails', c.exited), 1);
+        assert.deepEqual(lines(c.out()), ['QM_STEP database', 'QM_FATAL database']);
+        assert.equal(existsSync(join(dir, 'server.lock')), false);
+      } finally {
+        c.proc.kill();
+      }
+    } finally {
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('refuses a QM_CSP_CONNECT that is not a plain source before it touches anything', async () => {
+    const dir = setup();
+    try {
+      const c = start(MAIN, { ...envFor(dir, await freePort()), QM_CSP_CONNECT: "ipc: 'unsafe-inline'; script-src *" });
+      try {
+        assert.equal(await within(30_000, 'the start fails', c.exited), 1);
+        assert.deepEqual(lines(c.out()), ['QM_FATAL config']);
+        assert.match(c.out(), /QM_CSP_CONNECT/);
+      } finally {
+        c.proc.kill();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 });

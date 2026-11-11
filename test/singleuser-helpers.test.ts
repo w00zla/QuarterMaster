@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { dataDir, dbDir, thumbsDir } from '../src/singleuser/paths.ts';
+import { cspConnect, dataDir, dbDir, thumbsDir } from '../src/singleuser/paths.ts';
 import { PORT_FIRST, PORT_LAST, canListen, choosePort } from '../src/singleuser/port.ts';
 
 describe('singleuser: data folder', () => {
@@ -55,5 +55,16 @@ describe('singleuser: port', () => {
       await new Promise((r) => blocker.close(r));
     }
     assert.equal(await canListen(port), true);
+  });
+});
+
+describe('singleuser: QM_CSP_CONNECT', () => {
+  it('is nothing when unset or blank, else the sources split at spaces and commas', () => {
+    assert.deepEqual(cspConnect(undefined), []);
+    assert.deepEqual(cspConnect('  '), []);
+    assert.deepEqual(cspConnect('ipc: http://ipc.localhost,http://127.0.0.1:1430  ws://[::1]:5'), ['ipc:', 'http://ipc.localhost', 'http://127.0.0.1:1430', 'ws://[::1]:5']);
+  });
+  it('refuses anything that could end the directive or add another one', () => {
+    for (const bad of ["'unsafe-inline'", 'a;script-src', 'https://x"y', 'x<y', 'ipc: *; default-src *']) assert.throws(() => cspConnect(bad), /QM_CSP_CONNECT/, bad);
   });
 });

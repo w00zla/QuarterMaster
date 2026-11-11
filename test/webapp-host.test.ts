@@ -113,3 +113,17 @@ describe('Host guard, WebSocket handshake', () => {
     assert.equal(await handshake(openPort, 'evil.example'), 'open');
   });
 });
+
+describe('Content-Security-Policy connect-src', () => {
+  const policy = async (extra: Partial<WebappConfig> = {}) => (await build(extra).request('/api/capabilities')).headers.get('content-security-policy') ?? '';
+
+  it('is the origin and its WebSocket, nothing more, by default', async () => {
+    assert.match(await policy(), /connect-src 'self' ws:\/\/127\.0\.0\.1:28460(;|$)/);
+  });
+  it('adds exactly the sources it is given (the desktop shell\'s IPC), and nothing else changes', async () => {
+    const plain = await policy();
+    const widened = await policy({ extraConnectSrc: ['ipc:', 'http://ipc.localhost'] });
+    assert.match(widened, /connect-src 'self' ws:\/\/127\.0\.0\.1:28460 ipc: http:\/\/ipc\.localhost(;|$)/);
+    assert.equal(widened.replace(' ipc: http://ipc.localhost', ''), plain);
+  });
+});
