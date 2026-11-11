@@ -36,7 +36,10 @@
       :root {
         --bg-base: #0a1d29;
         --bg-surface: #0f2c3e;
+        --bg-surface-2: #143a52;
         --bg-surface-3: #194967;
+        --err: #ff5c6c;
+        --accent-text: #000000;
         --accent: #54adf7;
         --text: #ffffff;
         --text-2: #add3eb;
@@ -51,7 +54,7 @@
       body {
         box-sizing: border-box;
         display: flex;
-        padding: 16px;
+        flex-direction: column;
         background: var(--bg-base);
         color: var(--text);
         font-family: "Bai Jamjuree", "Segoe UI", system-ui, sans-serif;
@@ -60,8 +63,57 @@
         overflow: hidden;
       }
 
+      /* The title bar of the frameless window, as the web app's TitleBar.vue: the drag region and the three window buttons */
+      .titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        height: 44px;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        padding: 0 8px;
+      }
+
+      .win-btns {
+        display: flex;
+        gap: 2px;
+      }
+
+      .win-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-2);
+        cursor: pointer;
+      }
+
+      .win-btn:hover {
+        background: var(--bg-surface-2);
+        color: var(--text);
+      }
+
+      .win-btn.close:hover {
+        background: var(--err);
+        color: var(--accent-text);
+      }
+
+      .win-btn svg {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
       .tile {
         flex: 1;
+        margin: 0 16px 16px;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -133,6 +185,7 @@
         height: 20px;
         font-size: 13px;
         color: var(--text-2);
+        text-align: center;
       }
 
       .failed {
@@ -167,6 +220,13 @@
     </style>
   </head>
   <body data-tauri-drag-region>
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="win-btns">
+        <button id="minimize" class="win-btn" type="button"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M5 12h14" /></svg></button>
+        <button id="maximize" class="win-btn" type="button"></button>
+        <button id="close" class="win-btn close" type="button"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+      </div>
+    </header>
     <div class="tile" data-tauri-drag-region>
       <div class="top" data-tauri-drag-region>
         <div class="icon-slot" aria-hidden="true" data-tauri-drag-region></div>
@@ -207,6 +267,19 @@
       }
 
       el("quit").addEventListener("click", () => invoke("quit"));
+
+      // The window buttons: the shell's own window commands (the web app's contract has the same); the maximize button shows the
+      // icon of what a click does next
+      const MAXIMIZE = '<svg width="14" height="14" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1" /></svg>';
+      const RESTORE = '<svg width="14" height="14" viewBox="0 0 24 24"><rect x="4" y="8" width="12" height="12" rx="1" /><path d="M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" /></svg>';
+      const refreshMaximized = () =>
+        invoke("window_is_maximized").then((m) => (el("maximize").innerHTML = m ? RESTORE : MAXIMIZE), () => {});
+      el("maximize").innerHTML = MAXIMIZE;
+      el("minimize").addEventListener("click", () => invoke("window_minimize"));
+      el("maximize").addEventListener("click", () => invoke("window_toggle_maximize").then(refreshMaximized));
+      el("close").addEventListener("click", () => invoke("window_close"));
+      window.addEventListener("resize", refreshMaximized);
+      refreshMaximized();
       // The event first, then the state as it is now: no step is missed between the two
       listen("splash-changed", (event) => render(event.payload)).then(() => invoke("splash_state").then(render));
     </script>

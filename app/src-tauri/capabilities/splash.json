@@ -1,12 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "splash",
-  "description": "The splash (the app's own page): its state, the quit button, dragging the frameless window",
+  "description": "The splash (the app's own page): its state, the quit button, dragging the frameless window and its window buttons",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:window:allow-start-dragging",
     "allow-splash-state",
-    "allow-quit"
+    "allow-quit",
+    "allow-window-minimize",
+    "allow-window-toggle-maximize",
+    "allow-window-close",
+    "allow-window-is-maximized"
   ]
 }

@@ -34,7 +34,7 @@ const MAIN_WINDOW: &str = "main";
 const SETTINGS_WINDOW: &str = "settings";
 const SETTINGS_PATH: &str = "/settings?window=settings";
 /// Before the page has measured itself (`settings_window_fit`); the window is not shown at this size.
-const SETTINGS_START_SIZE: (f64, f64) = (672.0, 800.0);
+const SETTINGS_START_SIZE: (f64, f64) = (560.0, 800.0);
 /// A settings window whose page never sized it is shown after this anyway.
 const SETTINGS_SHOW_LIMIT: Duration = Duration::from_secs(5);
 /// The event the splash listens to; its payload is the `Splash`.

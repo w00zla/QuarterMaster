@@ -429,7 +429,7 @@ async function settingsWindow(feed) {
     // The page renders the panel without game data (a fresh data folder: the main window shows the start tile), measures itself
     // and asks for its size once: the window then has the fixed width
     await until(async () => (await settings.eval('document.querySelector(".settings") !== null')).value === true, 30_000, 'the settings panel');
-    await until(async () => (await settings.eval('window.innerWidth')).value === 672, 15_000, 'the settings window at its fixed width');
+    await until(async () => (await settings.eval('window.innerWidth')).value === 560, 15_000, 'the settings window at its fixed width');
     const height = (await settings.eval('window.innerHeight')).value;
     assert.ok(height >= 400 && height < 1100, `the settings window's height ${height}`);
     assert.equal((await settings.eval('document.scrollingElement.scrollHeight > window.innerHeight || document.getElementById("app").scrollHeight > window.innerHeight')).value, false, 'the settings window has a scroll bar');

@@ -68,8 +68,10 @@ wurde unerwartet beendet." / "The server stopped unexpectedly." and the quit but
 
 The look of the web app's start tile (`StartTile.vue`): the base `#0a1d29`, the tile `#0f2c3e`, the reserved icon slot, the wordmark
 QUARTER in `#ffffff` and MASTER in the accent `#54adf7` (Bai Jamjuree 700), the app version in Share Tech Mono, a row of four segments and
-one line of text. It is the app's own page and gets its whole state from the shell (command `splash_state`, event `splash-changed`):
-the page holds no text and no logic of its own.
+one line of text, all centred, under a slim bar (44 px) with the three window buttons (minimize, maximize or restore, close; the look of `WindowButtons.vue`)
+and the drag region on the rest, so a hanging start can be closed. It is the app's own page and gets its whole state from the shell (command
+`splash_state`, event `splash-changed`): the page holds no text and no logic of its own; the window buttons call the contract's window
+commands (`window_minimize`, `window_toggle_maximize`, `window_close`, `window_is_maximized`).
 
 | Step | Segments | Text (`bundle.json` `startTexts`, German when the system language is German, else English) |
 |---|---|---|
@@ -111,7 +113,7 @@ splash and the origin the server reported. Any other navigation is refused (`nav
 **Who may call what.** The app's commands are declared in `build.rs` (an app manifest), so each has a permission and nothing is
 callable by default. Three capabilities grant them:
 
-- `splash.json`, the app's own page: `splash_state`, `quit`, listening to events, dragging the window.
+- `splash.json`, the app's own page: `splash_state`, `quit`, listening to events, dragging the window and the four window commands of its buttons.
 - `webapp.json`, the main window and pages at `http://127.0.0.1:*` only (`remote.urls`, `local: false`): the contract's twelve commands
   and `open_settings`, listening and unlistening to events, and the two window functions Tauri's `data-tauri-drag-region` calls
   (`start_dragging`, `internal_toggle_maximize`: the double click on the title bar).
@@ -127,7 +129,7 @@ shows and focuses it when it exists. It is frameless, **not resizable** (no maxi
 stays above it), centered, and created hidden: it is shown by `settings_window_fit { width, height }`, which the page sends once after
 its first render with the height it measured (`settings_size`: at most 95 % of the window's screen; a width or height that is no size
 is refused; the command refuses any other window's label). A page that never sends it is shown as it is after 5 s. The dialogs the panel
-opens fit the fixed width (672 px) and the minimum height (400 px) the page asks for. `window_focus_main` brings the main window to the
+opens fit the fixed width (560 px) and the minimum height (400 px) the page asks for. `window_focus_main` brings the main window to the
 front (the settings window's "App Update" button asks the main window for the dialog over a `BroadcastChannel`, which needs no
 command).
 
@@ -269,7 +271,7 @@ debugging port (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`). Scenarios:
 | `lifecycle` | pairing file, `GET /api/capabilities` and `/`, exactly one `node` child, no update request with `QM_AUTO_UPDATE=0`; after a close request to the window both processes are gone within 15 s and the pairing file and `server.lock` are removed |
 | `hardKill` | the app killed: the server ends by itself; app and server killed: the lock stays and the next start takes it over |
 | `contract` | from the web app's page: the IPC without a CSP report and exactly one extra `connect-src` source, the window commands, `update_state`, the `update-changed` events of a check, an update found, downloaded and refused for its signature, a channel chosen and stored, a vanished channel back to stable, the commands that must be refused (`open_external` with http, file, `javascript:`, data, relative, credentials and empty URLs; an accepted URL is never sent, it would start the owner's browser); `window_close` from a minimized window ends everything |
-| `settingsWindow` | `open_settings` from the main page opens the settings page (read through the debugging port; fresh data folder, so the main window shows the start tile): the panel renders, the window gets its fixed width (672 px) and no scroll bar, the permissions per window (the main window may not size it; the settings window may not open another, minimize, maximize, install updates or call the splash's commands), closing it leaves the app running, and closing the main window takes a reopened one along (both processes gone, lock removed) |
+| `settingsWindow` | `open_settings` from the main page opens the settings page (read through the debugging port; fresh data folder, so the main window shows the start tile): the panel renders, the window gets its fixed width (560 px) and no scroll bar, the permissions per window (the main window may not size it; the settings window may not open another, minimize, maximize, install updates or call the splash's commands), closing it leaves the app running, and closing the main window takes a reopened one along (both processes gone, lock removed) |
 | `locked` | a second app on the same data folder: the splash's failure sentence and quit button (read from the page), the first app untouched, quit by the button |
 | `singleInstance` | the default data folder (moved under the temp folder through `LOCALAPPDATA`): a second start ends with 0, the first keeps running |
 | `startUpdate` | the switch on: the start asks the feed, downloads the update, refuses it and starts; a feed that never answers holds the start for the limit only; `autoUpdate: false` in `settings.json` asks nothing |
