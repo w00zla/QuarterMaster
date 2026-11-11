@@ -447,6 +447,7 @@ const en = {
   // Singleuser variant: top bar, start tile, settings, notice
   "nav.settings": "Settings",
   "nav.gameVersion": "Game version",
+  "nav.game": "Game:",
   "start.starting": "Starting …",
   "start.languagePack": "Loading language pack …",
   "start.setup": "Setting up game data …",
@@ -949,6 +950,7 @@ const de: Record<Key, string> = {
 
   "nav.settings": "Einstellungen",
   "nav.gameVersion": "Spielversion",
+  "nav.game": "Spiel:",
   "start.starting": "Starte …",
   "start.languagePack": "Sprachpaket wird geladen …",
   "start.setup": "Spieldaten werden eingerichtet …",

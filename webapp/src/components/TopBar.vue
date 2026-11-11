@@ -59,7 +59,7 @@ onUnmounted(() => {
     </div>
     <div class="spacer" :data-tauri-drag-region="drag" />
     <!-- The game version of the installed data (both variants); a fixed width, so the dash and the number take the same room -->
-    <span class="ver-chip fixed" :class="{ none: !gameLabel }" :title="t('nav.gameVersion')" :data-tauri-drag-region="drag">{{ gameLabel ?? "–" }}</span>
+    <span class="ver-chip fixed" :class="{ none: !gameLabel }" :title="t('nav.gameVersion')" :data-tauri-drag-region="drag"><span class="ver-label" :data-tauri-drag-region="drag">{{ t("nav.game") }}</span>{{ gameLabel ?? "–" }}</span>
     <template v-if="controls.companion">
       <RouterLink v-for="tab in supportTabs" :key="tab.to" :to="tab.to" class="btn small outline support" :class="{ active: $route.path === tab.to }">
         <Icon :name="tab.icon" :size="14" /> {{ t(tab.label) }}
