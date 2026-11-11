@@ -1,0 +1,61 @@
+# After a release is published (a draft made public, as a pre-release or a full
+# one), by the tag's prefix:
+# - `app-v…` / `companion-v…`: channels.json on main points at the tag — the
+#   product's `stable` for a plain version, its channel entry for
+#   `x.y.z-<channel>.<n>` (created on the channel's first version). A tag that
+#   is not newer than the one listed leaves the file alone.
+# - `data-<game label>-<n>`: `data.stable` in channels.json.
+# - then the README's download table is written again from channels.json.
+# Any other tag (this repository's releases are nothing else) is skipped.
+# Removing a channel after its merge stays a manual step (docs/releasing.md).
+#
+# The commit goes to main as the GitHub Actions bot: a ruleset on main must let
+# that bot push (docs/releasing.md). A manual run with a tag redoes the update
+# for a release already published.
+name: Release published
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release tag (app-vX.Y.Z[-<channel>.<n>], companion-vX.Y.Z[-<channel>.<n>], data-<game label>-<n>)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# Two releases published close together must not push at the same time
+concurrency:
+  group: channels-json
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  channels:
+    name: channels.json and README
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'app-v') || startsWith(github.event.release.tag_name || inputs.tag, 'companion-v') || startsWith(github.event.release.tag_name || inputs.tag, 'data-')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Point channels.json at ${{ github.event.release.tag_name || inputs.tag }}
+        run: node scripts/channels-set.mjs "$TAG"
+      - name: README download table
+        run: node scripts/readme-downloads.mjs
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- channels.json README.md; then
+            echo "channels.json and README.md already up to date"
+            exit 0
+          fi
+          git add channels.json README.md
+          git commit -m "Point channels.json at ${TAG}"
+          git push origin main

@@ -1,0 +1,167 @@
+# Build the Quartermaster desktop app (app/, the singleuser shell) for Windows and Linux. docs/releasing.md.
+#
+# - Manual run (any branch): a test build — tests, then the installers as
+#   workflow artifacts (14 days). No release, nothing the updater can see.
+# - Tag `app-v*`: tests, then a *draft* release with the installers, the updater
+#   signatures and latest.json. Nothing goes live until the draft is published
+#   by hand. A plain tag (`app-vX.Y.Z`, on main) is a full release; a channel tag
+#   (`app-vX.Y.Z-<channel>.<n>`, on channel/<channel>) is drafted as a
+#   pre-release. Publishing moves the tag into channels.json (release.yml).
+#
+# Secrets (one key for both apps): TAURI_SIGNING_PRIVATE_KEY (the minisign key,
+# one line), TAURI_SIGNING_PRIVATE_KEY_PASSWORD (empty if the key has none).
+name: Build app
+
+on:
+  push:
+    tags: ["app-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  LINUX_DEPS: libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: App version (Cargo.toml)
+        id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' app/src-tauri/Cargo.toml | head -n 1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "App version $version"
+          # tauri.conf.json carries no version of its own (Tauri then takes Cargo.toml's); one that appears must agree
+          conf=$(jq -r '.version // empty' app/src-tauri/tauri.conf.json)
+          if [ -n "$conf" ] && [ "$conf" != "$version" ]; then
+            echo "tauri.conf.json says $conf, Cargo.toml says $version" >&2
+            exit 1
+          fi
+      - name: Tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/app-v')
+        run: |
+          tag=${GITHUB_REF#refs/tags/app-v}
+          if [ "$tag" != "${{ steps.version.outputs.version }}" ]; then
+            echo "Tag app-v$tag but Cargo.toml says ${{ steps.version.outputs.version }}" >&2
+            exit 1
+          fi
+      - name: Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      # The whole suite on PGlite in the process (test/pglite.env): no Postgres, no game data
+      - name: Node tests
+        run: pnpm test:pglite
+      - name: Rust tests
+        run: cargo test --manifest-path app/src-tauri/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-24.04
+          - name: windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux packages
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - run: pnpm install --frozen-lockfile
+      # app:build = the server bundle (the SPA is built when stale), the pinned Node as the sidecar (downloaded and
+      # checked against nodejs.org's SHASUMS256.txt when the runner's Node is not the pin), then `tauri build`: the NSIS
+      # setup on Windows, the AppImage on Linux, with updater artifacts because the signing key is in the environment.
+      # The release configuration keeps the updater's insecure-transport switch off (docs/releasing.md).
+      - name: Build
+        run: pnpm app:build
+      - name: Collect (Linux)
+        if: matrix.name == 'linux'
+        shell: bash
+        run: |
+          mkdir -p assets
+          cp "app/src-tauri/target/release/bundle/appimage/Quartermaster_${VERSION}_amd64.AppImage" "app/src-tauri/target/release/bundle/appimage/Quartermaster_${VERSION}_amd64.AppImage.sig" assets/
+          ls -la assets
+      - name: Collect (Windows)
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          mkdir -p assets
+          cp "app/src-tauri/target/release/bundle/nsis/Quartermaster_${VERSION}_x64-setup.exe" "app/src-tauri/target/release/bundle/nsis/Quartermaster_${VERSION}_x64-setup.exe.sig" assets/
+          ls -la assets
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quartermaster-app-${{ matrix.name }}-${{ needs.test.outputs.version }}
+          path: assets/
+          retention-days: 14
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: [test, build]
+    if: startsWith(github.ref, 'refs/tags/app-v')
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: quartermaster-app-*
+          path: assets
+          merge-multiple: true
+      - name: Draft release
+        run: |
+          node scripts/latest-json.mjs "$TAG" assets > assets/latest.json
+          cat assets/latest.json
+          case $VERSION in
+          *-*) pre=--prerelease ;;
+          *) pre= ;;
+          esac
+          # shellcheck disable=SC2086  # $pre is one flag or nothing
+          gh release create "$TAG" --draft $pre --latest=false --title "Quartermaster $VERSION" --notes "" assets/*
+          echo "Draft release $TAG created — publish it on GitHub."
