@@ -415,6 +415,56 @@ async function contract(feed) {
 }
 
 /** A second app on the same data folder: the splash says so and offers Quit; the first app is not touched. */
+async function settingsWindow(feed) {
+  const scenario = await scenarioEnv('settings', feed);
+  const app = startApp(scenario.env);
+  const { origin, node } = await ready(app, scenario);
+  const main = await Page.open(scenario.debugPort, origin);
+  let settings;
+  try {
+    // The permission is per window: the main window opens it, may not size it
+    await main.invoke('open_settings');
+    settings = await Page.open(scenario.debugPort, `${origin}/settings?window=settings`);
+    assert.match(await main.rejects('settings_window_fit', { width: 672, height: 800 }), /not allowed|permission|only/i);
+    // The page renders the panel without game data (a fresh data folder: the main window shows the start tile), measures itself
+    // and asks for its size once: the window then has the fixed width
+    await until(async () => (await settings.eval('document.querySelector(".settings") !== null')).value === true, 30_000, 'the settings panel');
+    await until(async () => (await settings.eval('window.innerWidth')).value === 672, 15_000, 'the settings window at its fixed width');
+    const height = (await settings.eval('window.innerHeight')).value;
+    assert.ok(height >= 400 && height < 1100, `the settings window's height ${height}`);
+    assert.equal((await settings.eval('document.scrollingElement.scrollHeight > window.innerHeight || document.getElementById("app").scrollHeight > window.innerHeight')).value, false, 'the settings window has a scroll bar');
+    // A second call brings the one window to the front
+    await main.invoke('open_settings');
+    // What the settings window may call, and what not
+    assert.equal(await settings.invoke('window_is_maximized'), false);
+    await settings.invoke('update_state');
+    await settings.invoke('window_focus_main');
+    await settings.rejects('open_settings');
+    await settings.rejects('window_minimize');
+    await settings.rejects('window_toggle_maximize');
+    await settings.rejects('update_install');
+    await settings.rejects('splash_state');
+    log('settings window: opens, sizes itself once, permissions per window: ok');
+    // Closing it leaves the app running
+    await settings.eval(`void window.__TAURI__.core.invoke('window_close')`);
+    await until(async () => {
+      const list = await (await fetch(`http://127.0.0.1:${scenario.debugPort}/json/list`)).json();
+      return !list.some((t) => t.type === 'page' && t.url.includes('window=settings'));
+    }, 10_000, 'the settings window gone');
+    assert.equal(app.exit, null, 'the app keeps running after the settings window closed');
+    await main.invoke('update_state');
+    // It opens again, and closing the main window takes it along
+    await main.invoke('open_settings');
+    settings.close();
+    settings = await Page.open(scenario.debugPort, `${origin}/settings?window=settings`);
+    await main.eval(`void window.__TAURI__.core.invoke('window_close')`);
+  } finally {
+    settings?.close();
+    main.close();
+  }
+  await goneAndClean(app, node, scenario, 'settings window: main window close');
+}
+
 async function locked(feed) {
   const first = await scenarioEnv('locked', feed);
   const app = startApp(first.env);
@@ -526,7 +576,7 @@ async function startUpdate(feed) {
 
 // --- run ---
 
-const scenarios = { lifecycle, hardKill, contract, locked, singleInstance, startUpdate };
+const scenarios = { lifecycle, hardKill, contract, settingsWindow, locked, singleInstance, startUpdate };
 
 let failed = false;
 const watchdog = { timer: null };

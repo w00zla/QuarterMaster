@@ -46,6 +46,11 @@ impl Lang {
         self.pick("Beenden", "Quit")
     }
 
+    /// The settings window's title (the taskbar's name for it; the window has no frame).
+    pub fn settings_title(self) -> &'static str {
+        self.pick("Quartermaster – Einstellungen", "Quartermaster – Settings")
+    }
+
     pub fn installing_update(self) -> &'static str {
         self.pick("Update wird installiert …", "Installing update …")
     }

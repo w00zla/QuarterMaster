@@ -9,7 +9,7 @@ bundle", "The start protocol", "Stdin control", "One process per data folder"); 
 | Path | What |
 |---|---|
 | `app/src-tauri/` | the Rust program (`quartermaster`): `lib.rs` (the start, the window, the commands), `protocol.rs` (the start protocol's lines), `bundle.rs` (`bundle.json`), `sidecar.rs` (the server process), `settings.rs` (`autoUpdate`), `update.rs` (app updates), `config.rs` (the chosen channel), `texts.rs` (the shell's own texts) |
-| `app/src-tauri/capabilities/` | `splash.json` (the app's own page) and `webapp.json` (the web app's origin) |
+| `app/src-tauri/capabilities/` | `splash.json` (the app's own page), `webapp.json` (the web app's origin in the main window) and `settings.json` (the settings window) |
 | `app/src-tauri/tauri.conf.json` | the window, the splash's CSP, the updater's public key; `tauri.windows.conf.json` (NSIS), `tauri.bundle.conf.json` (the sidecar and the server bundle, passed by the build script), `tauri.updater.conf.json` (updater artifacts, passed when the signing key is there) |
 | `app/splash/` | the splash: one `index.html` with inline CSS and JS and the fonts (copies of `adminapp/src/assets/fonts/`); no framework, no build step |
 | `app/scripts/` | `fetch-node.mjs` (the sidecar binary), `build.mjs` (the build), `smoke.mjs` (the smoke test) |
@@ -54,7 +54,7 @@ piped, no console window. `node` is the official Node of the pinned version (`NO
 sends the window there, `QM_FATAL <code>` shows the failure. `QM_READY` is taken only with an origin of the form
 `http://127.0.0.1:<port>`; anything else counts as a failed start. Every line of stdout and stderr goes to the log file.
 
-**Stop:** closing the window (the web app's close button, Alt+F4, the taskbar) or the splash's quit button hides the window, writes
+**Stop:** closing the main window (the web app's close button, Alt+F4, the taskbar) or the splash's quit button hides the window (and destroys the settings window), writes
 `stop` to the server's stdin, waits up to 10 s for the process to end, kills it if it has not, and exits. The same stop runs before
 an update's installer starts and when the app's event loop ends for any other reason. **No server stays behind when the shell dies
 without stopping it** (killed, a panic: release builds abort): the server reads the end of its stdin as `stop` and shuts down
@@ -93,8 +93,8 @@ bundle carries).
 
 ## The window and the contract
 
-The window is frameless (`decorations: false`); the web app draws the chrome and calls the shell. It shows two things only: the
-splash and the origin the server reported. Any other navigation is refused (`navigation_allowed`).
+The main window is frameless (`decorations: false`); the web app draws the chrome and calls the shell. It shows two things only: the
+splash and the origin the server reported. Any other navigation is refused (`navigation_allowed`, which the settings window obeys too).
 
 | Command | Implementation |
 |---|---|
@@ -103,16 +103,38 @@ splash and the origin the server reported. Any other navigation is refused (`nav
 | `window_minimize`, `window_toggle_maximize`, `window_is_maximized` | the window's own functions |
 | `window_close` | a close request to the window: the stop above |
 | `window_start_resize { direction }` | the system's resize drag from that edge or corner; a direction that is none of the eight is rejected |
+| `open_settings` | "The settings window" (main window only) |
+| `settings_window_fit { width, height }`, `window_focus_main` | "The settings window" (settings window only) |
 | `update_state`, `update_check`, `update_install`, `update_set_channel { id }` | "Updates and channels" |
 | event `update-changed` | emitted with the `UpdateState` at every change |
 
 **Who may call what.** The app's commands are declared in `build.rs` (an app manifest), so each has a permission and nothing is
-callable by default. Two capabilities grant them:
+callable by default. Three capabilities grant them:
 
 - `splash.json`, the app's own page: `splash_state`, `quit`, listening to events, dragging the window.
-- `webapp.json`, pages at `http://127.0.0.1:*` only (`remote.urls`, `local: false`): the contract's twelve commands, listening and
-  unlistening to events, and the two window functions Tauri's `data-tauri-drag-region` calls (`start_dragging`,
-  `internal_toggle_maximize`: the double click on the title bar).
+- `webapp.json`, the main window and pages at `http://127.0.0.1:*` only (`remote.urls`, `local: false`): the contract's twelve commands
+  and `open_settings`, listening and unlistening to events, and the two window functions Tauri's `data-tauri-drag-region` calls
+  (`start_dragging`, `internal_toggle_maximize`: the double click on the title bar).
+- `settings.json`, the settings window (label `settings`, the same origins): `pick_folder`, `pick_file`, `open_external`, `window_close`,
+  `window_is_maximized`, `update_state`, `settings_window_fit`, `window_focus_main`, listening and unlistening to events and
+  `start_dragging`. Nothing else: no minimize, maximize, resize, `open_settings`, update install or channel.
+
+### The settings window
+
+`open_settings` (from the main window) opens a second window, label `settings`, at `<origin>/settings?window=settings` (the web app's
+settings-only mode: a title bar and the settings panel, `docs/webapp.md` "The side bar and the settings window"), or un-minimizes,
+shows and focuses it when it exists. It is frameless, **not resizable** (no maximize or minimize either), owned by the main window (it
+stays above it), centered, and created hidden: it is shown by `settings_window_fit { width, height }`, which the page sends once after
+its first render with the height it measured (`settings_size`: at most 95 % of the window's screen; a width or height that is no size
+is refused; the command refuses any other window's label). A page that never sends it is shown as it is after 5 s. The dialogs the panel
+opens fit the fixed width (672 px) and the minimum height (400 px) the page asks for. `window_focus_main` brings the main window to the
+front (the settings window's "App Update" button asks the main window for the dialog over a `BroadcastChannel`, which needs no
+command).
+
+Closing the settings window (its close button, Alt+F4) just closes it. Closing the main window is the app's end as before; the
+settings window is destroyed with it (no close request, so it cannot count as an end of its own), and when the server ends by itself
+while the app runs it is destroyed too (the main window goes back to the splash). With no server (no origin yet) `open_settings`
+answers "the server is not running".
 
 No plugin command is granted beyond these (the dialog and updater plugins are used from Rust only). `withGlobalTauri` injects
 `window.__TAURI__` into every page the window shows; with the navigation limited to the server's origin, the commands are reachable from
@@ -247,6 +269,7 @@ debugging port (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`). Scenarios:
 | `lifecycle` | pairing file, `GET /api/capabilities` and `/`, exactly one `node` child, no update request with `QM_AUTO_UPDATE=0`; after a close request to the window both processes are gone within 15 s and the pairing file and `server.lock` are removed |
 | `hardKill` | the app killed: the server ends by itself; app and server killed: the lock stays and the next start takes it over |
 | `contract` | from the web app's page: the IPC without a CSP report and exactly one extra `connect-src` source, the window commands, `update_state`, the `update-changed` events of a check, an update found, downloaded and refused for its signature, a channel chosen and stored, a vanished channel back to stable, the commands that must be refused (`open_external` with http, file, `javascript:`, data, relative, credentials and empty URLs; an accepted URL is never sent, it would start the owner's browser); `window_close` from a minimized window ends everything |
+| `settingsWindow` | `open_settings` from the main page opens the settings page (read through the debugging port; fresh data folder, so the main window shows the start tile): the panel renders, the window gets its fixed width (672 px) and no scroll bar, the permissions per window (the main window may not size it; the settings window may not open another, minimize, maximize, install updates or call the splash's commands), closing it leaves the app running, and closing the main window takes a reopened one along (both processes gone, lock removed) |
 | `locked` | a second app on the same data folder: the splash's failure sentence and quit button (read from the page), the first app untouched, quit by the button |
 | `singleInstance` | the default data folder (moved under the temp folder through `LOCALAPPDATA`): a second start ends with 0, the first keeps running |
 | `startUpdate` | the switch on: the start asks the feed, downloads the update, refuses it and starts; a feed that never answers holds the start for the limit only; `autoUpdate: false` in `settings.json` asks nothing |

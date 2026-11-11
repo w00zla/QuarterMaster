@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri_runtime::ResizeDirection;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State, Url, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::window::Color;
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, RunEvent, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
@@ -29,6 +30,13 @@ use texts::Lang;
 use update::{UpdateState, Updater};
 
 const MAIN_WINDOW: &str = "main";
+/// The settings window (docs/app.md "The settings window"): the web app at `SETTINGS_PATH`, opened by `open_settings`.
+const SETTINGS_WINDOW: &str = "settings";
+const SETTINGS_PATH: &str = "/settings?window=settings";
+/// Before the page has measured itself (`settings_window_fit`); the window is not shown at this size.
+const SETTINGS_START_SIZE: (f64, f64) = (672.0, 800.0);
+/// A settings window whose page never sized it is shown after this anyway.
+const SETTINGS_SHOW_LIMIT: Duration = Duration::from_secs(5);
 /// The event the splash listens to; its payload is the `Splash`.
 const SPLASH_EVENT: &str = "splash-changed";
 /// The update check at start never holds the start longer than this.
@@ -72,6 +80,7 @@ fn show_fatal(app: &AppHandle, text: &str) {
     set_splash(app, |s| s.error = Some(text.to_string()));
     let shell = app.state::<Shell>();
     if shell.origin.lock().unwrap().take().is_some() {
+        close_settings(app);
         let url = shell.splash_url.lock().unwrap().clone();
         if let (Some(url), Some(window)) = (url, app.get_webview_window(MAIN_WINDOW)) {
             let _ = window.navigate(url);
@@ -84,11 +93,20 @@ pub(crate) fn stop_server(app: &AppHandle) {
     app.state::<Shell>().sidecar.stop(STOP_WAIT);
 }
 
-/// The app ends: the window disappears at once, the server is stopped, then the process exits.
+/// The settings window goes away without a close request (it must not count as the app's end): with the main window, or when the
+/// server's origin is gone.
+fn close_settings(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+        let _ = window.destroy();
+    }
+}
+
+/// The app ends: the windows disappear at once, the server is stopped, then the process exits.
 fn quit_app(app: &AppHandle) {
     if app.state::<Shell>().quitting.swap(true, Ordering::SeqCst) {
         return;
     }
+    close_settings(app);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
     }
@@ -301,6 +319,91 @@ fn window_start_resize(window: tauri::Window, direction: ResizeDirection) -> Res
     window.start_resize_dragging(direction).map_err(|e| e.to_string())
 }
 
+/// The settings window's address: the server's origin and the settings path (None for an origin that does not parse).
+fn settings_url(origin: &str) -> Option<Url> {
+    Url::parse(origin).ok()?.join(SETTINGS_PATH).ok()
+}
+
+/// The size the page asked for (CSS px), kept inside what makes sense: a size that is none is refused; the window is never
+/// larger than 95 % of its screen (`screen`, logical px, if known), so the title bar stays reachable.
+fn settings_size(width: f64, height: f64, screen: Option<(f64, f64)>) -> Result<(f64, f64), String> {
+    if !(width.is_finite() && height.is_finite() && width >= 100.0 && height >= 100.0) {
+        return Err("not a window size".into());
+    }
+    let (max_w, max_h) = screen.map_or((f64::MAX, f64::MAX), |(w, h)| (w * 0.95, h * 0.95));
+    Ok((width.min(max_w).round(), height.min(max_h).round()))
+}
+
+fn show_window(window: &WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Opens the settings window, or brings it to the front: the same origin at the settings path, frameless like the main window,
+/// not resizable, owned by the main window (it stays above it). It stays hidden until its page has sent its size
+/// (`settings_window_fit`), or `SETTINGS_SHOW_LIMIT` has passed.
+#[tauri::command]
+fn open_settings(app: AppHandle, shell: State<Shell>) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+        show_window(&window);
+        return Ok(());
+    }
+    let origin = shell.origin.lock().unwrap().clone().ok_or("the server is not running")?;
+    let url = settings_url(&origin).ok_or("the server's address is not usable")?;
+    let allowed = shell.origin.clone();
+    let mut builder = WebviewWindowBuilder::new(&app, SETTINGS_WINDOW, WebviewUrl::External(url))
+        .title(shell.lang.settings_title())
+        .inner_size(SETTINGS_START_SIZE.0, SETTINGS_START_SIZE.1)
+        .decorations(false)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .visible(false)
+        .center()
+        .background_color(Color(10, 29, 41, 255))
+        .on_navigation(move |url| navigation_allowed(url, None, allowed.lock().unwrap().as_deref()));
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW) {
+        builder = builder.parent(&main).map_err(|e| e.to_string())?;
+    }
+    builder.build().map_err(|e| e.to_string())?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(SETTINGS_SHOW_LIMIT).await;
+        if let Some(window) = handle.get_webview_window(SETTINGS_WINDOW) {
+            if !window.is_visible().unwrap_or(true) {
+                log::warn!("settings window: no size from the page, shown as it is");
+                show_window(&window);
+            }
+        }
+    });
+    Ok(())
+}
+
+/// The settings window's page has measured its content: the window gets that inner size (inside its screen), is centered on
+/// its screen and shown. Only the settings window may call it (`capabilities/settings.json`).
+#[tauri::command]
+fn settings_window_fit(window: WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+    if window.label() != SETTINGS_WINDOW {
+        return Err("only the settings window is sized this way".into());
+    }
+    let screen = window.current_monitor().ok().flatten().map(|m| {
+        let size = m.size().to_logical::<f64>(m.scale_factor());
+        (size.width, size.height)
+    });
+    let (width, height) = settings_size(width, height, screen)?;
+    window.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
+    let _ = window.center();
+    show_window(&window);
+    Ok(())
+}
+
+/// Brings the main window to the front (the settings window's App Update button: the dialog is the main window's).
+#[tauri::command]
+fn window_focus_main(app: AppHandle) {
+    focus_main(&app);
+}
+
 #[tauri::command]
 fn update_state(updater: State<Updater>) -> UpdateState {
     updater.state()
@@ -401,6 +504,10 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // The settings window just closes; the main window's close is the app's end
+                if window.label() == SETTINGS_WINDOW {
+                    return;
+                }
                 api.prevent_close();
                 quit_app(window.app_handle());
             }
@@ -416,6 +523,9 @@ pub fn run() {
             window_close,
             window_is_maximized,
             window_start_resize,
+            open_settings,
+            settings_window_fit,
+            window_focus_main,
             update_state,
             update_check,
             update_install,
@@ -464,6 +574,26 @@ mod tests {
         let dev = url("http://localhost:1430");
         assert!(navigation_allowed(&url("http://localhost:1430/index.html"), Some(&dev), None));
         assert!(!navigation_allowed(&url("http://localhost:1431/"), Some(&dev), None));
+    }
+
+    #[test]
+    fn the_settings_window_is_the_servers_origin_at_the_settings_path() {
+        let settings = settings_url("http://127.0.0.1:28460").unwrap();
+        assert_eq!(settings.as_str(), "http://127.0.0.1:28460/settings?window=settings");
+        // The window it opens is one the navigation rule allows
+        assert!(navigation_allowed(&settings, None, Some("http://127.0.0.1:28460")));
+        assert!(settings_url("not a url").is_none());
+    }
+
+    #[test]
+    fn the_settings_window_takes_the_size_asked_for_inside_its_screen() {
+        assert_eq!(settings_size(672.0, 812.4, None), Ok((672.0, 812.0)));
+        assert_eq!(settings_size(672.0, 812.0, Some((1920.0, 1080.0))), Ok((672.0, 812.0)));
+        // 95 % of a small screen at most
+        assert_eq!(settings_size(672.0, 812.0, Some((1366.0, 768.0))), Ok((672.0, 730.0)));
+        for (w, h) in [(f64::NAN, 800.0), (672.0, f64::INFINITY), (0.0, 800.0), (672.0, -1.0), (10.0, 10.0)] {
+            assert!(settings_size(w, h, None).is_err(), "{w} x {h}");
+        }
     }
 
     #[test]
