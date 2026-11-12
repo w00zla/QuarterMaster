@@ -22,6 +22,14 @@ export interface Config {
   overlayDisplay: OverlayDisplay;
   hotkeyOverlay: string;
   hotkeyMode: string;
+  // Switches the scan between the terminals and the radar signature ("" = none)
+  hotkeyScanMode: string;
+  // How see-through both overlays are, in percent (0–80)
+  overlayTransparency: number;
+  // Where the signature overlay sits next to the radar signature
+  signaturePosition: SignaturePosition;
+  // The scan overlay stays shown while the signature scan runs (off: the signature overlay alone)
+  scanOverlayInSignature: boolean;
   // The tab (= the overlay's mode) switches by itself: with the screen the scan sees, with a new blueprint unlock
   autoTab: boolean;
   // The screen scan's OCR on the GPU where it can (GpuStatus), else on the CPU
@@ -37,6 +45,8 @@ export interface Config {
 export type GpuStatus = { state: "ready" } | { state: "missing" } | { state: "failed"; error: string };
 
 export type OverlayPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
+
+export type SignaturePosition = "below" | "above" | "left" | "right";
 
 export interface Unlock {
   // As logged (UTC, ISO)
@@ -121,16 +131,34 @@ export type AppFolder = "config" | "log" | "cache" | "game";
 export const openFolder = (which: AppFolder) => call<void>("open_folder", { which });
 // The scan: what the OCR reads from the screen capture, switched on and off by the user or the overlay. The scope says
 // which screens it reads: the freight manager's warehouse (materials, items), the character inventory's storage pane
-// (ship components), the refinery terminal (jobs)
+// (ship components), the refinery terminal (jobs); or the radar signature of a ship's scan alone (the signature scan
+// reads nothing else)
 export interface ScanScope {
   warehouse: boolean;
   inventory: boolean;
   refinery: boolean;
+  signature: boolean;
 }
 export const getScan = () => call<boolean>("get_scan");
 export const setScan = (on: boolean, scope: ScanScope) => call<void>("set_scan", { on, ...scope });
-// The screen the scan sees (event "scan-screen")
-export type ScanScreen = "none" | "warehouse" | "inventory" | "refinery";
+// The screen the scan sees (event "scan-screen"); "signature": the signature scan runs
+export type ScanScreen = "none" | "warehouse" | "inventory" | "refinery" | "signature";
+// A read of the radar signature (event "signature-read", every frame of the signature scan): the signature (null: no
+// plate in view or not readable), the text as read, the OCR's confidence, the number's box in frame pixels
+export interface SignatureRead {
+  value: number | null;
+  raw: string;
+  score: number;
+  rect: { x0: number; y0: number; x1: number; y1: number } | null;
+  // Where the reader looked for the plate (the debug view)
+  window: { x0: number; y0: number; x1: number; y1: number } | null;
+}
+export interface SignatureEvent {
+  atMs: number;
+  width: number;
+  height: number;
+  read: SignatureRead;
+}
 // The inventory debug window: frames with the reads, the last reads kept; a recording writes every read into a new folder below dir (its path)
 export const setDebug = (on: boolean) => call<void>("set_debug", { on });
 export const startDebugRecording = (dir: string) => call<string>("start_debug_recording", { dir });

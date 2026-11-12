@@ -1,7 +1,9 @@
 // The scan (Rust: ocrwatch.rs): one for the freight manager's warehouse, the character inventory and the
 // refinery terminal; the worker finds the screen itself (event "scan-screen"). The user switches it in the
 // scan row; the overlay switches it on with itself and off again only when it started it. Its scope follows
-// the panels' filters: a screen none of whose kinds is on is not read. Starting clears the inventory's
+// the panels' filters: a screen none of whose kinds is on is not read. The signature scan (mining.ts, the
+// Bergbau panel's chip) is a mode of its own: while it is on the scan reads the radar signature alone, and the
+// state tag says so throughout. Starting clears the inventory's
 // earlier sightings and loads the catalog and the stored stock. While it runs, the screen capture tells
 // whether the game runs (event "game-seen"). Off at every start.
 import { listen } from "@tauri-apps/api/event";
@@ -10,6 +12,7 @@ import type { IconName } from "../../adminapp/src/components/Icon.vue";
 import { getGameFront, getGameSeen, getScan, setScan, type ScanScope, type ScanScreen } from "./backend";
 import { t } from "./i18n";
 import { kinds, loadStock, locationUuid, resetSightings } from "./inventorySync";
+import { signatureOn } from "./mining";
 import { ensureCatalog, jobsOn, preparing } from "./refinerySync";
 import { toastError } from "./toasts";
 
@@ -21,16 +24,20 @@ export const gameSeen = ref(false);
 // Its window is in front: only then the scan reads (else it is idle, its screen left)
 export const gameFront = ref(false);
 
-// What the filters leave the scan to read
-export const scope = computed<ScanScope>(() => ({
-  warehouse: kinds.value.has("mats") || kinds.value.has("items"),
-  inventory: kinds.value.has("comps") || kinds.value.has("fps"),
-  refinery: jobsOn.value,
-}));
-const scopeEmpty = computed(() => !scope.value.warehouse && !scope.value.inventory && !scope.value.refinery);
+// What the filters leave the scan to read; the signature scan reads nothing else
+export const scope = computed<ScanScope>(() => signatureOn.value
+  ? { warehouse: false, inventory: false, refinery: false, signature: true }
+  : {
+    warehouse: kinds.value.has("mats") || kinds.value.has("items"),
+    inventory: kinds.value.has("comps") || kinds.value.has("fps"),
+    refinery: jobsOn.value,
+    signature: false,
+  });
+const scopeEmpty = computed(() => !scope.value.warehouse && !scope.value.inventory && !scope.value.refinery && !scope.value.signature);
 
 // The panel tab the reads of the screen in view go to (the overlay's mode follows it), else null
-export const screenTab = computed(() => (screen.value === "refinery" ? "refinery" : screen.value === "warehouse" ? "stock" : screen.value === "inventory" ? "comps" : null));
+const SCREEN_TABS = { refinery: "refinery", warehouse: "stock", inventory: "comps", signature: "mining", none: null } as const;
+export const screenTab = computed(() => SCREEN_TABS[screen.value]);
 
 /** Switches the scan on (a fresh start: the inventory's earlier sightings go) or off. */
 export async function setScanOn(on: boolean) {
@@ -64,6 +71,9 @@ export interface StateTag {
 export const scanState = computed<StateTag>(() => {
   const s = !scanOn.value
     ? ({ cls: "", icon: "eye-off", label: "scan.off" } as const)
+    // The signature scan: one tag the whole time it runs
+    : signatureOn.value
+    ? ({ cls: "ok", icon: "target", label: "scan.signature" } as const)
     : preparing.value
       ? ({ cls: "", icon: "clock", label: "scan.preparing" } as const)
       : !gameSeen.value

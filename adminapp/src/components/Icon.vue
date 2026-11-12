@@ -103,6 +103,10 @@ export const ICONS = {
   database: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
   trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
   'wifi-off': '<path d="M2 2l20 20"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M5 12.9a10 10 0 0 1 5.2-2.7"/><path d="M19 12.9a10 10 0 0 0-2-1.5"/><path d="M2 8.8a15 15 0 0 1 4.2-2.6"/><path d="M22 8.8a15 15 0 0 0-11.3-3.8"/><path d="M12 20h.01"/>',
+  // The mining methods (the companion's radar signatures): a ship, the ROC (a ground vehicle), by hand
+  'mine-ship': '<path d="M12 3c3 3 4 7 4 11l3 3v2l-4-1-1 2h-4l-1-2-4 1v-2l3-3c0-4 1-8 4-11z"/><circle cx="12" cy="10" r="1.5"/>',
+  'mine-roc': '<rect x="3" y="9" width="12" height="7" rx="1"/><path d="M15 12h3l3 3v1h-6"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  'mine-hand': '<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V12"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.5A6.5 6.5 0 0 1 4 15.5V11a1.5 1.5 0 0 1 3 0v2"/>',
 } as const
 
 export type IconName = keyof typeof ICONS

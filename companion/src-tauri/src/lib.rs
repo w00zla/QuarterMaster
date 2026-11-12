@@ -4,9 +4,11 @@
 //! Structure after BindSight (`config.rs`, `logwatch.rs`).
 //! Reads the warehouse (`inventory.rs`), the character inventory (`components.rs`) and the refinery
 //! terminal (`refinery.rs`) from frames during a scan session the user starts (`ocr.rs`, `ocrwatch.rs`)
-//! with sc-ohseearr's readers, in the player's game language (sc-ohseearr's `Locale`); the frames come
+//! with sc-ohseearr's readers, in the player's game language (sc-ohseearr's `Locale`), or, in the signature
+//! scan, the radar signature of a ship's scan (`mining.rs`); the frames come
 //! from the screen capture (`capture.rs` on sc-ohseearr's capture crate, Windows only so far).
-//! The scan overlay (`overlay.rs`, Windows only) shows the main window's detections over the game.
+//! The scan overlay (`overlay.rs`, Windows only) shows the main window's detections over the game, the
+//! signature overlay the resources a radar signature may stand for next to it.
 //! Updates by channel from GitHub releases (`update.rs`, the desktop app's way): the commands `update_*`, and at start,
 //! with `autoUpdate` on, a check that installs a newer version at once.
 
@@ -17,6 +19,7 @@ mod config;
 mod gamelog;
 pub mod inventory;
 mod logwatch;
+pub mod mining;
 pub mod ocr;
 mod ocrwatch;
 #[cfg(windows)]
@@ -248,8 +251,12 @@ fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config
     }
     // The channel is the update dialog's (`update_set_channel`); a settings window that was opened earlier must not undo it
     config.update_channel = state.lock().unwrap().config.update_channel.clone();
+    if !config::SIGNATURE_POSITIONS.contains(&config.signature_position.as_str()) {
+        config.signature_position = Config::default().signature_position;
+    }
+    config.overlay_transparency = config.overlay_transparency.min(config::MAX_TRANSPARENCY);
     #[cfg(windows)]
-    overlay::set_hotkeys(&app, &config.hotkey_overlay, &config.hotkey_mode)?;
+    overlay::set_hotkeys(&app, &config.hotkey_overlay, &config.hotkey_mode, &config.hotkey_scan_mode)?;
     config::save(&app, &config)?;
     {
         let mut data = state.lock().unwrap();
@@ -454,11 +461,13 @@ fn get_scan(detect: tauri::State<ocrwatch::Detect>) -> bool {
     detect.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Switches the scan on or off, with the screens it reads (a change of them while it runs applies to
-/// the next frame); the capture runs only while it is on. Every window hears about it (`scan-changed`).
+/// Switches the scan on or off, with the screens it reads or the radar signature alone (a change of them
+/// while it runs applies to the next frame); the capture runs only while it is on. Every window hears about it
+/// (`scan-changed`).
 #[tauri::command]
-fn set_scan(app: AppHandle, detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>, on: bool, warehouse: bool, inventory: bool, refinery: bool) {
-    let scope = ocrwatch::Scope { warehouse, inventory, refinery };
+#[allow(clippy::too_many_arguments)]
+fn set_scan(app: AppHandle, detect: tauri::State<ocrwatch::Detect>, scan: tauri::State<ocrwatch::Scan>, on: bool, warehouse: bool, inventory: bool, refinery: bool, signature: bool) {
+    let scope = ocrwatch::Scope { warehouse, inventory, refinery, signature };
     scan.set(scope);
     let was = detect.swap(on, std::sync::atomic::Ordering::Relaxed);
     if was != on {
@@ -793,7 +802,7 @@ pub fn run() {
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::POSITION | tauri_plugin_window_state::StateFlags::SIZE | tauri_plugin_window_state::StateFlags::MAXIMIZED,
                 )
-                .with_denylist(&["overlay", "settings"])
+                .with_denylist(&["overlay", "settings", "signature"])
                 .build(),
         );
     builder
@@ -826,10 +835,12 @@ pub fn run() {
             let fast = ocrwatch::FastCapture::default();
             let front = ocrwatch::GameFront::default();
             let gpu = ocrwatch::Gpu::new();
-            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone(), fast.clone(), front.clone(), gpu.clone());
+            let signature_seen = ocrwatch::SignatureSeen::default();
+            let signature_capture = ocrwatch::SignatureCapture::default();
+            let frames = ocrwatch::spawn(app.handle().clone(), detect.clone(), scan.clone(), debug.clone(), store.clone(), fast.clone(), front.clone(), gpu.clone(), signature_seen.clone(), signature_capture.clone());
             let seen = ocrwatch::GameSeen::default();
             #[cfg(windows)]
-            capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast, front.clone());
+            capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast, front.clone(), signature_capture.clone());
             app.manage(Mutex::new(frames));
             app.manage(detect);
             app.manage(scan);
@@ -843,15 +854,22 @@ pub fn run() {
             {
                 let overlay = overlay::Overlay::default();
                 let handle = app.handle().clone();
-                overlay::spawn(app.handle().clone(), overlay.clone(), move || {
+                overlay::spawn(app.handle().clone(), overlay.clone(), signature_seen, move || {
                     let state = handle.state::<Mutex<AppData>>();
                     let data = state.lock().unwrap();
-                    (data.config.overlay_position.clone(), data.config.overlay_display.clone())
+                    // The signature scan runs (the capture's flag) and the settings show the signature overlay alone
+                    let signature_scan = signature_capture.0.load(std::sync::atomic::Ordering::Relaxed);
+                    overlay::Placing {
+                        position: data.config.overlay_position.clone(),
+                        display: data.config.overlay_display.clone(),
+                        hide_scan_overlay: signature_scan && !data.config.scan_overlay_in_signature,
+                        signature_position: data.config.signature_position.clone(),
+                    }
                 });
                 app.manage(overlay);
                 app.manage(overlay::Hotkeys::default());
                 let c = app.state::<Mutex<AppData>>().lock().unwrap().config.clone();
-                if let Err(e) = overlay::set_hotkeys(app.handle(), &c.hotkey_overlay, &c.hotkey_mode) {
+                if let Err(e) = overlay::set_hotkeys(app.handle(), &c.hotkey_overlay, &c.hotkey_mode, &c.hotkey_scan_mode) {
                     log::warn!("overlay hotkeys not set: {e}");
                 }
                 overlay::spawn_hotkeys(app.handle().clone());

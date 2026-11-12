@@ -2,7 +2,7 @@
 // The title bar with the user (avatar, the name in its tooltip) and a button that opens the web app,
 // or why the connection is down (chip only then; no reload button: a restart of the app reloads
 // everything); below it the scan row (ScanBar.vue), then the side panel with the tabs (SideTabs.vue, at the left edge, icons like the
-// web app's navigation) and the panels beside it: comps, stock (both InventoryPanel), refinery, unlocks.
+// web app's navigation) and the panels beside it: comps, stock (both InventoryPanel), refinery, mining, unlocks.
 // The chips open the settings window (its own window, SettingsApp.vue; one at a time); it never opens by itself, also not
 // while the app is not connected (the red chip says why). After a
 // save ("config-changed") this window re-reads the config, re-checks the connection and the log state. While the server refuses
@@ -16,6 +16,7 @@ import Tooltip from "../../adminapp/src/components/Tooltip.vue";
 import { PICKER_LABELS } from "../../webapp/src/components/Picker.vue";
 import InventoryPanel from "./components/InventoryPanel.vue";
 import AppFooter from "./components/AppFooter.vue";
+import MiningPanel from "./components/MiningPanel.vue";
 import ScanBar from "./components/ScanBar.vue";
 import SideTabs from "./components/SideTabs.vue";
 import Toasts from "./components/Toasts.vue";
@@ -38,6 +39,7 @@ import { watchInventory } from "./inventorySync";
 import { watchDebugReport } from "./debugReport";
 import { tab, watchOverlay } from "./overlay";
 import { watchScan } from "./scan";
+import { watchMining } from "./mining";
 import RefineryPanel from "./components/RefineryPanel.vue";
 import { toastError } from "./toasts";
 
@@ -74,6 +76,7 @@ onMounted(async () => {
   await watchScan().catch(toastError);
   await watchRefinery().catch(toastError);
   await watchInventory().catch(toastError);
+  await watchMining().catch(toastError);
   await watchDebugReport().catch(toastError);
   await watchOverlay().catch(toastError);
   // Not connected: the red tag in the top bar says why and opens the settings on a click; they never open by themselves
@@ -114,6 +117,7 @@ onMounted(async () => {
           <InventoryPanel v-show="tab === 'comps'" part="comps" />
           <InventoryPanel v-show="tab === 'stock'" part="stock" />
           <RefineryPanel v-show="tab === 'refinery'" />
+          <MiningPanel v-show="tab === 'mining'" />
           <UnlocksPanel v-show="tab === 'unlocks'" />
         </main>
       </div>

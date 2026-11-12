@@ -1,5 +1,6 @@
 //! Windows screen capture for the scan: while detection is on and Star Citizen is the foreground window,
-//! one frame per second of its client area (BGRA, converted only if it is read), sent to the OCR worker
+//! one frame per second of its client area (two a second in the signature scan: the radar signature changes
+//! quickly and its overlay follows it), (BGRA, converted only if it is read), sent to the OCR worker
 //! (`ocrwatch`), which gates and reads it; while detection is on it also tells whether the game runs at all
 //! (`game-seen`, for the state row). The capture itself is sc-ohseearr's (`sc_ohseearr_capture_win`): DXGI
 //! Desktop Duplication, the image of the game's monitor cut to the window (no capture border, unlike
@@ -15,15 +16,19 @@ use sc_ohseearr_capture_win::{Captured, Found, Grab, Rest, Window, WindowCapture
 use tauri::{AppHandle, Emitter};
 use windows::Win32::Foundation::{HWND, RECT};
 
-use crate::ocrwatch::{CaptureInfo, Detect, FastCapture, Frame, GameFront, GameSeen, GAME_FRONT, GAME_SEEN, PULL_TIMEOUT_MS};
+use crate::ocrwatch::{CaptureInfo, Detect, FastCapture, Frame, GameFront, GameSeen, SignatureCapture, GAME_FRONT, GAME_SEEN, PULL_TIMEOUT_MS};
 
 const GAME_EXE: &str = "StarCitizen.exe";
 const INTERVAL: Duration = Duration::from_secs(1);
+/// The signature scan's interval: a read takes ~50–60 ms on the CPU (3 threads) at 3840×1600, so two a second
+/// keep those threads about an eighth busy, slower CPUs too; a frame that comes while the worker still reads is dropped
+const SIGNATURE_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Starts the capture thread; it sends frames only while `detect` is on and the game is in front
-/// (one per second, on the warehouse and the character inventory when the worker pulls, `FastCapture`),
-/// and tells whether the game runs (`seen`, only while `detect` is on).
-pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, fast: FastCapture, front: GameFront) {
+/// (one per second, two in the signature scan (`SignatureCapture`), on the warehouse and the character inventory
+/// when the worker pulls, `FastCapture`), and tells whether the game runs (`seen`, only while `detect` is on).
+#[allow(clippy::too_many_arguments)]
+pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, fast: FastCapture, front: GameFront, signature: SignatureCapture) {
     std::thread::spawn(move || {
         // The game window last seen in front counts while the companion itself is in front (`Found::in_front`
         // false); the skipped grabs go into the next frame's info
@@ -48,7 +53,7 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
                     }
                 }
             } else {
-                std::thread::sleep(INTERVAL);
+                std::thread::sleep(if signature.0.load(Ordering::Relaxed) { SIGNATURE_INTERVAL } else { INTERVAL });
             }
             let on = detect.load(Ordering::Relaxed);
             let game = if on { cap.window() } else { None };

@@ -37,6 +37,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use image::{ImageFormat, RgbImage};
 use sc_ohseearr_gear_inventory::GearInventoryReader;
+use sc_ohseearr_mining_hud::MiningHudReader;
 use sc_ohseearr_refinery::RefineryReader;
 use sc_ohseearr_sc::{Locale, LocaleSource, Reader};
 use sc_ohseearr_warehouse::WarehouseReader;
@@ -47,10 +48,12 @@ pub use sc_ohseearr_capture_win::{Gate, Pixels, PULL_TIMEOUT_MS};
 
 use crate::components::ComponentRead;
 use crate::inventory::Grid;
-use crate::ocr::{Ocr, TextBox};
+use crate::mining::SignatureRead;
+use crate::ocr::{Ocr, Rect, TextBox};
 use crate::refinery::{Overview, Read};
 
 pub const REFINERY_OVERVIEW: &str = "refinery-overview";
+pub const SIGNATURE_READ: &str = "signature-read";
 pub const REFINERY_VISIT: &str = "refinery-visit";
 pub const INVENTORY_READ: &str = "inventory-read";
 pub const INVENTORY_DEBUG: &str = "inventory-debug";
@@ -132,6 +135,33 @@ struct VisitEvent {
     active: bool,
 }
 
+/// A read of the radar signature (`signature-read`, every frame of the signature scan): the frame's size and
+/// what it showed.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SignatureEvent {
+    at_ms: u64,
+    width: u32,
+    height: u32,
+    read: SignatureRead,
+}
+
+/// Where the signature scan last saw a signature (the signature overlay sits next to it): the number's box in
+/// frame pixels, the frame's size and when. Set by the worker on every read with a value, cleared when the
+/// signature scan ends; the overlay hides once it is older than `overlay::SIGNATURE_STALE`.
+#[derive(Clone, Copy, Debug)]
+pub struct SignatureSpot {
+    pub at: Instant,
+    pub rect: Rect,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The last `SignatureSpot`, shared with the overlay's placing thread. Its own type: Tauri keeps managed
+/// state by type.
+#[derive(Default, Clone)]
+pub struct SignatureSeen(pub Arc<Mutex<Option<SignatureSpot>>>);
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct InventoryEvent {
@@ -154,6 +184,8 @@ struct InventoryEvent {
     frame: Option<String>,
     /// A refinery read (sent only while debugging: the sync gets `refinery-overview`)
     refinery: Option<RefineryRead>,
+    /// A radar signature read (sent only while debugging: the frontend gets `signature-read`)
+    signature: Option<SignatureRead>,
     /// How the frame was captured
     capture: CaptureInfo,
     /// Which models read it, where, and their share of `ms`
@@ -185,13 +217,15 @@ pub struct RefineryRead {
 /// Which screen the scan is looking at: decided once (the refinery's titles, the page number of the
 /// character inventory, a fitted grid the warehouse) and kept until the reader found nothing
 /// `SCREEN_MISSES` (refinery: `LEAVE_AFTER`) times in a row (a switch between the screens takes the
-/// player seconds).
+/// player seconds). The ship's HUD with its radar signature is no screen the scan finds: the signature scan
+/// (`Scope::signature`) is a mode of its own that reads nothing else, every frame, for as long as it is on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
     Unknown,
     Warehouse,
     Inventory,
     Refinery,
+    Signature,
 }
 
 impl Screen {
@@ -201,6 +235,7 @@ impl Screen {
             Screen::Warehouse => "warehouse",
             Screen::Inventory => "inventory",
             Screen::Refinery => "refinery",
+            Screen::Signature => "signature",
         }
     }
 }
@@ -217,6 +252,7 @@ pub struct DebugRead {
     pub grid: Option<Grid>,
     pub components: Option<ComponentRead>,
     pub refinery: Option<RefineryRead>,
+    pub signature: Option<SignatureRead>,
     pub cursor: Option<(f32, f32)>,
     pub boxes: Vec<TextBox>,
     pub capture: CaptureInfo,
@@ -264,6 +300,7 @@ struct ExportRead<'a> {
     grid: &'a Option<Grid>,
     components: &'a Option<ComponentRead>,
     refinery: &'a Option<RefineryRead>,
+    signature: &'a Option<SignatureRead>,
     /// The mouse cursor in frame pixels (replays pass it to the reads)
     cursor: Option<(f32, f32)>,
     boxes: &'a [TextBox],
@@ -294,6 +331,7 @@ fn write_read(folder: &Path, n: usize, r: &DebugRead) -> Result<(), String> {
         grid: &r.grid,
         components: &r.components,
         refinery: &r.refinery,
+        signature: &r.signature,
         cursor: r.cursor,
         boxes: &r.boxes,
         capture: r.capture,
@@ -360,6 +398,7 @@ fn spawn_debug_writer(app: AppHandle, store: DebugStore) -> SyncSender<(RgbImage
                         grid: event.grid.clone(),
                         components: event.components.clone(),
                         refinery: event.refinery.clone(),
+                        signature: event.signature.clone(),
                         cursor: event.cursor,
                         boxes: event.boxes.clone(),
                         capture: event.capture,
@@ -411,27 +450,31 @@ fn jpeg_bytes(image: &RgbImage) -> Result<Vec<u8>, String> {
 pub type Detect = Arc<AtomicBool>;
 
 /// Which screens the scan reads (the frontend's filters): the freight manager's warehouse (materials,
-/// items), the character inventory (ship components), the refinery terminal (jobs). A screen out of
-/// scope is neither looked for nor read.
+/// items), the character inventory (ship components), the refinery terminal (jobs), or the radar signature
+/// of a ship's scan. A screen out of scope is neither looked for nor read. The signature scan reads nothing
+/// else: with it on, the terminals are out of scope whatever their flags say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Scope {
     pub warehouse: bool,
     pub inventory: bool,
     pub refinery: bool,
+    pub signature: bool,
 }
 
 impl Scope {
     fn bits(self) -> u8 {
-        self.warehouse as u8 | (self.inventory as u8) << 1 | (self.refinery as u8) << 2
+        self.warehouse as u8 | (self.inventory as u8) << 1 | (self.refinery as u8) << 2 | (self.signature as u8) << 3
     }
 
     fn from_bits(v: u8) -> Self {
-        Self { warehouse: v & 1 != 0, inventory: v & 2 != 0, refinery: v & 4 != 0 }
+        Self { warehouse: v & 1 != 0, inventory: v & 2 != 0, refinery: v & 4 != 0, signature: v & 8 != 0 }
     }
 
     fn allows(self, screen: Screen) -> bool {
         match screen {
             Screen::Unknown => true,
+            Screen::Signature => self.signature,
+            _ if self.signature => false,
             Screen::Warehouse => self.warehouse,
             Screen::Inventory => self.inventory,
             Screen::Refinery => self.refinery,
@@ -481,6 +524,11 @@ pub const GAME_FRONT: &str = "game-front";
 /// read answers (the screen changed, the scan stopped).
 #[derive(Default, Clone)]
 pub struct FastCapture(pub Arc<AtomicU64>);
+
+/// The signature scan runs: the capture grabs two frames a second instead of one (the worker sets it with the
+/// screen).
+#[derive(Default, Clone)]
+pub struct SignatureCapture(pub Arc<AtomicBool>);
 pub const GAME_SEEN: &str = "game-seen";
 
 /// Whether the OCR can run on the GPU (sc-ohseearr's engine, DirectML): the redistributable DirectML.dll next
@@ -521,9 +569,10 @@ impl Gpu {
 }
 
 /// Starts the OCR worker; frames sent to the returned channel are read in order while a session runs.
-pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront, gpu: Gpu) -> Sender<Frame> {
+#[allow(clippy::too_many_arguments)]
+pub fn spawn(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront, gpu: Gpu, seen: SignatureSeen, signature_capture: SignatureCapture) -> Sender<Frame> {
     let (tx, rx) = channel::<Frame>();
-    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store, fast, front, gpu).run(rx));
+    std::thread::spawn(move || Worker::new(app, detect, scan, debug, store, fast, front, gpu, seen, signature_capture).run(rx));
     if let Some(dir) = std::env::var_os("QM_OCR_FRAMES") {
         spawn_folder_source(PathBuf::from(dir), tx.clone());
     }
@@ -559,12 +608,13 @@ struct Visit {
 
 /// The readers without a model of their own (sc-ohseearr's; the warehouse reader is part of `Models`), each with
 /// what it keeps across frames: the character inventory reader its UI scale (from the last page number read), the
-/// refinery reader its labels. Made anew when the scan stops: their memory goes, and the next start may see the
-/// screens from elsewhere.
+/// refinery reader its labels, the mining HUD reader nothing but its last frame. Made anew when the scan stops:
+/// their memory goes, and the next start may see the screens from elsewhere.
 #[derive(Default)]
 struct Readers {
     gear: GearInventoryReader,
     refinery: RefineryReader,
+    mining: MiningHudReader,
 }
 
 /// The game's texts for the readers (`LocaleSource`: the language pack of the game folder in use, the English
@@ -623,6 +673,10 @@ struct Worker {
     unread: CaptureInfo,
     /// The frame's conversion to RGB before the read (logged with the read's phases)
     rgb_time: Duration,
+    /// Where the signature scan last saw a signature (the signature overlay's place)
+    signature_seen: SignatureSeen,
+    /// Set while the signature scan runs (the capture's faster interval)
+    signature_capture: SignatureCapture,
 }
 
 pub(crate) fn unix_ms(t: SystemTime) -> u64 {
@@ -655,7 +709,8 @@ fn ensure_models(slot: &mut Option<Models>, gpu: bool) -> Result<&mut Models, St
 }
 
 impl Worker {
-    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront, gpu: Gpu) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    fn new(app: AppHandle, detect: Detect, scan: Scan, debug: Debug, store: DebugStore, fast: FastCapture, front: GameFront, gpu: Gpu, signature_seen: SignatureSeen, signature_capture: SignatureCapture) -> Self {
         let debug_tx = spawn_debug_writer(app.clone(), store);
         Self {
             app,
@@ -680,6 +735,8 @@ impl Worker {
             capture: CaptureInfo::default(),
             unread: CaptureInfo::default(),
             rgb_time: Duration::ZERO,
+            signature_seen,
+            signature_capture,
         }
     }
 
@@ -717,13 +774,17 @@ impl Worker {
             if !scope.allows(self.screen) {
                 self.set_screen(Screen::Unknown, "out of scope");
             }
+            // The signature scan: a mode, not a screen to find (every frame is read for the signature)
+            if scope.signature {
+                self.set_screen(Screen::Signature, "signature scan");
+            }
             if let Some(v) = &mut self.visit {
                 v.last_frame = Instant::now();
             }
             // Held back (refinery: not at rest; nothing in view: the probe throttle): counted with the next read
             let held = match self.screen {
                 Screen::Refinery => frame.live && !self.gate.pass(frame.pixels.thumb(), frame.at_ms),
-                Screen::Warehouse | Screen::Inventory => false,
+                Screen::Warehouse | Screen::Inventory | Screen::Signature => false,
                 Screen::Unknown => frame.live && frame.at_ms.saturating_sub(self.last_probe_ms) < PROBE_MS,
             };
             if held {
@@ -745,6 +806,8 @@ impl Worker {
                 // Warehouse and character inventory: every frame (the character and the world behind
                 // the translucent inventory screen never come to rest, and the user waits for each stack)
                 Screen::Warehouse | Screen::Inventory => self.look_inventory(scope, frame.at_ms, frame.cursor, image),
+                // The ship's HUD: every frame (the signature changes as the ship moves)
+                Screen::Signature => self.look_signature(frame.at_ms, frame.cursor, image),
                 // Nothing in view (a menu, the verse): a probe costs the reads, so every PROBE_MS only
                 Screen::Unknown => {
                     self.last_probe_ms = frame.at_ms;
@@ -801,6 +864,10 @@ impl Worker {
                 models.warehouse.reset();
             }
         }
+        if self.screen == Screen::Signature {
+            // The signature overlay hides
+            *self.signature_seen.0.lock().unwrap() = None;
+        }
         if self.screen == Screen::Refinery {
             self.visit = None;
             log::info!("refinery visit ended ({why})");
@@ -815,9 +882,11 @@ impl Worker {
         self.screen = screen;
         self.screen_misses = 0;
         self.gate = Gate::default();
-        // The screens read every frame pull them (`FastCapture`), the others take the normal interval
+        // The screens read every frame pull them (`FastCapture`), the signature scan takes two a second, the others
+        // the normal interval
         let pull = matches!(screen, Screen::Warehouse | Screen::Inventory);
         self.fast.0.store(if pull { unix_ms(SystemTime::now()) } else { 0 }, Ordering::Relaxed);
+        self.signature_capture.0.store(screen == Screen::Signature, Ordering::Relaxed);
         let _ = self.app.emit(SCAN_SCREEN, screen.name());
     }
 
@@ -934,7 +1003,7 @@ impl Worker {
             }
             _ => log::debug!("no warehouse grid, no inventory tooltip ({ms} ms, screen {:?})", screen),
         }
-        let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None, capture: self.capture, ocr };
+        let event = InventoryEvent { at_ms, ms, width, height, grid, components, cursor, boxes, frame: None, refinery: None, signature: None, capture: self.capture, ocr };
         // The scan gets the read right away; while debugging a copy goes to the debug writer
         if debug {
             self.to_debug(image, event.clone());
@@ -993,11 +1062,36 @@ impl Worker {
         // While debugging the read goes with its frame to the debug window and a recording
         if self.debug.0.load(Ordering::Relaxed) {
             let (width, height) = image.dimensions();
-            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug), capture: self.capture, ocr: self.take_phases().1 };
+            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes: Vec::new(), frame: None, refinery: Some(debug), signature: None, capture: self.capture, ocr: self.take_phases().1 };
             self.to_debug(image, event);
         }
         if self.screen_misses >= LEAVE_AFTER {
             self.set_screen(Screen::Unknown, "left");
+        }
+        Ok(())
+    }
+
+    /// Reads the radar signature of a ship's scan in a frame (every frame while the signature scan is on): goes
+    /// out as `signature-read`; a read with a value moves the signature overlay's place (`SignatureSeen`), one
+    /// without keeps the last (the overlay hides once that is too old).
+    fn look_signature(&mut self, at_ms: u64, cursor: Option<(f32, f32)>, image: RgbImage) -> Result<(), String> {
+        self.take_phases();
+        let ocr = &mut ensure_models(&mut self.models, self.on_gpu)?.ocr;
+        let started = Instant::now();
+        let frame = sc_ohseearr_sc::Frame { id: self.frame_id, image: &image, cursor, locale: None };
+        let reading = self.readers.mining.read(ocr, &frame)?;
+        let ms = started.elapsed().as_millis() as u64;
+        let boxes = reading.diagnostics.boxes.clone();
+        let read = crate::mining::to_legacy(reading.output, reading.diagnostics.window);
+        let (width, height) = image.dimensions();
+        if let (Some(_), Some(rect)) = (read.value, read.rect) {
+            *self.signature_seen.0.lock().unwrap() = Some(SignatureSpot { at: Instant::now(), rect, width, height });
+        }
+        log::debug!("signature read in {ms} ms: {:?} ({:?})", read.value, read.raw);
+        let _ = self.app.emit(SIGNATURE_READ, SignatureEvent { at_ms, width, height, read: read.clone() });
+        if self.debug.0.load(Ordering::Relaxed) {
+            let event = InventoryEvent { at_ms, ms, width, height, grid: None, components: None, cursor, boxes, frame: None, refinery: None, signature: Some(read), capture: self.capture, ocr: self.take_phases().1 };
+            self.to_debug(image, event);
         }
         Ok(())
     }
@@ -1040,4 +1134,31 @@ fn spawn_folder_source(dir: PathBuf, tx: Sender<Frame>) {
             std::thread::sleep(Duration::from_secs(2));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_screen_out_of_scope_is_not_read() {
+        let all = Scope { warehouse: true, inventory: true, refinery: true, signature: false };
+        for screen in [Screen::Unknown, Screen::Warehouse, Screen::Inventory, Screen::Refinery] {
+            assert!(all.allows(screen), "{screen:?}");
+        }
+        assert!(!all.allows(Screen::Signature));
+        // A filter off: its screen is left and not looked for
+        let no_refinery = Scope { refinery: false, ..all };
+        assert!(!no_refinery.allows(Screen::Refinery));
+        assert!(no_refinery.allows(Screen::Warehouse));
+        // The signature scan reads nothing else, whatever the terminals' flags say
+        let signature = Scope { signature: true, ..all };
+        for screen in [Screen::Warehouse, Screen::Inventory, Screen::Refinery] {
+            assert!(!signature.allows(screen), "{screen:?}");
+        }
+        assert!(signature.allows(Screen::Signature));
+        // Kept as bits for the commands
+        assert_eq!(Scope::from_bits(signature.bits()), signature);
+        assert_eq!(Scope::from_bits(no_refinery.bits()), no_refinery);
+    }
 }

@@ -5,12 +5,16 @@
 // icon with the row count below it, the tab's name in a tooltip; wide (200 px): icon, name, the count at the right. A small button
 // half over the panel's right edge toggles the two (always possible); the choice is remembered (default narrow). Wide raises the
 // window's minimum width by the difference and widens a narrower window to it, so the tables keep their width.
+// A tab being read shows its icon green (the scan row's "detected" colour): while the scan runs, the screens it reads (scan.ts
+// scope: their filters on, the scan mode); the blueprints while their filter is on and Game.log is found.
 import { computed, onMounted, ref } from "vue";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../../adminapp/src/components/Tooltip.vue";
 import { t, type Key } from "../i18n";
 import { pickTab, tab, TAB_ICONS, tabCounts, type Tab } from "../overlay";
+import { scanOn, scope } from "../scan";
+import { log, unlocksOn } from "../state";
 import { minWidthFor, parseSideMode, type SideMode } from "../sideTabs";
 import { toastError } from "../toasts";
 
@@ -25,11 +29,19 @@ const GROUPS: Entry[][] = [
     { id: "comps", label: "comps.title" },
     { id: "stock", label: "stock.title" },
     { id: "refinery", label: "refinery.title" },
+    { id: "mining", label: "mining.title" },
   ],
   [{ id: "unlocks", label: "unlocks.title" }],
 ];
 
 const STORE_KEY = "qm.companion.sideMode";
+
+// The tabs being read right now: the screens the running scan reads; the blueprints while their filter is on and the Game.log is
+// found (read whether the scan runs or not)
+const scanned = computed<Record<Tab, boolean>>(() => {
+  const s = scanOn.value ? scope.value : { inventory: false, warehouse: false, refinery: false, signature: false };
+  return { comps: s.inventory, stock: s.warehouse, refinery: s.refinery, mining: s.signature, unlocks: unlocksOn.value && !!log.value?.found };
+});
 
 function stored(): SideMode {
   try {
@@ -75,7 +87,7 @@ onMounted(fit);
         <div v-if="i > 0" class="sep" />
         <Tooltip v-for="x in group" :key="x.id" side="right" :text="narrow ? t(x.label) : null">
           <button type="button" class="item" :class="{ narrow, active: tab === x.id }" :aria-label="t(x.label)" @click="pickTab(x.id)">
-            <Icon :name="TAB_ICONS[x.id]" :size="20" />
+            <Icon :name="TAB_ICONS[x.id]" :size="20" :class="{ read: scanned[x.id] }" />
             <span v-if="!narrow" class="name">{{ t(x.label) }}</span>
             <span class="count">{{ tabCounts[x.id] }}</span>
           </button>
@@ -189,6 +201,11 @@ onMounted(fit);
 .item.active:hover {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+/* This tab is being read: its icon green like the scan row's "detected" tag */
+.item .read {
+  color: var(--ok);
 }
 
 .name {

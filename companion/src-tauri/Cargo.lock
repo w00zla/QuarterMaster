@@ -3124,6 +3124,7 @@ dependencies = [
  "sc-ohseearr-capture-win",
  "sc-ohseearr-core",
  "sc-ohseearr-gear-inventory",
+ "sc-ohseearr-mining-hud",
  "sc-ohseearr-model-paddle-det-tiny",
  "sc-ohseearr-model-sc-rec-latin",
  "sc-ohseearr-model-sc-warehouse-layout",
@@ -3549,7 +3550,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-capture-win"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "image",
  "log",
@@ -3559,7 +3559,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-core"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "fast_image_resize",
  "image",
@@ -3572,7 +3571,16 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-gear-inventory"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
+dependencies = [
+ "image",
+ "sc-ohseearr-core",
+ "sc-ohseearr-sc",
+ "serde",
+]
+
+[[package]]
+name = "sc-ohseearr-mining-hud"
+version = "0.1.0"
 dependencies = [
  "image",
  "sc-ohseearr-core",
@@ -3583,7 +3591,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-model-paddle-det-tiny"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "sc-ohseearr-core",
 ]
@@ -3591,7 +3598,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-model-sc-rec-latin"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "sc-ohseearr-core",
 ]
@@ -3599,7 +3605,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-model-sc-warehouse-layout"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "sc-ohseearr-core",
 ]
@@ -3607,7 +3612,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-refinery"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "image",
  "sc-ohseearr-core",
@@ -3618,7 +3622,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-sc"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "image",
  "log",
@@ -3629,7 +3632,6 @@ dependencies = [
 [[package]]
 name = "sc-ohseearr-warehouse"
 version = "0.1.0"
-source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.1.0#98e4187e91079d340b2a5652c67da7ee032ad056"
 dependencies = [
  "image",
  "sc-ohseearr-core",
@@ -4641,7 +4643,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
