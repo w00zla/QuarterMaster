@@ -9,9 +9,11 @@ adapted from BindSight's `releasectl`.
 ## The model
 
 - **`main` is protected**: pull requests only, squash merge as the only merge
-  method, required status checks, no bypass for anyone. **The tool never pushes
-  to `main`**: a live version goes through a pull request that the tool opens,
-  shows (state and checks) and merges on your explicit yes. The tool contains no
+  method, required status checks; its one bypass is the deploy key with which
+  `release.yml` rewrites the README's downloads block after a release, nothing
+  else. **The tool never pushes to `main`**: a live version goes through a pull
+  request that the tool opens, shows (state and checks) and merges on your
+  explicit yes. The tool contains no
   code path that pushes the default branch (one function builds every push and
   refuses `main`; a test checks the commands of every run).
 - **Live versions `x.y.z`** are tagged on the **squash commit** the merge leaves

@@ -142,8 +142,12 @@ tag is `data-<label>-<n>` with the snapshot's label):
 
 ```sh
 gh release create data-<label>-<n> <out>/manifest.json <out>/quartermaster-data-<label>-<n>.zip <out>/catalog.json.gz <out>/thumbs-update.zip \
-  --title "Game data <label> (<n>)" --notes "" --latest=false
+  --title "Game data <label> (<n>)" --notes-file <notes.md> --latest=false
 ```
+
+The notes say in a few lines which game version it is for (version, channel, build, branch and the date of the extraction, from the
+snapshot's `game` and `extractedAt`) and what is in it (the counts of the catalog's items, resources, mineables, blueprints, locations and
+manufacturers, the English texts, the number of pictures). The apps do not read them.
 
 Creating the release publishes it, which runs `release.yml`: `data.stable` in `channels.json` (on the `channels` branch) becomes the tag and
 the apps pick it up at their next data check. Keep `<out dir>` for the next pack's `--previous`. The data feed has no channels: only

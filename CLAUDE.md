@@ -22,7 +22,7 @@ Where things are described (read the matching file before working in an area):
 | `docs/companion.md` | companion app (`companion/`): requirements, structure, Game.log, server/config, release, scan session, warehouse and character inventory scans, refinery sync, capture, overlay, OCR adapters (pointers into sc-ohseearr), decisions |
 | `docs/singleuser.md` | singleuser variant: the process (entry point, env variables, data folder, port, Host guard), the app bundle for the desktop shell (files, `nodeFlags`, start protocol `QM_STEP`/`QM_READY`/`QM_FATAL`, stdin control, the data folder's lock), the DB part (PGlite in the process, `connectUrl`, settings, `maintain()`, the one-connection rule) the settings, the game folder, the language pack and the pairing file, the data pack (assets, manifest, build, install, the update from GitHub) and the local identity (one fixed user, the open local API) |
 | `docs/app.md` | the desktop app (`app/`, the shell of the singleuser variant: Tauri 2): the start, the Node sidecar, the splash and its texts, the shell contract's implementation (capabilities, IPC and the CSP value), app updates and channels, single instance, the environment overrides, building (what is unsigned), the smoke test |
-| `docs/releasing.md` | releasing: tags and versions of the two apps and the data packs, `channels.json` (the one feed file, on the `channels` branch), the PR-only `main` and its ruleset, the workflows in `.github/workflows/` (`ci.yml` for pull requests, the build and release workflows) and the scripts they run, cutting a release, one-time repository setup |
+| `docs/releasing.md` | releasing: tags and versions of the two apps and the data packs, `channels.json` (the one feed file, on the `channels` branch), the PR-only `main`, its ruleset and its one bypass (the deploy key with which `release.yml` rewrites the README's downloads block), the workflows in `.github/workflows/` (`ci.yml` for pull requests, the build and release workflows) and the scripts they run, cutting a release, one-time repository setup |
 | `docs/ext.md` | third-party data (UEX trading) |
 | `docs/deploy.md` | production design (image, compose, DB roles, Caddy) and the step-by-step deploy, backups, updates, rollback, restore |
 | `../sc-ohseearr` | OCR engine, models, readers and training (own repo, https://github.com/w00zla/sc-ohseearr; the companion's Rust git dependencies by release tag; PP-OCRv6 runtime, warehouse layout detector, text recognizer) |
@@ -32,7 +32,7 @@ Where things are described (read the matching file before working in an area):
 stock service, UEX pull and the user web app are built. In production since 2026-10-05 (Docker Compose on a
 VPS behind Caddy); live with real users and data since 2026-11-08 (bot and user web app), so the production DB
 is not disposable. Backup and restore are tested on production; **the daily backups stay on the server only** (no
-remote target yet: `docs/deploy.md` § 6). The companion (Game.log blueprints, warehouse and character inventory scans, scan overlay, refinery sync) is in use; it is to become independent of the web app (a standalone version is planned).
+remote target yet: `docs/deploy.md` § 6). The companion (Game.log blueprints, warehouse and character inventory scans, scan overlay, refinery sync) is in use. The singleuser variant ("Quartermaster (singleuser)", the desktop app `app/`) is released: app 1.0.0, companion 2.1.0 and the first data pack since 2026-11-12, as GitHub releases with updates through `channels.json` (`docs/releasing.md`).
 
 ## Commands
 
