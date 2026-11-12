@@ -129,7 +129,7 @@ export function startLocal() {
   void tick();
 }
 
-// A new data pack: the game version of the top bar follows
+// A new data pack: the game version of the slim bar follows
 watch(installedTag, (tag, old) => {
   if (old !== undefined && tag !== old) void loadCapabilities();
 });

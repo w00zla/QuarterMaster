@@ -6,9 +6,11 @@
 // language, the switch "Automatic updates" (the channel is the update dialog's); the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
 // by default) with its state as a tag and a dim note below (greyed out, off, when it cannot run there:
 // gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed).
-// Two columns keep the window low: the app and Star Citizen at the left, the scan and its overlay at the right. The scan overlay group (Windows only):
-// position (six icon-only buttons on a drawn monitor), display (compact or thumbnails) and hotkeys, saved (on/off is the scan row's
-// toggle and the hotkey). In the foot at the left, secondary for the user: the debug window (opening it closes this
+// Two columns keep the window low: the app and Star Citizen at the left, the scan and its overlay at the right. The overlay group
+// (Windows only): the transparency of both overlays (a slider); the scan overlay's position (six icon-only buttons on a drawn
+// monitor) and display (compact or thumbnails); the radar signature's overlay, its side next to the number (four icon-only buttons
+// around a drawn plate) and whether the scan overlay stays shown in the signature scan; the hotkeys (overlay on/off, overlay view,
+// scan mode), saved (on/off is the scan row's toggle and the hotkey). In the foot at the left, secondary for the user: the debug window (opening it closes this
 // window).
 // The settings window (opened from the main window, Rust `open_settings_window`): fixed width, not resizable,
 // frameless with a title bar of its own (icon, "QM Companion Settings", close), like the desktop app's settings window. This page loads config and pairing itself (its own webview), sizes the window
@@ -21,7 +23,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../adminapp/src/components/Dropdown.vue";
 import Icon from "../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../adminapp/src/components/Tooltip.vue";
-import { fitSettingsWindow, getPaired, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition } from "./backend";
+import { fitSettingsWindow, getPaired, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition, type SignaturePosition } from "./backend";
 import type { OverlayDisplay } from "./overlayLayout";
 import { t } from "./i18n";
 import { connectionOf } from "./connection";
@@ -57,6 +59,10 @@ const overlayPosition = ref<OverlayPosition>("top-left");
 const overlayDisplay = ref<OverlayDisplay>("thumbs");
 const hotkeyOverlay = ref("");
 const hotkeyMode = ref("");
+const hotkeyScanMode = ref("");
+const transparency = ref(18);
+const signaturePosition = ref<SignaturePosition>("below");
+const scanOverlayInSignature = ref(true);
 const busy = ref(false);
 // The online server's address; left empty it is the production server again (the Rust side fills it in)
 const server = ref("");
@@ -77,6 +83,10 @@ function fill() {
   overlayDisplay.value = c?.overlayDisplay ?? "thumbs";
   hotkeyOverlay.value = c?.hotkeyOverlay ?? "";
   hotkeyMode.value = c?.hotkeyMode ?? "";
+  hotkeyScanMode.value = c?.hotkeyScanMode ?? "";
+  transparency.value = c?.overlayTransparency ?? 18;
+  signaturePosition.value = c?.signaturePosition ?? "below";
+  scanOverlayInSignature.value = c?.scanOverlayInSignature ?? true;
 }
 
 let unlisten: (() => void) | null = null;
@@ -143,6 +153,8 @@ const displayOptions = computed(() => [
 ]);
 // The places where they are: top row, then bottom row
 const POSITIONS: OverlayPosition[] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
+// The signature overlay's sides, each a button where it is around the drawn plate
+const SIGNATURE_POSITIONS: SignaturePosition[] = ["above", "left", "right", "below"];
 
 const changed = computed(() => connection.value !== connectionOf(config.value)
   || server.value.trim() !== (config.value?.server ?? "")
@@ -155,7 +167,11 @@ const changed = computed(() => connection.value !== connectionOf(config.value)
   || overlayPosition.value !== config.value?.overlayPosition
   || overlayDisplay.value !== (config.value?.overlayDisplay ?? "thumbs")
   || hotkeyOverlay.value !== config.value?.hotkeyOverlay
-  || hotkeyMode.value !== config.value?.hotkeyMode);
+  || hotkeyMode.value !== config.value?.hotkeyMode
+  || hotkeyScanMode.value !== (config.value?.hotkeyScanMode ?? "")
+  || transparency.value !== (config.value?.overlayTransparency ?? 18)
+  || signaturePosition.value !== (config.value?.signaturePosition ?? "below")
+  || scanOverlayInSignature.value !== (config.value?.scanOverlayInSignature ?? true));
 
 async function save() {
   if (!changed.value || busy.value) return;
@@ -171,6 +187,10 @@ async function save() {
       overlayDisplay: overlayDisplay.value,
       hotkeyOverlay: hotkeyOverlay.value,
       hotkeyMode: hotkeyMode.value,
+      hotkeyScanMode: hotkeyScanMode.value,
+      overlayTransparency: transparency.value,
+      signaturePosition: signaturePosition.value,
+      scanOverlayInSignature: scanOverlayInSignature.value,
       autoTab: autoTab.value,
       autoUpdate: autoUpdate.value,
       // Not this window's to change (the update dialog's); the Rust side keeps the stored one
@@ -273,6 +293,14 @@ async function pickFolder() {
       </section>
       <section v-if="isWindows" class="settings-group">
         <div class="settings-group-head"><Icon name="desktop" :size="14" /><span class="settings-group-title">{{ t("settings.overlay") }}</span></div>
+        <label class="line between">
+          <span class="label">{{ t("settings.transparency") }}</span>
+          <span class="line">
+            <input v-model.number="transparency" class="slider" type="range" min="0" max="80" step="5" />
+            <span class="num pct">{{ transparency }} %</span>
+          </span>
+        </label>
+        <div class="sub-title">{{ t("settings.scanOverlay") }}</div>
         <div class="line between">
           <span class="label">{{ t("settings.overlayPosition") }}</span>
           <!-- A small monitor with the six places where they are on the screen -->
@@ -289,6 +317,22 @@ async function pickFolder() {
           <span class="label">{{ t("settings.overlayDisplay") }}</span>
           <Dropdown v-model="overlayDisplay" :options="displayOptions" variant="outline" />
         </div>
+        <div class="sub-title">{{ t("settings.signatureOverlay") }}</div>
+        <div class="line between">
+          <span class="label">{{ t("settings.signaturePosition") }}</span>
+          <!-- The signature's plate with the four sides the overlay can sit on -->
+          <div class="plate-sides">
+            <span class="plate" aria-hidden="true"><Icon name="locate" :size="10" />3,600</span>
+            <Tooltip v-for="p in SIGNATURE_POSITIONS" :key="p" :text="t(`signature.pos.${p}`)">
+              <button type="button" class="place side" :class="[p, { active: signaturePosition === p }]" :aria-label="t(`signature.pos.${p}`)" :aria-pressed="signaturePosition === p" @click="signaturePosition = p" />
+            </Tooltip>
+          </div>
+        </div>
+        <label class="line between">
+          <span class="label">{{ t("settings.scanOverlayInSignature") }}</span>
+          <input v-model="scanOverlayInSignature" class="switch" type="checkbox" />
+        </label>
+        <div class="sub-title">{{ t("settings.hotkeys") }}</div>
         <div class="line between">
           <span class="label">{{ t("settings.hotkeyOverlay") }}</span>
           <HotkeyInput v-model="hotkeyOverlay" class="hotkey-field" />
@@ -296,6 +340,10 @@ async function pickFolder() {
         <div class="line between">
           <span class="label">{{ t("settings.hotkeyMode") }}</span>
           <HotkeyInput v-model="hotkeyMode" class="hotkey-field" />
+        </div>
+        <div class="line between">
+          <span class="label">{{ t("settings.hotkeyScanMode") }}</span>
+          <HotkeyInput v-model="hotkeyScanMode" class="hotkey-field" />
         </div>
       </section>
       </div>
@@ -463,6 +511,83 @@ async function pickFolder() {
 
 .hotkey-field {
   width: 200px;
+}
+
+/* A part of the overlay group: a small caption over its rows */
+.sub-title {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+/* The transparency: a slider and its value in a fixed width (the row keeps its layout while dragging) */
+.slider {
+  width: 140px;
+  accent-color: var(--accent);
+}
+
+.pct {
+  width: 4.5ch;
+  text-align: right;
+  font-size: 12px;
+}
+
+/* The signature overlay's sides around a drawn plate (the game's: a pin and the number), as big as the monitor */
+.plate-sides {
+  position: relative;
+  width: 112px;
+  height: 70px;
+  box-sizing: border-box;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-base);
+}
+
+.plate {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--warn) 30%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.side {
+  position: absolute;
+}
+
+.side.above {
+  left: 50%;
+  top: 4px;
+  transform: translateX(-50%);
+}
+
+.side.below {
+  left: 50%;
+  bottom: 4px;
+  transform: translateX(-50%);
+}
+
+.side.left {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.side.right {
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 /* As wide for either choice: the field does not change size with what is picked */

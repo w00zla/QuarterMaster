@@ -151,7 +151,7 @@ describe('data feed and updater', { timeout: 280_000 }, () => {
   describe('GitHub feed (injected fetch)', () => {
     const MANIFEST_BYTES = (n: number): Buffer => Buffer.from(JSON.stringify(manifestFor(n)));
     const manifestFor = (n: number): Manifest => ({
-      format: 1, tag: tag(n), previous: n > 1 ? tag(n - 1) : null, game: { label: LABEL, build: 1000 }, schemaVersion: 7,
+      format: 1, tag: tag(n), previous: n > 1 ? tag(n - 1) : null, game: { label: LABEL, build: 1000 }, schemaVersion: 8,
       files: {
         full: { name: `quartermaster-data-${LABEL}-${n}.zip`, size: 5, sha256: '1'.repeat(64) },
         catalog: { name: 'catalog.json.gz', size: 5, sha256: '2'.repeat(64) },
@@ -350,7 +350,7 @@ describe('data feed and updater', { timeout: 280_000 }, () => {
 
     it('a pack with another schema: appTooOld (newer or older), nothing downloaded or touched', async () => {
       const { dir } = makeFeed(1);
-      for (const [app, pack] of [[6, 'newer'], [8, 'older']] as const) {
+      for (const [app, pack] of [[7, 'newer'], [9, 'older']] as const) {
         const s = spy(folderFeed(dir));
         const { updater, dataDir } = make(s.feed, { appSchemaVersion: app });
         const state = await updater.check();

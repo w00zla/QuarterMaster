@@ -172,10 +172,21 @@ export type CompanionCatalogLocation = Pick<CatalogLocation, 'uuid' | 'key' | 'l
 export type CompanionCatalogBlueprint = Pick<CatalogBlueprint,
   'uuid' | 'label' | 'name' | 'size' | 'gradeLetter' | 'isDefault' | 'retired' | 'outputUuid' | 'thumb'>;
 
+// A rock kind with its radar signature for one node (a ship's scan shows it times the cluster's nodes): the resource
+// it is named after (an ore, not bookable: by name), the mining method, the rarity (ship rocks)
+export interface CompanionCatalogRock {
+  resourceUuid: string;
+  name: string;
+  method: 'ship' | 'roc' | 'fps';
+  rarity: string | null;
+  radarSignature: number;
+}
+
 export interface CompanionCatalogResponse {
   materials: CompanionCatalogMaterial[];
   locations: CompanionCatalogLocation[];
   blueprints: CompanionCatalogBlueprint[];
+  rocks: CompanionCatalogRock[];
 }
 
 // --- the companion app's English texts (GET /api/companion/locale) -----------------------------------
@@ -708,6 +719,23 @@ export interface ApiTokenInfo {
 
 export interface ApiTokenCreated {
   token: string;
+}
+
+// --- the companion's downloads (GET /api/companion/downloads; companion-downloads.ts) ----------------
+// Its stable release (channels.json on GitHub) as direct links, the main file first per platform. version null: no stable
+// release known (none yet, or GitHub not reachable): no links, the releases page only.
+
+export interface CompanionDownload {
+  // The file's kind as the README's downloads block names it: Installer, Standalone, AppImage, deb, rpm
+  label: string;
+  url: string;
+}
+
+export interface CompanionDownloadsResponse {
+  releasesUrl: string;
+  version: string | null;
+  windows: CompanionDownload[];
+  linux: CompanionDownload[];
 }
 
 // --- companion API contract check (every companion request, any /api route but capabilities) ---------

@@ -3,7 +3,10 @@
 // warehouse: tiles green, the hovered one white, the read cells blue, the tooltip magenta; the character
 // inventory: the tooltip and its lines magenta, the cursor's tile white; its height can be dragged) and a
 // legend, the read's key figures, then per screen the grid and tooltip, every tile, every tooltip line or
-// every work order, and the read cells and OCR boxes (each table collapsible, the last two collapsed). "Detections": the main window's sightings of both scans in one
+// every work order, and the read cells and OCR boxes (each table collapsible, the last two collapsed). The radar
+// signature: the number's box orange, the reader's search window violet; the catalog's rock kinds, the overlay's
+// settings and the last reads with the resources each can stand for (the main window's "signature-report").
+// "Detections": the main window's sightings of both scans in one
 // table. "Record data" writes every read into a folder the user picks.
 // Frames travel with the reads only while the debug window is open (the Rust side's debug flag, set here
 // and dropped by the Rust side when the window is destroyed); a recording holds what was read while it
@@ -18,19 +21,22 @@ import { norm } from "../../../src/stock/material-names.ts";
 import { parseField, type ComponentSighting } from "../components";
 import type { InventoryReadEvent, ReadRect, Sighting } from "../inventory";
 import type { Kind, SightingsReport } from "../inventorySync";
+import type { SignatureReport } from "../mining";
 import { errorText, toast, toastError } from "../toasts";
 
 const read = shallowRef<InventoryReadEvent | null>(null);
 const scanOn = ref(false);
 // The screen the scan sees (known from its next change on)
 const screen = ref<ScanScreen>("none");
-const SCREEN_TEXT = { none: "scan.waiting", warehouse: "scan.warehouse", inventory: "scan.inventory", refinery: "scan.refinery" } as const;
+const SCREEN_TEXT = { none: "scan.waiting", warehouse: "scan.warehouse", inventory: "scan.inventory", refinery: "scan.refinery", signature: "scan.signature" } as const;
 // The recording's folder while one runs
 const recording = ref<string | null>(null);
 const busy = ref(false);
 // The main window's sightings of both scans (sent on every change and on request)
 const report = ref<SightingsReport>({ materials: [], components: [], registered: [], dismissed: [], locations: {}, statNames: [], filtered: {} });
 const view = ref<"read" | "sightings">("read");
+// The main window's signature scan (sent on every change and on request)
+const signatureReport = ref<SignatureReport | null>(null);
 // The detections table's kind filter (this window's own)
 const KINDS: Kind[] = ["mats", "items", "comps", "fps"];
 const kinds = ref(new Set<Kind>(KINDS));
@@ -53,6 +59,8 @@ onMounted(async () => {
     await listen<ScanScreen>("scan-screen", (e) => (screen.value = e.payload));
     await listen<SightingsReport>("inventory-sightings", (e) => (report.value = e.payload));
     await emit("inventory-sightings-request");
+    await listen<SignatureReport>("signature-report", (e) => (signatureReport.value = e.payload));
+    await emit("signature-report-request");
   } catch (e) {
     toast(errorText(e), "error");
   }
@@ -61,15 +69,16 @@ onMounted(async () => {
 const grid = computed(() => read.value?.grid ?? null);
 const comp = computed(() => (read.value?.components && (read.value.components.page || read.value.components.tooltip) ? read.value.components : null));
 const refinery = computed(() => (read.value?.refinery?.kind === "overview" || read.value?.refinery?.kind === "terminal" ? read.value.refinery : null));
+const signature = computed(() => read.value?.signature ?? null);
 // What the read saw
-const readScreen = computed<ScanScreen>(() => (grid.value ? "warehouse" : comp.value ? "inventory" : refinery.value ? "refinery" : "none"));
+const readScreen = computed<ScanScreen>(() => (grid.value ? "warehouse" : comp.value ? "inventory" : refinery.value ? "refinery" : signature.value ? "signature" : "none"));
 const hovered = computed(() => grid.value?.tiles.find((x) => x.hovered) ?? null);
 
 // The overlay draws in frame pixels; the SVG scales with the image
 const viewBox = computed(() => (read.value ? `0 0 ${read.value.width} ${read.value.height}` : "0 0 1 1"));
 const stroke = computed(() => (read.value ? Math.max(2, Math.round(read.value.height / 400)) : 2));
 const rectAttrs = (r: ReadRect) => ({ x: r.x0, y: r.y0, width: Math.max(1, r.x1 - r.x0), height: Math.max(1, r.y1 - r.y0) });
-const COLOR = { box: "#ffdc00", cell: "#00c8ff", tile: "#00ff50", hovered: "#ffffff", tooltip: "#ff50ff" } as const;
+const COLOR = { box: "#ffdc00", cell: "#00c8ff", tile: "#00ff50", hovered: "#ffffff", tooltip: "#ff50ff", number: "#ff8c00", window: "#b07cff" } as const;
 // The legend: the overlays this screen draws
 const legend = computed(() => {
   const box = { color: COLOR.box, text: t("debug.boxes") };
@@ -77,6 +86,7 @@ const legend = computed(() => {
     return [box, { color: COLOR.cell, text: t("debug.cells") }, { color: COLOR.tile, text: t("debug.tiles") }, { color: COLOR.hovered, text: t("debug.hovered") }, { color: COLOR.tooltip, text: t("debug.tooltip") }];
   }
   if (readScreen.value === "inventory") return [box, { color: COLOR.hovered, text: t("debug.cursorTile") }, { color: COLOR.tooltip, text: t("debug.lines") }];
+  if (readScreen.value === "signature") return [box, { color: COLOR.number, text: t("debug.number") }, { color: COLOR.window, text: t("debug.window") }];
   return [box];
 });
 
@@ -111,6 +121,14 @@ const facts = computed(() => {
     list.push({ k: t("debug.k.station"), v: refinery.value.overview?.station ?? "–" });
     list.push({ k: t("debug.k.orders"), v: String(refinery.value.overview?.orders.length ?? 0) });
   }
+  if (signature.value) {
+    const s = signature.value;
+    list.push({ k: t("mining.signature"), v: s.value === null ? "–" : s.value.toLocaleString("en-US") });
+    list.push({ k: t("debug.k.raw"), v: s.raw || "–" });
+    list.push({ k: t("debug.col.score"), v: s.raw ? s.score.toFixed(2) : "–" });
+    list.push({ k: t("debug.number"), v: s.rect ? `${pos(s.rect)} · ${size(s.rect)}` : "–" });
+    list.push({ k: t("debug.window"), v: s.window ? `${pos(s.window)} · ${size(s.window)}` : "–" });
+  }
   list.push({ k: t("debug.boxes"), v: String(r.boxes.length) });
   return list;
 });
@@ -129,7 +147,7 @@ const tooltipLines = computed(() => (comp.value?.tooltip?.lines ?? []).map((l) =
 const LOW_SCORE = 0.6;
 
 // Which tables are open, kept across reads (a panel that comes and goes with the screen opens as left)
-const opened = reactive({ tiles: true, lines: true, orders: true, cells: false, boxes: false });
+const opened = reactive({ tiles: true, lines: true, orders: true, signatures: true, cells: false, boxes: false });
 const onToggle = (key: keyof typeof opened, e: Event) => (opened[key] = (e.target as HTMLDetailsElement).open);
 
 // The detections: one table for both scans: source (the freight manager's warehouse or the character
@@ -280,6 +298,10 @@ async function toggleRecording() {
                 <rect v-for="(x, i) in grid.tiles" :key="`t${i}`" v-bind="rectAttrs(x.rect)" fill="none" :stroke="x.hovered ? COLOR.hovered : COLOR.tile" :stroke-width="stroke * 1.5" />
                 <rect v-if="grid.tooltip" v-bind="rectAttrs(grid.tooltip.rect)" fill="none" :stroke="COLOR.tooltip" :stroke-width="stroke * 1.5" />
               </template>
+              <template v-if="signature">
+                <rect v-if="signature.window" v-bind="rectAttrs(signature.window)" fill="none" :stroke="COLOR.window" :stroke-width="stroke" stroke-dasharray="8 6" />
+                <rect v-if="signature.rect" v-bind="rectAttrs(signature.rect)" fill="none" :stroke="COLOR.number" :stroke-width="stroke * 1.5" />
+              </template>
               <template v-if="comp">
                 <rect v-if="comp.cell" v-bind="rectAttrs(comp.cell.rect)" fill="none" :stroke="COLOR.hovered" :stroke-width="stroke * 1.5" />
                 <template v-if="comp.tooltip">
@@ -399,6 +421,52 @@ async function toggleRecording() {
                   <td class="num">{{ pos(l.rect) }}</td>
                   <td class="mono white">{{ l.text }}</td>
                   <td><span class="tag" :class="l.kind.cls">{{ t(l.kind.key) }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </details>
+        </template>
+
+        <!-- The radar signature: the catalog's rock kinds, the overlay's settings, the last reads with their resources -->
+        <template v-if="readScreen === 'signature' && signatureReport">
+          <section class="panel">
+            <div class="ph">{{ t("debug.signature") }}</div>
+            <div class="kv">
+              <span class="kk">{{ t("debug.k.rocks") }}</span>
+              <span class="vv"><span class="tag" :class="signatureReport.rocks ? 'ok' : 'warn'">{{ signatureReport.rocks }}</span></span>
+              <span class="kk">{{ t("settings.signaturePosition") }}</span><span class="vv">{{ t(`signature.pos.${signatureReport.position}`) }}</span>
+              <span class="kk">{{ t("settings.transparency") }}</span><span class="vv">{{ signatureReport.transparency }} %</span>
+            </div>
+          </section>
+          <details class="panel" :open="opened.signatures" @toggle="onToggle('signatures', $event)">
+            <summary class="ph"><Icon name="chevron-right" :size="12" class="chev" /> {{ t("debug.signatureReads") }} <span class="cnt">{{ signatureReport.reads.length }}</span></summary>
+            <table>
+              <colgroup>
+                <col style="width: 80px" />
+                <col style="width: 80px" />
+                <col style="width: 110px" />
+                <col style="width: 60px" />
+                <col />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>{{ t("debug.k.time") }}</th>
+                  <th class="num">{{ t("mining.signature") }}</th>
+                  <th>{{ t("debug.k.raw") }}</th>
+                  <th class="num">{{ t("debug.col.score") }}</th>
+                  <th>{{ t("mining.resources") }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(r, i) in signatureReport.reads" :key="i">
+                  <td class="mono">{{ time(r.atMs) }}</td>
+                  <td class="num white">{{ r.value === null ? "–" : r.value.toLocaleString("en-US") }}</td>
+                  <td class="mono">{{ r.raw || "—" }}</td>
+                  <td class="num" :class="{ 'warn-text': r.raw && r.score < LOW_SCORE }">{{ r.raw ? r.score.toFixed(2) : "–" }}</td>
+                  <td>
+                    <span v-for="(m, j) in r.matches" :key="j" class="match"><Icon v-if="m.icon" :name="m.icon" :size="12" /> {{ m.text }}</span>
+                    <span v-if="r.value !== null && !r.matches.length" class="warn-text">{{ t(signatureReport.rocks ? "mining.noMatch" : "mining.noData") }}</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -544,5 +612,13 @@ async function toggleRecording() {
   margin-right: 5px;
   border: 2px solid;
   vertical-align: -1px;
+}
+
+/* A resource of a signature read after its mining method's icon */
+.match {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 10px;
 }
 </style>

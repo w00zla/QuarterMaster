@@ -32,8 +32,7 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
 - **How the SPA uses the capabilities.** A view never asks for the variant or the login. It asks either a capability
   (`capabilities.ts`: `orgsOn`, `uexOn`) or a trait derived from them in one place (`navigation.ts` `traitsOf`, exported by
   `capabilities.ts`): `localApp` (own settings, data updates, app version, start tile: `/api/local/*`), `singleUser` (no "who"
-  and no "source", e.g. in the history) and `sideLayout` (header across the full width with the side bar below, instead of the
-  top bar). Today all three follow from `login: 'none'`; they are named apart so a view says what it means and a variant that
+  and no "source", e.g. in the history). Today both follow from `login: 'none'`; they are named apart so a view says what it means and a variant that
   differs in one of them changes `traitsOf` only. Whether the page runs in the desktop shell (`shell.available`) or is the
   settings window (`windows.ts`) is a different question (the frame, not the variant).
 - `GET /api/capabilities` → `Capabilities` `{ login: 'discord' | 'none', orgs, uex, game }` (`api-types.ts`): what this
@@ -41,7 +40,7 @@ Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend ru
   asked at every request: the singleuser variant's `uex` follows the user's key; online passes a value; `orgs` is read once, when
   the app is built, because it decides which routes are mounted, so it cannot change at runtime) and the installed game data:
   `game` = `{ label, build }` of the latest catalog import (`label` like `4.10.2.12913470`, may be null for an old import), `null`
-  while no catalog is installed. It lives here because both variants' top bars need it once at load, the route is public and
+  while no catalog is installed. It lives here because both variants' slim bars need it once at load, the route is public and
   already asked first, and it costs no extra request; the query (`game-version.ts`) is cached for 5 seconds and shared by concurrent
   requests, so a data pack install shows without a restart and the public route is no query per request. A failing query answers
   the last value (or null). The one API route answered without
@@ -115,7 +114,9 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 - `GET /api/companion/catalog?lang` (2026-11-01): the companion app's catalog, the same rows (same order) with
   only the fields it reads (`CompanionCatalogResponse`, `Pick`s of the types above): materials without unit
   (follows from `kind`), class and `minable`; locations without yields; blueprints with uuid, label, name,
-  size, grade letter, `isDefault`, `retired`, `outputUuid`, `thumb`. Cached like `/api/catalog` (`private,
+  size, grade letter, `isDefault`, `retired`, `outputUuid`, `thumb`; since 2026-11-10 `rocks`, the rock kinds with a radar
+  signature (`CompanionCatalogRock`: resource uuid and name, method, rarity, one node's signature; `catalog.mineable_rock`, an
+  older companion ignores it) for the companion's signature scan. Cached like `/api/catalog` (`private,
   no-cache`, ETag). Session or API token like every route.
   Size per language (dev DB, 2026-11-01): ~2.45 MB instead of ~2.95 MB raw, gzip ~340 instead of ~360 KB
   (the components with their stats are most of it and the companion needs them). Gzipped by the server when the
@@ -165,9 +166,15 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 
 ### API token / "Access Key" (`token.ts`, `web.api_token`)
 
-One per user for the companion app, managed in the top bar's "Companion" dialog (`CompanionDialog.vue`;
+One per user for the companion app, managed in the slim bar's "Companion" dialog (`CompanionDialog.vue`;
 `POST /api/token`, shown once, only the SHA-256 and the creating session's Discord profile stored; a new one
-replaces the old; the dialog also links to the companion's GitHub releases). `Authorization: Bearer qmt_…` authenticates `/api/*` as the user (never falls back to the
+replaces the old). The dialog also offers the companion's stable release as direct downloads (2026-11-12):
+`GET /api/companion/downloads` (`companion-downloads.ts`, `CompanionDownloadsResponse`) reads the stable tag from
+`channels.json` on the repository's `channels` branch (the README's and the data updater's feed, `docs/releasing.md`), kept 10 minutes (a
+failed read 1), and answers the version and the files per platform as the README's downloads block names them (Windows:
+Installer, Standalone; Linux: AppImage, deb, rpm; the names of `scripts/release-lib.mjs` `downloads`, which the image does not
+hold: `test/companion-downloads.test.ts` pins them); the Windows installer is the primary button, "Releases auf GitHub" a quiet link
+below. Without a known stable release (none, or GitHub not reachable) the dialog shows the releases link only. `Authorization: Bearer qmt_…` authenticates `/api/*` as the user (never falls back to the
 cookie) and skips the same-origin check (a cross-site page cannot set the header without a preflight);
 `/api/token` itself is session-only. Requests made with it are history source `companion`.
 
@@ -357,7 +364,7 @@ blocks".
   head: count, systems, rank span, best chance), every row listed (title with the game's placeholders as "…",
   rank, systems · bound place, markers Kette/Illegal/Annahme/event, chance), the list scrolls inside with a
   sticky head row; event tiers with event, points and chance. Wording in `webapp/src/unlocks.ts`.
-- **Crafting** (the third tab bar, the tools, with Bergbau and Kaufen/Verkaufen; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
+- **Crafting** (the third tab bar, the tools, with Bergbau and Kaufen/Verkaufen; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`; built like Bergbau and Kaufen/Verkaufen (2026-11-12): the tile's head with icon and name only, then a section whose bar holds the label "Blueprints prüfen" ("Check blueprints", blueprint icon), the picker and, at the right, "Leeren"; plan in
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
   field that stop at the slot's minimum (`withQualityFloor`; the track keeps the full 0–1000 scale). Below the
@@ -445,8 +452,8 @@ blocks".
   Verkauf/Kauf with the range and, dim, UEX's average (items: the number of terminals); no locations.
 - Profile (RSI handle, language) is a dialog from the settings icon button next to the avatar (the avatar
   itself is not clickable), saved with Save; no language switch in the header.
-- Top bar right: the privileges' features as outline buttons (route links; Thumbnail-Prüfung, icon `eye`, accent on
-  its page; only for holders), Companion (`desktop` icon), divider, avatar with
+- Slim bar right (online): the privileges' features as outline buttons (route links; Thumbnail-Prüfung, icon `eye`, accent on
+  its page; only for holders), Companion (`desktop` icon), the game version chip, divider, avatar with
   name, profile, logout (icon only). Footer (from BindSight, one line, sticky): credits, "Powered by:" with
   a logo link to UEX (`uex-logo-{20,40}.png`, Lanczos from its touch icon), a divider, a short CIG fan site disclaimer (the full text on hover) and the Star Citizen
   logo from the official fankit (`webapp/src/assets/sc-logo-{20,40}.png`), on every page incl. login.
@@ -459,8 +466,7 @@ answer) and only then loads `/api/me`. What it shows follows the capabilities, n
 - **`login: 'discord'`**: the online behaviour as always (login view, user, profile, logout, companion dialog, the
   "thumbnail review" privilege button).
 - **`login: 'none'`** (the singleuser variant): no login view, no user name or avatar, no profile dialog, no logout, no companion download
-  dialog, and no top bar: the navigation is the side bar ("The side bar and the settings window" below), whose "Settings" entry opens
-  the settings window of the desktop shell or, in a plain browser, `/settings`; the route exists only without a login, with a login
+  dialog; the slim bar's settings button opens the settings window of the desktop shell or, in a plain browser, `/settings`; the route exists only without a login, with a login
   it leads home (`navigation.ts` `routeAllowed`, a router guard, and `App.vue` re-checks the current route when the capabilities
   arrive or change).
 - **`orgs: false`**: no scope switch (`ScopeBar` renders nothing), no "Your orgs" panel on the overview, no sharing button in the stock
@@ -469,26 +475,29 @@ answer) and only then loads `/api/me`. What it shows follows the capabilities, n
 - **`uex: false`**: no buy/sell tab (and `/trade` leads home), in the stock and gear tables no UEC columns, no trade button column
   and no worth in the head (no `/api/trade/prices` request), no trade dialog, no price section in the info cards, no worth tile on
   the overview. A UEX key set or removed in the settings changes the capabilities at once; the views follow.
-- **The game version chip** (`.ver-chip`, mono; tooltip "Spielversion") in the top bar (online) and in the slim bar beside the side bar (singleuser) shows `capabilities.game.label`,
+- **The game version chip** (`.ver-chip`, mono; tooltip "Spielversion") in the slim bar shows `capabilities.game.label`,
   a dash while there is none. It has the width of a game version, so the dash and the number take the same room and nothing moves.
   The capabilities are refreshed after a data install, after the UEX key changes and every 15 s while the data state is idle.
 
-The navigation is built from `navigation.ts` (pure: which tab groups, which top bar controls, the side bar's groups and width, which
+The navigation is built from `navigation.ts` (pure: the nav groups, which slim bar controls, the side bar's groups and width, which
 routes for which capabilities).
 
 ### The side bar and the settings window
 
-**The side bar** (`SideNav.vue`, singleuser only; the online variant keeps `TopBar.vue` unchanged) runs from below the header (the slim bar) down
-to the footer (the singleuser app is as high as the window and only the content beside the bar scrolls). From the top: the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
+**The side bar** (`SideNav.vue`, both variants since 2026-11-12; the online top bar is gone) runs from below the header (the slim bar) down
+to the footer (logged in, the app is as high as the window and only the content beside the bar scrolls; the login page scrolls as a
+whole). From the top: the groups of `sideGroups` (the three nav groups, then History as a group of its own, drawn
 quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups; nothing below them. The toggle is a small
 button at the middle of the bar's height, half over its right edge (chevron, tooltip). Two modes: *wide* (icon and text, 232 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
 opens above or below the button). The choice is stored in `localStorage` (`qm.sideMode`, in a try/catch); below 1000 px of window
 width the bar is narrow whatever the choice (`sideModeFor`; the stored choice is not touched, the toggle is disabled then). The two
 modes differ in width only: buttons are 36 px high either way, icons sit at the same place, the tooltip wrapper exists in both.
 
-**The slim bar** (`SlimBar.vue`) is the header across the window's full width, above the side bar and the content, as the companion's top bar (56 px, the narrow side bar's width; never wraps): the app's logo (36 px) and wordmark at the left, the drag region, the game version chip
-(`.ver-chip.fixed` with the quiet "Game:" label), the settings button (gear `icon-btn`, as the top bar had it: the shell's settings
-window, in a plain browser the `/settings` page, accent on that route) and, in the shell, the window buttons. In a plain browser it is the same bar without
+**The slim bar** (`SlimBar.vue`) is the header across the window's full width, above the side bar and the content, as the companion's top bar (56 px, the narrow side bar's width; never wraps): the app's logo (36 px) and wordmark at the left, the drag region, then the variant's controls (`userControls`): online the
+privileges' features, Companion, the game version chip, a divider, avatar and name, profile, logout (see "Views" above); singleuser
+the game version chip (`.ver-chip.fixed` with the quiet "Game:" label), the settings button (gear `icon-btn`: the shell's settings
+window, in a plain browser the `/settings` page, accent on that route) and, in the shell, the window buttons. It never wraps: below
+900 px the wordmark and the name give way, below 640 px the buttons show their icon only. In a plain browser it is the same bar without
 window buttons and drag attributes. It measures its height into `layout.ts` `topbarHeight`, so the toasts sit below it. The footer
 (`AppFooter.vue`) stays across the full width.
 
@@ -614,16 +623,13 @@ update commands are optional as a group: when `update_state` rejects at start, t
 payload that is not an `UpdateState` is dropped; a command that rejects shows as an error of the updater. What the shell sets in
 the server's environment: `QM_MIGRATIONS_DIR`, `QM_DIST_DIR`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (`docs/app.md` "The sidecar").
 
-**The frameless window.** Only with `shell.available`: in the singleuser variant the slim bar is the title bar (drag region, the chip,
-the window buttons; the logo's row of the side bar is a drag region too); in the online variant the top bar is (drag region; double
-click maximizes, the shell's doing) with the three window buttons (`WindowButtons.vue`: minimize, maximize or restore, close; 36 px
-slots, close hovers in the error colour) at its right end; where the app bar is not shown (the start tile, the server not reachable)
+**The frameless window.** Only with `shell.available`: the slim bar is the title bar (drag region, the chip,
+the three window buttons at its right end: `WindowButtons.vue`: minimize, maximize or restore, close; 36 px slots, close hovers in
+the error colour; double click maximizes, the shell's doing); where the app bar is not shown (the start tile, the server not reachable)
 `TitleBar.vue` gives a bar with the buttons alone; `WindowEdges.vue` puts eight invisible 6 px strips along the edges (none while
-maximized). The top bar's window buttons sit absolutely at the top right (the bar keeps 128 px of right padding), so a wrapped bar keeps
-them in its first row; up to a window width of 1400 px the wordmark, the tab padding and the gaps give way so the bar stays one row at
-1280 px. The settings window has `TitleBar.vue` with its title and the close button, no edges.
+maximized). The settings window has `TitleBar.vue` with its title and the close button, no edges.
 
-**The app footer and the update dialog.** With `login: 'none'` the footer starts with the app version (mono, 22 px high). Where the shell
+**The app footer and the update dialog.** The footer ends in both variants with the GitHub link after a divider (2026-11-12); online without the app logo and the version. With `login: 'none'` the app version follows the logo (mono, 22 px high). Where the shell
 offers updates it is a button opening the dialog and a mark (the download arrow in the accent colour; its room is kept when empty) follows
 it while a version was found (`available`, `downloading`, `installing`); in a browser the version is plain text. The dialog
 (`UpdateDialog.vue`, "App Update"; also opened by the bold notice's button and the App group's "App Update" button in the settings,
@@ -665,7 +671,7 @@ decisions, time formatting, both languages having the same texts).
 - Dialog buttons always sit in the footer (`ConfirmDialog`); a `ConfirmButton` with `form` submits a form in
   the body (Enter works). Pickers: `webapp/src/components/Picker.vue` (lists every match, the list scrolls);
   `Dropdown.vue` is BindSight's with prefixed variant classes (`dd-chip`, …: ui.css has global
-  `.chip`/`.outline`/`.small`). Toasts top right below the top bar (`TopBar.vue`, in the singleuser variant `SlimBar.vue` and the settings
+  `.chip`/`.outline`/`.small`). Toasts top right below the slim bar (`SlimBar.vue` and the settings
   window's title bar measure their height into `layout.ts` `topbarHeight`, `Toasts.vue` sets `top` from it; a CSS variable failed after a full reload).
   Error codes mapped in `i18n.ts`; amounts validated with the server's own `parseAmount`.
 - Icons on tabs, buttons and panel heads like BindSight (extra icons in the shared

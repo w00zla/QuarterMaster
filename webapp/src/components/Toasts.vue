@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The toast stack (see toasts.ts), top right below the top bar, newest first; a click dismisses one.
+// The toast stack (see toasts.ts), top right below the slim bar, newest first; a click dismisses one.
 // Taken from BindSight. Notices
 // (actions from the bot and the companion app) have a title and a detail line and an × to close.
 import Icon from "../../../adminapp/src/components/Icon.vue";
@@ -29,7 +29,7 @@ import { t } from "../i18n";
 <style scoped>
 .toasts {
   position: fixed;
-  /* Below the top bar: `top` comes from its measured height (layout.ts) */
+  /* Below the slim bar: `top` comes from its measured height (layout.ts) */
   top: 16px;
   bottom: auto;
   right: 16px;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Your profile, opened from the avatar in the top bar: RSI handle (shown to your orgs) and the web
+// Your profile, opened from the slim bar (the gear beside the avatar): RSI handle (shown to your orgs) and the web
 // app's language; both saved with Save.
 import { computed, ref, watch } from "vue";
 import { t } from "../i18n";

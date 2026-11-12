@@ -2,7 +2,7 @@
 // Bump SNAPSHOT_SCHEMA_VERSION on any incompatible change.
 import { z } from 'zod';
 
-export const SNAPSHOT_SCHEMA_VERSION = 7;
+export const SNAPSHOT_SCHEMA_VERSION = 8;
 
 // Game record ids are UUID-shaped but not necessarily RFC-compliant
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -222,6 +222,19 @@ export const mineableSchema = z.object({
   }).nullable(),
 });
 
+// A rock kind the placed providers spawn (entities/mineable/<rock>), per mining method: the resource it is
+// named after (its composition's first part), its rarity and its radar signature (one node; the scanner shows it
+// times the cluster's nodes)
+export const mineableRockSchema = z.object({
+  uuid,
+  key: z.string(),
+  method: z.enum(['ship', 'roc', 'fps']),
+  resourceUuid: uuid,
+  // From the rock composition's name (common … legendary); ship rocks only
+  rarity: z.string().nullable(),
+  radarSignature: z.number().nullable(),
+});
+
 export const snapshotSchema = z.object({
   schemaVersion: z.literal(SNAPSHOT_SCHEMA_VERSION),
   game: z.object({
@@ -252,6 +265,7 @@ export const snapshotSchema = z.object({
   locations: z.array(locationSchema),
   miningProviders: z.array(miningProviderSchema),
   mineables: z.array(mineableSchema),
+  mineableRocks: z.array(mineableRockSchema),
 });
 
 export type Snapshot = z.infer<typeof snapshotSchema>;
@@ -268,6 +282,7 @@ export type BlueprintSource = z.infer<typeof blueprintSourceSchema>;
 export type Location = z.infer<typeof locationSchema>;
 export type MiningProvider = z.infer<typeof miningProviderSchema>;
 export type Mineable = z.infer<typeof mineableSchema>;
+export type MineableRock = z.infer<typeof mineableRockSchema>;
 export type BlueprintTier = z.infer<typeof blueprintTierSchema>;
 export type BlueprintSlot = z.infer<typeof blueprintSlotSchema>;
 export type BlueprintInput = z.infer<typeof blueprintInputSchema>;

@@ -132,6 +132,11 @@ describe('web app features (database)', { skip: url ? false : 'TEST_DATABASE_URL
       for (const row of body[part]) assert.deepEqual(Object.keys(row).sort(), [...fields[part]].sort());
       assert.deepEqual(body[part], full[part].map((r) => pick(r, fields[part])));
     }
+    // The rock kinds with a radar signature (the fixtures' common ship rock; the rare one and the FPS gem have none)
+    assert.equal(body.rocks.length, 1);
+    assert.equal(body.rocks[0]!.resourceUuid, U.ore);
+    assert.deepEqual([body.rocks[0]!.method, body.rocks[0]!.rarity, body.rocks[0]!.radarSignature], ['ship', 'common', 4285]);
+    assert.equal(typeof body.rocks[0]!.name, 'string');
     // Revalidated like /catalog; without a valid token nothing
     const again = await app.request('/api/companion/catalog?lang=en', { headers: { ...auth, 'if-none-match': tag } });
     assert.equal(again.status, 304);

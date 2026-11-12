@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main, the settings, the debug and the overlay window",
-  "windows": ["main", "settings", "debug", "overlay"],
+  "description": "Capability for the main, the settings, the debug and the two overlay windows",
+  "windows": ["main", "settings", "debug", "overlay", "signature"],
   "permissions": [
     "core:default",
     "dialog:allow-open",

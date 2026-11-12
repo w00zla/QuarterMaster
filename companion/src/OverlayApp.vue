@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // The scan overlay's page (Rust: overlay.rs; the main window's side: overlay.ts): a compact fixed-size
 // tile on a transparent window, read-only (the window ignores the mouse): on the right a narrow rail
-// with the four modes, each its icon above its count (as wide as "999"; the shown one highlighted; a
-// warning instead of the count when its filters are all off or the log is missing); next to it the
+// with the five modes, each its icon above its count (as wide as "999"; the shown one highlighted; one the scan
+// leaves out (its filters off, the other scan mode) greyed, the others' icons green (being read); a
+// warning instead of the count when the log is missing); next to it the
 // location line (clipped at its end), then the newest rows, 20 px each, as many as fit (more than that:
 // the last one fades out). The display "thumbs" (settings) shows the newest item as a taller top row (its
 // thumbnail, the name above its details, the amount right) and the item's small thumbnail after each
-// row's tag (if it has one); the refinery keeps rows only. No hint texts: without rows only the location shows.
+// row's tag (if it has one); the refinery keeps rows only. A row with parts (the signatures) shows each after its
+// icon (the mining method). No hint texts: without rows only the location shows.
 // Everything comes as text in the UI language from the main window ("overlay-view", on every change
 // and when this page asks). A detected item (`flash` counts up) lets the location line light up briefly.
 import { computed, onMounted, ref, watch } from "vue";
@@ -35,7 +37,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section v-if="view" class="tile">
+  <section v-if="view" class="tile" :style="{ '--opaque': `${100 - view.transparency}%` }">
     <div class="main">
       <div :key="flashes" class="place" :class="{ missing: view.placeMissing, flash: flashes > 0 }">
         <Icon :name="view.placeMissing ? 'warning' : 'locate'" :size="12" />
@@ -57,13 +59,13 @@ onMounted(async () => {
         <div v-for="(r, i) in view.rows" :key="i" class="row" :class="{ dim: r.dim }">
           <span v-if="r.tag" class="tag" :class="r.cls">{{ r.tag }}</span>
           <Thumb v-if="view.display === 'thumbs'" :item="r.thumb" size="s" :px="16" />
-          <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span></span>
+          <span class="name">{{ r.name }}<span v-if="r.detail" class="detail"> · {{ r.detail }}</span><span v-for="(p, j) in r.parts" :key="`p${j}`" class="detail part"><Icon v-if="p.icon" :name="p.icon" :size="10" />{{ p.text }}</span></span>
           <span v-for="(c, j) in r.cols" :key="j" class="num">{{ c }}</span>
         </div>
       </div>
     </div>
     <div class="rail">
-      <span v-for="(x, i) in view.tabs" :key="i" class="mode" :class="{ active: x.active, warn: x.warn }">
+      <span v-for="(x, i) in view.tabs" :key="i" class="mode" :class="{ active: x.active, off: x.off, warn: x.warn }">
         <Icon :name="x.icon" :size="10" />
         <Icon v-if="x.warn" name="warning" :size="10" />
         <span v-else>{{ x.count }}</span>
@@ -85,7 +87,7 @@ body,
 </style>
 
 <style scoped>
-/* Slightly see-through: the game stays visible behind the tile */
+/* See-through as the settings say (overlayTransparency): the game stays visible behind the tile */
 .tile {
   display: flex;
   height: 100%;
@@ -93,7 +95,7 @@ body,
   overflow: hidden;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-panel);
-  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) var(--opaque, 82%), transparent);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -168,7 +170,7 @@ body,
   width: 3ch;
   padding: 2px 2px;
   border-radius: var(--radius-control);
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -180,8 +182,20 @@ body,
   background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* Being read (not left out, nothing missing): its icon green like the main window's tabs */
+.mode:not(.off):not(.warn) > svg:first-child {
+  color: var(--ok);
+}
+
+/* Left out by the scan (its filters off, the other scan mode): greyed, shown or not */
+.mode.off {
+  color: var(--text-3);
+  opacity: 0.45;
+}
+
 .mode.warn {
   color: var(--warn);
+  opacity: 1;
 }
 
 /* The display "thumbs": the newest item, two lines with larger text next to its thumbnail */
@@ -283,6 +297,15 @@ body,
 
 .detail {
   color: var(--text-2);
+}
+
+/* A part of the detail after its icon (the signatures' resources after the mining method's) */
+.part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 /* Registered or in stock already: dimmed like in the panel */

@@ -548,5 +548,6 @@ export function normalize(input: NormalizeInput): Snapshot {
     locations,
     miningProviders: mined.miningProviders,
     mineables: mined.mineables,
+    mineableRocks: mined.mineableRocks,
   };
 }

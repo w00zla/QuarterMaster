@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// The companion app as an app card: logo, name and the link to its releases on GitHub; below it a bar with
-// its Access Key (the API token; shown once when created, a new one replaces the old).
+// The companion app as an app card: logo, name with the stable version, its files on GitHub as direct downloads (per platform,
+// the main one first: the Windows installer as the primary button; GET /api/companion/downloads) and the releases page as a
+// quiet link (the only link while no stable release is known); below it a bar with its Access Key (the API token; shown once
+// when created, a new one replaces the old).
 import { computed, onMounted, ref } from "vue";
-import type { ApiTokenCreated, ApiTokenInfo } from "../../../src/webapp/api-types";
+import type { ApiTokenCreated, ApiTokenInfo, CompanionDownloadsResponse } from "../../../src/webapp/api-types";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 // Exact sizes (72 px, 144 px for 2x screens) from assets/logo.png
 import logo from "../assets/logo-72.png";
@@ -20,6 +22,13 @@ const newKey = ref<string | null>(null);
 const busy = ref(false);
 
 const RELEASES = "https://github.com/w00zla/quartermaster/releases";
+// Until the server answered (and when it fails): the releases page only
+const downloads = ref<CompanionDownloadsResponse | null>(null);
+const platforms = computed(() => {
+  const d = downloads.value;
+  if (!d?.version) return [];
+  return [{ name: "Windows", files: d.windows }, { name: "Linux", files: d.linux }].filter((p) => p.files.length);
+});
 const buttons: ConfirmButton[] = [{ label: t("common.close"), kind: "outline", value: "close" }];
 
 // "2026-10-07" in every language
@@ -36,6 +45,7 @@ const keyText = computed(() => {
 });
 
 onMounted(async () => {
+  void api<CompanionDownloadsResponse>("/companion/downloads").then((d) => (downloads.value = d), () => { /* the releases page only */ });
   try {
     keyInfo.value = await api<ApiTokenInfo>("/token");
   } catch (e) {
@@ -72,8 +82,21 @@ async function copyKey() {
       <div class="app-head">
         <img class="logo" :src="logo" :srcset="`${logo} 1x, ${logo2x} 2x`" alt="" />
         <div class="app-main">
-          <div class="app-name">Quartermaster Companion</div>
-          <a class="btn small primary get" :href="RELEASES" target="_blank" rel="noopener noreferrer">
+          <div class="app-name">Quartermaster Companion <span v-if="downloads?.version" class="version">v{{ downloads.version }}</span></div>
+          <!-- Per platform its files, the main one first; the Windows installer is the primary button -->
+          <div v-for="(p, i) in platforms" :key="p.name" class="platform">
+            <span class="platform-name">{{ p.name }}</span>
+            <a
+              v-for="(f, j) in p.files" :key="f.url" class="btn small get" :class="i === 0 && j === 0 ? 'primary' : 'outline'"
+              :href="f.url" rel="noopener noreferrer"
+            >
+              <Icon v-if="j === 0" name="download" :size="14" /> {{ f.label }}
+            </a>
+          </div>
+          <a v-if="platforms.length" class="releases" :href="downloads?.releasesUrl ?? RELEASES" target="_blank" rel="noopener noreferrer">
+            <Icon name="external" :size="12" /> {{ t("companion.releases") }}
+          </a>
+          <a v-else class="btn small primary get" :href="RELEASES" target="_blank" rel="noopener noreferrer">
             <Icon name="external" :size="14" /> {{ t("companion.releases") }}
           </a>
         </div>
@@ -137,6 +160,36 @@ async function copyKey() {
 
 .get {
   text-decoration: none;
+}
+
+.version {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+/* A platform's files in a row: its name in a fixed room, so the two rows' buttons line up */
+.platform {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.platform-name {
+  width: 64px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.releases {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 /* The Access Key below, set apart by the line above */

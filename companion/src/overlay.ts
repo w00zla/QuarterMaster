@@ -1,10 +1,11 @@
 // The scan overlay in the main window (Rust: overlay.rs; its page: OverlayApp.vue). Turning it on
 // switches the scan on (scan.ts), turning it off switches it off again if the overlay started it. Its
 // mode is the main window's tab, one and the same. It switches by itself with the screen the scan sees
-// (warehouse: stock; character inventory: comps; refinery terminal: refinery) and with a blueprint unlock
+// (warehouse: stock; character inventory: comps; refinery terminal: refinery; the signature scan: mining) and with a blueprint unlock
 // Game.log adds while the app runs that is still to register (new or ambiguous: blueprints), unless the
 // settings turned that off (`autoTab`); by hand with
-// a click on a tab or the mode hotkey, stepping through them. Each panel
+// a click on a tab or the mode hotkey, stepping through them (which never switches the scan mode: only the
+// Bergbau panel's chip and the scan mode hotkey do). Each panel
 // puts its rows into `overlayRows`; the overlay gets them as one read-only view (texts in the UI
 // language, thumbnail references) on every change and when it asks, laid out for the configured display
 // (overlayLayout.ts); with each thing detected (detections.ts) its location line flashes.
@@ -17,6 +18,7 @@ import { unlockRows } from "./debugReport";
 import { detected, detections } from "./detections";
 import { t } from "./i18n";
 import { kinds, locationUuid } from "./inventorySync";
+import { signatureOn, toggleSignature } from "./mining";
 import { overlayLayout, type OverlayDisplay } from "./overlayLayout";
 import { jobsOn, syncCatalog } from "./refinerySync";
 import { scanOn, screenTab, setScanOn } from "./scan";
@@ -26,8 +28,8 @@ import { toastError } from "./toasts";
 
 // The main window's tabs (= the overlay's modes) in the order the mode hotkey steps through them;
 // the last one stays for the next start (the former "inventory" tab: stock)
-export type Tab = "comps" | "stock" | "refinery" | "unlocks";
-const TAB_ORDER: Tab[] = ["comps", "stock", "refinery", "unlocks"];
+export type Tab = "comps" | "stock" | "refinery" | "mining" | "unlocks";
+const TAB_ORDER: Tab[] = ["comps", "stock", "refinery", "mining", "unlocks"];
 const TAB_KEY = "qm.companion.tab";
 const stored = localStorage.getItem(TAB_KEY);
 export const tab = ref<Tab>(TAB_ORDER.includes(stored as Tab) ? (stored as Tab) : "stock");
@@ -55,14 +57,18 @@ export interface OverlayRow {
   dim?: boolean;
   // The item's thumbnail (the display "thumbs" shows it); none = without
   thumb?: ThumbRef | null;
+  // In place of the detail: its parts, each after its icon (the signatures' resources after the mining method's)
+  parts?: { text: string; icon: IconName | null }[];
 }
 
-/** A mode in the overlay's head: its icon and count, whether it is shown, whether it cannot work (its
- * filters all off, the log missing: a warning instead of the count). */
+/** A mode in the overlay's head: its icon and count, whether it is shown, whether the scan leaves it out (its
+ * filters all off, the other scan mode: drawn greyed), whether it cannot work (the log missing: a warning instead of
+ * the count). */
 export interface OverlayTab {
   icon: IconName;
   count: number;
   active: boolean;
+  off: boolean;
   warn: boolean;
 }
 
@@ -80,35 +86,45 @@ export interface OverlayView {
   more: boolean;
   // Counts up with each detection (detections.ts); the page flashes the location when it changes
   flash: number;
+  // How see-through the tile is, in percent (settings, shared with the signature overlay)
+  transparency: number;
 }
 
 // The panels' rows, newest first (each panel keeps its own up to date)
-export const overlayRows = reactive<Record<Tab, OverlayRow[]>>({ stock: [], comps: [], unlocks: [], refinery: [] });
+export const overlayRows = reactive<Record<Tab, OverlayRow[]>>({ stock: [], comps: [], unlocks: [], refinery: [], mining: [] });
 // How many rows each panel's table lists (shown in its tab)
-export const tabCounts = reactive<Record<Tab, number>>({ stock: 0, comps: 0, unlocks: 0, refinery: 0 });
+export const tabCounts = reactive<Record<Tab, number>>({ stock: 0, comps: 0, unlocks: 0, refinery: 0, mining: 0 });
 
 // Like the web app's navigation
-export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "gear", unlocks: "blueprint", refinery: "drop" };
+export const TAB_ICONS: Record<Tab, IconName> = { stock: "type-crate", comps: "gear", unlocks: "blueprint", refinery: "drop", mining: "pickaxe" };
 
 const view = computed<OverlayView>(() => {
   const m = tab.value;
-  const cannot: Record<Tab, boolean> = {
-    stock: !kinds.value.has("mats") && !kinds.value.has("items"),
-    comps: !kinds.value.has("comps") && !kinds.value.has("fps"),
-    unlocks: !unlocksOn.value || (!!log.value && !log.value.found),
-    refinery: !jobsOn.value,
+  // Left out: the filters all off; the terminals while the signature scan runs, the signatures while it does not
+  const signature = signatureOn.value;
+  const off: Record<Tab, boolean> = {
+    stock: signature || (!kinds.value.has("mats") && !kinds.value.has("items")),
+    comps: signature || (!kinds.value.has("comps") && !kinds.value.has("fps")),
+    unlocks: !unlocksOn.value,
+    refinery: signature || !jobsOn.value,
+    mining: !signature,
   };
-  const tabs = TAB_ORDER.map((x) => ({ icon: TAB_ICONS[x], count: tabCounts[x], active: x === m, warn: cannot[x] }));
+  const logMissing = !!log.value && !log.value.found;
+  const tabs = TAB_ORDER.map((x) => ({ icon: TAB_ICONS[x], count: tabCounts[x], active: x === m, off: off[x], warn: x === "unlocks" && unlocksOn.value && logMissing }));
   // The location in every mode
   const placeMissing = !locationUuid.value;
   const place = placeMissing ? t("overlay.noLocation") : (syncCatalog.value?.locations.find((l) => l.uuid === locationUuid.value)?.short ?? "?");
   // As many as the overlay's fixed tile shows below its location line
   const display: OverlayDisplay = config.value?.overlayDisplay === "compact" ? "compact" : "thumbs";
-  const layout = overlayLayout(display, m === "refinery");
+  // The refinery and the signatures have no single newest item with a thumbnail: rows only
+  const layout = overlayLayout(display, m === "refinery" || m === "mining");
   const all = overlayRows[m];
   const top = layout.top ? (all[0] ?? null) : null;
   const rest = layout.top ? all.slice(1) : all;
-  return { display, top, place, placeMissing, tabs, rows: rest.slice(0, layout.rows), more: rest.length > layout.rows, flash: detections.value };
+  return {
+    display, top, place, placeMissing, tabs, rows: rest.slice(0, layout.rows), more: rest.length > layout.rows, flash: detections.value,
+    transparency: config.value?.overlayTransparency ?? 18,
+  };
 });
 
 const publish = () => {
@@ -167,8 +183,9 @@ export async function watchOverlay() {
     if (!on) startedScan = false;
   });
   await listen("overlay-request", publish);
-  await listen<"toggle" | "mode">("overlay-hotkey", (e) => {
+  await listen<"toggle" | "mode" | "scanMode">("overlay-hotkey", (e) => {
     if (e.payload === "toggle") void setOverlay(!overlayOn.value);
+    else if (e.payload === "scanMode") toggleSignature();
     else pickTab(TAB_ORDER[(TAB_ORDER.indexOf(tab.value) + 1) % TAB_ORDER.length]!);
   });
 }

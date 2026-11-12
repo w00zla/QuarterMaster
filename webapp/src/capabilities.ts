@@ -14,13 +14,11 @@ const traits = computed(() => traitsOf(capabilities.value));
 export const localApp = computed(() => traits.value.localApp);
 /** Exactly one user: no "who" and no "source" anywhere. */
 export const singleUser = computed(() => traits.value.singleUser);
-/** The header across the full width with the side bar below it (else the top bar). */
-export const sideLayout = computed(() => traits.value.sideLayout);
 /** Orgs exist (the online variant). Until the capabilities are known the online behaviour applies. */
 export const orgsOn = computed(() => capabilities.value?.orgs ?? true);
 /** UEX trading data is offered. */
 export const uexOn = computed(() => capabilities.value?.uex ?? true);
-/** The installed game version for the top bar's chip; null while none is installed. */
+/** The installed game version for the slim bar's chip; null while none is installed. */
 export const gameLabel = computed(() => capabilities.value?.game?.label ?? null);
 
 /** Loads the capabilities; false when the server did not answer (the caller tries again). */

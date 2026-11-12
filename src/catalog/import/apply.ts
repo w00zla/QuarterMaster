@@ -147,8 +147,10 @@ export async function runImport(db: Db, snapshot: Snapshot, snapshotSha256: stri
         const mined = miningRows(snapshot);
         await tx.delete(c.mineable);
         await tx.delete(c.miningProvider);
+        await tx.delete(c.mineableRock);
         for (const batch of chunks(mined.providers, 1000)) await tx.insert(c.miningProvider).values(batch);
         for (const batch of chunks(mined.mineables, 1000)) await tx.insert(c.mineable).values(batch);
+        for (const batch of chunks(mined.rocks, 1000)) await tx.insert(c.mineableRock).values(batch);
 
         // Everything not seen in this import gets retired; must match the diff exactly
         for (const name of ENTITY_NAMES) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The singleuser variant's navigation: a bar at the left edge below the header (SlimBar.vue, which carries the logo) down to the
-// footer (the online variant keeps the top bar). The nav groups of navigation.ts one below the other with a divider
+// The navigation (both variants): a bar at the left edge below the header (SlimBar.vue, which carries the logo) down to the
+// footer. The nav groups of navigation.ts one below the other with a divider
 // between them, the history as the last group (quieter); nothing below it. At the middle of its height, half over the bar's right edge, a small
 // button toggles between wide (icon and text, 232 px) and narrow (icons with a tooltip, 56 px). The choice is remembered; below
 // 1000 px of window width the bar is narrow whatever the choice (it is not overwritten). The settings are not here: their button

@@ -14,6 +14,11 @@
   width: 100%;
 }
 
+/* A tile's title in its head: a bit bigger than the admin UI's 14 px (ui.css) */
+.head-title {
+  font-size: 16px;
+}
+
 /* Panels holding pickers: the suggestion lists must not be clipped */
 .panel.unclipped {
   overflow: visible;

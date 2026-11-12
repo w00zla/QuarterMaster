@@ -225,7 +225,8 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
 - Below it the **scan row** (`ScanBar.vue`, fixed height, decided 2026-10-19): the Scan toggle (off =
   outline with an eye, on = accent with a pulsing dot, locked with a lock icon while the overlay runs it),
   the overlay toggle (Windows; a desktop icon, off = dashed and dimmed, on = accent), one tag that always
-  says what the scan does (`scan.ts` `scanState`: "Scan off" / "Preparing…" / "Game not detected" /
+  says what the scan does (`scan.ts` `scanState`: "Scan off" / "Radar-Signatur" (the signature scan, the whole time
+  it runs) / "Preparing…" / "Game not detected" /
   "Game not in focus" (another window in front: the scan is idle) / "Nothing to scan" (every filter off) / "Waiting for a terminal" / "Location missing" (warehouse or
   inventory without a location) / "Warehouse|Inventory|Refinery detected"), the "Loading…" tag; on the
   right "Log not found" (a chip only then, the path in its tooltip: the blueprints and the auto location
@@ -241,7 +242,7 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   only.
 - The tabs sit in a **side panel** at the left edge (`components/SideTabs.vue`, copied from the web app's `SideNav.vue`
   in look and behaviour; below the title bar and the scan row, down to the window's bottom; only the main area beside it
-  scrolls). Two groups with a divider: the three scan modes (also the overlay's modes), then the look-up tabs (Blueprints);
+  scrolls). Two groups with a divider: the four scan modes (also the overlay's modes), then the look-up tabs (Blueprints);
   a new tab is one more entry in `GROUPS`. Entries: icon, and each tab's table row count (`tabCounts` in `overlay.ts`;
   tabular, in a fixed room: it never changes an entry's size); the last tab kept in localStorage `qm.companion.tab`; it never
   switches by itself: the scan row's tag names the screen. **Narrow** (56 px, the default): the icon with the count below it
@@ -250,10 +251,13 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   `qm.companion.sideMode`). Wide raises the window's minimum width to 840 px (`sideTabs.ts`: 696 - 56 + 200; `setMinSize`
   from the frontend, capability `main-window.json`; the minimum height is the constant `MIN_HEIGHT`, as in `tauri.conf.json`)
   and widens a narrower window to it, keeping position and height; this also runs at start, after the window-state plugin
-  restored the stored size. Collapsing lowers the minimum to 696 px and does not shrink the window.
+  restored the stored size. Collapsing lowers the minimum to 696 px and does not shrink the window. A tab being read shows
+  its icon in green (the scan row's "detected" colour; 2026-11-10; no animation; the overlay's rail likewise, and it greys
+  the others): while the scan runs the screens it reads (their filters, the scan mode), the blueprints while their filter
+  is on and Game.log is found.
   The outdated state shows no panel. The tabs with the panels
-  Gear and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`) and
-  Blueprints (`UnlocksPanel.vue`), like the web app's navigation (order, names "Ausrüstung" (until 2026-10-20 "Komponenten")/"Ressourcen"/
+  Gear and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`), Bergbau
+  (`MiningPanel.vue`, since 2026-11-10) and Blueprints (`UnlocksPanel.vue`), like the web app's navigation (order, names "Ausrüstung" (until 2026-10-20 "Komponenten")/"Ressourcen"/
   "Raffinerie"/"Baupläne", icons; decided 2026-10-20, before: one Inventory tab), all four kept mounted
   (`v-show`; a stored "inventory" tab opens Stock); panel heads carry no icon. Every head: title, the count
   (room for "999": the chips after it stay put), the panel's filter chips (no label: "Scanned" / "Not
@@ -272,10 +276,16 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   ("Screen Scan": "App-Ansicht automatisch wechseln" (the automatic tab switch), then "GPU-Beschleunigung
   aktivieren" (since 2026-10-31 a plain row below it, off by default; before, a highlighted card on top) with a state tag "Aktiv" / "CPU" / "Nicht verfügbar" / "Fehler" and a dim
   note below (pays off only when the scan reads slowly on a weaker CPU, takes VRAM), switches; the
-  GPU greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Scan overlay" group
-  (Windows only, see below: the position as six icon-only buttons on a drawn 16:9 monitor, each with its
-  place as tooltip; "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
-  `overlayDisplay`, applied once saved); the hotkeys "Hotkey Overlay an/aus" and "Hotkey Overlay-Ansicht wechseln"; the UI says "Ansicht" for tab and overlay view alike, since 2026-10-30), in the head's right end
+  GPU greyed out and off when the OCR cannot run on the GPU, see "OCR"), the "Overlay" group
+  (Windows only, see below; until 2026-11-10 "Scan-Overlay"): "Transparenz" (a slider 0–80 % in steps of 5, config
+  `overlayTransparency`, 18 by default = the look before it; both overlays), then under small captions "Scan-Overlay":
+  the position as six icon-only buttons on a drawn 16:9 monitor, each with its
+  place as tooltip, "Darstellung" ("Display": "Thumbnails" (default) or "Kompakt", a dropdown, config
+  `overlayDisplay`, applied once saved); "Radar-Signatur": "Position zur Signatur" as four icon-only buttons around a
+  drawn plate (config `signaturePosition`: below (default), above, left, right) and "Scan-Overlay im Signatur-Modus
+  zeigen" (config `scanOverlayInSignature`, on by default; off: while the signature scan runs only the signature
+  overlay shows); "Hotkeys": "Overlay an/aus",
+  "Overlay-Ansicht wechseln", "Scan-Modus wechseln" (none by default); the UI says "Ansicht" for tab and overlay view alike, since 2026-10-30), in the head's right end
   a small "Debug" button for the debug window (secondary for the user; what it does as tooltip; the settings
   window closes once the debug window is open). Labels left, controls right like
   BindSight's settings.
@@ -316,7 +326,7 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   Ship comp. or FPS gear, refinery = Jobs; a screen out of scope is neither looked for nor read (all off: "Nothing to
   scan"); a filter change applies to the next frame.
 - **Which screen** (`Screen` in `ocrwatch.rs`, sent as `scan-screen`: `none`, `warehouse`, `inventory`,
-  `refinery`): without one the worker probes every 2 s (`PROBE_MS`): the refinery's big titles first
+  `refinery`, `signature` while the signature scan runs, see "Radar signature"): without one the worker probes every 2 s (`PROBE_MS`): the refinery's big titles first
   (the refinery reader's `probe`, 30–110 ms; skipped without the game's texts, see "OCR"), then the cheap
   page number read (~30 ms, the gear reader's `probe_with(.., false)`: every place the page can have, a
   kept scale not trusted; only "n/m" with m ≤ 99) for the character inventory, else the grid read for the
@@ -324,7 +334,7 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   found nothing 3 reads in a row (`SCREEN_MISSES`, the refinery's `LEAVE_AFTER`: a switch takes the player
   seconds), a minute without frames, the scan's stop or the screen's filter going off.
 - The readers are sc-ohseearr's (`Readers` in `ocrwatch.rs`: `WarehouseReader`, `GearInventoryReader`,
-  `RefineryReader`, ADR 0010 there: `probe`/`read` on a `Frame` with its id, cursor and `Locale`); each keeps
+  `RefineryReader`, `MiningHudReader` (the signature scan, "Radar signature" below), ADR 0010 there: `probe`/`read` on a `Frame` with its id, cursor and `Locale`); each keeps
   what it learned across frames (the warehouse's last strong layout, reset when its screen is left; the
   character inventory's UI scale); their output goes through `to_legacy` into the companion's payloads.
 - The refinery screen reads a live frame once the view came to rest after it moved and every 2 s
@@ -554,7 +564,7 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   one tag for all its crates; no checkout next to this repo is needed to build): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
   `paddle-det-tiny` (PP-OCRv6 tiny's detector), `sc-rec-latin` (our recognizer: tiny's cut to Latin and fine-tuned on
   the game's font) and `sc-warehouse-layout`, compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the
-  reader interface, the game's texts), the readers `-warehouse`, `-gear-inventory`, `-refinery` and
+  reader interface, the game's texts), the readers `-warehouse`, `-gear-inventory`, `-refinery`, `-mining-hud` and
   `sc-ohseearr-capture-win`. How they work, what was tried, the measurements and the model history: its README, the
   reader READMEs, the model cards (`models/*/MODEL.md`), `training/README.md` and `docs/adr/` (0006/0007/0010 the
   readers). Changes to the engine, models or readers belong there.
@@ -637,6 +647,49 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   collected in the game, and it must not be proposed again (also not as one without a job once its job is
   stored).
 
+## Radar signature (Bergbau)
+
+Built 2026-11-10, not tested in game yet. `mining.rs` (adapter), `ocrwatch.rs` (`look_signature`), `overlay.rs` (the
+signature overlay), `mining.ts`, `signatures.ts`, `MiningPanel.vue`, `SignatureApp.vue` (`signature.html`).
+
+- **The signature scan** is a mode of the one scan, not a screen it finds: the Bergbau panel's chip "Radar-Signatur"
+  ("Radar signature"; localStorage `qm.companion.mining.signature`, off by default) or the scan mode hotkey switch it;
+  a dim line after the chip: "Signatur-Scan schaltet alle anderen Scans ab". While it is on the scope is the
+  signature alone (`Scope::signature`; the terminals are not looked for), the screen is `signature`
+  (`scan-screen`; the tab follows it like the others when `autoTab` is on) and the scan row's state tag says
+  "Radar-Signatur" the whole time the scan runs.
+- Two frames a second (`SignatureCapture`: the capture's interval 500 ms instead of 1 s; no gate, no pull; a frame
+  that comes while the worker reads is dropped) go to sc-ohseearr's `MiningHudReader` (no locale): the
+  number on the plate above the heading tape and its box (frame pixels, without the pin icon); each read goes out
+  as `signature-read` (`SignatureEvent`: frame size, `SignatureRead` value/raw/score/rect/window) and, while
+  debugging, with the frame to the debug view and a recording (`signature`). A read takes ~50–60 ms on 3 CPU threads
+  at 3840×1600 (offline): about an eighth of those threads at two a second (four were built first; two chosen so slower
+  CPUs keep up).
+- **Evaluation** (`signatures.ts`, pure, `test/companion-signatures.test.ts`): a ship's scan shows one node's
+  signature times the cluster's nodes, so a rock kind fits when the signature is a whole multiple of its own
+  (the catalog's `rocks`, every mining method's: the ship scans for the ROC and hand mining too, and all of them go
+  into crafting; one line per resource name, count and method: "3 × Gold" after the method's icon, ship, ROC or
+  hand (`mine-ship`, `mine-roc`, `mine-hand` in the shared `Icon.vue`), fewest nodes first).
+  None fits: "Keine Ressource passt"; a catalog without rock signatures (an older server, a catalog imported before
+  them): "Keine Gesteinssignaturen im Katalog". Signatures are shown as the game writes them ("42,000").
+- **Panel** (tab "Bergbau"/"Mining" before Baupläne, icon pickaxe): two tiles (the newest signature, its
+  resources), below them the latest signatures (a new entry when the number changes; 50 kept, the app session
+  only; a button empties them): time, signature, resources. The scan overlay's view "Bergbau" shows the same rows
+  (signature, then its resources each after the mining method's icon).
+- **Signature overlay**: a second window of the overlay's kind (frameless, transparent, click-through, excluded
+  from the capture), opened and closed with the scan overlay (the scan row's toggle: both overlays or none, the
+  user's decision 2026-11-10); while the signature scan runs the scan overlay hides when the settings say so
+  (`scanOverlayInSignature` off: `Placing::hide_scan_overlay`). The placing thread puts it
+  next to the last signature seen (`SignatureSeen`, set by every read with a value), on the configured side
+  (`signaturePosition`), 8 px away and centred on the number, 220×120 logical px, checked every 50 ms (moved at once,
+  put on top again every 250 ms); hidden while the game is not in front, without a signature, and once the last one
+  is 1.5 s old (`SIGNATURE_STALE`). Its page shows the newest signature's resources one per line after the method's
+  icon, the tile at the side facing the number (`signature-view` from `mining.ts`).
+- **Debug window** (scan tab): a signature read shows the number's box (orange) and the reader's search window
+  (violet, dashed) over the frame, value, raw text, score and both boxes among the key figures, then the rock kinds
+  in the catalog, the overlay's settings and the last 20 reads with their resources (`signature-report` from
+  `mining.ts`: the debug window has no catalog).
+
 ## Screen capture (Windows)
 
 `capture.rs`, the loop on sc-ohseearr's `sc-ohseearr-capture-win` (`WindowCapture`: the window, in front or not,
@@ -664,19 +717,21 @@ its own `CaptureInfo` with `dropped`/`gated`/`waitMs`; `foreground_game`/`client
 game since.
 
 - A frameless, transparent, click-through, non-focusable window holding the mode's panel as a
-  compact fixed-size read-only tile (300×130 logical px, 340×190 in the display "Thumbnails": wider by the rows' S thumbnails; both narrower since 2026-10-30 without the kind badges, lower since 2026-10-31), slightly see-through; layout "C" of the concept
+  compact fixed-size read-only tile (300×150 logical px, 340×210 in the display "Thumbnails": wider by the rows' S thumbnails; both narrower since 2026-10-30 without the kind badges, lower since 2026-10-31, one row higher since 2026-11-10 for the fifth mode), see-through as the settings say; layout "C" of the concept
   https://claude.ai/artifact/1CK7QBiMpLcj7n4efMeybn with the rail on the right, 2026-10-20): a narrow rail
-  on the right with the four modes top down, each its icon above its count, exactly as wide as "999"
-  (`3ch`, tabular digits; the shown one highlighted; a warning instead of the count when its filters are
-  all off or the log is missing); next to it a 22 px line (a line below it) with the picked location after its icon in every
+  on the right with the five modes top down, each its icon above its count, exactly as wide as "999"
+  (`3ch`, tabular digits; the shown one highlighted; the icons of the modes being read green like the main window's
+  tabs, one the scan leaves out greyed, since 2026-11-10: its filters
+  all off, or the other scan mode (the terminals while the signature scan runs, Bergbau while it does not); a
+  warning instead of the count when the log is missing); next to it a 22 px line (a line below it) with the picked location after its icon in every
   mode (mono face, clipped at its end; "No location picked" in warn colour), then the newest rows at 20 px
-  without lines between (a text tag only where the row has one: refinery states, new/ambiguous unlocks), 5 fit; more than that: the last one
+  without lines between (a text tag only where the row has one: refinery states, new/ambiguous unlocks), 6 fit; more than that: the last one
   fades out. No hint texts: without rows only the location line.
 - **Display** (settings "Darstellung", 2026-10-25; `overlayLayout.ts`, the height in `overlay.rs` follows the
   config with the next tick): "Kompakt" is the look above. "Thumbnails" (default) shows the newest row as a
   60 px top row (the M thumbnail at 44 px when the item has one, the name at 14 px above its tag and
-  details at 12 px, the amount right) and 5 rows below it, each with the S thumbnail (16 px) after its tag.
-  The refinery has no single newest item: rows only (8, with the first material's thumbnail).
+  details at 12 px, the amount right) and 6 rows below it, each with the S thumbnail (16 px) after its tag.
+  The refinery and the signatures have no single newest item: rows only (9; the refinery with the first material's thumbnail).
   `OverlayRow.thumb` carries uuid and hash from the panels; the overlay page loads the images itself
   (`thumb` is allowed in every window: the app has no command allowlist).
 - **Flash** (2026-10-31, always on, no setting): every
@@ -696,19 +751,20 @@ game since.
   only position, display and hotkeys). Showing it switches the scan on (locked in the scan row while it is shown), hiding it switches
   the scan off only if it started it. The mode is the main window's tab, one and the same (since
   2026-10-20; before, the overlay had its own and the two drifted apart). By itself: the screen the scan
-  sees (warehouse: Stock, character inventory: Components, terminal: Refinery; nothing in view: it stays) and a blueprint
+  sees (warehouse: Stock, character inventory: Components, terminal: Refinery, the signature scan: Bergbau; nothing in view: it stays) and a blueprint
   unlock Game.log adds while the app runs that is still to register (new or ambiguous, once matched:
   Blueprints; the log's unlocks at its first state and the old logs' do not switch); both can be turned
   off in the settings ("App-Ansicht automatisch wechseln", config `autoTab`, on by default). By hand: a click on a
-  tab, the mode hotkey stepping through the four. Also with the overlay off. A component row shows its name and stats only, a stack its name, quality and amount.
+  tab, the mode hotkey stepping through the five (it never switches the scan mode: only the Bergbau panel's chip and the scan mode hotkey do). Also with the overlay off. A component row shows its name and stats only, a stack its name, quality and amount.
 - Each panel writes its rows into `overlayRows`; `overlay.ts` sends the view as texts (`overlay-view`, on
   every change and on `overlay-request`).
-- Hotkeys (`hotkeyOverlay`/`hotkeyMode`, accelerators with the browser's physical key code, default
-  `Alt+Shift+KeyQ` for on/off (until 2026-10-20 `Ctrl+Shift+KeyQ`; a stored config keeps its own) and none for the mode; recorded in `HotkeyInput.vue`, a modifier or an F key
+- Hotkeys (`hotkeyOverlay`/`hotkeyMode`/`hotkeyScanMode`, accelerators with the browser's physical key code, default
+  `Alt+Shift+KeyQ` for on/off (until 2026-10-20 `Ctrl+Shift+KeyQ`; a stored config keeps its own) and none for the mode and the scan mode; recorded in `HotkeyInput.vue`, a modifier or an F key
   required; cleared with Backspace/Delete while recording or the × inside the field) are **polled** (`GetAsyncKeyState` every 30 ms, exactly these modifiers; character keys by scan
   code, mapped with the current layout): `RegisterHotKey` never fired while SC was in front (its raw input
   keeps application hotkeys away). The keys reach the game too. A press emits `overlay-hotkey`
-  `toggle`/`mode`; `set_config` refuses invalid ones (`hotkeyInvalid`, `hotkeySame`) and keeps the old.
+  `toggle`/`mode`/`scanMode` (the scan mode toggles the signature scan, `mining.ts`); `set_config` refuses invalid ones
+  (`hotkeyInvalid`, `hotkeySame`: two the same) and keeps the old.
 
 ## WebView2
 

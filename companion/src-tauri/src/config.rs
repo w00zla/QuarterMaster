@@ -3,7 +3,7 @@
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
 //! connection (the online server or the Quartermaster app on this PC), the
 //! Quartermaster server, the user's API token, the SC channel folder whose
-//! `Game.log` is followed (in the local mode the app's folder comes first, `pairing.rs`), the UI language, the automatic tab switch, the OCR on the GPU, the scan overlay's position, display and hotkeys, and the updates (the switch and the chosen channel). The server defaults to the production
+//! `Game.log` is followed (in the local mode the app's folder comes first, `pairing.rs`), the UI language, the automatic tab switch, the OCR on the GPU, the overlays' transparency, the scan overlay's position, display and hotkeys, the signature overlay's position, and the updates (the switch and the chosen channel). The server defaults to the production
 //! one; the settings can set another (e.g. a server of one's own), and only then the file holds a `server` entry.
 
 use std::path::PathBuf;
@@ -53,11 +53,24 @@ pub struct Config {
     /// the window a bit higher) or "compact" (rows only).
     #[serde(default = "default_overlay_display")]
     pub overlay_display: String,
-    /// The overlay's hotkeys as accelerators ("Alt+Shift+KeyQ", the on/off default); empty = none (the mode's default).
+    /// The overlay's hotkeys as accelerators ("Alt+Shift+KeyQ", the on/off default); empty = none (the mode's and
+    /// the scan mode's default).
     #[serde(default = "default_hotkey_overlay")]
     pub hotkey_overlay: String,
     #[serde(default)]
     pub hotkey_mode: String,
+    /// Switches the scan between the terminals and the radar signature
+    #[serde(default)]
+    pub hotkey_scan_mode: String,
+    /// How see-through both overlays are, in percent (0 = opaque; at most `MAX_TRANSPARENCY`).
+    #[serde(default = "default_overlay_transparency")]
+    pub overlay_transparency: u32,
+    /// Where the signature overlay sits next to the radar signature: "below", "above", "left" or "right".
+    #[serde(default = "default_signature_position")]
+    pub signature_position: String,
+    /// The scan overlay stays shown while the signature scan runs (off: the signature overlay alone).
+    #[serde(default = "default_true")]
+    pub scan_overlay_in_signature: bool,
     /// The main window's tab (= the overlay's mode) switches by itself: with the screen the scan sees
     /// and with a new blueprint unlock (the frontend's `overlay.ts`).
     #[serde(default = "default_true")]
@@ -85,6 +98,20 @@ fn default_connection() -> String {
 pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
 pub const OVERLAY_DISPLAYS: [&str; 2] = ["thumbs", "compact"];
+
+pub const SIGNATURE_POSITIONS: [&str; 4] = ["below", "above", "left", "right"];
+
+/// The settings' slider ends at this (more and the tiles are hard to read over the game)
+pub const MAX_TRANSPARENCY: u32 = 80;
+
+/// The overlay's look before the setting existed (82 % opaque)
+fn default_overlay_transparency() -> u32 {
+    18
+}
+
+fn default_signature_position() -> String {
+    "below".into()
+}
 
 fn default_overlay_position() -> String {
     "top-left".into()
@@ -114,6 +141,10 @@ impl Default for Config {
             overlay_display: default_overlay_display(),
             hotkey_overlay: default_hotkey_overlay(),
             hotkey_mode: String::new(),
+            hotkey_scan_mode: String::new(),
+            overlay_transparency: default_overlay_transparency(),
+            signature_position: default_signature_position(),
+            scan_overlay_in_signature: true,
             auto_tab: true,
             gpu: false,
             auto_update: true,
@@ -211,6 +242,11 @@ mod tests {
         // Files written before the local mode existed: online
         assert_eq!(c.connection, ONLINE);
         assert_eq!(parse(r#"{"connection":"local"}"#).unwrap().connection, LOCAL);
+        // Missing before the signature scan existed: below, the old look, no hotkey
+        assert_eq!(c.signature_position, "below");
+        assert_eq!(c.overlay_transparency, 18);
+        assert_eq!(c.hotkey_scan_mode, "");
+        assert!(c.scan_overlay_in_signature);
     }
 
     #[test]

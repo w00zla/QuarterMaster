@@ -264,6 +264,23 @@ export const mineable = catalog.table('mineable', {
 ]);
 
 /**
+ * A rock kind the placed providers spawn, per mining method (snapshot `mineableRocks`): the resource it is named
+ * after, its rarity (ship rocks) and its radar signature for one node (the scanner shows it times the cluster's
+ * nodes). Derived data.
+ */
+export const mineableRock = catalog.table('mineable_rock', {
+  uuid: uuid('uuid').primaryKey(),
+  key: text('key').notNull(),
+  method: text('method').notNull(),
+  resourceUuid: uuid('resource_uuid').notNull().references(() => resource.uuid),
+  rarity: text('rarity'),
+  radarSignature: numeric('radar_signature'),
+}, (t) => [
+  check('mineable_rock_method', sql`${t.method} IN ('ship', 'roc', 'fps')`),
+  index().on(t.resourceUuid),
+]);
+
+/**
  * One text set per source and language: 'game' (catalog import) or an externally maintained
  * global.ini (localization import). The source with the highest priority wins per key.
  */

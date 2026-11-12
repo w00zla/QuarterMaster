@@ -3,7 +3,7 @@
 // and their resources. Where a provider is used comes from the object containers (socpak.ts).
 import { isObj, recordKey, refPath, type Obj, type RecordStore } from './records.ts';
 import type { ContainerScan } from './socpak.ts';
-import type { Location, Mineable, MiningProvider, Resource } from '../snapshot.ts';
+import type { Location, Mineable, MineableRock, MiningProvider, Resource } from '../snapshot.ts';
 
 export const MINING_PATHS = {
   providers: 'libs/foundry/records/harvestable/providerpresets/',
@@ -27,12 +27,20 @@ const PROVIDER_LOCATIONS: Record<string, string> = {
 
 const RARITY = /(uncommon|common|rare|epic|legendary)shipmineables/i;
 
+// A rock's radar signature: the slot of its base signatures that mineable rocks set (the only non-zero one on
+// build 12913470; the slot's name is not in the data). The scanner shows it times the cluster's nodes.
+const RADAR_SIGNATURE = 4;
+
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const objs = (v: unknown): Obj[] => arr(v).filter(isObj);
 
 interface Part { resourceUuid: string; min: number; max: number; chance: number; scale: number }
-interface Rock { path: string; parts: Part[]; itemUuid: string | null }
+interface Rock {
+  path: string; parts: Part[]; itemUuid: string | null;
+  // The entity; the resource it is named after (its composition's first part); its radar signature
+  uuid: string; key: string; resourceUuid: string | null; radarSignature: number | null;
+}
 interface Normal { min: number; max: number; mean: number; stddev: number }
 interface Band { start: number; end: number; mappedValue: number }
 
@@ -76,7 +84,7 @@ export function mining(
   resources: Resource[],
   itemUuids: Set<string>,
   anomaly: (code: string, record: string | null, detail: string) => void,
-): { miningProviders: MiningProvider[]; mineables: Mineable[] } {
+): { miningProviders: MiningProvider[]; mineables: Mineable[]; mineableRocks: MineableRock[] } {
   const locationByKey = new Map(locations.map((l) => [l.key, l.uuid]));
   const parentOf = new Map(locations.map((l) => [l.uuid, l.parentUuid]));
   const resourceByUuid = new Map(resources.map((r) => [r.uuid, r]));
@@ -101,19 +109,28 @@ export function mining(
       // The item the rock breaks into (FPS and ROC rocks), if the catalog has it
       const itemRef = components.map((c) => (isObj(c.entityClassOverride) ? c.entityClassOverride.entityClass : null)).find((r) => r);
       const item = store.get(refPath(itemRef));
-      const parts = objs(composition._RecordValue_.compositionArray).flatMap((e): Part[] => {
+      const resolved = objs(composition._RecordValue_.compositionArray).map((e): Part | null => {
         const element = store.get(refPath(e.mineableElement));
         const rt = element?._RecordValue_.resourceType;
         const resourceUuid = isObj(rt) && typeof rt._RecordId_ === 'string' ? rt._RecordId_ : null;
         const min = num(e.minPercentage), max = num(e.maxPercentage);
         if (!resourceUuid || !resourceByUuid.has(resourceUuid) || min === null || max === null) {
           anomaly('unresolved_ref', composition._RecordName_, `element ${String(e.mineableElement)}`);
-          return [];
+          return null;
         }
         // The chance the part is in a rock; its quality factor (the lean part of an ore: 0.49, 0.789)
-        return [{ resourceUuid, min, max, chance: num(e.probability) ?? 1, scale: num(e.qualityScale) ?? 1 }];
+        return { resourceUuid, min, max, chance: num(e.probability) ?? 1, scale: num(e.qualityScale) ?? 1 };
       });
-      rock = { path: refPath(compositionRef)!, parts, itemUuid: item && itemUuids.has(item._RecordId_) ? item._RecordId_ : null };
+      const signature = components.find((c) => c._Type_ === 'SSCSignatureSystemParams');
+      const radar = isObj(signature?.radarProperties) ? signature.radarProperties.baseSignatureParams : null;
+      rock = {
+        path: refPath(compositionRef)!, parts: resolved.filter((p) => p !== null),
+        itemUuid: item && itemUuids.has(item._RecordId_) ? item._RecordId_ : null,
+        // The first part is the rock's own resource (every placed rock on build 12913470: the ore or gem its
+        // composition's depositName names)
+        uuid: entity._RecordId_, key: recordKey(entity._RecordName_), resourceUuid: resolved[0]?.resourceUuid ?? null,
+        radarSignature: num(arr(isObj(radar) ? radar.signatures : null)[RADAR_SIGNATURE]),
+      };
     }
     rocks.set(presetPath, rock);
     return rock;
@@ -164,6 +181,20 @@ export function mining(
   // --- providers ---
   const miningProviders: MiningProvider[] = [];
   const mineables: Mineable[] = [];
+  // The rock kinds the placed providers spawn; a rock without its own resource (unresolved) is left out
+  const mineableRocks = new Map<string, MineableRock>();
+  const useRock = (rock: Rock, method: Mineable['method'], from: string) => {
+    if (!rock.resourceUuid) return;
+    const known = mineableRocks.get(rock.uuid);
+    if (known) {
+      if (known.method !== method) anomaly('rock_methods', from, `rock ${rock.key} in ${known.method} and ${method}; kept ${known.method}`);
+      return;
+    }
+    mineableRocks.set(rock.uuid, {
+      uuid: rock.uuid, key: rock.key, method, resourceUuid: rock.resourceUuid,
+      rarity: RARITY.exec(rock.path)?.[1]?.toLowerCase() ?? null, radarSignature: rock.radarSignature,
+    });
+  };
   for (const path of store.list(MINING_PATHS.providers)) {
     const r = store.get(path)!;
     const key = recordKey(r._RecordName_);
@@ -192,6 +223,7 @@ export function mining(
         const rock = rockOf(h.harvestable, r._RecordName_);
         const weight = num(h.relativeProbability) ?? 0;
         if (!rock || !(weight > 0)) continue;
+        useRock(rock, method, r._RecordName_);
         // A part listed twice in one rock (same resource and factor): in the rock when either is
         const inRock = new Map<string, { part: Part; missing: number; min: number; max: number }>();
         for (const p of rock.parts) {
@@ -229,5 +261,5 @@ export function mining(
   miningProviders.sort((a, b) => a.key.localeCompare(b.key));
   mineables.sort((a, b) => a.providerUuid.localeCompare(b.providerUuid) || a.method.localeCompare(b.method) || a.resourceUuid.localeCompare(b.resourceUuid)
     || b.qualityScale - a.qualityScale);
-  return { miningProviders, mineables };
+  return { miningProviders, mineables, mineableRocks: [...mineableRocks.values()].sort((a, b) => a.key.localeCompare(b.key)) };
 }

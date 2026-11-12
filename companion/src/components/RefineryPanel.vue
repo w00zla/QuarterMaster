@@ -208,9 +208,7 @@ async function registerAll(value: string) {
           <!-- 2: the state, whether a job is registered, the time left and the end; the total yield at the right -->
           <div class="job-state">
             <span class="tag" :class="KIND[p.kind].cls">{{ t(KIND[p.kind].tag) }}</span>
-            <Tooltip :text="t(registered(p) ? 'refinery.isRegistered' : 'refinery.notRegistered')">
-              <span class="tag kind" :class="{ accent: registered(p), off: !registered(p) }"><Icon name="link" :size="11" /></span>
-            </Tooltip>
+            <span class="tag kind" :class="{ accent: registered(p), off: !registered(p) }"><Icon name="link" :size="11" /></span>
             <template v-if="endOf(p) !== null">
               <Icon name="clock" :size="12" />
               <span v-if="endOf(p)! > now" class="num">{{ left(endOf(p)! - now) }}</span>

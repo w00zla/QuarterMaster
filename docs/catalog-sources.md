@@ -166,8 +166,9 @@ BlueprintPoolRecord.blueprintRewards[]          blueprintRecord, weight (all 1.0
 
 ### Mining
 
-What can be mined where (`src/catalog/extract/mining.ts` and `socpak.ts`, snapshot `miningProviders` and
-`mineables`, tables `catalog.mining_provider` and `catalog.mineable`; built 2026-10-24, build 12913470):
+What can be mined where (`src/catalog/extract/mining.ts` and `socpak.ts`, snapshot `miningProviders`,
+`mineables` and `mineableRocks`, tables `catalog.mining_provider`, `catalog.mineable` and `catalog.mineable_rock`;
+built 2026-10-24, build 12913470; rocks 2026-11-10):
 
 ```
 object container (socpak = ZIP)     <name>.xml: <Child name="….socpak" starMapRecord="<StarMapObject uuid>">
@@ -178,6 +179,7 @@ HarvestableProviderPreset           harvestable/providerpresets/system/<system>/
   └ harvestables[]                  harvestable -> HarvestablePreset, relativeProbability (weight in the group)
     HarvestablePreset.entityClass -> entities/mineable/<rock>.json
       Components[MineableParams].composition -> MineableComposition (mining/rockcompositionpresets/…)
+      Components[SSCSignatureSystemParams].radarProperties.baseSignatureParams.signatures[4] -> radar signature
       Components[…].entityClassOverride.entityClass -> the item the rock breaks into (FPS/ROC gems)
     MineableComposition.compositionArray[]   mineableElement, min/maxPercentage, probability, qualityScale
     MineableElement.resourceType            the resource (ore, raw material, gem)
@@ -220,6 +222,15 @@ HarvestableProviderPreset           harvestable/providerpresets/system/<system>/
   So the values differ only by system (Pyro has its own for nearly every ore and gem; Stanton and Nyx share the
   default). The RCD overrides of single QV Breaker Stations in Nyx (legendary ores, Torite) reach no mined
   place: no provider is placed there.
+- **Rock kinds** (`mineableRocks`, 2026-11-10): one entry per rock entity the placed providers spawn, with its
+  method, its resource (the composition's first part: on every placed rock the ore or gem its `depositName`
+  names), the rarity (as above, ship rocks only) and the **radar signature** of one node: slot 4 of the entity's
+  base signatures, the only non-zero one (the slot's name is not in the data). The ship scanner shows it times the
+  cluster's nodes (Quantanium 3170: 6340 for two). Build 12913470: per ore one value, the same for its asteroid
+  and surface rock, by rarity common 4180–4300, uncommon 3825–3900, rare 3540–3600, epic 3370–3400, legendary
+  3170–3200 (no overlap); every ROC rock 4000, every FPS rock 3000. The old rock-type entities (`asteroidctype…`,
+  `felsic…`, `granite…`: 4700–4900) are in no placed provider. A rock spawned by two methods would keep the
+  first (anomaly `rock_methods`; none on build 12913470).
 - Not covered: the slot presets of caves, contested zones and asteroid bases (`harvestable/slotpresets/`),
   where Carinite, Sadaryx and Saldynium come from; creature parts. Refinery yield bonuses are not in the game
   files (a type `RefineryCompetencies` exists, no record uses it; the `Refinery` entity has empty params, the
@@ -259,7 +270,7 @@ Commands (`pnpm catalog:extract`, `catalog:import`, `loc:import`): `CLAUDE.md`. 
 admin web UI (upload, dry run first), using the same functions as the CLIs.
 
 - **The snapshot format (`src/catalog/snapshot.ts`, Zod) is the contract** between extractor and importer.
-  It is versioned via `SNAPSHOT_SCHEMA_VERSION` (currently 6, since the mining parts; an older snapshot must be extracted again);
+  It is versioned via `SNAPSHOT_SCHEMA_VERSION` (currently 8, since the mining rock kinds; an older snapshot must be extracted again);
   extractor implementations are meant to be swappable behind it (scunpacked-data is the documented fallback
   source). `src/catalog/import/load.ts` reads and checks a snapshot (gzip detected by content) for the CLI
   and the API.
@@ -287,7 +298,7 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 | Path | Content |
 |---|---|
 | `src/catalog/extract/` | extractor: StarBreaker wrapper, record store, `global.ini` parser, normalizer, blueprint sources (`sources.ts`), object containers (`socpak.ts`), mining (`mining.ts`), CLI |
-| `src/catalog/snapshot.ts` | snapshot format (Zod), `SNAPSHOT_SCHEMA_VERSION` (6) |
+| `src/catalog/snapshot.ts` | snapshot format (Zod), `SNAPSHOT_SCHEMA_VERSION` (8) |
 | `src/catalog/import/` | catalog import (`load.ts` read + check, `plan.ts` pure logic, `apply.ts` DB, `cli.ts`), localization import (`loc-import.ts`, `loc-cli.ts`) |
 | `src/catalog/labels.ts` | app texts (key prefix `qm_`), category groups, item type/class keys, derived names |
 | `src/db/schema/catalog.ts` | Drizzle schema, Postgres schema `catalog` |
@@ -303,7 +314,7 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
 - Quantities are `NUMERIC` and passed to Postgres as strings.
 - Storage locations are selected by the app (stations, landing zones and places with a freight elevator, see "Selection rule for storage locations"; the amenity is the snapshot's `freightElevator`).
 - `location`: every `StarMapObject` with `parent_uuid` (no foreign key: rows of one import reference each other in any order; the integrity check ensures every parent is in the snapshot), `type`, `nav_icon`, `hide_in_starmap`, `respawn_location_type`. Names via `name_key`; `has_freight_elevator` (the record lists the freight elevator amenity), `has_refinery`.
-- **Derived fields** (snapshot schema 7, migration `0035`; the importer reads schema 7 only and asks for a re-extract on older snapshots): the extractor derives them from the DataCore records, the import stores them, the app reads the columns:
+- **Derived fields** (snapshot schema 7, migration `0035`; the importer reads the current schema only and asks for a re-extract on older snapshots): the extractor derives them from the DataCore records, the import stores them, the app reads the columns:
   - `location.has_freight_elevator` (snapshot `freightElevator`): the record lists the amenity `a783bfb9-…` (Freight Elevator); `location.has_refinery` (`refinery`): a container placing the refinery entity lies below the object (see "Refinery places").
   - `item.is_shop` (`shop`): a shop item (SHOP_TYPES); exactly the items stored without a raw record (`shopItemSql`).
   - `item.scu_per_piece` (`scuPerPiece`): Harvestables only, `AttachDef.inventoryOccupancyVolume.microSCU / 1e6` when positive, else null (`double precision`); `item.base_stats` (`baseStats`, `jsonb`): crafted property key → the unmodified value as the tooltip shows it, for every property the item's record (or the damage record it links) holds a number for; the places are the jsonpaths of `src/stock/component-base.ts`, evaluated by the normalizer (`src/stock/jsonpath.ts`: the subset of Postgres' lax jsonpath they use). The migration does not backfill it: empty until the first import from a schema 7 snapshot.
@@ -315,6 +326,8 @@ admin web UI (upload, dry run first), using the same functions as the CLIs.
   using them, `location_uuids`, no foreign key) and `mineables` (per provider, method, resource and part
   `quality_scale`: share, percent range, rarity, item, quality range and `quality_values`), replaced as a whole on
   every import (derived). See "Mining".
+- `mineable_rock` (migration `0037`): the snapshot's `mineableRocks` (per rock entity: method, resource, rarity,
+  `radar_signature` of one node), replaced as a whole on every import (derived). See "Mining".
 - Localization:
   - `localization_source` (source, lang, priority, origin, hash, key count; lang `de` or `en`): `game` = priority 0, written by the catalog import; external sources default to 100.
   - `localization` (source, lang, key, value).

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Deploys the committed main branch from this machine: pushes into the VM's checkout over SSH,
-# then runs scripts/deploy.sh there. The VM's checkout is a plain repo created with
-# "git init -b main" and "git config receive.denyCurrentBranch updateInstead"; there is no
-# git server, the VM never pulls.
+# Deploys the checked-out branch (main or any other) from this machine: pushes its committed HEAD
+# into the VM's checkout over SSH, then runs scripts/deploy.sh there. The VM's checkout is a plain
+# repo created with "git init -b main" and "git config receive.denyCurrentBranch updateInstead";
+# there is no git server, the VM never pulls. Its main is always what is deployed: the push
+# replaces it (forced: after a branch, main's squash merge is no fast-forward of it).
 #
 #   scripts/push-deploy.sh <user@host>
 #
@@ -26,13 +27,16 @@ if [[ -n $(git status --porcelain) ]]; then
   exit 1
 fi
 branch=$(git symbolic-ref --quiet --short HEAD || true)
-if [[ $branch != main ]]; then
-  echo "Not on main (on: ${branch:-detached HEAD})" >&2
+if [[ -z $branch ]]; then
+  echo "Detached HEAD: check out the branch to deploy" >&2
   exit 1
 fi
+if [[ $branch != main ]]; then
+  echo "==> Note: deploying branch $branch, not main"
+fi
 
-echo "==> Push $(git rev-parse --short HEAD) to $host:$path"
-git push "$host:$path" main
+echo "==> Push $branch at $(git rev-parse --short HEAD) to $host:$path"
+git push --force "$host:$path" HEAD:main
 
 echo "==> Deploy on $host"
 # -t: live output, Ctrl+C reaches the VM. A dropped connection kills deploy.sh; it can simply be
