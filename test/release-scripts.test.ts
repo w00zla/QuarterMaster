@@ -25,12 +25,14 @@ interface Lib {
   readChannels(path: string): Channels;
   pointAt(json: Channels, tag: string): { changed: boolean; message: string };
   removeChannel(json: Channels, product: string, id: string): { changed: boolean; message: string };
+  downloadsTable(json: Channels): string;
+  replaceDownloads(readme: string, table: string): string;
 }
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const feedDir = join(root, 'test', 'release-feed');
 const lib = new URL('../scripts/release-lib.mjs', import.meta.url).href;
-const { assetNames, compareVersions, parseTag, pointAt, readChannels, removeChannel } = (await import(lib)) as Lib;
+const { assetNames, compareVersions, downloadsTable, parseTag, pointAt, readChannels, removeChannel, replaceDownloads } = (await import(lib)) as Lib;
 const { decide } = (await import(new URL('../scripts/ci-scope.mjs', import.meta.url).href)) as Scope;
 const empty = () => readChannels(join(feedDir, 'channels.json'));
 
@@ -119,6 +121,53 @@ describe('latest.json', () => {
     assert.equal(feed.platforms['windows-x86_64'].signature, 'SIGNATURE');
     assert.ok(feed.platforms['windows-x86_64'].url.endsWith(`/releases/download/companion-v2.2.0-beta.1/${names.windows}`));
     assert.throws(() => execFileSync(process.execPath, [join(root, 'scripts', 'latest-json.mjs'), 'app-v1.0.0', dir], { stdio: 'ignore' }));
+  });
+});
+
+describe('README downloads block', () => {
+  const block = (table: string) => `# Title\n\n<div id="release_dls">\n\n${table}\n\n</div>\n\nMore text.\n`;
+
+  it('links every file of the stable releases, the first per platform in bold; nothing released says so', () => {
+    const json = empty();
+    assert.ok(downloadsTable(json).includes('| **Quartermaster (singleuser)** | not released yet | not released yet |'));
+    pointAt(json, 'app-v1.0.0');
+    pointAt(json, 'companion-v2.1.0');
+    pointAt(json, 'companion-v2.2.0-beta.1');
+    const table = downloadsTable(json);
+    const url = (tag: string, name: string) => `https://github.com/w00zla/quartermaster/releases/download/${tag}/${name}`;
+    assert.ok(table.includes(`| **Quartermaster (singleuser)** | **[Installer](${url('app-v1.0.0', 'Quartermaster_1.0.0_x64-setup.exe')})** | **[AppImage](${url('app-v1.0.0', 'Quartermaster_1.0.0_amd64.AppImage')})** |`));
+    for (const name of ['Quartermaster-Companion_2.1.0_x64-setup.exe', 'Quartermaster-Companion_2.1.0_x64-standalone.zip', 'Quartermaster-Companion_2.1.0_amd64.AppImage', 'Quartermaster-Companion_2.1.0_amd64.deb', 'Quartermaster-Companion-2.1.0-1.x86_64.rpm']) {
+      assert.ok(table.includes(url('companion-v2.1.0', name)), name);
+    }
+    assert.ok(!table.includes('beta'), 'a channel release is not in the block');
+  });
+
+  it('replaces only the block, is stable on a second run and refuses a README without one', () => {
+    const json = empty();
+    pointAt(json, 'app-v1.0.0');
+    const once = replaceDownloads(block('old table'), downloadsTable(json));
+    assert.ok(once.startsWith('# Title\n\n<div id="release_dls">\n\n| | Windows | Linux |'));
+    assert.ok(once.endsWith('\n\n</div>\n\nMore text.\n'));
+    assert.ok(!once.includes('old table'));
+    assert.equal(replaceDownloads(once, downloadsTable(json)), once);
+    assert.throws(() => replaceDownloads('# no block\n', 'x'), /no downloads block/);
+  });
+
+  it('the script edits the README file and says when nothing changed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'qm-readme-'));
+    const channels = join(dir, 'channels.json');
+    const readme = join(dir, 'README.md');
+    writeFileSync(readme, block('old table'));
+    const run = () => execFileSync(process.execPath, [join(root, 'scripts', 'readme-downloads.mjs'), channels, readme], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    execFileSync(process.execPath, [join(root, 'scripts', 'channels-set.mjs'), 'companion-v2.1.0', channels], { stdio: 'ignore' });
+    assert.match(run(), /rewritten/);
+    assert.ok(readFileSync(readme, 'utf8').includes('companion-v2.1.0/Quartermaster-Companion_2.1.0_amd64.deb'));
+    assert.match(run(), /unchanged/);
+  });
+
+  it("the repository's README has the downloads block", () => {
+    const readme = readFileSync(join(root, 'README.md'), 'utf8');
+    assert.doesNotThrow(() => replaceDownloads(readme, 'x'));
   });
 });
 

@@ -13,7 +13,7 @@ const DATA_TAG = /^data-([A-Za-z0-9][A-Za-z0-9._+-]*)-([1-9][0-9]*)$/;
 
 /** The two desktop apps: tag prefix, the product name in the bundles' file names (spaces turned into `-`) and the title. */
 export const PRODUCTS = {
-  app: { prefix: 'app-v', bundle: 'Quartermaster', title: 'Quartermaster' },
+  app: { prefix: 'app-v', bundle: 'Quartermaster', title: 'Quartermaster (singleuser)' },
   companion: { prefix: 'companion-v', bundle: 'Quartermaster-Companion', title: 'Quartermaster Companion' },
 };
 
@@ -59,6 +59,47 @@ export function compareData(a, b) {
 export function assetNames(product, version) {
   const { bundle } = PRODUCTS[product];
   return { windows: `${bundle}_${version}_x64-setup.exe`, linux: `${bundle}_${version}_amd64.AppImage` };
+}
+
+/**
+ * Every file a stable release offers for download, by platform, as the README's downloads block links them: the
+ * updater's installer and AppImage first, then the companion's standalone zip (Windows) and its distribution packages
+ * (Linux). `[{ label, name }]` per platform.
+ */
+export function downloads(product, version) {
+  const { bundle } = PRODUCTS[product];
+  const main = assetNames(product, version);
+  const windows = [{ label: 'Installer', name: main.windows }];
+  const linux = [{ label: 'AppImage', name: main.linux }];
+  if (product === 'companion') {
+    windows.push({ label: 'Standalone', name: `${bundle}_${version}_x64-standalone.zip` });
+    linux.push({ label: 'deb', name: `${bundle}_${version}_amd64.deb` }, { label: 'rpm', name: `${bundle}-${version}-1.x86_64.rpm` });
+  }
+  return { windows, linux };
+}
+
+// The README's downloads block: everything between these two lines is generated (readme-downloads.mjs)
+const BLOCK_START = '<div id="release_dls">';
+const BLOCK_END = '</div>';
+
+/** The downloads block's table: one row per app, its stable release's files (the first in bold); "not released yet" without one. */
+export function downloadsTable(json) {
+  const rows = Object.entries(PRODUCTS).map(([product, { prefix, title }]) => {
+    const tag = json[product].stable;
+    if (!tag) return `| **${title}** | not released yet | not released yet |`;
+    const { windows, linux } = downloads(product, tag.slice(prefix.length));
+    const cell = (files) => files.map((f, i) => (i === 0 ? `**[${f.label}](${releaseUrl(tag, f.name)})**` : `[${f.label}](${releaseUrl(tag, f.name)})`)).join(' · ');
+    return `| **${title}** | ${cell(windows)} | ${cell(linux)} |`;
+  });
+  return ['| | Windows | Linux |', '| --- | --- | --- |', ...rows].join('\n');
+}
+
+/** The README with its downloads block replaced by `table`; an error when the block's lines are missing. */
+export function replaceDownloads(readme, table) {
+  const start = readme.indexOf(BLOCK_START);
+  const end = start < 0 ? -1 : readme.indexOf(BLOCK_END, start);
+  if (start < 0 || end < 0) throw new Error(`the README has no downloads block (${BLOCK_START} … ${BLOCK_END})`);
+  return `${readme.slice(0, start + BLOCK_START.length)}\n\n${table}\n\n${readme.slice(end)}`;
 }
 
 export const releaseUrl = (tag, asset = '') => `https://github.com/${REPO}/releases/download/${tag}${asset ? `/${asset}` : ''}`;
