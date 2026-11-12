@@ -629,7 +629,7 @@ the error colour; double click maximizes, the shell's doing); where the app bar 
 `TitleBar.vue` gives a bar with the buttons alone; `WindowEdges.vue` puts eight invisible 6 px strips along the edges (none while
 maximized). The settings window has `TitleBar.vue` with its title and the close button, no edges.
 
-**The app footer and the update dialog.** The footer's right end (after a divider: the app logo, the GitHub link) is the same in both variants (2026-11-12); online it has no version. With `login: 'none'` the app version follows the logo (mono, 22 px high). Where the shell
+**The app footer and the update dialog.** The footer ends in both variants with the GitHub link after a divider (2026-11-12); online without the app logo and the version. With `login: 'none'` the app version follows the logo (mono, 22 px high). Where the shell
 offers updates it is a button opening the dialog and a mark (the download arrow in the accent colour; its room is kept when empty) follows
 it while a version was found (`available`, `downloading`, `installing`); in a browser the version is plain text. The dialog
 (`UpdateDialog.vue`, "App Update"; also opened by the bold notice's button and the App group's "App Update" button in the settings,
