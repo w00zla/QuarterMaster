@@ -3114,7 +3114,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "quartermaster-companion"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "base64 0.21.7",
  "image",
@@ -3549,7 +3549,8 @@ dependencies = [
 
 [[package]]
 name = "sc-ohseearr-capture-win"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "image",
  "log",
@@ -3558,7 +3559,8 @@ dependencies = [
 
 [[package]]
 name = "sc-ohseearr-core"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "fast_image_resize",
  "image",
@@ -3570,7 +3572,8 @@ dependencies = [
 
 [[package]]
 name = "sc-ohseearr-gear-inventory"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "image",
  "sc-ohseearr-core",
@@ -3580,7 +3583,8 @@ dependencies = [
 
 [[package]]
 name = "sc-ohseearr-mining-hud"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "image",
  "sc-ohseearr-core",
@@ -3590,28 +3594,32 @@ dependencies = [
 
 [[package]]
 name = "sc-ohseearr-model-paddle-det-tiny"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "sc-ohseearr-core",
 ]
 
 [[package]]
 name = "sc-ohseearr-model-sc-rec-latin"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "sc-ohseearr-core",
 ]
 
 [[package]]
 name = "sc-ohseearr-model-sc-warehouse-layout"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "sc-ohseearr-core",
 ]
 
 [[package]]
 name = "sc-ohseearr-refinery"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "image",
  "sc-ohseearr-core",
@@ -3621,7 +3629,8 @@ dependencies = [
 
 [[package]]
 name = "sc-ohseearr-sc"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "image",
  "log",
@@ -3631,7 +3640,8 @@ dependencies = [
 
 [[package]]
 name = "sc-ohseearr-warehouse"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/w00zla/sc-ohseearr?tag=v0.2.0#421c02e6b55420038b4702c8d1a80d12d0b6e860"
 dependencies = [
  "image",
  "sc-ohseearr-core",
