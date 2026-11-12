@@ -197,7 +197,7 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
 - Bump the version in `src-tauri/Cargo.toml` (bundle names and the header use it), build per platform:
   Windows `pnpm companion:build` (`build:windows`) gives the setup (with `DirectML.dll` next to the exe, from
   `pnpm directml`) `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and
-  `target/release/quartermaster-companion.exe`; Linux the AppImage. The build needs network access for the OCR
+  `target/release/quartermaster-companion.exe` (the standalone zip's, with `DirectML.dll`); Linux the AppImage, the `.deb` and the `.rpm`. The build needs network access for the OCR
   crates (git, by tag) and nothing next to this repository. All of it runs through `scripts/build.mjs`; with
   `TAURI_SIGNING_PRIVATE_KEY` set it also makes the updater's artifacts ("Updates and channels").
 - The server hosts no companion files: the downloads are the GitHub releases of this repository
