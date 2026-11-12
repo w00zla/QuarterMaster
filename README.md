@@ -23,7 +23,7 @@ straight from the game, so there is little to type.
 | | Windows | Linux |
 | --- | --- | --- |
 | **Quartermaster (singleuser)** | **[Installer](https://github.com/w00zla/quartermaster/releases/download/app-v1.0.0/Quartermaster_1.0.0_x64-setup.exe)** | **[AppImage](https://github.com/w00zla/quartermaster/releases/download/app-v1.0.0/Quartermaster_1.0.0_amd64.AppImage)** |
-| **Quartermaster Companion** | **[Installer](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_x64-setup.exe)** · [Standalone](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_x64-standalone.zip) | **[AppImage](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_amd64.AppImage)** |
+| **Quartermaster Companion** | **[Installer](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_x64-setup.exe)** · [Standalone](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_x64-standalone.zip) | **[AppImage](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_amd64.AppImage)** · [deb](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_amd64.deb) · [rpm](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion-2.1.0-1.x86_64.rpm) |
 
 </div>
 
