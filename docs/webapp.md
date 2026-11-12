@@ -364,7 +364,7 @@ blocks".
   head: count, systems, rank span, best chance), every row listed (title with the game's placeholders as "…",
   rank, systems · bound place, markers Kette/Illegal/Annahme/event, chance), the list scrolls inside with a
   sticky head row; event tiers with event, points and chance. Wording in `webapp/src/unlocks.ts`.
-- **Crafting** (the third tab bar, the tools, with Bergbau and Kaufen/Verkaufen; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`, plan in
+- **Crafting** (the third tab bar, the tools, with Bergbau and Kaufen/Verkaufen; the overview has a bar of its own, the data views the second): `CraftingView`, `CraftingPicker`, `PlanEntryCard`; built like Bergbau and Kaufen/Verkaufen (2026-11-12): the tile's head with icon and name only, then a section whose bar holds the label "Blueprints prüfen" ("Check blueprints", blueprint icon), the picker and, at the right, "Leeren"; plan in
   localStorage `qm.webapp.crafting`; the planner's warnings are codes with values (`PlanWarning`), worded by
   `warningText` in `webapp/src/crafting.ts`. Each card has a count (1–99) and per slot a quality slider and
   field that stop at the slot's minimum (`withQualityFloor`; the track keeps the full 0–1000 scale). Below the

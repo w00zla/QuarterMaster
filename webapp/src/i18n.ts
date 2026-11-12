@@ -294,6 +294,7 @@ const en = {
   "filter.allMembers": "All members",
 
   "crafting.title": "Crafting",
+  "crafting.check": "Check blueprints",
   "crafting.clear": "Clear",
   "crafting.empty": "Pick blueprints to check what they need",
   "crafting.missing": "A blueprint that is not in the catalog",
@@ -803,6 +804,7 @@ const de: Record<Key, string> = {
   "filter.allMembers": "Alle Mitglieder",
 
   "crafting.title": "Herstellung",
+  "crafting.check": "Blueprints prüfen",
   "crafting.clear": "Leeren",
   "crafting.empty": "Wähl Baupläne, um zu prüfen, was sie brauchen",
   "crafting.missing": "Ein Bauplan, der nicht im Katalog ist",

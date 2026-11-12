@@ -118,11 +118,19 @@ function setCount(entry: PlanEntry, n: number) {
       <div class="head">
         <Icon name="crafter" :size="16" />
         <span class="head-title no-grow">{{ t("crafting.title") }}</span>
-        <div class="divider head-divider" />
-        <CraftingPicker class="head-picker" @add="add" />
         <div class="spacer" />
-        <button type="button" class="btn outline small" :disabled="!checks.length" @click="checks = []"><Icon name="trash" :size="14" /> {{ t("crafting.clear") }}</button>
       </div>
+
+      <!-- As Mining's and Buy/Sell's: the tile's head with the view's name, then a section with its bar (label, picker, actions) -->
+      <section class="section">
+        <div class="section-bar">
+          <Icon name="blueprint" :size="14" />
+          <span class="panel-title">{{ t("crafting.check") }}</span>
+          <div class="divider bar-divider" />
+          <CraftingPicker class="section-picker" @add="add" />
+          <div class="spacer" />
+          <button type="button" class="btn outline small" :disabled="!checks.length" @click="checks = []"><Icon name="trash" :size="14" /> {{ t("crafting.clear") }}</button>
+        </div>
 
       <div class="entries">
         <div v-if="!checks.length" class="empty-line">{{ t("crafting.empty") }}</div>
@@ -146,6 +154,7 @@ function setCount(entry: PlanEntry, n: number) {
           <div v-else-if="!recipes.error.value" class="empty-line">{{ t("common.loading") }}</div>
         </template>
       </div>
+      </section>
     </section>
   </div>
 </template>
@@ -162,20 +171,35 @@ function setCount(entry: PlanEntry, n: number) {
   font-size: 13px;
 }
 
-.entries {
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding: 16px;
+}
+
+.section-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.entries {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-/* Phones: the picker gets a row of its own below the title and Clear */
+/* Phones: the picker gets a row of its own below the label and Clear */
 @media (max-width: 640px) {
-  .head-divider {
+  .bar-divider {
     display: none;
   }
 
-  .head-picker {
+  .section-picker {
     order: 10;
     flex-basis: 100%;
   }
