@@ -115,7 +115,9 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 - `GET /api/companion/catalog?lang` (2026-11-01): the companion app's catalog, the same rows (same order) with
   only the fields it reads (`CompanionCatalogResponse`, `Pick`s of the types above): materials without unit
   (follows from `kind`), class and `minable`; locations without yields; blueprints with uuid, label, name,
-  size, grade letter, `isDefault`, `retired`, `outputUuid`, `thumb`. Cached like `/api/catalog` (`private,
+  size, grade letter, `isDefault`, `retired`, `outputUuid`, `thumb`; since 2026-11-10 `rocks`, the rock kinds with a radar
+  signature (`CompanionCatalogRock`: resource uuid and name, method, rarity, one node's signature; `catalog.mineable_rock`, an
+  older companion ignores it) for the companion's signature scan. Cached like `/api/catalog` (`private,
   no-cache`, ETag). Session or API token like every route.
   Size per language (dev DB, 2026-11-01): ~2.45 MB instead of ~2.95 MB raw, gzip ~340 instead of ~360 KB
   (the components with their stats are most of it and the companion needs them). Gzipped by the server when the

@@ -28,7 +28,7 @@ import { materialTrade } from '../ext/trade.ts';
 import { loadUnlocks, registerUnlockRoutes, unlockSummary } from './unlocks.ts';
 import { registerMiningRoutes } from './mining.ts';
 import { registerFeatureRoutes } from './features.ts';
-import { minableUuids } from './mining-query.ts';
+import { minableUuids, rockSignatures } from './mining-query.ts';
 import { unlockableBlueprints } from './unlock-query.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CompanionCatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
@@ -313,6 +313,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
         outputUuid: e.outputUuid, thumb: (e.outputUuid && thumb.get(e.outputUuid)) ?? null,
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
+      rocks: await rockSignatures(db, lang),
     } satisfies CompanionCatalogResponse);
   });
 

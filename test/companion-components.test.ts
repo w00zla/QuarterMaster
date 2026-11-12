@@ -42,7 +42,7 @@ function responses(): CompanionCatalogResponse[] {
     { uuid: '00000000-0000-4000-8000-0000000000f1', kind: 'resource', name: 'Blizzard', nameKey: null, type: null, typeLabel: null, component: false, label: 'Blizzard', size: null, gradeLetter: null, stats: [], thumb: null },
   ];
   const de = en.map((m) => ({ ...m, stats: m.stats.map((s) => ({ ...s, name: s.uuid === COOLANT ? 'Kühlleistung' : s.uuid === HEALTH ? 'Integrität' : s.name })) }));
-  const base: Omit<CompanionCatalogResponse, 'materials'> = { locations: [], blueprints: [] };
+  const base: Omit<CompanionCatalogResponse, 'materials'> = { locations: [], blueprints: [], rocks: [] };
   return [{ ...base, materials: en }, { ...base, materials: de }];
 }
 
@@ -245,7 +245,7 @@ describe('FPS gear', () => {
   const item = (uuid: string, name: string, type: string, stats: CatalogStat[]): CompanionCatalogResponse['materials'][number] => ({
     uuid, kind: 'item', name, nameKey: null, type, typeLabel: type, component: true, label: name, size: null, gradeLetter: null, stats, thumb: null,
   });
-  const base: Omit<CompanionCatalogResponse, 'materials'> = { locations: [], blueprints: [] };
+  const base: Omit<CompanionCatalogResponse, 'materials'> = { locations: [], blueprints: [], rocks: [] };
   const cat = buildComponentCatalog([{ ...base, materials: [
     item(CQ7, 'CQ7 Rifle', 'WeaponPersonal', [
       fpsStat(DAMAGE, 'Impact Force', null, 'change', 0, 7.5), fpsStat(FIRE_RATE, 'Fire Rate', 650, 'value', 0, 12),

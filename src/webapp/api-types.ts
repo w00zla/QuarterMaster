@@ -172,10 +172,21 @@ export type CompanionCatalogLocation = Pick<CatalogLocation, 'uuid' | 'key' | 'l
 export type CompanionCatalogBlueprint = Pick<CatalogBlueprint,
   'uuid' | 'label' | 'name' | 'size' | 'gradeLetter' | 'isDefault' | 'retired' | 'outputUuid' | 'thumb'>;
 
+// A rock kind with its radar signature for one node (a ship's scan shows it times the cluster's nodes): the resource
+// it is named after (an ore, not bookable: by name), the mining method, the rarity (ship rocks)
+export interface CompanionCatalogRock {
+  resourceUuid: string;
+  name: string;
+  method: 'ship' | 'roc' | 'fps';
+  rarity: string | null;
+  radarSignature: number;
+}
+
 export interface CompanionCatalogResponse {
   materials: CompanionCatalogMaterial[];
   locations: CompanionCatalogLocation[];
   blueprints: CompanionCatalogBlueprint[];
+  rocks: CompanionCatalogRock[];
 }
 
 // --- the companion app's English texts (GET /api/companion/locale) -----------------------------------

@@ -1,5 +1,6 @@
-// Reads for the mining data (catalog.mining_provider, catalog.mineable): what is mined where, the mined
-// resources with their refined material and item, and the star map objects' parents.
+// Reads for the mining data (catalog.mining_provider, catalog.mineable, catalog.mineable_rock): what is mined
+// where, the mined resources with their refined material and item, the rock kinds' radar signatures, and the star
+// map objects' parents.
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
@@ -51,6 +52,23 @@ export const minedResources = importCache(async (db: Db, lang: string) => rows<M
   JOIN catalog.resource r ON r.uuid = m.resource_uuid
   LEFT JOIN catalog.resource f ON f.uuid = r.refined_uuid
   GROUP BY r.uuid, f.uuid`));
+
+export interface RockSignatureRow {
+  resourceUuid: string;
+  name: string;
+  method: 'ship' | 'roc' | 'fps';
+  rarity: string | null;
+  radarSignature: number;
+}
+
+/** The rock kinds with a radar signature (one node's), named after their resource, by name, method and rarity. */
+export const rockSignatures = importCache(async (db: Db, lang: string) => rows<RockSignatureRow>(db, sql`
+  SELECT k.resource_uuid AS "resourceUuid", coalesce(${locText(lang, sql`r.name_key`)}, r.key) AS name, k.method, k.rarity,
+    k.radar_signature::float8 AS "radarSignature"
+  FROM catalog.mineable_rock k
+  JOIN catalog.resource r ON r.uuid = k.resource_uuid
+  WHERE k.radar_signature IS NOT NULL
+  ORDER BY name, k.method, k.rarity`));
 
 /** Every uuid the mining data answers for (mined and refined resources, items); language-independent. */
 const minableSet = importCache(async (db: Db) => new Set((await rows<{ uuid: string }>(db, sql`
