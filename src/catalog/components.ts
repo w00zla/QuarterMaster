@@ -80,11 +80,10 @@ export function isShopItem(type: string | null | undefined, subType: string | nu
   return !rule.paths || rule.paths.some((p) => path.includes(p));
 }
 
-/** SQL condition: the catalog.item row `alias` is a shop item. The extract stores exactly these without a raw
- * record (normalize.ts); the type rule alone does not tell, Misc counts only under the carryables' paths, which
- * the DB does not keep (a harvestable under carryables/ is a recipe input with its raw record). */
-export const shopItemSql = (alias: string): string =>
-  `NOT EXISTS (SELECT 1 FROM catalog.raw_record shop_r WHERE shop_r.uuid = ${alias}.uuid)`;
+/** SQL condition: the catalog.item row `alias` is a shop item. The extractor decides (snapshot `shop`, column `is_shop`); the
+ * type rule alone does not tell, Misc counts only under the carryables' paths, which the DB does not keep (a harvestable
+ * under carryables/ is a recipe input, no shop item). The extract stores shop items without a raw record. */
+export const shopItemSql = (alias: string): string => `${alias}.is_shop`;
 
 /** SQL condition: the catalog.item row `alias` has an FPS gear type (as isFpsType). */
 export const fpsTypeSql = (alias: string): string => `(${Object.entries(FPS_TYPES).map(([type, subTypes]) =>

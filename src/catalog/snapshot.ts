@@ -2,7 +2,7 @@
 // Bump SNAPSHOT_SCHEMA_VERSION on any incompatible change.
 import { z } from 'zod';
 
-export const SNAPSHOT_SCHEMA_VERSION = 6;
+export const SNAPSHOT_SCHEMA_VERSION = 7;
 
 // Game record ids are UUID-shaped but not necessarily RFC-compliant
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -63,6 +63,13 @@ export const itemSchema = z.object({
   manufacturerUuid: uuid.nullable(),
   nameKey: locKey,
   descriptionKey: locKey,
+  // A shop item (components.ts SHOP_TYPES): catalog-only, stored without a raw record
+  shop: z.boolean(),
+  // Harvestables: SCU one piece takes in an inventory (null: none or not a harvestable)
+  scuPerPiece: z.number().nullable(),
+  // Crafted property key -> the unmodified value as the game's tooltip shows it, for every property the
+  // item's record holds one for (src/stock/component-base.ts)
+  baseStats: z.record(z.string(), z.number()),
 });
 
 export const blueprintCategorySchema = z.object({
@@ -122,6 +129,8 @@ export const blueprintSchema = z.object({
   categoryUuid: uuid.nullable(),
   outputItemUuid: uuid.nullable(),
   isDefault: z.boolean(),
+  // Some blueprint reward pool hands it out
+  inRewardPool: z.boolean(),
   tiers: z.array(blueprintTierSchema),
 });
 
@@ -174,6 +183,10 @@ export const locationSchema = z.object({
   navIcon: z.string().nullable(),
   hideInStarmap: z.boolean(),
   respawnLocationType: z.string().nullable(),
+  // The record lists the amenity "Commodity Trading - Freight Elevator"
+  freightElevator: z.boolean(),
+  // A refinery is here (not filled yet: false)
+  refinery: z.boolean(),
 });
 
 // What can be mined where: a harvestable provider preset (the spawn table of a planet, moon or asteroid
@@ -221,10 +234,13 @@ export const snapshotSchema = z.object({
   }),
   extractor: z.object({ version: z.string(), starbreaker: z.string() }),
   extractedAt: z.iso.datetime(),
+  // Crafting rules of the game (CraftingGlobalParams); null: the record is missing
+  crafting: z.object({ defaultCompositionQuality: z.number().int().nullable() }),
   anomalies: z.array(anomalySchema),
   // Language code -> loc key (lower case, without '@') -> text; complete global.ini per shipped language
   localization: z.record(z.string(), z.record(z.string(), z.string())),
-  rawRecords: z.array(rawRecordSchema),
+  // Absent = none: the data pack's slim snapshot (docs/singleuser.md) leaves them out
+  rawRecords: z.array(rawRecordSchema).default([]),
   resources: z.array(resourceSchema),
   manufacturers: z.array(manufacturerSchema),
   items: z.array(itemSchema),

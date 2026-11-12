@@ -1,12 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main, the debug and the overlay window",
-  "windows": ["main", "debug", "overlay"],
+  "description": "Capability for the main, the settings, the debug and the overlay window",
+  "windows": ["main", "settings", "debug", "overlay"],
   "permissions": [
     "core:default",
     "dialog:allow-open",
-    "dialog:allow-save",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",

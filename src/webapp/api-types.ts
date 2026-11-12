@@ -10,10 +10,11 @@ export interface MeOrg {
 
 export interface MeResponse {
   userId: string;
-  // Discord display name (global name, else username) and username, as of the last login
-  name: string;
-  username: string;
-  avatarUrl: string;
+  // Discord display name (global name, else username) and username, as of the last login; avatar: the Discord avatar
+  // URL. All three are null for a user without a Discord profile (the singleuser variant's local user)
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
   // Active memberships only
   orgs: MeOrg[];
   // Star Citizen account name, shown to the user's orgs; null = not set
@@ -26,6 +27,36 @@ export interface MeResponse {
 }
 
 export type Lang = 'de' | 'en';
+
+// --- capabilities (GET /api/capabilities, the one API route without a login) -----------------------
+// What this server offers; the SPA and the companion ask before anything else.
+/** What a server offers, as its composition root states it (`WebappConfig.capabilities`). */
+export interface ServerCapabilities {
+  // How a user gets in: 'discord' = the Discord login (/auth/login, sessions, API tokens for the companion);
+  // 'none' = no login at all, every request is the one local user's (no /auth/*, no /api/token)
+  login: 'discord' | 'none';
+  // Orgs exist: the org routes (/api/orgs/…) and org scopes
+  orgs: boolean;
+  // UEX trading data (prices, terminals) is offered
+  uex: boolean;
+}
+
+/**
+ * The companion app's API contract number: what a companion built from this tree sends in `X-QM-Companion-Api`, and
+ * for a server its maximum (the number it was built with). Raised when the contract changes in a way an older
+ * companion cannot follow (or, the other way round, a newer companion needs something an older server lacks).
+ */
+export const COMPANION_API = 1;
+/** The oldest contract number a server still accepts from a companion; never above COMPANION_API. */
+export const COMPANION_API_MIN = 1;
+
+/** The answer of GET /api/capabilities: the server's capabilities and the installed game data. */
+export interface Capabilities extends ServerCapabilities {
+  // The latest catalog import's game version (label `4.10.2.12913470`, and its build number); null = no catalog installed
+  game: { label: string | null; build: number } | null;
+  // The companion contract numbers this server accepts: `min` (COMPANION_API_MIN) to `max` (COMPANION_API)
+  companionApi: { min: number; max: number };
+}
 
 // --- errors -----------------------------------------------------------------------------------
 // Every non-2xx answer: { error: code }. Stock codes as in src/stock/service.ts (StockErrorCode);
@@ -95,10 +126,8 @@ export interface CatalogLocation {
   short: string;
   // The game's localization key of the name (lower case), as for materials
   nameKey: string | null;
-  // Has a refinery (per UEX; every location while there is no UEX data yet)
+  // Has a refinery (the catalog's flag; every location while none is flagged yet)
   refinery: boolean;
-  // Refinery yield bonus in % per refined material UUID (per UEX, reported per ore; only those UEX reports for this refinery)
-  yields: Record<string, number>;
 }
 
 export interface CatalogBlueprint {
@@ -148,6 +177,10 @@ export interface CompanionCatalogResponse {
   locations: CompanionCatalogLocation[];
   blueprints: CompanionCatalogBlueprint[];
 }
+
+// --- the companion app's English texts (GET /api/companion/locale) -----------------------------------
+// text/plain, the lines `key=value` of a global.ini (a line break in a value as the literal `\n`): the game's own
+// English texts only. ETag, gzip when accepted; 404 `{ error: 'noCatalog' }` without an installed catalog.
 
 // --- stock -------------------------------------------------------------------------------------
 // All take &lang=de|en for material and location names and answer StockListResponse.
@@ -663,8 +696,9 @@ export interface ProfileRequest {
 // GET  /api/token -> ApiTokenInfo       (session only, 403 'sessionOnly' with a token)
 // POST /api/token -> ApiTokenCreated    creates the token, replacing an existing one; shown only here
 // With "Authorization: Bearer <token>" every other /api route works as the user. The companion app
-// also sends its version in X-QM-Companion; older than the server's release (or missing, while the
-// server has one) = 426 CompanionOutdated for every token request.
+// also sends its contract number in X-QM-Companion-Api (and its app version in X-QM-Companion, for logs):
+// a number below COMPANION_API_MIN or none = 426 CompanionOutdated, above COMPANION_API = 409 ServerOutdated,
+// for every token request (before the token is checked).
 
 export interface ApiTokenInfo {
   // null = no token
@@ -676,32 +710,19 @@ export interface ApiTokenCreated {
   token: string;
 }
 
-// --- companion app release (GET /api/companion; files at GET /downloads/companion/<file>, session or API token;
-// the installed app's update feed at GET /downloads/companion/latest.json, Tauri updater format)
-export type CompanionPlatform = 'windows' | 'linux';
-
-export interface CompanionDownload {
-  platform: CompanionPlatform;
-  // setup = the installed app (Windows, updates itself); standalone = the bare exe zipped, the AppImage
-  kind: 'setup' | 'standalone';
-  file: string;
-  // Bytes
-  size: number;
-  // Path on this server
-  url: string;
-}
-
-export interface CompanionInfo {
-  // null = the server has no release
-  version: string | null;
-  downloads: CompanionDownload[];
-}
-
+// --- companion API contract check (every companion request, any /api route but capabilities) ---------
+/** 426: the companion's contract number is missing or below the server's minimum. */
 export interface CompanionOutdated {
   error: 'companionOutdated';
-  version: string;
-  // Absolute URLs per platform
-  downloads: Partial<Record<CompanionPlatform, string>>;
+  // COMPANION_API_MIN
+  apiMin: number;
+}
+
+/** 409: the companion's contract number is above the server's maximum. */
+export interface ServerOutdated {
+  error: 'serverOutdated';
+  // COMPANION_API
+  apiMax: number;
 }
 
 // --- history (GET /api/history?lang&before&after&source&category&action&by) ------------------------
@@ -837,3 +858,102 @@ export type ServerMessage =
   | { type: 'pong' };
 
 export type ClientMessage = { type: 'ping' };
+
+// --- singleuser: the game data update (GET /api/local/data, docs/singleuser.md "Updating the data") ---
+
+/** Why an update failed, in a few classes; the details are in the log. */
+export type DataUpdateFailure = 'corrupt' | 'invalid' | 'unsupported' | 'fileMissing' | 'internal';
+
+export type DataUpdateOutcome =
+  | { outcome: 'upToDate' | 'noChannel' | 'offline' }
+  | { outcome: 'installed'; tag: string }
+  // The pack's catalog format is not the app's: nothing was installed, the app must be updated (`pack`: the pack is newer or older)
+  | { outcome: 'appTooOld'; tag: string; pack: 'newer' | 'older' }
+  | { outcome: 'failed'; reason: DataUpdateFailure };
+
+/** The state of the data update, kept in memory: reading it never touches the database. */
+export interface DataUpdateState {
+  phase: 'idle' | 'checking' | 'downloading' | 'installing';
+  /** The installed data pack; null = none. */
+  installed: { tag: string; gameLabel: string } | null;
+  /** Bytes of the files being downloaded; null when nothing is downloading. */
+  progress: { done: number; total: number } | null;
+  /** The last finished operation; null = none since the start. `at` is an ISO time. */
+  last: ({ at: string } & DataUpdateOutcome) | null;
+}
+
+/** POST /api/local/data/import: a full data pack file on this machine. */
+export interface DataImportRequest {
+  path: string;
+}
+
+// --- singleuser: the settings and the game folder (GET/PUT /api/local/settings, docs/singleuser.md "Settings") ---
+
+/** What is wrong with a game folder: not a folder, or one of the two required files is missing. */
+export type GameFolderProblem = 'notFolder' | 'noDataP4k' | 'noBuildManifest';
+
+/** Why there is no language pack. `noUserCfg`, `noLanguage` and `builtInEnglish` are the normal English case. */
+export type LanguagePackProblem = 'noUserCfg' | 'noLanguage' | 'builtInEnglish' | 'iniMissing' | 'iniUnreadable' | 'iniEmpty';
+
+export interface GameFolderState {
+  state: 'unset' | 'invalid' | 'ok';
+  problem?: GameFolderProblem;
+  /** The game version (`4.10.2.12913470`); absent when the folder is not ok or its manifest is unreadable. */
+  gameVersion?: string;
+}
+
+/** The player's language pack as read at start. `none` = the game's English (nothing to report), `problem` = a pack was expected and is unusable. */
+export interface LanguagePackState {
+  state: 'none' | 'loaded' | 'problem';
+  language?: string;
+  /** A loaded pack's `global.ini`, relative to the game folder, with forward slashes (`data/Localization/<language>/global.ini`). */
+  file?: string;
+  /** Number of texts of a loaded pack. */
+  texts?: number;
+  /** A loaded pack is in effect: its texts show instead of the game's English (`loaded` and `active`: "active with N texts in language X"). */
+  active?: boolean;
+  problem?: LanguagePackProblem;
+  /** The game folder changed since the start: the pack is read again at the next start only. */
+  pending: boolean;
+}
+
+export interface LocalSettingsState {
+  gameDir: string | null;
+  autoUpdate: boolean;
+  /** The UEX key is never sent back: only whether one is set (settings file or QM_UEX_KEY). */
+  uexKeySet: boolean;
+  /** Minutes between two UEX pulls: 15, 30 or 60. */
+  uexIntervalMinutes: 15 | 30 | 60;
+  /** Values the environment overrides (development): they cannot be changed here. `uexIntervalMinutes` is never overridden. */
+  overridden: { gameDir: boolean; autoUpdate: boolean; uexKey: boolean; uexIntervalMinutes: boolean };
+  /** The app's own version (package.json). */
+  appVersion: string;
+  gameFolder: GameFolderState;
+  languagePack: LanguagePackState;
+}
+
+/** PUT /api/local/settings: only the values to change. */
+export interface LocalSettingsUpdate {
+  gameDir?: string | null;
+  autoUpdate?: boolean;
+  /** The user's own UEX key; null or an empty string removes it. */
+  uexKey?: string | null;
+  uexIntervalMinutes?: 15 | 30 | 60;
+}
+
+// --- singleuser: the UEX pull (GET /api/local/uex, docs/singleuser.md "UEX") ---
+
+export type UexOutcome = 'ok' | 'refused' | 'offline' | 'failed';
+
+/**
+ * The state of the UEX pull, kept in memory. `off` = no key (nothing is ever requested), `idle` = waiting for `nextPull`,
+ * `pulling`. The times are ISO strings; `lastPull` is when the last pull started, `last.at` when it ended. `refused` =
+ * UEX does not accept the key, `offline` = no answer, `failed` = anything else (details in the log); `changed` = the
+ * number of endpoints whose data changed.
+ */
+export interface UexState {
+  phase: 'off' | 'idle' | 'pulling';
+  lastPull: string | null;
+  nextPull: string | null;
+  last: { outcome: UexOutcome; at: string; changed?: number } | null;
+}

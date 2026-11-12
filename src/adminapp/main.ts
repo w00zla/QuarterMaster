@@ -96,7 +96,7 @@ api.get('/mining/:uuid', async (c) => {
   return found(c, id ? await getMiningProvider(db, id, lang(c)) : null);
 });
 api.get('/localization/sources', async (c) => c.json(await q.getLocSources(db)));
-api.get('/ext/uex', async (c) => c.json(await q.getUex(db, lang(c))));
+api.get('/ext/uex', async (c) => c.json(await q.getUex(db)));
 api.get('/ext/uex/trade', async (c) => c.json(await q.getUexTrade(db, lang(c))));
 api.get('/localization/search', async (c) => {
   const query = (c.req.query('q') ?? '').trim();
@@ -150,9 +150,6 @@ const flag = (c: Context, name: string) => c.req.query(name) === '1';
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 api.post('/import/catalog', requireWriteHeader, bodyLimit({ maxSize: 300 * MB }), async (c) => {
-  // The readable version (4.10.2) is required: snapshots carry none (set at import, not at extract)
-  const label = c.req.query('label')?.trim();
-  if (!label) return c.json({ error: 'label is required (the game version, e.g. 4.10.2)' }, 400);
   let loaded;
   try {
     loaded = loadSnapshot(new Uint8Array(await c.req.arrayBuffer()));
@@ -160,7 +157,6 @@ api.post('/import/catalog', requireWriteHeader, bodyLimit({ maxSize: 300 * MB })
     return c.json({ error: message(err) }, 400);
   }
   const { snapshot, sha256 } = loaded;
-  snapshot.game.label = label;
   const result = await runImport(db, snapshot, sha256, {
     dryRun: c.req.query('dryRun') !== '0',
     force: flag(c, 'force'),

@@ -2,8 +2,9 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
-import { connect, type Db } from '../src/db/client.ts';
-import { connectAs, prepareDb } from './roles.ts';
+import { type Db } from '../src/db/client.ts';
+import { connectUrl } from '../src/db/connect-url.ts';
+import { connectAs, PGLITE, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncGuild, syncMember, type MemberInfo } from '../src/bot/roster.ts';
@@ -98,10 +99,10 @@ describe('roster sync (database)', { skip: url ? false : 'TEST_DATABASE_URL not 
     assert.equal((await row(BOB))!.active, true);
   });
 
-  it('a concurrent first write keeps the user row, the member change still commits', async () => {
+  it('a concurrent first write keeps the user row, the member change still commits', { skip: PGLITE && 'needs a second connection; PGlite has one' }, async () => {
     const GINA = '720000000000000007';
     await syncMember(db, G, settings, GINA, info(GINA, [MEMBER_ROLE]));
-    const other = connect(url);
+    const other = connectUrl(url);
     try {
       let sync: Promise<string> | undefined;
       // The write holds a key lock on the user row until it commits; the roster's user delete waits

@@ -1,10 +1,10 @@
 //! Persistent app config (JSON in the app config dir, like BindSight's —
 //! `%APPDATA%\com.w00zla.quartermaster.companion\config.json` on Windows,
 //! `~/.config/com.w00zla.quartermaster.companion/config.json` on Linux): the
+//! connection (the online server or the Quartermaster app on this PC), the
 //! Quartermaster server, the user's API token, the SC channel folder whose
-//! `Game.log` is followed, the UI language, the automatic tab switch, the OCR on the GPU and the scan overlay's position, display and hotkeys. The server is fixed in the app; only a `server` entry
-//! in the file changes it (e.g. a dev server, read at start), the settings UI
-//! does not show it and saving never writes or overwrites that entry.
+//! `Game.log` is followed (in the local mode the app's folder comes first, `pairing.rs`), the UI language, the automatic tab switch, the OCR on the GPU, the scan overlay's position, display and hotkeys, and the updates (the switch and the chosen channel). The server defaults to the production
+//! one; the settings can set another (e.g. a server of one's own), and only then the file holds a `server` entry.
 
 use std::path::PathBuf;
 
@@ -29,6 +29,10 @@ fn default_server() -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    /// Which server the app talks to: "online" (`server` with `token`) or "local" (the Quartermaster app on
+    /// this PC, found through its pairing file: no token).
+    #[serde(default = "default_connection")]
+    pub connection: String,
     /// Where the web app runs (origin); missing or empty = the production server.
     #[serde(default = "default_server")]
     pub server: String,
@@ -62,6 +66,20 @@ pub struct Config {
     /// on fast CPUs it reads hardly faster and holds VRAM next to the game.
     #[serde(default)]
     pub gpu: bool,
+    /// Updates by themselves: with this on, a check at start installs a newer version at once (update.rs).
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
+    /// The update channel the user chose in the update dialog; empty = none (the build's own channel, else stable). Only
+    /// `update_set_channel` changes it (`set_config` keeps the stored one).
+    #[serde(default)]
+    pub update_channel: String,
+}
+
+pub const ONLINE: &str = "online";
+pub const LOCAL: &str = "local";
+
+fn default_connection() -> String {
+    ONLINE.into()
 }
 
 pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
@@ -87,6 +105,7 @@ fn default_true() -> bool {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            connection: default_connection(),
             server: default_server(),
             token: String::new(),
             game_dir: default_game_dir(),
@@ -97,18 +116,29 @@ impl Default for Config {
             hotkey_mode: String::new(),
             auto_tab: true,
             gpu: false,
+            auto_update: true,
+            update_channel: String::new(),
         }
     }
 }
 
 impl Config {
-    pub fn game_log(&self) -> PathBuf {
-        PathBuf::from(&self.game_dir).join("Game.log")
+    /// The game folder in use: in the local mode the paired app's (`paired`: its pairing file's `gameDir`, None
+    /// while unknown or not set there), else and online this config's own.
+    pub fn game_dir_with(&self, paired: Option<&str>) -> String {
+        match paired {
+            Some(dir) if self.connection == LOCAL => dir.to_string(),
+            _ => self.game_dir.clone(),
+        }
     }
+}
 
-    pub fn log_backups(&self) -> PathBuf {
-        PathBuf::from(&self.game_dir).join("logbackups")
-    }
+pub fn game_log(game_dir: &str) -> PathBuf {
+    PathBuf::from(game_dir).join("Game.log")
+}
+
+pub fn log_backups(game_dir: &str) -> PathBuf {
+    PathBuf::from(game_dir).join("logbackups")
 }
 
 fn config_path(app: &AppHandle) -> Option<PathBuf> {
@@ -136,25 +166,22 @@ fn parse(text: &str) -> Result<Config, serde_json::Error> {
     Ok(config)
 }
 
-/// Writes token and game folder; the file's `server` entry stays as it is (the default is never
-/// written, an edit of the file while the app runs is kept).
+/// Writes the config; the production server is never written (it stays a default: a later change of it in the app
+/// reaches everyone who did not set a server of their own).
 pub fn save(app: &AppHandle, config: &Config) -> Result<(), String> {
     let path = config_path(app).ok_or("no config dir")?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    let text = to_file(config, std::fs::read_to_string(&path).ok().as_deref())?;
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::write(&path, to_file(config)?).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The file's content: token and game folder of `config`, the `server` entry of the `current` file (if any).
-fn to_file(config: &Config, current: Option<&str>) -> Result<String, String> {
+/// The file's content: everything of `config`, the `server` entry only when it is not the production server.
+fn to_file(config: &Config) -> Result<String, String> {
     let mut value = serde_json::to_value(config).map_err(|e| e.to_string())?;
     let map = value.as_object_mut().ok_or("config is no object")?;
-    map.remove("server");
-    let server = current.and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok()).and_then(|v| v.get("server").cloned());
-    if let Some(server) = server {
-        map.insert("server".into(), server);
+    if config.server == DEFAULT_SERVER {
+        map.remove("server");
     }
     serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
 }
@@ -175,20 +202,37 @@ mod tests {
         // Missing in files written before it existed: on (the GPU off)
         assert!(c.auto_tab);
         assert!(!c.gpu);
+        // Updates: on, no channel chosen
+        assert!(c.auto_update);
+        assert_eq!(c.update_channel, "");
+        assert!(!parse(r#"{"autoUpdate":false}"#).unwrap().auto_update);
+        assert_eq!(parse(r#"{"updateChannel":"beta"}"#).unwrap().update_channel, "beta");
         assert_eq!(c.overlay_display, "thumbs");
+        // Files written before the local mode existed: online
+        assert_eq!(c.connection, ONLINE);
+        assert_eq!(parse(r#"{"connection":"local"}"#).unwrap().connection, LOCAL);
     }
 
     #[test]
-    fn saving_keeps_the_files_server_entry() {
+    fn the_paired_game_folder_only_in_the_local_mode() {
+        let online = Config { game_dir: "D:/SC/LIVE".into(), ..Config::default() };
+        let local = Config { connection: LOCAL.into(), ..online.clone() };
+        assert_eq!(online.game_dir_with(Some("F:/Games/LIVE")), "D:/SC/LIVE");
+        assert_eq!(local.game_dir_with(Some("F:/Games/LIVE")), "F:/Games/LIVE");
+        // Not set in the app (or the app not seen yet): the companion's own setting
+        assert_eq!(local.game_dir_with(None), "D:/SC/LIVE");
+    }
+
+    #[test]
+    fn saving_writes_only_a_server_of_ones_own() {
         let c = Config { token: "qmt_x".into(), game_dir: "D:/SC/LIVE".into(), language: "de".into(), ..Config::default() };
-        // No file or no entry: none written (the default stays a default)
-        for current in [None, Some("{}"), Some("not json")] {
-            let saved: serde_json::Value = serde_json::from_str(&to_file(&c, current).unwrap()).unwrap();
-            assert_eq!(saved.get("server"), None);
-            assert_eq!(parse(&saved.to_string()).unwrap(), c);
-        }
-        // An entry (e.g. edited while the app ran): kept, not the loaded server
-        let saved = parse(&to_file(&c, Some(r#"{"server":"http://localhost:5174","token":"old"}"#)).unwrap()).unwrap();
+        // The production server: not written (the default stays a default)
+        let saved: serde_json::Value = serde_json::from_str(&to_file(&c).unwrap()).unwrap();
+        assert_eq!(saved.get("server"), None);
+        assert_eq!(parse(&saved.to_string()).unwrap(), c);
+        // Another one (set in the settings): written and read back
+        let own = Config { server: "http://localhost:5174".into(), ..c.clone() };
+        let saved = parse(&to_file(&own).unwrap()).unwrap();
         assert_eq!(saved.server, "http://localhost:5174");
         assert_eq!(saved.token, "qmt_x");
         assert_eq!(saved.game_dir, "D:/SC/LIVE");
@@ -197,7 +241,8 @@ mod tests {
     #[test]
     fn paths_below_the_game_dir() {
         let c = Config { game_dir: "/games/sc/LIVE".into(), ..Config::default() };
-        assert_eq!(c.game_log(), PathBuf::from("/games/sc/LIVE/Game.log"));
-        assert_eq!(c.log_backups(), PathBuf::from("/games/sc/LIVE/logbackups"));
+        let dir = c.game_dir_with(None);
+        assert_eq!(game_log(&dir), PathBuf::from("/games/sc/LIVE/Game.log"));
+        assert_eq!(log_backups(&dir), PathBuf::from("/games/sc/LIVE/logbackups"));
     }
 }

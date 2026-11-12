@@ -13,6 +13,8 @@ import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { ensureGuild, updateGuildSettings, type GuildSettings } from '../src/bot/settings.ts';
 import type { ServerMessage } from '../src/webapp/api-types.ts';
+import type { DiscordLogin } from '../src/webapp/discord.ts';
+import { discordIdentity } from '../src/webapp/identity-discord.ts';
 import { CLOSE_SESSION_ENDED, RealtimeHub, listenForChanges } from '../src/webapp/realtime.ts';
 import { createSession, hashToken } from '../src/webapp/session.ts';
 import { U, fixtureSnapshot } from './fixtures.ts';
@@ -23,6 +25,7 @@ const [G, H] = ['700000000000000041', '700000000000000042'];
 const MEMBER_ROLE = '710000000000000041';
 const [ME, MATE, STRANGER] = ['730000000000000041', '730000000000000042', '730000000000000043'];
 const QUIET_MS = 250;
+const noLogin: DiscordLogin = { start: () => Promise.reject(new Error('unused')), finish: () => Promise.reject(new Error('unused')) };
 
 describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
@@ -95,15 +98,19 @@ describe('realtime (database)', { skip: url ? false : 'TEST_DATABASE_URL not set
     await member(MATE, [MEMBER_ROLE]);
     await member(STRANGER, [MEMBER_ROLE], H);
 
-    hub = new RealtimeHub(webDb, { origin: ORIGIN, trustProxy: false, maxPerUser: 3, pingMs: 150 }, () => {});
+    hub = new RealtimeHub(webDb, discordIdentity(webDb, noLogin), { origin: ORIGIN, trustProxy: false, maxPerUser: 3, pingMs: 150 }, () => {});
     await listenForChanges(client, hub, () => {});
     server = createServer((_req, res) => res.end());
     server.on('upgrade', (req, sock, head) => hub.handleUpgrade(req, sock, head));
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     port = (server.address() as AddressInfo).port;
   });
-  beforeEach(() => {
+  beforeEach(async () => {
     for (const ws of sockets.splice(0)) ws.terminate();
+    // The hub drops a terminated socket only when its own side sees the close: without waiting, the next case's
+    // sockets can run into maxPerUser (seen as an intermittent "refused 429")
+    for (let i = 0; i < 200 && hub.connections > 0; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(hub.connections, 0, 'sockets of the previous case still open');
   });
   after(async () => {
     for (const ws of sockets) ws.terminate();

@@ -25,6 +25,7 @@ import InfoTip from "../components/InfoTip.vue";
 import UnlocksDialog from "../components/UnlocksDialog.vue";
 import Picker from "../components/Picker.vue";
 import ScopeBar, { scopeName } from "../components/ScopeBar.vue";
+import { orgsOn } from "../capabilities";
 import { columnsTexts, lang, t, viewTexts } from "../i18n";
 import { memberLabel, orgOf } from "../orgs";
 import { takeQuery } from "../deepLink";
@@ -254,7 +255,7 @@ onUnmounted(() => {
     <section class="panel unclipped">
       <div class="head">
         <Icon name="blueprint" :size="16" />
-        <span class="head-title">{{ t("nav.blueprints") }} <span class="dim">· {{ scopeName(scope) }}</span></span>
+        <span class="head-title">{{ t("nav.blueprints") }} <span v-if="orgsOn" class="dim">· {{ scopeName(scope) }}</span></span>
         <button v-if="!org" type="button" class="btn small" :class="addOpen ? 'outline' : 'primary'" :disabled="!catalog" @click="addOpen = !addOpen">
           <Icon :name="addOpen ? 'close' : 'plus'" :size="14" />
           <span class="swap"><span :class="{ hidden: !addOpen }">{{ t("common.close") }}</span><span :class="{ hidden: addOpen }">{{ t("bp.add") }}</span></span>

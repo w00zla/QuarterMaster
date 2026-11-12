@@ -8,14 +8,14 @@
 import { listen } from "@tauri-apps/api/event";
 import { computed, ref, shallowRef, watch } from "vue";
 import type { CompanionCatalogResponse, OkResponse, StockListResponse } from "../../src/webapp/api-types";
-import { gameNames } from "./backend";
+import { gameNames, refreshLocale } from "./backend";
 import { detected } from "./detections";
 import { t } from "./i18n";
 import {
   buildCatalog, doneRequest, finishedRequests, gameNameKeys, jobsOf, RefinerySync, removeRequest, startRequest,
   type Job, type OverviewEvent, type Proposal, type SyncCatalog, type Update, type VisitEvent,
 } from "./refinery";
-import { api, config, connected } from "./state";
+import { api, connected, gameDir } from "./state";
 import { thumbRef } from "./thumbs";
 import { toast, toastError } from "./toasts";
 
@@ -75,6 +75,9 @@ async function loadCatalog() {
     const en = await api<CompanionCatalogResponse>("GET", "/companion/catalog?lang=en", undefined, true);
     const responses = [de, en];
     catalogResponses.value = { de, en };
+    // The game's English texts belong to the same catalog import: brought up to date with it (the readers' English
+    // table, kept on disk by the Rust side); without them the catalog still works
+    await refreshLocale().catch((e) => console.warn("English texts:", e));
     let own: Record<string, string> = {};
     const keys = gameNameKeys(responses);
     try {
@@ -166,7 +169,7 @@ export async function watchRefinery() {
   await listen<VisitEvent>("refinery-visit", (e) => onVisit(e.payload));
   // Ready before the first visit: loaded once connected (the catalog comes from the server), again for another game folder
   let loadedFor: string | null = null;
-  watch([connected, () => config.value?.gameDir], ([c, dir]) => {
+  watch([connected, gameDir], ([c, dir]) => {
     if (!c || dir === undefined || dir === loadedFor) return;
     loadedFor = dir;
     serial(loadCatalog);

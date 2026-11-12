@@ -13,6 +13,8 @@ export interface ConfirmButton {
   icon?: IconName;
   // ID of a form in the body: the button submits it (also on Enter there) instead of answering
   form?: string;
+  // The label's other states (a button whose text changes): their room is kept, the button keeps its width
+  reserve?: string[];
 }
 
 // Open dialogs, innermost last: only that one answers Escape (a form dialog with its confirmation on top)
@@ -83,7 +85,13 @@ onUnmounted(() => {
             :disabled="b.disabled"
             @click="b.form || emit('choose', b.value)"
           >
-            <Icon v-if="b.icon" :name="b.icon" :size="14" /> {{ b.label }}
+            <Icon v-if="b.icon" :name="b.icon" :size="14" />
+            <!-- Other texts this button takes in other states: they reserve the room, so it never changes size -->
+            <span v-if="b.reserve?.length" class="swap">
+              <span>{{ b.label }}</span>
+              <span v-for="r in b.reserve" :key="r" class="hidden" aria-hidden="true">{{ r }}</span>
+            </span>
+            <template v-else> {{ b.label }}</template>
           </button>
         </div>
       </div>

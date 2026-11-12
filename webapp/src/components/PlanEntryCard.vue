@@ -20,6 +20,7 @@ import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { MAX_QUALITY, MIN_QUALITY } from "../../../src/planner/plan";
 import type { EntryResult, PlannerRecipe, StatResult } from "../../../src/planner/types";
 import type { MaterialInfo, StockBatch } from "../../../src/webapp/api-types";
+import { orgsOn } from "../capabilities";
 import { blueprints, materials } from "../catalog";
 import { craftingUi, toggleIn, warningText } from "../crafting";
 import { clampCount, coverageOf, MAX_COUNT, MIN_COUNT, needsOf } from "../../../src/planner/stock";
@@ -265,8 +266,18 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
       <MiningDialog v-if="miningOf" :uuid="miningOf.uuid" :name="miningOf.name" :target="miningOf.target" @close="miningOf = null" />
     </div>
 
+    <!-- Without orgs (singleuser) there is only you: one plain line, whether you have the blueprint -->
+    <div v-if="!orgsOn" class="stock-part">
+      <div class="owned-line">
+        <span class="panel-title">{{ t("crafting.owned") }}</span>
+        <span class="spacer" />
+        <span v-if="recipe?.isDefault" class="tag ok">{{ t("crafting.default") }}</span>
+        <span v-else-if="!owners" class="tag">—</span>
+        <span v-else class="tag" :class="owners.mine ? 'ok' : 'warn'">{{ t(owners.mine ? "crafting.ownHave" : "crafting.ownMissing") }}</span>
+      </div>
+    </div>
     <!-- Who has the blueprint: you, then each of your orgs with its members who registered it -->
-    <div class="stock-part">
+    <div v-else class="stock-part">
       <!-- The whole head toggles; closed, right: only whether you have it -->
       <button type="button" class="stock-toggle" :aria-expanded="ownersOpen" @click="toggleIn(craftingUi.ownersOpen, result.blueprintUuid)">
         <Icon :name="ownersOpen ? 'chevron-down' : 'chevron-right'" :size="14" />
@@ -388,6 +399,14 @@ const minable = (uuid: string) => !!materials.value.get(uuid)?.minable;
 
 .stock-toggle:hover {
   color: var(--text);
+}
+
+/* The owners part without orgs: the title (the table head's style) and the state, as high as the toggles */
+.owned-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
 }
 
 .needs {

@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { DiscordAPIError, type Client } from 'discord.js';
 import { sql } from 'drizzle-orm';
-import type postgres from 'postgres';
-import { type Db } from '../src/db/client.ts';
+import type { ChangeSource, Db } from '../src/db/client.ts';
 import { connectAs, prepareDb } from './roles.ts';
 import { runImport } from '../src/catalog/import/apply.ts';
 import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
@@ -62,7 +61,7 @@ function fakeDiscord() {
 
 describe('board (database)', { skip: url ? false : 'TEST_DATABASE_URL not set' }, () => {
   let db: Db;
-  let client: postgres.Sql;
+  let client: ChangeSource;
   let close: () => Promise<void>;
   const logged: string[] = [];
   const quiet = (m: string) => void logged.push(m);

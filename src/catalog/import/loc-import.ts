@@ -5,7 +5,7 @@ import { LANGS, displayText, isMissingTranslation, parseGlobalIni } from '../ext
 import { APP_KEY_PREFIX, isAppKey } from '../labels.ts';
 import { IMPORT_LOCK } from './apply.ts';
 import {
-  APP_SOURCE, DEFAULT_EXTERNAL_PRIORITY, GAME_SOURCE, countWins, readKeys, readSources, readTexts, removeSource, writeTexts, type SourceRow,
+  APP_SOURCE, DEFAULT_EXTERNAL_PRIORITY, GAME_SOURCE, PACK_SOURCE, countWins, readKeys, readSources, readTexts, removeSource, writeTexts, type SourceRow,
 } from './localization.ts';
 import { diffTexts, textsSha256, type TextDiff, type Violation } from './plan.ts';
 
@@ -71,6 +71,7 @@ function validateSourceAndLang(source: string, lang: string): string[] {
   const errors: string[] = [];
   if (source === GAME_SOURCE) errors.push(`source "${GAME_SOURCE}" is reserved for the catalog import`);
   else if (source === APP_SOURCE) errors.push(`source "${APP_SOURCE}" is reserved for the app's own texts`);
+  else if (source === PACK_SOURCE) errors.push(`source "${PACK_SOURCE}" is reserved for the singleuser variant's language pack`);
   else if (!SOURCE_PATTERN.test(source)) errors.push(`invalid source name "${source}" (lower case letters, digits, . _ -)`);
   if (!LANGS.includes(lang)) errors.push(`unsupported language "${lang}" (${LANGS.join(', ')})`);
   return errors;

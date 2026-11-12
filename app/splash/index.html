@@ -1,0 +1,288 @@
+<!doctype html>
+<!-- The desktop shell's splash: shown from the first frame until the server listens (then the window shows the web app),
+     and again with a message when the start failed. It looks like the web app's start tile (webapp/src/components/StartTile.vue,
+     the tokens of adminapp/src/styles/tokens.css); the shell hands it its whole state (app/src-tauri/src/lib.rs `Splash`). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quartermaster</title>
+    <style>
+      @font-face {
+        font-family: "Bai Jamjuree";
+        font-style: normal;
+        font-weight: 400;
+        src: url("fonts/BaiJamjuree-400.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Bai Jamjuree";
+        font-style: normal;
+        font-weight: 600;
+        src: url("fonts/BaiJamjuree-600.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Bai Jamjuree";
+        font-style: normal;
+        font-weight: 700;
+        src: url("fonts/BaiJamjuree-700.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Share Tech Mono";
+        font-style: normal;
+        font-weight: 400;
+        src: url("fonts/ShareTechMono-400.woff2") format("woff2");
+      }
+
+      :root {
+        --bg-base: #0a1d29;
+        --bg-surface: #0f2c3e;
+        --bg-surface-2: #143a52;
+        --bg-surface-3: #194967;
+        --err: #ff5c6c;
+        --accent-text: #000000;
+        --accent: #54adf7;
+        --text: #ffffff;
+        --text-2: #add3eb;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-base);
+        color: var(--text);
+        font-family: "Bai Jamjuree", "Segoe UI", system-ui, sans-serif;
+        user-select: none;
+        cursor: default;
+        overflow: hidden;
+      }
+
+      /* The title bar of the frameless window, as the web app's TitleBar.vue: the drag region and the three window buttons */
+      .titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        height: 44px;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        padding: 0 8px;
+      }
+
+      .win-btns {
+        display: flex;
+        gap: 2px;
+      }
+
+      .win-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-2);
+        cursor: pointer;
+      }
+
+      .win-btn:hover {
+        background: var(--bg-surface-2);
+        color: var(--text);
+      }
+
+      .win-btn.close:hover {
+        background: var(--err);
+        color: var(--accent-text);
+      }
+
+      .win-btn svg {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .tile {
+        flex: 1;
+        margin: 0 16px 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 48px;
+        background: var(--bg-surface);
+        border-radius: 8px;
+      }
+
+      .top {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+      }
+
+      /* The app's logo, as on the web app's start tile (logo-128.png, logo-256.png for 2x screens: copies of the web app's) */
+      .icon-slot {
+        width: 128px;
+        height: 128px;
+        display: block;
+      }
+
+      .wordmark {
+        font-size: 40px;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        /* The last letter's spacing would push the word off centre */
+        margin-right: -0.22em;
+        white-space: nowrap;
+      }
+
+      .wordmark .accent {
+        color: var(--accent);
+      }
+
+      .version {
+        height: 16px;
+        font-family: "Share Tech Mono", Consolas, monospace;
+        font-size: 13px;
+        color: var(--text-2);
+      }
+
+      /* One block for both states: the tile does not change its size when the state does */
+      .low {
+        width: min(420px, calc(100% - 32px));
+        height: 84px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .segments {
+        display: flex;
+        gap: 6px;
+      }
+
+      .seg {
+        flex: 1;
+        height: 6px;
+        border-radius: 4px;
+        background: var(--bg-surface-3);
+      }
+
+      .seg.on {
+        background: var(--accent);
+      }
+
+      .line {
+        height: 20px;
+        font-size: 13px;
+        color: var(--text-2);
+        text-align: center;
+      }
+
+      .failed {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .sentence {
+        min-height: 20px;
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .btn {
+        height: 32px;
+        padding: 0 16px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        background: transparent;
+        color: var(--text);
+        font-family: inherit;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body data-tauri-drag-region>
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="win-btns">
+        <button id="minimize" class="win-btn" type="button"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M5 12h14" /></svg></button>
+        <button id="maximize" class="win-btn" type="button"></button>
+        <button id="close" class="win-btn close" type="button"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+      </div>
+    </header>
+    <div class="tile" data-tauri-drag-region>
+      <div class="top" data-tauri-drag-region>
+        <img class="icon-slot" src="logo-128.png" srcset="logo-128.png 1x, logo-256.png 2x" alt="" draggable="false" data-tauri-drag-region />
+        <div class="wordmark" data-tauri-drag-region>QUARTER<span class="accent" data-tauri-drag-region>MASTER</span></div>
+        <div id="version" class="version" data-tauri-drag-region></div>
+      </div>
+      <div class="low" data-tauri-drag-region>
+        <div id="steps">
+          <div id="segments" class="segments" role="progressbar" aria-valuemin="0"></div>
+        </div>
+        <div id="line" class="line" data-tauri-drag-region></div>
+        <div id="failed" class="failed hidden">
+          <div id="sentence" class="sentence"></div>
+          <button id="quit" class="btn" type="button"></button>
+        </div>
+      </div>
+    </div>
+    <script>
+      // The shell computes everything (texts in the system's language, the step); this page only shows it
+      const { invoke } = window.__TAURI__.core;
+      const { listen } = window.__TAURI__.event;
+      const el = (id) => document.getElementById(id);
+
+      function render(s) {
+        el("version").textContent = s.version ? `v${s.version}` : "";
+        const segments = el("segments");
+        while (segments.children.length < s.steps) segments.appendChild(document.createElement("span"));
+        [...segments.children].forEach((seg, i) => (seg.className = i < s.step ? "seg on" : "seg"));
+        segments.setAttribute("aria-valuemax", String(s.steps));
+        segments.setAttribute("aria-valuenow", String(s.step));
+        const failed = s.error !== null;
+        el("steps").classList.toggle("hidden", failed);
+        el("line").classList.toggle("hidden", failed);
+        el("failed").classList.toggle("hidden", !failed);
+        el("line").textContent = s.text;
+        el("sentence").textContent = s.error ?? "";
+        el("quit").textContent = s.quit;
+      }
+
+      el("quit").addEventListener("click", () => invoke("quit"));
+
+      // The window buttons: the shell's own window commands (the web app's contract has the same); the maximize button shows the
+      // icon of what a click does next
+      const MAXIMIZE = '<svg width="14" height="14" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1" /></svg>';
+      const RESTORE = '<svg width="14" height="14" viewBox="0 0 24 24"><rect x="4" y="8" width="12" height="12" rx="1" /><path d="M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" /></svg>';
+      const refreshMaximized = () =>
+        invoke("window_is_maximized").then((m) => (el("maximize").innerHTML = m ? RESTORE : MAXIMIZE), () => {});
+      el("maximize").innerHTML = MAXIMIZE;
+      el("minimize").addEventListener("click", () => invoke("window_minimize"));
+      el("maximize").addEventListener("click", () => invoke("window_toggle_maximize").then(refreshMaximized));
+      el("close").addEventListener("click", () => invoke("window_close"));
+      window.addEventListener("resize", refreshMaximized);
+      refreshMaximized();
+      // The event first, then the state as it is now: no step is missed between the two
+      listen("splash-changed", (event) => render(event.payload)).then(() => invoke("splash_state").then(render));
+    </script>
+  </body>
+</html>

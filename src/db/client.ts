@@ -9,6 +9,14 @@ export const schema = { ...catalog, ...app, ...bot, ...web };
 export type Db = PostgresJsDatabase<typeof schema>;
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
+/**
+ * What LISTEN needs from a connection: postgres.js (`connect().client`) and PGlite (`connectPglite().client`) both do it.
+ * `onListen` runs after every (re)connect of the listener: postgres.js calls it again after a reconnect, PGlite once.
+ */
+export type ChangeSource = {
+  listen(channel: string, onNotify: (payload: string) => void, onListen?: () => void): Promise<{ unlisten: () => Promise<void> }>;
+};
+
 // client: the raw postgres.js connection, for what drizzle lacks (LISTEN)
 export function connect(url: string | undefined): { db: Db; close: () => Promise<void>; client: postgres.Sql } {
   if (!url) throw new Error('DATABASE_URL is not set');

@@ -2,10 +2,11 @@
 // Wraps any content and shows a text bubble on hover/focus, in the app's look. The
 // bubble is teleported to <body> (panels with overflow: hidden do not clip it) and
 // kept inside the window: centred above the content, shifted sideways at the edges,
-// below it when there is no room above. `mono` for technical values.
+// below it when there is no room above. `mono` for technical values. `side="right"`: right of the
+// content, at its middle (the entries of a navigation bar at the left edge).
 import { nextTick, ref } from "vue";
 
-const props = defineProps<{ text: string | null | undefined; mono?: boolean }>();
+const props = defineProps<{ text: string | null | undefined; mono?: boolean; side?: "right" }>();
 
 const MARGIN = 8;
 const GAP = 8;
@@ -23,6 +24,12 @@ async function show() {
   const a = anchor.value?.getBoundingClientRect();
   const b = bubble.value?.getBoundingClientRect();
   if (!a || !b || !open.value) return;
+  // Beside the content (a navigation bar at the left edge): right of it, at its middle; where the window ends, as usual
+  if (props.side === "right" && a.right + GAP + b.width <= window.innerWidth - MARGIN) {
+    const middle = a.top + a.height / 2 - b.height / 2;
+    pos.value = { left: a.right + GAP, top: Math.min(Math.max(middle, MARGIN), window.innerHeight - b.height - MARGIN) };
+    return;
+  }
   const left = Math.min(Math.max(a.left + a.width / 2 - b.width / 2, MARGIN), window.innerWidth - b.width - MARGIN);
   const above = a.top - GAP - b.height;
   const top = above >= MARGIN ? above : Math.min(a.bottom + GAP, window.innerHeight - b.height - MARGIN);

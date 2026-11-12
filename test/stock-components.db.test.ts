@@ -44,10 +44,8 @@ describe('ship components in stock (database)', { skip: url ? false : 'TEST_DATA
     await db.execute(sql`UPDATE catalog.blueprint_slot SET modifiers = CASE WHEN slot_index = 0 AND tier_index = 0
         THEN ${JSON.stringify([{ propertyUuid: U.property, ranges }])}::jsonb ELSE '[]'::jsonb END
       WHERE blueprint_uuid IN (SELECT uuid FROM catalog.blueprint WHERE output_item_uuid = ${U.output})`);
-    // Its property stands for Integrity, whose base value sits in the record's health component
+    // Its property stands for Integrity, whose base value the item holds (from its record's health component: 110)
     await db.execute(sql`UPDATE catalog.crafted_property SET key = 'GPP_Health_MaxHealth' WHERE uuid = ${U.property}`);
-    await db.execute(sql`UPDATE catalog.raw_record SET data = jsonb_set(data, '{Components}', data->'Components' || '[{"_Type_": "SHealthComponentParams", "Health": 110}]'::jsonb)
-      WHERE uuid = ${U.output}`);
     await ensureGuild(db, G, 'Component Org');
     const settings = await updateGuildSettings(db, G, { memberRoleIds: [MEMBER_ROLE] });
     await syncMember(db, G, settings, MIA, { userId: MIA, displayName: 'Mia', roleIds: [MEMBER_ROLE], bot: false });

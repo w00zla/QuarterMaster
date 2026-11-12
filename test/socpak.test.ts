@@ -47,6 +47,11 @@ const OTHER = '10000000-0000-0000-0000-0000000000a2';
 const MOON = '20000000-0000-0000-0000-0000000000b1';
 const CLUSTER_A = '20000000-0000-0000-0000-0000000000b2';
 const CLUSTER_B = '20000000-0000-0000-0000-0000000000b3';
+const STATION_A = '20000000-0000-0000-0000-0000000000c1';
+const STATION_B = '20000000-0000-0000-0000-0000000000c2';
+const OUTER = '20000000-0000-0000-0000-0000000000c3';
+const INNER = '20000000-0000-0000-0000-0000000000c4';
+const REFINERY = '30000000-0000-0000-0000-0000000000d1';
 
 const child = (name: string, starMap?: string) =>
   `<Child external="1" name="${name}" entityName="x" class="LocationObjectContainer"${starMap ? ` starMapRecord="${starMap}"` : ''}>\n</Child>`;
@@ -88,5 +93,40 @@ describe('socpak', () => {
       [OTHER]: [CLUSTER_A, CLUSTER_B, MOON].sort(),
     });
     assert.deepEqual(scan.unplaced, [{ container: 'objectcontainers/pu/system/test/field.socpak', providers: [PROVIDER] }]);
+    assert.deepEqual([...scan.refineryPlaces], []);
+  });
+
+  it('flags the nearest star map records above a refinery along every parent path', () => {
+    const pu = 'Data/ObjectContainers/PU';
+    const rest = 'Data/ObjectContainers/PU/loc/test';
+    const refinery = (name: string) => `CrChF\u0000${name}\u0000Refinery\u0000${REFINERY.toUpperCase()}\u0000`;
+    const scan = scanContainers([
+      // Two stations use one module (the first parent alone would miss STATION_B)
+      { path: `${pu}/system/test/system.socpak`, buf: zip({ 'system.xml': container('system', [
+        child(`${rest}/station_a.socpak`, STATION_A), child(`${rest}/station_b.socpak`, STATION_B),
+        child(`${rest}/outer.socpak`, OUTER), child(`${rest}/ring.socpak`),
+      ]) }) },
+      { path: `${rest}/station_a.socpak`, buf: zip({ 'a.xml': container('a', [child(`${rest}/module.socpak`)]) }) },
+      { path: `${rest}/station_b.socpak`, buf: zip({ 'b.xml': container('b', [child(`${rest}/module.socpak`)]) }) },
+      { path: `${rest}/module.socpak`, buf: zip({ 'module.xml': container('module', []), 'module.soc': refinery('x') }) },
+      // A record of its own below an outer one: only the nearest
+      { path: `${rest}/outer.socpak`, buf: zip({ 'outer.xml': container('outer', [child(`${rest}/inner.socpak`, INNER)]) }) },
+      { path: `${rest}/inner.socpak`, buf: zip({ 'inner.xml': container('inner', []), 'inner.soc': refinery('y') }) },
+      // A cycle without a record, and a container without any parent
+      { path: `${rest}/ring.socpak`, buf: zip({ 'ring.xml': container('ring', [child(`${rest}/ring2.socpak`)]), 'ring.soc': refinery('z') }) },
+      { path: `${rest}/ring2.socpak`, buf: zip({ 'ring2.xml': container('ring2', [child(`${rest}/ring.socpak`)]) }) },
+      { path: `${rest}/lonely.socpak`, buf: zip({ 'lonely.xml': container('lonely', []), 'lonely.soc': refinery('w') }) },
+      // A provider outside the star systems is not mining's business
+      { path: `${rest}/plain.socpak`, buf: zip({ 'plain.xml': container('plain', []), 'plain.soc': soc(PROVIDER) }) },
+    ], new Set([PROVIDER]), [REFINERY]);
+    assert.deepEqual([...scan.refineryPlaces].sort(), [STATION_A, STATION_B, INNER].sort());
+    assert.deepEqual(scan.refineryUnplaced, ['objectcontainers/pu/loc/test/lonely.socpak', 'objectcontainers/pu/loc/test/ring.socpak']);
+    assert.deepEqual([...scan.places], []);
+    assert.deepEqual(scan.unplaced, []);
+  });
+
+  it('finds no refinery without an entity to search for', () => {
+    const scan = scanContainers([{ path: 'Data/ObjectContainers/PU/loc/x.socpak', buf: zip({ 'x.xml': container('x', []), 'x.soc': REFINERY }) }], new Set());
+    assert.deepEqual([...scan.refineryPlaces, ...scan.refineryUnplaced], []);
   });
 });

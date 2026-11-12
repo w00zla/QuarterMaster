@@ -384,40 +384,8 @@ export interface UexEndpointStatus {
   checkedAt: string;
 }
 
-export interface UexRefinery {
-  terminalId: number;
-  terminal: string;
-  system: string;
-  // UEX's station/city name
-  place: string;
-  // Matched catalog location (label in the text language); null = not matched
-  locationUuid: string | null;
-  location: string | null;
-  // Yield bonus in % per ore (UEX's ore name)
-  yields: Record<string, number>;
-}
-
-/** A refining method: UEX's ratings and the community values in ext.refining_method, joined by code. */
-export interface UexMethod {
-  name: string;
-  code: string;
-  // UEX ratings 1 (low) to 3 (high); null when UEX does not list the method
-  ratingYield: number | null;
-  ratingCost: number | null;
-  ratingSpeed: number | null;
-  // ext.refining_method; null when it has no row for the code
-  yieldPct: number | null;
-  secondsPerScu: number | null;
-  // "scminer.rocks · 4.10.1"
-  source: string | null;
-}
-
 export interface UexResponse {
   endpoints: UexEndpointStatus[];
-  refineries: UexRefinery[];
-  // Every ore that appears in the yields, alphabetical
-  ores: string[];
-  methods: UexMethod[];
 }
 
 /** How far the UEX trade data cover the catalog (`src/ext/trade.ts`: commodities by English name, items by UUID). */
@@ -794,7 +762,7 @@ export interface RefineryJob {
   jobId: string;
   owner: UserRef;
   location: { uuid: string; name: string };
-  // At a UEX refinery (without UEX data every location counts)
+  // At a refinery of the catalog (none flagged yet: every location counts)
   atRefinery: boolean;
   startedAt: string | null;
   endsAt: string | null;

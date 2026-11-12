@@ -54,6 +54,7 @@ import Icon from "../../../adminapp/src/components/Icon.vue";
 import { typeIcon } from "../../../adminapp/src/typeIcons";
 import { thumbPath } from "../../../src/thumbs";
 import { materials } from "../catalog";
+import { uexOn } from "../capabilities";
 import { auec, priceRange, priceTime, qty } from "../format";
 import { t } from "../i18n";
 import { blueprintThumb, materialThumb } from "../thumbs";
@@ -159,15 +160,17 @@ const priceSides = (p: PriceSummary) => ([[t("trade.sell"), p.sell], [t("trade.b
         </template>
         <!-- UEX-Preise (immer): Spanne über die Terminals, dahinter der UEX-Durchschnitt (Gegenstände: die Zahl der
              Terminals); eine Seite ohne Preis "—", ganz ohne "Keine Preise" -->
-        <div class="section price-head"><span>{{ t("trade.prices") }}</span><span v-if="mat.prices" class="source">UEX · {{ priceTime(mat.prices.date) }}</span></div>
-        <dl v-if="mat.prices" class="kv">
-          <template v-for="s in priceSides(mat.prices)" :key="s.label">
-            <dt>{{ s.label }}</dt>
-            <dd v-if="s.range">{{ priceRange(s.range) }}&nbsp;aUEC <span class="dim">· {{ s.extra }}</span></dd>
-            <dd v-else class="dim">—</dd>
-          </template>
-        </dl>
-        <div v-else class="dim">{{ t("info.noPrices") }}</div>
+        <template v-if="uexOn">
+          <div class="section price-head"><span>{{ t("trade.prices") }}</span><span v-if="mat.prices" class="source">UEX · {{ priceTime(mat.prices.date) }}</span></div>
+          <dl v-if="mat.prices" class="kv">
+            <template v-for="s in priceSides(mat.prices)" :key="s.label">
+              <dt>{{ s.label }}</dt>
+              <dd v-if="s.range">{{ priceRange(s.range) }}&nbsp;aUEC <span class="dim">· {{ s.extra }}</span></dd>
+              <dd v-else class="dim">—</dd>
+            </template>
+          </dl>
+          <div v-else class="dim">{{ t("info.noPrices") }}</div>
+        </template>
       </template>
     </div>
   </div>

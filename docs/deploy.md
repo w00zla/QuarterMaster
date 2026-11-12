@@ -9,7 +9,7 @@ There is no git server: the VM's checkout is a plain repo that you push into ove
 ## Design
 
 - `Dockerfile` (multi-stage): one image for every process, the compose service's `command` picks it. Build stage with all dependencies builds both SPAs; the runtime stage has the backend's production dependencies only (`--filter sc-quartermaster`), `src/`, `drizzle/`, `adminapp/dist`, `webapp/dist`, runs as `node`. `package.json` must be in the image (`"type": "module"`). `.dockerignore` keeps `.env`, `local/` and `node_modules` out.
-- `compose.yaml`: `db` (Postgres 18, no published port), `bot` (no port; `WEBAPP_ORIGIN` optional for its web app links; `local/thumbs/` mounted read-only for which item thumbnails exist, Discord fetches them from `THUMBS_URL`, default `WEBAPP_ORIGIN` + `/thumbs`), `ext` (the third-party pull every 15 minutes, no port), `admin` (published on `127.0.0.1:3001` only, `local/thumbs/` mounted read-only for the thumbnails' coverage and images), `webapp` (as `qm_web`, published on `127.0.0.1:3000` only, `WEBAPP_TRUST_PROXY=1`, the companion release and the item thumbnails mounted read-only from `local/companion/` and `local/thumbs/` of the checkout), `migrate` (profile `tools`, one-off). App containers run read-only, without capabilities, `no-new-privileges`; logs rotate (json-file with `max-size`: the default never rotates). Each service gets only its own variables; `DATABASE_URL` is built from the role passwords (URL-safe characters only).
+- `compose.yaml`: `db` (Postgres 18, no published port), `bot` (no port; `WEBAPP_ORIGIN` optional for its web app links; `local/thumbs/` mounted read-only for which item thumbnails exist, Discord fetches them from `THUMBS_URL`, default `WEBAPP_ORIGIN` + `/thumbs`), `ext` (the third-party pull every 15 minutes, no port), `admin` (published on `127.0.0.1:3001` only, `local/thumbs/` mounted read-only for the thumbnails' coverage and images), `webapp` (as `qm_web`, published on `127.0.0.1:3000` only, `WEBAPP_TRUST_PROXY=1`, the item thumbnails mounted read-only from `local/thumbs/` of the checkout), `migrate` (profile `tools`, one-off). App containers run read-only, without capabilities, `no-new-privileges`; logs rotate (json-file with `max-size`: the default never rotates). Each service gets only its own variables; `DATABASE_URL` is built from the role passwords (URL-safe characters only).
 - **DB roles** (`deploy/db-roles.sh`, idempotent): superuser `postgres` only for init, roles and dumps; `qm_owner` owns the database and everything the migrations create and is used by `migrate` only; `qm_app` (bot, admin, ext) has DML only, no DDL, `app.stock_journal` and `app.history` only `SELECT`/`INSERT` (append-only enforced by the DB), no access to schema `drizzle`, in schema `web` only column-level `SELECT` on `web.session` (`user_id`, Discord username/global name, `created_at`, `last_seen_at`, `expires_at`) and `web.api_token` (`user_id`, Discord username/global name, `created_at`, `last_used_at`) for the admin's user overview, never the token hashes (bot/admin must not forge web sessions; regranted after the `REVOKE ALL` on every run). `qm_web` (user web app) reads `catalog`, `app` and `ext`, writes `app_user`, `stock_batch`, `stock_journal` and `history` (`INSERT` only), `user_blueprint` and `feature_entry` (privilege features; the key check is the code's), but `app.org`/`app.member` and `app.user_privilege` are read-only (no role IDs, no roster changes, no self-granted privileges), no access to schema `bot`, full DML in `web`; its grants are explicit, reapplied on every run (default privileges cover `qm_app` only). Grants for new tables come from `ALTER DEFAULT PRIVILEGES FOR ROLE qm_owner`, which only covers objects qm_owner creates: never run migrations as the superuser. The script runs on a fresh volume (mounted into `/docker-entrypoint-initdb.d/`) and in `deploy.sh` after every migration, fed via stdin (a single-file bind mount keeps the old inode after a push updated the checkout). Migrations stay free of role names: dev and test DBs run as superuser without these roles. A dump restores into a fresh volume (the init creates the roles first). `scripts/test-roles.sh` runs the DB tests under these roles.
 - Caddy on the VM host terminates TLS: the user web app on 443 (`qm.example.com` → `127.0.0.1:3000`, Caddy adds only HSTS: the app sets its own headers), the admin UI on its own port (`:8443` → `127.0.0.1:3001`) or only through a VPN (§ 5), example in `docs/Caddyfile.example`.
 - The scripts assume Docker Compose. podman-compose only serves for local tests and behaves differently: it does not wait for `service_healthy`, `run migrate` needs `--profile tools`, `up --wait` waits for every container of the project, and `up -d` does not recreate containers after the image changed.
@@ -21,7 +21,7 @@ There is no git server: the VM's checkout is a plain repo that you push into ove
 - DNS: the domain points to the VM.
 - Firewall on the VM and port forwards on the router: inbound **80, 443** (ACME challenge, the user web app) and **8443** (admin UI; not with the VPN variant, § 5). Nothing else, in particular not 3000, 3001 or 5432.
 - **Docker's published ports bypass ufw/firewalld.** `compose.yaml` only publishes `127.0.0.1:3000` (web app) and `127.0.0.1:3001` (admin); never add a port without `127.0.0.1:`.
-- SELinux host (RHEL/Fedora): the bind mounts in `compose.yaml` need `:z` (`…/10-roles.sh:ro,z`, `./local/companion:/companion:ro,z`, `./local/thumbs:/thumbs:ro,z`). Debian/Ubuntu: nothing to do.
+- SELinux host (RHEL/Fedora): the bind mounts in `compose.yaml` need `:z` (`…/10-roles.sh:ro,z`, `./local/thumbs:/thumbs:ro,z`). Debian/Ubuntu: nothing to do.
 
 ## 2. Checkout and `.env`
 
@@ -47,7 +47,6 @@ On the VM:
 ```sh
 cd /opt/sc-quartermaster
 cp .env.example .env && chmod 600 .env
-mkdir -p local/companion     # the companion release (§ 8); created by Docker as root otherwise
 mkdir -p local/thumbs        # the item thumbnails (§ 8, `push-thumbs.sh`)
 ```
 
@@ -68,7 +67,7 @@ Set in `.env`:
 openssl rand -hex 32     # one per password
 ```
 
-`DATABASE_URL`, `ADMINAPP_HOST`, `ADMINAPP_PORT`, `WEBAPP_HOST`, `WEBAPP_PORT`, `WEBAPP_TRUST_PROXY`, `COMPANION_DIR` are ignored (compose sets them). Delete `TEST_DATABASE_URL`: the tests drop schemas in that database.
+`DATABASE_URL`, `ADMINAPP_HOST`, `ADMINAPP_PORT`, `WEBAPP_HOST`, `WEBAPP_PORT`, `WEBAPP_TRUST_PROXY` are ignored (compose sets them). A `COMPANION_DIR` left in the `.env` is ignored too (the server hosts no companion files). Delete `TEST_DATABASE_URL`: the tests drop schemas in that database.
 
 ## 3. Discord developer portal (production application)
 
@@ -149,7 +148,7 @@ sudo systemctl enable --now quartermaster-backup.timer
 
 ## 7. Updates
 
-> **⚠️ Existing production setup: add `UEX_TOKEN`, `QM_WEB_PASSWORD` (`openssl rand -hex 32`), `DISCORD_CLIENT_SECRET` and `WEBAPP_ORIGIN` (§ 2) to the VM's `.env`, `mkdir -p local/companion`, the OAuth2 redirect (§ 3), the web app's Caddy block (§ 5) and rename `WEB_USER`/`WEB_PASSWORD` to `ADMINAPP_USER`/`ADMINAPP_PASSWORD` (`sed -i -E 's/^WEB_(USER|PASSWORD|HOST|PORT)=/ADMINAPP_\1=/' .env`) BEFORE the next `scripts/deploy.sh`.** Without it every `docker compose` call fails on the `:?` check in `compose.yaml` (also `logs`, `run … register.ts`). `deploy.sh` then aborts at its first `docker compose` call, before backup, build and migration: the running containers and the DB stay unchanged (with `push-deploy.sh` the checkout is already updated). Set the variable and run `deploy.sh` again. The `db` container is recreated once because its environment changed (a short DB restart).
+> **⚠️ Existing production setup: add `UEX_TOKEN`, `QM_WEB_PASSWORD` (`openssl rand -hex 32`), `DISCORD_CLIENT_SECRET` and `WEBAPP_ORIGIN` (§ 2) to the VM's `.env`, the OAuth2 redirect (§ 3), the web app's Caddy block (§ 5) and rename `WEB_USER`/`WEB_PASSWORD` to `ADMINAPP_USER`/`ADMINAPP_PASSWORD` (`sed -i -E 's/^WEB_(USER|PASSWORD|HOST|PORT)=/ADMINAPP_\1=/' .env`) BEFORE the next `scripts/deploy.sh`.** Without it every `docker compose` call fails on the `:?` check in `compose.yaml` (also `logs`, `run … register.ts`). `deploy.sh` then aborts at its first `docker compose` call, before backup, build and migration: the running containers and the DB stay unchanged (with `push-deploy.sh` the checkout is already updated). Set the variable and run `deploy.sh` again. The `db` container is recreated once because its environment changed (a short DB restart).
 
 From your machine, on `main` with everything committed:
 
@@ -168,14 +167,7 @@ ssh <user>@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node sr
 - **Migrations applied in production are frozen**: never edit or regenerate them, only add new ones (`CLAUDE.md`).
 - Never run migrations as `postgres`: only `migrate` (role `qm_owner`). Otherwise new tables have no grants and the app gets "permission denied".
 
-## 8. Companion app release
-
-Copy the release files and `companion.json` into `local/companion/` of the VM's checkout; the web app picks a new manifest
-up within seconds, no restart (manifest format and version rules: `docs/webapp.md` "Companion release"). The upload runs from
-this checkout (`docs/companion.md` "Release": `scripts/publish-win-companion.ps1 <user>@<vm>` or
-`scripts/push-companion.sh <user>@<vm>`; the manifest is copied last, `DEPLOY_PATH`/`-DeployPath` for another checkout path).
-
-### Item thumbnails
+## 8. Item thumbnails
 
 After `pnpm thumbs:build` (`docs/webapp.md` "Thumbnails"), from the local checkout:
 

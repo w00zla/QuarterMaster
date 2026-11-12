@@ -95,7 +95,7 @@ const logTip = computed(() => (log.value ? t("log.notFound", { path: log.value.p
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
+  height: 48px;
   flex-shrink: 0;
   padding: 0 16px;
   background: var(--bg-surface);

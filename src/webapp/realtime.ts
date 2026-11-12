@@ -2,22 +2,20 @@
 // triggers of migration 0006 whoever writes) fans out to the browsers' WebSockets (/api/ws). Messages
 // only say what changed (ServerMessage); the data comes through the normal endpoints, which check
 // the rights. The handshake runs outside Hono (Node's 'upgrade' event), so it checks everything
-// itself: path, Origin (cross-site WebSocket hijacking), connection limits, session.
+// itself: path, Origin (cross-site WebSocket hijacking), connection limits, and the user (the Identity's,
+// identity.ts: online the session cookie).
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { sql } from 'drizzle-orm';
-import { parse as parseCookies } from 'hono/utils/cookie';
-import type postgres from 'postgres';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { z } from 'zod';
-import type { Db } from '../db/client.ts';
+import type { ChangeSource, Db } from '../db/client.ts';
 import type { ServerMessage } from './api-types.ts';
 import { FEATURES, holdersOf } from './features.ts';
 import { clientAddress, rateKey } from './ip.ts';
-import { SESSION_COOKIE, validateSession } from './session.ts';
+import type { Identity, SocketUser } from './identity.ts';
 
 export const CHANNEL = 'qm_changes';
-const SESSION_COOKIE_NAME = `__Host-${SESSION_COOKIE}`;
 // Closing codes the SPA knows: the session is gone (log in again)
 export const CLOSE_SESSION_ENDED = 4401;
 
@@ -36,16 +34,19 @@ export interface RealtimeOptions {
   // Same as the app: the only Origin a handshake may come from
   origin: string;
   trustProxy: boolean;
+  // The Host headers a handshake may carry (see WebappConfig.allowedHosts); unset = no check
+  allowedHosts?: string[];
   maxPerUser?: number;
   maxPerAddress?: number;
-  // Keepalive: ping, drop dead connections, check the session again
+  // Keepalive: ping, drop dead connections, ask the identity whether the user's login still stands
   pingMs?: number;
 }
 
 interface Conn {
   ws: WebSocket;
   userId: string;
-  token: string;
+  // Whether the login behind the socket still stands (SocketUser.valid)
+  valid: SocketUser['valid'];
   address: string;
   // Active memberships, refreshed when the roster changes for this user
   orgs: Set<string>;
@@ -59,15 +60,17 @@ const MAX_MESSAGES = 20;
 
 export class RealtimeHub {
   private readonly db: Db;
-  private readonly options: Required<RealtimeOptions>;
+  private readonly identity: Identity;
+  private readonly options: Required<Omit<RealtimeOptions, 'allowedHosts'>> & Pick<RealtimeOptions, 'allowedHosts'>;
   private readonly log: Log;
   private readonly conns = new Set<Conn>();
   private readonly wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   private readonly timer: ReturnType<typeof setInterval>;
 
-  constructor(db: Db, options: RealtimeOptions, log: Log) {
+  constructor(db: Db, identity: Identity, options: RealtimeOptions, log: Log) {
     this.db = db;
-    this.options = { maxPerUser: 5, maxPerAddress: 20, pingMs: 25_000, ...options };
+    this.identity = identity;
+    this.options = { maxPerUser: 5, maxPerAddress: 20, pingMs: 25_000, allowedHosts: undefined, ...options };
     this.log = log;
     this.timer = setInterval(() => void this.keepalive(), this.options.pingMs);
     this.timer.unref();
@@ -79,6 +82,9 @@ export class RealtimeHub {
       socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     };
     socket.on('error', () => socket.destroy());
+    // DNS rebinding: the page's own host name decides what "same-origin" means to the browser
+    const { allowedHosts } = this.options;
+    if (allowedHosts && !allowedHosts.includes(req.headers.host?.toLowerCase() ?? '')) return reject(421, 'Misdirected Request');
     if (new URL(req.url ?? '/', 'http://localhost').pathname !== '/api/ws') return reject(404, 'Not Found');
     // Browsers send cookies with a cross-site handshake and CORS does not apply: Origin decides
     if (req.headers.origin !== this.options.origin) return reject(403, 'Forbidden');
@@ -86,13 +92,11 @@ export class RealtimeHub {
     const address = rateKey(clientAddress(Array.isArray(forwarded) ? forwarded.at(-1) : forwarded,
       req.socket.remoteAddress, this.options.trustProxy));
     if (this.count((c) => c.address === address) >= this.options.maxPerAddress) return reject(429, 'Too Many Requests');
-    const token = parseCookies(req.headers.cookie ?? '', SESSION_COOKIE_NAME)[SESSION_COOKIE_NAME];
-    if (!token) return reject(401, 'Unauthorized');
-    validateSession(this.db, token).then(async (session) => {
-      if (!session) return reject(401, 'Unauthorized');
-      if (this.count((c) => c.userId === session.userId) >= this.options.maxPerUser) return reject(429, 'Too Many Requests');
-      const orgs = await this.orgsOf(session.userId);
-      this.wss.handleUpgrade(req, socket, head, (ws) => this.register(ws, session.userId, token, address, orgs));
+    this.identity.authenticateUpgrade(req).then(async (user) => {
+      if (!user) return reject(401, 'Unauthorized');
+      if (this.count((c) => c.userId === user.userId) >= this.options.maxPerUser) return reject(429, 'Too Many Requests');
+      const orgs = await this.orgsOf(user.userId);
+      this.wss.handleUpgrade(req, socket, head, (ws) => this.register(ws, user, address, orgs));
     }).catch((err: unknown) => {
       this.log('Realtime handshake failed', err);
       reject(500, 'Internal Server Error');
@@ -167,8 +171,8 @@ export class RealtimeHub {
     this.wss.close();
   }
 
-  private register(ws: WebSocket, userId: string, token: string, address: string, orgs: Set<string>) {
-    const conn: Conn = { ws, userId, token, address, orgs, alive: true, recent: [] };
+  private register(ws: WebSocket, user: SocketUser, address: string, orgs: Set<string>) {
+    const conn: Conn = { ws, userId: user.userId, valid: user.valid, address, orgs, alive: true, recent: [] };
     this.conns.add(conn);
     ws.on('pong', () => (conn.alive = true));
     ws.on('message', (data, isBinary) => this.receive(conn, data, isBinary));
@@ -201,9 +205,9 @@ export class RealtimeHub {
       }
       conn.alive = false;
       conn.ws.ping();
-      // Logout, expiry or a new login elsewhere ended the session: the socket goes too
-      const session = await validateSession(this.db, conn.token).catch(() => undefined);
-      if (session === null) conn.ws.close(CLOSE_SESSION_ENDED, 'session ended');
+      // The login ended (online: logout, expiry or a new login elsewhere): the socket goes too
+      const valid = await conn.valid().catch(() => undefined);
+      if (valid === false) conn.ws.close(CLOSE_SESSION_ENDED, 'session ended');
     }
   }
 
@@ -218,6 +222,11 @@ export class RealtimeHub {
     const rows = await this.db.execute<{ guild_id: string }>(
       sql`SELECT guild_id FROM app.member WHERE user_id = ${userId} AND active`);
     return new Set(rows.map((r) => r.guild_id));
+  }
+
+  /** Open connections (the tests wait for 0 between cases: a terminated socket leaves the hub a moment later). */
+  get connections(): number {
+    return this.conns.size;
   }
 
   private count(match: (c: Conn) => boolean) {
@@ -236,7 +245,7 @@ export class RealtimeHub {
 }
 
 /** Feeds the database's change announcements into the hub; after a reconnect of the listener, a resync. */
-export async function listenForChanges(client: postgres.Sql, hub: RealtimeHub, log: Log) {
+export async function listenForChanges(client: ChangeSource, hub: RealtimeHub, log: Log) {
   let connected = false;
   // One after another, in the order the database announced them
   let queue = Promise.resolve();

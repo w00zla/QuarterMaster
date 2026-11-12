@@ -3,10 +3,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
 import type { ThumbSize } from "../../src/thumbs.ts";
-import type { CompanionOutdated, CompanionPlatform } from "../../src/webapp/api-types.ts";
+import { COMPANION_API } from "../../src/webapp/api-types.ts";
+import { isConnectionCode, outdatedOf, refusalOf, type Connection, type Outdated, type Paired } from "./connection.ts";
 import type { OverlayDisplay } from "./overlayLayout.ts";
 
 export interface Config {
+  // Which server the app talks to: the online one (server + token) or the Quartermaster app on this PC
+  connection: Connection;
   server: string;
   // The user's API token (web app profile)
   token: string;
@@ -23,6 +26,10 @@ export interface Config {
   autoTab: boolean;
   // The screen scan's OCR on the GPU where it can (GpuStatus), else on the CPU
   gpu: boolean;
+  // Updates by themselves: a check at start installs a newer version at once
+  autoUpdate: boolean;
+  // The update channel chosen in the update dialog ("" = none: the build's own, else stable); only the dialog changes it
+  updateChannel: string;
 }
 
 // Whether the OCR can run on the GPU: ready, DirectML.dll not next to the exe, or failed in this run
@@ -60,9 +67,8 @@ export interface LogState {
 /** A refusal: an error code (translated by the UI) or a message. */
 export class AppError extends Error {}
 
-// Codes that mean the connection itself is refused (shown as the connection state, not as a toast)
-const CONNECTION_CODES = new Set(["noServer", "noToken", "invalidServer", "insecureServer", "invalidToken", "network", "companionOutdated"]);
-export const isConnectionError = (e: unknown) => e instanceof AppError && CONNECTION_CODES.has(e.message);
+// A refusal of the connection itself (connection.ts: shown as the connection state, not as a toast)
+export const isConnectionError = (e: unknown) => e instanceof AppError && isConnectionCode(e.message);
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
@@ -80,13 +86,18 @@ export const setUnlockScan = (on: boolean) => call<void>("set_unlock_scan", { on
 // Writes the debug window's Game.log export (the log state plus the main window's report) into dir; the file's path
 export const exportLogDebug = (dir: string, report: unknown) => call<string>("export_log_debug", { dir, report });
 export const scanBackups = () => call<{ found: number; failed: number }>("scan_backups");
-// updater = the installed app (setup), which updates itself (installUpdate); the standalone exe downloads the zip
-export const appInfo = () => call<{ version: string; platform: CompanionPlatform; updater: boolean }>("app_info");
+// setup = the installed app (NSIS setup), not the bare exe
+export const appInfo = () => call<{ version: string; platform: "windows" | "linux"; setup: boolean }>("app_info");
 export const gpuStatus = () => call<GpuStatus>("gpu_status");
-export const downloadUpdate = (url: string, dest: string) => call<void>("download_update", { url, dest });
-// Ends the app when it worked (the setup starts the new version)
-export const installUpdate = () => call<void>("install_update");
+// The web app of the server in use (the local app's in the local mode), in the browser
 export const openWebapp = () => call<void>("open_webapp");
+// The companion's releases page on GitHub, in the browser
+export const openReleases = () => call<void>("open_releases");
+/** The project's GitHub page in the browser (the footer's link). */
+export const openRepo = () => call<void>("open_repo");
+// The local app as its pairing file last said (read by the Rust side at every call in the local mode); null online
+// or while it was never seen
+export const getPaired = () => call<Paired | null>("paired");
 // A file as the debug window shows it; size null = not there
 export interface FileInfo {
   path: string;
@@ -124,6 +135,10 @@ export type ScanScreen = "none" | "warehouse" | "inventory" | "refinery";
 export const setDebug = (on: boolean) => call<void>("set_debug", { on });
 export const startDebugRecording = (dir: string) => call<string>("start_debug_recording", { dir });
 export const stopDebugRecording = () => call<void>("stop_debug_recording");
+// The settings window (settings.html), opened or focused
+export const openSettingsWindow = () => call<void>("open_settings_window");
+// The settings window's first size: its content height (logical px); the window then shows
+export const fitSettingsWindow = (height: number) => call<void>("fit_settings_window", { height });
 // The debug window (debug.html), opened or focused
 export const openDebugWindow = () => call<void>("open_debug_window");
 export const getGameSeen = () => call<boolean>("get_game_seen");
@@ -136,20 +151,32 @@ export const gameNames = (keys: string[]) => call<Record<string, string>>("game_
 // An item thumbnail as a data: URL (the app's cache, else the server's /thumbs/…; thumbs.ts keeps them per session)
 export const thumbData = (size: ThumbSize, uuid: string, hash: string) => call<string>("thumb", { size, uuid, hash });
 
-// Set when the server refused this version (426): the app does no work until updated
-export const outdated = ref<CompanionOutdated | null>(null);
+// Set when the server refused this app's API contract number (426: the companion is too old, 409: the server is):
+// the app does no work until that changed
+export const outdated = ref<Outdated | null>(null);
 
-/** One web app API call as the token's user; refusals throw their error code. `cache`: a GET kept on disk and
+/** An API answer's body; refusals throw their error code (connection.ts `refusalOf`), a contract refusal also sets
+ * `outdated`. */
+function answer<T>(res: { status: number; body: unknown }): T {
+  const refused = outdatedOf(res.status, res.body);
+  if (refused) outdated.value = refused;
+  const code = refusalOf(res.status, res.body);
+  if (code) throw new AppError(code);
+  return res.body as T;
+}
+
+/** One API call to the server in use (as the token's user online, as the local user in the app), with the API
+ * contract number this build was made for (COMPANION_API, its one source). `cache`: a GET kept on disk and
  * revalidated by its ETag (Rust `server::cached_api`; the catalog). */
 export async function api<T>(method: "GET" | "POST", path: string, body?: unknown, cache = false): Promise<T> {
-  const res = await call<{ status: number; body: unknown }>("api", { method, path: `/api${path}`, body: body ?? null, cache });
-  if (res.status === 426) {
-    outdated.value = res.body as CompanionOutdated;
-    throw new AppError("companionOutdated");
-  }
-  if (res.status >= 400) {
-    const code = (res.body as { error?: string } | null)?.error;
-    throw new AppError(code ?? `HTTP ${res.status}`);
-  }
-  return res.body as T;
+  return answer<T>(await call("api", { apiNumber: COMPANION_API, method, path: `/api${path}`, body: body ?? null, cache }));
+}
+
+let localeRun: Promise<void> | null = null;
+/** Brings the game's English texts on disk up to date with the server (GET /api/companion/locale, revalidated by
+ * its ETag; the readers' English table, Rust `server::cached_text`). One run at a time. */
+export function refreshLocale(): Promise<void> {
+  return (localeRun ??= call<{ status: number; body: unknown }>("refresh_locale", { apiNumber: COMPANION_API })
+    .then((res) => answer<void>(res))
+    .finally(() => (localeRun = null)));
 }

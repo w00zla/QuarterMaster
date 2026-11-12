@@ -16,7 +16,6 @@ import { sql, type SQL } from 'drizzle-orm';
 import { COMPONENT_TYPES, fpsTypeSql } from '../catalog/components.ts';
 import type { Db, Tx } from '../db/client.ts';
 import { one, rows } from '../db/query.ts';
-import { refineryLocations } from '../ext/refineries.ts';
 import { recordHistory, type HistoryCategory, type HistoryDetails, type Source } from '../history/record.ts';
 import type { ModifierRange } from '../planner/types.ts';
 import { formatAmount, parseAmount, type SubjectKind } from './amount.ts';
@@ -87,9 +86,8 @@ export class StockError extends Error {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// The star map amenity "Commodity Trading - Freight Elevator" (starmapamenitytypes.json): the place has a
-// freight elevator, so a location inventory; read from the record's `amenities` in catalog.raw_record
-const FREIGHT_ELEVATOR_AMENITY = 'a783bfb9-0f0a-491f-864b-945a49ef5da4';
+// Places whose star map record lists the amenity "Commodity Trading - Freight Elevator" have a freight elevator,
+// so a location inventory (catalog.location.has_freight_elevator, set by the extractor)
 // Places with a freight elevator whose record lacks the amenity: the freight manager's Warehouse was opened
 // there per Game.log (checked 2026-10-19); keys lower case. Nyx_Kaboos is hidden in the starmap.
 const FREIGHT_ELEVATOR_KEYS = [
@@ -106,7 +104,7 @@ const FREIGHT_ELEVATOR_KEYS = [
  * boundary `\M` instead of a plain space).
  */
 export const selectableLocationSql = (l = 'l') => sql.raw(`((NOT ${l}.hide_in_starmap AND (${l}.nav_icon IN ('Station', 'LandingZone')
-    OR EXISTS (SELECT 1 FROM catalog.raw_record r WHERE r.uuid = ${l}.uuid AND r.data -> 'amenities' @> '[{"_RecordId_": "${FREIGHT_ELEVATOR_AMENITY}"}]'))
+    OR ${l}.has_freight_elevator)
     OR lower(${l}.key) IN (${FREIGHT_ELEVATOR_KEYS.map((k) => `'${k}'`).join(', ')}))
   AND coalesce(${l}.type, '') NOT IN ('Anomaly', 'PointOfInterest')
   AND EXISTS (SELECT 1 FROM catalog.localization_effective e WHERE e.lang = 'en' AND e.key = ${l}.name_key AND e.value !~ '^WIP\\M'))`);
@@ -235,6 +233,15 @@ async function checkLocation(tx: Tx, uuid: string) {
     SELECT l.retired_at IS NOT NULL AS retired, ${selectableLocationSql()} AS selectable FROM catalog.location l WHERE l.uuid = ${uuid}`);
   if (!loc?.selectable) throw new StockError('unknownLocation');
   if (loc.retired) throw new StockError('retired');
+}
+
+/**
+ * The places with a refinery (catalog.location.has_refinery, not retired); null while none is flagged at all
+ * (a database not imported from a v7 snapshot yet): then every selectable location counts as a refinery.
+ */
+export async function refineryLocations(db: Db | Tx): Promise<Set<string> | null> {
+  const found = await rows<{ uuid: string }>(db, sql`SELECT uuid FROM catalog.location WHERE has_refinery AND retired_at IS NULL`);
+  return found.length ? new Set(found.map((r) => r.uuid)) : null;
 }
 
 async function checkHolder(tx: Tx, guildId: string, userId: string) {
@@ -439,8 +446,8 @@ export async function refineStart(db: Db, actor: Actor, input: RefineStartInput)
   return db.transaction(async (tx) => {
     await ensureUser(tx, actor.userId);
     await checkLocation(tx, input.locationUuid);
-    // Refineries per UEX; without UEX data yet every selectable location
-    const refineries = await refineryLocations(db);
+    // Refinery places from the catalog; none flagged yet = every selectable location
+    const refineries = await refineryLocations(tx);
     if (refineries && !refineries.has(input.locationUuid)) throw new StockError('notRefinery');
     const jobId = randomUUID();
     const started = (await one<{ now: string }>(tx, sql`SELECT now()::text AS now`))!.now;

@@ -10,7 +10,6 @@ import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
 import { syncMember } from '../src/bot/roster.ts';
 import { addBlueprint } from '../src/bot/blueprints.ts';
 import { ensureGuild, markGuildLeft, updateGuildSettings } from '../src/bot/settings.ts';
-import { storeSnapshot } from '../src/ext/store.ts';
 import { COMPONENT_QUALITY, add, refineStart, type Actor } from '../src/stock/service.ts';
 import { createSession } from '../src/webapp/session.ts';
 import { createApiToken } from '../src/webapp/token.ts';
@@ -129,10 +128,8 @@ describe('admin: users, orgs and data checks (database)', { skip: url ? false : 
     await db.execute(sql`UPDATE catalog.item SET retired_at = now() WHERE uuid = ${U.gem}`);
     await db.execute(sql`UPDATE catalog.blueprint SET retired_at = now() WHERE uuid = ${U.blueprint2}`);
     await db.execute(sql`UPDATE app.stock_batch SET refine_started_at = now() - interval '9 days', refine_ends_at = now() - interval '8 days' WHERE state = 'refining'`);
-    // UEX data without this station: the job sits outside every refinery
-    await storeSnapshot(db, 'uex', 'refineries_yields', [
-      { id_terminal: 1, terminal_name: 'Refinery Nowhere', star_system_name: 'Nyx', space_station_name: 'Nowhere', commodity_name: 'Iron (Ore)', value: 1 },
-    ]);
+    // Another place flagged instead of this station: the job sits outside every refinery
+    await db.execute(sql`UPDATE catalog.location SET has_refinery = (uuid = ${U.orphan})`);
     assert.deepEqual(await count(), { retiredMaterial: 1, retiredLocation: 0, retiredBlueprint: 1, jobNotAtRefinery: 1 });
     const checks = new Map((await getDataChecks(db, 'en')).map((c) => [c.key, c.hits]));
     assert.deepEqual(checks.get('retiredMaterial')!.map((h) => [h.userId, h.name, h.amount, h.unit]), [[OLGA, 'Olga O.', '3', 'pcs']]);

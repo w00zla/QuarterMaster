@@ -119,11 +119,8 @@ services:
       WEBAPP_TRUST_PROXY: "1"
       WEBAPP_HOST: 0.0.0.0
       WEBAPP_PORT: "3000"
-      COMPANION_DIR: /companion
       THUMBS_DIR: /thumbs
     volumes:
-      # The companion app release (companion.json + files), copied there by hand; local/ is gitignored
-      - ./local/companion:/companion:ro
       # The item thumbnails (s/, m/, l/ + thumbs.json), from scripts/push-thumbs.sh
       - ./local/thumbs:/thumbs:ro
     ports: ["127.0.0.1:3000:3000"]

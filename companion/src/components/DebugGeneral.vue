@@ -79,7 +79,7 @@ const counts = (lang: string) => report.value?.catalog?.counts.find((c) => c.lan
         <div class="kv wide">
           <span class="kk">{{ t("debug.k.version") }}</span><span class="vv">{{ app ? `v${app.version}` : "–" }}</span>
           <span class="kk">{{ t("debug.k.platform") }}</span>
-          <span class="vv">{{ app ? `${app.platform} · ${t(app.updater ? "debug.build.setup" : "debug.build.standalone")}` : "–" }}</span>
+          <span class="vv">{{ app ? `${app.platform} · ${t(app.setup ? "debug.build.setup" : "debug.build.standalone")}` : "–" }}</span>
           <span class="kk">{{ t("debug.k.server") }}</span><span class="vv">{{ info?.server || "–" }}</span>
           <span class="kk">{{ t("debug.k.user") }}</span><span class="vv">{{ report?.user ?? "–" }}</span>
           <span class="kk">{{ t("debug.k.connection") }}</span>

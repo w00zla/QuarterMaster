@@ -51,27 +51,23 @@ function useProgress() {
 const catalogFile = ref<File | null>(null);
 const force = ref(false);
 const allowDowngrade = ref(false);
-// The readable version (e.g. 4.10.2), required: snapshots carry none since the extractor stopped setting it
-const label = ref("");
-const labelMissing = computed(() => !label.value.trim());
 const catalogRun = useProgress();
 const catalogBusy = computed(() => catalogRun.state.busy);
 const catalogError = ref("");
 const catalogResult = ref<CatalogImportResponse | null>(null);
 // A passed dry run is only valid for the file and options it ran with
 const catalogReady = ref(false);
-watch([catalogFile, force, allowDowngrade, label], () => {
+watch([catalogFile, force, allowDowngrade], () => {
   catalogReady.value = false;
 });
 
 async function runCatalog(dryRun: boolean) {
-  if (!catalogFile.value || labelMissing.value) return;
+  if (!catalogFile.value) return;
   catalogRun.start(dryRun);
   catalogError.value = "";
   try {
     const r = await postFile<CatalogImportResponse>("/import/catalog", {
       dryRun: dryRun ? 1 : 0, force: force.value ? 1 : 0, allowDowngrade: allowDowngrade.value ? 1 : 0,
-      label: label.value.trim(),
     }, catalogFile.value, catalogRun.onUpload);
     catalogResult.value = r;
     catalogReady.value = dryRun && r.status === "dry-run";
@@ -152,12 +148,11 @@ const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
           <span class="mono dim name">{{ catalogFile?.name ?? "" }}</span>
         </div>
         <div class="row">
-          <label class="field">Label <input v-model="label" class="input mono short" :class="{ missing: catalogFile && labelMissing }" placeholder="4.10.2" required /></label>
           <label class="check"><input v-model="force" type="checkbox" /> Force <HelpTip :text="HELP.forceImport" /></label>
           <label class="check"><input v-model="allowDowngrade" type="checkbox" /> Allow downgrade <HelpTip :text="HELP.allowDowngrade" /></label>
         </div>
         <div class="row">
-          <button type="button" class="btn outline small" :disabled="!catalogFile || labelMissing || catalogBusy" @click="runCatalog(true)">Dry run</button>
+          <button type="button" class="btn outline small" :disabled="!catalogFile || catalogBusy" @click="runCatalog(true)">Dry run</button>
           <button type="button" class="btn primary small" :disabled="!catalogReady || catalogBusy" @click="runCatalog(false)">Import</button>
           <span v-if="catalogBusy" class="progress">
             <span class="spinner" />
@@ -343,11 +338,6 @@ const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
 
 .input.short {
   width: 70px;
-}
-
-/* A file is chosen, the required label is not */
-.input.missing {
-  box-shadow: inset 0 0 0 1px var(--warn);
 }
 
 .progress {

@@ -52,7 +52,8 @@ async function save() {
 </script>
 
 <template>
-  <ConfirmDialog v-if="me" :title="me.name" :subtitle="me.username" icon="user" :buttons="buttons" @choose="emit('close')">
+  <!-- name and username are only null without a Discord profile (the singleuser variant, which has no profile dialog) -->
+  <ConfirmDialog v-if="me" :title="me.name ?? ''" :subtitle="me.username ?? undefined" icon="user" :buttons="buttons" @choose="emit('close')">
     <form id="profile" class="form single flush" @submit.prevent="save">
       <label class="field">
         {{ t("profile.rsi") }}

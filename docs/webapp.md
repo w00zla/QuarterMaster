@@ -9,26 +9,76 @@ before go-live: the privacy notice (needs the controller's name and contact from
 it), an OWASP ZAP baseline scan, the deploy (`docs/deploy.md`).
 
 Commands (`pnpm webapp`, `webapp:dev`, …): `CLAUDE.md`. Locally the backend runs on `:3002`, its Vite on
-`:5174` with a proxy for `/api`, `/auth` and `/downloads`; always open it as `localhost`, never
+`:5174` with a proxy for `/api`, `/auth` and `/thumbs`; always open it as `localhost`, never
 `127.0.0.1` (another cookie host). The dev Discord application has the redirect
 `http://localhost:5174/auth/callback`; the dev bot must run against the dev DB, else the roster is empty.
 
 ## Backend (`src/webapp/`)
 
-- Hono, own process (`main.ts`); `createApp` in `app.ts` builds the app without a server, the tests drive it
-  via `app.request`.
-- Middleware order: `secureHeaders` (strict CSP, no HSTS: Caddy sets it), own same-origin check for every
-  non-GET (`Sec-Fetch-Site`, else `Origin` = `WEBAPP_ORIGIN`; Hono's `csrf()` only covers form content
+- Hono, own process (`main.ts`); `createApp(db, identity, config)` in `app.ts` builds the app without a server, the
+  tests drive it via `app.request`. `app.ts` and `realtime.ts` hold no login, session or token code: who the user
+  is comes from the `Identity` passed in (see "Identity"); `main.ts` is the online composition root (Discord
+  identity, `capabilities` `{ login: 'discord', orgs: true, uex: true }`).
+- Middleware order: `secureHeaders` (strict CSP, no HSTS: Caddy sets it), the write check for every
+  non-GET (the identity's `acceptsWrite`; online: `Sec-Fetch-Site`, else `Origin` = `WEBAPP_ORIGIN`; Hono's `csrf()` only covers form content
   types), `no-store` on `/auth/*` and `/api/*` unless the route sets its own (only `/api/catalog` and `/api/companion/catalog`: `private,
   no-cache` with an ETag from Hono's `etag()`, a hash of the body; unchanged = 304, ~3 MB per language
   spared (Caddy compresses nothing; the app gzips only `/api/companion/catalog`, below); the header is set outside `etag()`, whose 304 drops the route's headers), `hono-rate-limiter` (in memory: `/auth/*` per IP, `/api/*`
-  per session), then for `/api/*` the session check (401 for every route, unknown ones too), JSON-only
+  per session), the identity's own routes (online `/auth/*`), `GET /api/capabilities`, then for `/api/*` the
+  companion API check (only for a request the identity calls the companion's, see "Companion API"), the
+  user check (the identity's `authenticate`; online 401 for every route, unknown ones too), JSON-only
   writes (415, `DELETE` included) and a 16 KB body limit (a feature's image upload: its own, see
   "Features and privileges").
+- **How the SPA uses the capabilities.** A view never asks for the variant or the login. It asks either a capability
+  (`capabilities.ts`: `orgsOn`, `uexOn`) or a trait derived from them in one place (`navigation.ts` `traitsOf`, exported by
+  `capabilities.ts`): `localApp` (own settings, data updates, app version, start tile: `/api/local/*`), `singleUser` (no "who"
+  and no "source", e.g. in the history) and `sideLayout` (header across the full width with the side bar below, instead of the
+  top bar). Today all three follow from `login: 'none'`; they are named apart so a view says what it means and a variant that
+  differs in one of them changes `traitsOf` only. Whether the page runs in the desktop shell (`shell.available`) or is the
+  settings window (`windows.ts`) is a different question (the frame, not the variant).
+- `GET /api/capabilities` → `Capabilities` `{ login: 'discord' | 'none', orgs, uex, game }` (`api-types.ts`): what this
+  server offers (`ServerCapabilities`: `WebappConfig.capabilities` of the composition root, **a value or a function** returning it,
+  asked at every request: the singleuser variant's `uex` follows the user's key; online passes a value; `orgs` is read once, when
+  the app is built, because it decides which routes are mounted, so it cannot change at runtime) and the installed game data:
+  `game` = `{ label, build }` of the latest catalog import (`label` like `4.10.2.12913470`, may be null for an old import), `null`
+  while no catalog is installed. It lives here because both variants' top bars need it once at load, the route is public and
+  already asked first, and it costs no extra request; the query (`game-version.ts`) is cached for 5 seconds and shared by concurrent
+  requests, so a data pack install shows without a restart and the public route is no query per request. A failing query answers
+  the last value (or null). The one API route answered without
+  a user (the SPA and the companion ask before they have one); it sits before the user check, behind the
+  per-address rate limit, `no-store`. Only this exact path and `GET`. `orgs: false` also leaves the org routes
+  (`/api/orgs/…`) unmounted (`registerRoutes`' option; the API's 404). Every other route that takes a guild id
+  checks the caller's membership there, so without memberships no parameter reaches an org.
+- `WebappConfig.allowedHosts` (optional): the `Host` header values a request may carry; the first middleware answers any
+  other with 421 `{ error: 'host not allowed' }`, and sends a GET/HEAD page request on a listed host that is not the
+  origin's to the origin (307). Unset (online) = no check, Caddy matches the host. The WebSocket handshake takes the
+  same list through `RealtimeOptions.allowedHosts` (421). Used by the singleuser variant (`docs/singleuser.md`
+  "Host guard").
+- `WebappConfig.mountApi` (optional): `(api: ApiApp) => void`, called with the API router after the regular routes and the
+  identity's API routes and before the 404 catch-all, so the routes stay behind the identity check, the JSON-only rule for
+  writes and the body limit. Online passes none; the singleuser variant mounts its data update routes
+  (`src/singleuser/data-routes.ts`, `docs/singleuser.md` "Updating the data").
 - Client IP: socket address, or the last `X-Forwarded-For` entry with `WEBAPP_TRUST_PROXY=1` (Caddy drops
   the client's own header).
 
-### Login (`discord.ts`)
+### Identity (`identity.ts`, `identity-discord.ts`, `identity-local.ts`)
+
+The seam between the HTTP layer and the variant it runs as. `Identity`:
+
+| Method | Asked | Online (`discordIdentity(db, login)`) |
+|---|---|---|
+| `acceptsWrite(c, origin)` | every non-GET, before anything else; false = 403 | `Authorization` present (the companion's token: no cookie, and a page cannot set the header without a preflight) or same-origin |
+| `mountRoutes(app, host)` | once, after the global middlewares | `/auth/login`, `/auth/callback`, `/auth/logout` |
+| `isCompanionRequest(c)` | every `/api/*` request but the capabilities, before `authenticate` | `Authorization` present (any value) |
+| `authenticate(c, host)` | every `/api/*` request but the capabilities, after the companion API check | `Authorization`: its token (401), never the cookie; else the session cookie (401, an unknown cookie deleted). Sets `session`, and `apiToken` for a token |
+| `mountApiRoutes(api, host)` | once, inside the API | `GET`/`POST /api/token`, session only |
+| `authenticateUpgrade(req)` | a WebSocket handshake, after path, Origin and the address limit | the session cookie; `valid()` re-validates it at every keepalive |
+
+`host` (`IdentityHost`) is what only the app has: its origin and the client address of a request (for the log).
+Online-only, all inside `identity-discord.ts`: the login, sessions and the API token. The local identity (one fixed user, no login) is described in `docs/singleuser.md`
+"Identity".
+
+### Login (`discord.ts`, routes in `identity-discord.ts`)
 
 `openid-client` with hand-configured Discord endpoints (Discord is no OIDC provider; `arctic` was planned
 but is deprecated on npm), code + PKCE S256 + state, scope `identify`, redirect URI = `WEBAPP_ORIGIN` +
@@ -50,14 +100,15 @@ yields no usable session); 14 days idle, 30 days absolute; a login replaces this
 validation re-creates a missing `app_user` row (sessions have no FK to it: the roster cleanup deletes
 `app_user` once it holds no data); expired rows deleted hourly. The Discord profile (name, avatar) lives in
 the session only, refreshed by each login; `/api/me` returns it for every user, also without any org
-(default avatar from the ID). Rights are never cached: `me.ts` reads the roster per request (active member
+(default avatar from the ID). `MeResponse.name`, `username` and `avatarUrl` are nullable: `null` for a user without a Discord profile
+(`Session.noProfile`, the singleuser variant's local user); a Discord user's answer is unchanged. Rights are never cached: `me.ts` reads the roster per request (active member
 rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deactivate its members).
 
 ### Features (`routes.ts`; the contract with all paths and shapes in `api-types.ts`)
 
 - `GET /api/catalog?lang`: bookable materials with unit, the `component` flag, `label`, size, grade letter
-  and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag,
-  yield bonuses and the star map `key` (as Game.log names it, for the companion); materials `minable` (the
+  and class, a component's `stats` with bounds, loc `nameKey` and `base`; locations with refinery flag
+  and the star map `key` (as Game.log names it, for the companion); materials `minable` (the
   mining data answers for it: a mined resource, a refined one from its ores, or a gem item); blueprints (`unlockable`: a
   row in `catalog.blueprint_source`; magazines included); each material and location with its loc `nameKey` (the companion looks it up in
   the player's language pack). From the shared in-memory catalogs; no ores, no refining methods.
@@ -65,7 +116,7 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
   only the fields it reads (`CompanionCatalogResponse`, `Pick`s of the types above): materials without unit
   (follows from `kind`), class and `minable`; locations without yields; blueprints with uuid, label, name,
   size, grade letter, `isDefault`, `retired`, `outputUuid`, `thumb`. Cached like `/api/catalog` (`private,
-  no-cache`, ETag). Session or API token like every route; companion builds before it keep `/api/catalog`.
+  no-cache`, ETag). Session or API token like every route.
   Size per language (dev DB, 2026-11-01): ~2.45 MB instead of ~2.95 MB raw, gzip ~340 instead of ~360 KB
   (the components with their stats are most of it and the companion needs them). Gzipped by the server when the
   client sends `Accept-Encoding: gzip` (so the proxy needs no `encode`): `Content-Encoding: gzip`,
@@ -116,7 +167,7 @@ rows; a server the bot left has none: `markGuildLeft`/`reconcilePresence` deacti
 
 One per user for the companion app, managed in the top bar's "Companion" dialog (`CompanionDialog.vue`;
 `POST /api/token`, shown once, only the SHA-256 and the creating session's Discord profile stored; a new one
-replaces the old). `Authorization: Bearer qmt_…` authenticates `/api/*` as the user (never falls back to the
+replaces the old; the dialog also links to the companion's GitHub releases). `Authorization: Bearer qmt_…` authenticates `/api/*` as the user (never falls back to the
 cookie) and skips the same-origin check (a cross-site page cannot set the header without a preflight);
 `/api/token` itself is session-only. Requests made with it are history source `companion`.
 
@@ -152,20 +203,38 @@ subject = catalog UUID, payload `{ hash }` = the thumbnail it was marked on, a W
 `GET /api/features/thumb-review/subjects?lang` lists every thumbnail of the index with name, class name, type and
 item class label. The SPA view: "Views".
 
-### Companion release (`companion.ts`)
+### Companion API (`companion.ts`, `locale.ts`)
 
-The companion app itself (code, build, release scripts) is described in `docs/companion.md`; this is the server side.
+The companion app itself is described in `docs/companion.md`; this is the server side. The server hosts no companion
+files: the releases are the GitHub releases of this repository (https://github.com/w00zla/quartermaster/releases),
+which the Companion dialog links to.
 
-`COMPANION_DIR` (default `local/companion`; where the companion's publish script writes) holds the built app files and `companion.json`
-`{"version":"x.y.z","windows":"<…_x64-standalone.zip>","linux":"<.AppImage>","windowsSetup":"<…_x64-setup.exe>"}`
-(re-read when it changes; the setup's updater signature is read from `<setup>.sig` next to it, missing =
-manifest ignored). `GET /api/companion` lists version and downloads (the setup first, `kind` setup or
-standalone); `GET /downloads/companion/<file>` serves only manifest files (not the `.sig`), only with a
-session (else redirect to `/`) or the API token (no version check: the outdated app downloads its update;
-a wrong token = 401). `GET /downloads/companion/latest.json`, same access: the installed app's update feed
-in the Tauri updater format (`version`, `platforms.windows-x86_64` with the setup's absolute URL and
-signature), 404 without a setup. Token requests must send `X-QM-Companion: <version>`: older than
-the manifest (or missing) = 426 `CompanionOutdated` with the download URLs; no manifest = no check.
+**Contract number.** The API contract is numbered, not the apps: `COMPANION_API` (in `api-types.ts`) is the number a
+companion built from this tree sends and, for a server, its maximum; `COMPANION_API_MIN` is the oldest number the server
+still accepts (`COMPANION_API_MIN <= COMPANION_API`, both 1 at the start). Both go into `GET /api/capabilities` as
+`companionApi: { min, max }`, in both variants. A companion sends its number in `X-QM-Companion-Api` (an integer) and
+its app version in `X-QM-Companion` (`x.y.z`, for logs and labels only, never decided on).
+
+**The check** (`companionApiRefusal`, one implementation, run by the app for every companion request before the
+identity's user check, so before the token check online): a number that is missing, not an integer or below
+`COMPANION_API_MIN` = 426 `{ "error": "companionOutdated", "apiMin": <n> }`; above `COMPANION_API` = 409
+`{ "error": "serverOutdated", "apiMax": <n> }`. Neither carries data or links. Every `/api/*` route is covered
+(writes and unknown routes too) except `GET /api/capabilities`, which is how a companion finds the range. What a
+companion request is, is the identity's call (`isCompanionRequest`): online a request carrying `Authorization`
+(whatever its value; the web app sends a cookie); singleuser a request carrying `X-QM-Companion` or `X-QM-Companion-Api`
+(no tokens there; the header is a label, any local program may send it or leave it out). The web app's own
+requests are never checked.
+
+**Locale** (`GET /api/companion/locale`): the game's own English texts, so the companion needs no hand-placed
+`global.ini`: the `game` source in `en` of the installed catalog, never the effective texts (the singleuser variant's
+language pack and external sources sit above the game's texts there and must not leak into this table; the companion
+reads the player's pack itself). The same lines a `global.ini` has: `key=value`, UTF-8 without BOM, `\n` line ends, a line
+break inside a value written back as the two characters `\n` as the game does, keys as stored (lower case, without
+`,P`), ordered by key. `Content-Type: text/plain; charset=utf-8`. The ETag is the game source's `content_sha256`
+(`"<sha>"`, `"<sha>-gzip"` for the gzipped body), so it changes exactly when a catalog import changed the game texts and
+costs no hash over the ~90k rows; a matching `If-None-Match` = 304. `Cache-Control: private, no-cache`, gzipped when the
+client accepts it (`Vary: Accept-Encoding`). The text (and its gzip) is kept in memory until the source's hash changes.
+No catalog installed = 404 `{ "error": "noCatalog" }`. Authenticated and version-checked like every companion route.
 
 ### Thumbnails (`thumbs.ts`, `src/thumbs.ts`)
 
@@ -202,8 +271,8 @@ blocks".
   stock/roster/org state to the org's active members, blueprints/profile to the user and everyone sharing an
   org; a listener reconnect sends `resync`.
 - Handshake checks: path, `Origin` = `WEBAPP_ORIGIN` (cross-site WebSocket hijacking), max 5 sockets per user
-  / 20 per address, session cookie; keepalive every 25 s pings and re-validates the session (close code 4401
-  when gone). Client messages: JSON `{type:'ping'}` only (Zod), 4 KB, 20 per 10 s, anything else closes
+  / 20 per address, the user (the identity's `authenticateUpgrade`: the session cookie); keepalive every 25 s
+  pings and re-validates the session (`SocketUser.valid`; close code 4401 when gone). Client messages: JSON `{type:'ping'}` only (Zod), 4 KB, 20 per 10 s, anything else closes
   (1008). Writes stay on REST. CSP `connect-src` lists the ws(s) origin explicitly.
 
 ## SPA (`webapp/`)
@@ -225,7 +294,7 @@ blocks".
 - **Übersicht**: KPI tiles from `GET /api/summary`, each with a detail line below (`StatTile`: unit after
   the value, the line as tall as a `.tag`): a personal panel with Materials (SCU materials only; SCU; kinds ·
   locations), Harvestables/Sammelobjekte (until 2026-10-20 "Items"; pieces; kinds · locations), Gear/Ausrüstung (the same), Blueprints "X / Y" (Y = obtainable:
-  not retired, not default, in a reward pool of the game data, cached per import; X = every registered one
+  not retired, not default, in a reward pool of the game data (`blueprint.in_reward_pool`), cached per import; X = every registered one
   and may exceed Y: then the game data misses a source, listed in the admin overview), Refinery jobs (sum of
   the expected yields · stations) and Next job ready (countdown, a "n ready" tag); "Your orgs" with one
   sub-tile per org (name, state, "Members: n", Resources/Items/Blueprints). Reloads on every realtime message.
@@ -276,7 +345,7 @@ blocks".
 - **Raffinerie**: running jobs as a table with one group per work order (station, total yield and the time
   left with a "ready" tag or "duration open" on the group row; actions: a clock opens `RefineryTimeDialog` to
   set or clear the time left, done, remove with a `ConfirmDialog` listing the materials), the materials below
-  with quality, expected yield and UEX bonus; job columns sort the jobs, material columns the materials
+  with quality and expected yield; job columns sort the jobs, material columns the materials
   within; same filters as Ressourcen. `RefineryStartForm`: station, duration (all three fields empty = "duration
   open") and rows of resource, quality and expected yield (no method, no estimates). `RefineryDoneDialog`
   stores the whole job, each row's amount starting from its expected yield.
@@ -382,10 +451,196 @@ blocks".
   a logo link to UEX (`uex-logo-{20,40}.png`, Lanczos from its touch icon), a divider, a short CIG fan site disclaimer (the full text on hover) and the Star Citizen
   logo from the official fankit (`webapp/src/assets/sc-logo-{20,40}.png`), on every page incl. login.
 
+### Capabilities and the singleuser UI
+
+The SPA asks `GET /api/capabilities` before anything else (`capabilities.ts`, reactive; retried every 2 s while the server does not
+answer) and only then loads `/api/me`. What it shows follows the capabilities, not a build flag:
+
+- **`login: 'discord'`**: the online behaviour as always (login view, user, profile, logout, companion dialog, the
+  "thumbnail review" privilege button).
+- **`login: 'none'`** (the singleuser variant): no login view, no user name or avatar, no profile dialog, no logout, no companion download
+  dialog, and no top bar: the navigation is the side bar ("The side bar and the settings window" below), whose "Settings" entry opens
+  the settings window of the desktop shell or, in a plain browser, `/settings`; the route exists only without a login, with a login
+  it leads home (`navigation.ts` `routeAllowed`, a router guard, and `App.vue` re-checks the current route when the capabilities
+  arrive or change).
+- **`orgs: false`**: no scope switch (`ScopeBar` renders nothing), no "Your orgs" panel on the overview, no sharing button in the stock
+  table (its actions column is one button narrower). The rest of the org handling needs no condition: a user without any org already
+  is a case (`me.orgs` is empty: no share switches in the add form, no recipient pickers, no owners lines).
+- **`uex: false`**: no buy/sell tab (and `/trade` leads home), in the stock and gear tables no UEC columns, no trade button column
+  and no worth in the head (no `/api/trade/prices` request), no trade dialog, no price section in the info cards, no worth tile on
+  the overview. A UEX key set or removed in the settings changes the capabilities at once; the views follow.
+- **The game version chip** (`.ver-chip`, mono; tooltip "Spielversion") in the top bar (online) and in the slim bar beside the side bar (singleuser) shows `capabilities.game.label`,
+  a dash while there is none. It has the width of a game version, so the dash and the number take the same room and nothing moves.
+  The capabilities are refreshed after a data install, after the UEX key changes and every 15 s while the data state is idle.
+
+The navigation is built from `navigation.ts` (pure: which tab groups, which top bar controls, the side bar's groups and width, which
+routes for which capabilities).
+
+### The side bar and the settings window
+
+**The side bar** (`SideNav.vue`, singleuser only; the online variant keeps `TopBar.vue` unchanged) runs from below the header (the slim bar) down
+to the footer (the singleuser app is as high as the window and only the content beside the bar scrolls). From the top: the groups of `sideGroups` (the top bar's three, then History as a group of its own, drawn
+quieter: 13 px, weight 400, dimmed) one below the other with a divider between groups; nothing below them. The toggle is a small
+button at the middle of the bar's height, half over its right edge (chevron, tooltip). Two modes: *wide* (icon and text, 232 px) and *narrow* (icon buttons, 56 px, each with the companion's `Tooltip.vue`, which
+opens above or below the button). The choice is stored in `localStorage` (`qm.sideMode`, in a try/catch); below 1000 px of window
+width the bar is narrow whatever the choice (`sideModeFor`; the stored choice is not touched, the toggle is disabled then). The two
+modes differ in width only: buttons are 36 px high either way, icons sit at the same place, the tooltip wrapper exists in both.
+
+**The slim bar** (`SlimBar.vue`) is the header across the window's full width, above the side bar and the content, as the companion's top bar (56 px, the narrow side bar's width; never wraps): the app's logo (36 px) and wordmark at the left, the drag region, the game version chip
+(`.ver-chip.fixed` with the quiet "Game:" label), the settings button (gear `icon-btn`, as the top bar had it: the shell's settings
+window, in a plain browser the `/settings` page, accent on that route) and, in the shell, the window buttons. In a plain browser it is the same bar without
+window buttons and drag attributes. It measures its height into `layout.ts` `topbarHeight`, so the toasts sit below it. The footer
+(`AppFooter.vue`) stays across the full width.
+
+**The settings** (`SettingsView.vue`) are built like the companion's settings window (`companion/src/SettingsApp.vue`): one tile 560 px wide that
+grows downward, a head (settings icon, title, the app's version small in mono), a body with four groups (a tile on the base background,
+a head row of its own (icon, title, state tag; `styles.css` `.settings-group`, shared with the companion), a field's label above its input, other rows label left and control right) and, in the settings
+window only, a foot with "Close" (everything applies at once: no save button). On the page the tile has the panels' corners; in the
+window it is the window's content, with no margin around it.
+Each state tag sits in its group's title next to the name (a word, never colour alone); the title is positioned absolutely, so a tag appearing moves
+nothing. The decisions are in `settingsLogic.ts`:
+
+- *Star Citizen* (`/api/local/settings`): the path field applies on Enter or when it loses focus with a changed value. A refusal (422) shows
+  "no game in this folder" and the "no game" tag and keeps the saved setting (the typed text stays). "Browse" exists only where the shell
+  has a folder picker; it is the primary button while there is no usable folder, without a picker the field gets the accent border instead.
+  The game version and the language pack's tag (active, none, restart needed) follow the settings.
+- *Game data* (`/api/local/data`): installed version, time of the last check, the amount while something downloads (that row replaces the
+  check time), "Import file" (a dialog with a path field, plus the picker button where the shell has one) and "Check for data"; both are
+  disabled while something runs. The state is polled while its phase is not idle.
+- *UEX* (`/api/local/uex`): the key field is a password field showing a mask while a key is set; "Save" stores a typed key, a cleared
+  field removes the key after a confirmation. The interval select (15, 30, 60 minutes) saves at once and is disabled without a key. One
+  row holds the times of the last and the next fetch (local; today as the clock, other days with the day); "Fetch now" (next to the link
+  to UEX) needs a key and a pull that is not running; the state is polled every 1.5 s while pulling. A refused key shows the "Refused" tag
+  and a message.
+- *App*: the version (with the "App Update" button where the shell offers updates), the automatic updates switch (saves at once) and the
+  language select (`me.langOverride` through `/api/profile`; the profile dialog that holds it online does not exist here). A value the
+  environment overrides (`overridden`) is shown, disabled.
+
+**The settings window.** In the desktop shell the settings are not a page but a window of their own: the side bar's Settings entry (and the
+first run) calls `open_settings`; the shell opens a second window, label `settings`, with the same origin at
+`/settings?window=settings` (or brings it to the front). The query is read once at start (`windows.ts` `settingsWindow`, pure part
+`windowMode`): in that mode `App.vue` renders only `TitleBar.vue` (with the title and the close button alone: `WindowButtons`
+`closeOnly`) and `SettingsView` (no side bar, footer, start tile, realtime or routes; the window works without game data, as the panel
+needs no catalog). The window cannot be resized: once its panel and the fonts are rendered, the page measures its height and calls
+`settings_window_fit` (`settingsFitSize`: 560 px wide, the height of the content plus 2 px, at least 400 px, which leaves the dialogs
+the panel opens, `ImportDialog` and the remove-key `ConfirmDialog`, room); the shell sizes and shows it. The settings window waits for
+the shell's update state before it renders (`main.ts`), so the height with or without the "App Update" row is known when it measures.
+In a plain browser the entry is the `/settings` page inside the normal layout.
+
+**The two windows** tell each other over one `BroadcastChannel` (`windows.ts`, name `quartermaster-windows`; safe where it is missing:
+nothing is sent). The settings window posts `changed` after every successful change (`local.ts`: `saveSettings`, `pullUex`,
+`checkData`, `importData`; the language in `SettingsView`); the main window answers with `reloadAll()` (settings, data state, UEX state,
+capabilities, `me`, then the data polling at its quick pace once), so a saved UEX key shows the trade tab, the language and the game
+version follow. "App Update" in the settings window posts `open-update` and calls `window_focus_main`; the main window opens the update
+dialog (`shell.openUpdate()`) and is brought to the front: the dialog stays the main window's.
+
+**The first run:** without a usable game folder (`firstRun`) the settings open by themselves (the shell's window, in a browser the page),
+once per page load and only after the app is shown (not over the start tile); the user can leave them.
+
+**The start tile** (`StartTile.vue`, state from `startTile.ts`) replaces the whole app (side bar, views, footer) while `login: 'none'` and no data
+pack is installed: the logo (128 px), the wordmark, the app version, four segments and one line of text; a
+download adds the amount ("12 / 45 MB") and a bar. Phases map to the steps: nothing known yet "Starting …" (1), checking and downloading
+"Loading game data …" (2), installing "Setting up game data …" (3). Without a connection (outcome offline or failed with nothing
+installed) the tile shows the "No connection" tag, "Game data missing." and two buttons, "Try again" first and then "Import file" (primary; the same dialog as in the settings;
+"Try again" posts a check); everything on the tile is centred; the same layout with "Game data missing." alone where nothing will fetch the data (updates off, no
+data channel), and with the "App update needed" tag where the newest data needs a newer app. The state (`local.ts`) is polled every
+second while it is busy and rarely while idle, each request with a 3 s limit. **A request that fails or times out while a check, a
+download or an installation was last seen counts as "still installing"** (the catalog import blocks the whole process for seconds, the
+state endpoint included), never as an error; five failed requests in a row with nothing running say the server is not reachable.
+When a data pack appears (`installedTag` changes) the catalog cache is dropped and the catalog loaded again, and the views mount
+fresh: no reload by the user.
+
+**The bold notice** (`UpdateNotice.vue`) sits above every view while the last data outcome is `appTooOld` with `pack: 'newer'` or a
+`failed` with reason `unsupported`: "App update needed / New game data needs a newer app." Its button is rendered only where the
+shell offers app updates.
+
+**The shell adapter** (`shell.ts`, the contract and its pure part in `shellLogic.ts`): the one place where native functions enter the
+SPA, a reactive object `shell` with `available` (the desktop shell is there: pickers and window chrome), `pickFolder()`,
+`pickFile(extensions?)` (both answer null when cancelled or unavailable), `updateAvailable`, `update` (the updater's state),
+`openUpdate()`/`closeUpdate()`/`updateOpen`, `checkUpdate()`, `installUpdate()`, `setChannel(id)`, the window (`maximized`,
+`minimize()`, `toggleMaximize()`, `close()`, `startResize(direction)`), the settings window (`openSettings()`, `fitSettings(width, height)`,
+`focusMain()`). `initShell()` (called in `main.ts` before the first render)
+binds the global the shell injects; in a browser everything stays "not available". No shell package is imported by the SPA.
+
+**Links that leave the app.** With the shell present, `initShell()` installs one `click` and `auxclick` handler on the document: a primary or
+middle click (or Enter on a focused link) on an `<a target="_blank">` with an absolute `https://` href, wherever and whenever it is
+rendered, is taken over (no in-app navigation, no second window) and sent to `open_external`; a failed call shows the error text as a
+toast. The decision is the pure `externalLinkUrl` in `shellLogic.ts`. In a browser nothing is installed and the links work as links.
+There is no `window.open` call in the SPA. Links with other hrefs (`blob:` previews) are left alone.
+
+### The desktop shell (the contract)
+
+The desktop app is its own Tauri program (`app/`; how it implements this contract, its capabilities and its updater: `docs/app.md`): it starts
+the server as a sidecar ("The app bundle" in `docs/singleuser.md`), waits for `QM_READY`, and shows `http://127.0.0.1:<port>` in its window. The SPA talks to it through the global `window.__TAURI__`
+(Tauri's `withGlobalTauri`): `__TAURI__.core.invoke(command, args)` and `__TAURI__.event.listen(event, handler)`. Without that global (or
+without `core.invoke`) nothing below exists: pickers answer null, no window chrome, no footer button, no app update.
+
+Commands (`args` is one object, possibly empty; a rejection carries a text):
+
+| Command | Arguments | Result |
+|---|---|---|
+| `pick_folder` | `{}` | the chosen folder, or `null` when cancelled |
+| `pick_file` | `{ extensions: string[] }` (without the dot, e.g. `["zip"]`; `[]` = any file) | the chosen file, or `null` |
+| `open_external` | `{ url: string }` | nothing; opens the URL in the system's default browser. The shell accepts only an absolute `https://` URL with a host and no credentials, and rejects anything else (http, file, custom schemes, `javascript:`, `data:`, relative, with credentials) with a text |
+| `window_minimize` | `{}` | nothing |
+| `window_toggle_maximize` | `{}` | nothing (maximizes, or restores when maximized) |
+| `window_close` | `{}` | nothing |
+| `window_is_maximized` | `{}` | `boolean`; asked at start, after every toggle and at every `resize` of the page |
+| `window_start_resize` | `{ direction: "North" \| "South" \| "East" \| "West" \| "NorthEast" \| "NorthWest" \| "SouthEast" \| "SouthWest" }` | nothing; the window starts a resize drag from that edge or corner |
+| `open_settings` | `{}` | nothing; opens the settings window (label `settings`, the same origin at `/settings?window=settings`, frameless, not resizable, hidden until sized) or brings it to the front. Main window only |
+| `settings_window_fit` | `{ width: number, height: number }` (CSS px) | nothing; sets the settings window's inner size (at most 95 % of its screen), centers and shows it. Settings window only, sent once after its first render |
+| `window_focus_main` | `{}` | nothing; un-minimizes the main window and brings it to the front. Settings window only |
+| `update_state` | `{}` | `UpdateState` (below) |
+| `update_check` | `{}` | nothing; starts a check, the progress arrives as `update-changed` |
+| `update_install` | `{}` | nothing; starts download and install of the available version |
+| `update_set_channel` | `{ id: string }` | nothing; saves the channel and checks it at once |
+
+```ts
+interface UpdateState {
+  state: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'installing' | 'error';
+  current: string;           // the running version, without "v"
+  available: string | null;  // the version found, without "v"
+  notes: string | null;      // plain text
+  progress: number | null;   // 0..1 while downloading, null when unknown
+  error: string | null;      // shown as it is, in the error colour
+  channel: string;           // the selected channel's id
+  channels: string[];        // every channel the user can select
+}
+```
+
+Event `update-changed`, payload `UpdateState`: at every change, progress included. Dragging the window is not a command: the title bar
+carries the standard `data-tauri-drag-region` attribute (on the bar and on its non-interactive parts, never on a button or link). The
+update commands are optional as a group: when `update_state` rejects at start, the SPA treats the shell as one without updates. A
+payload that is not an `UpdateState` is dropped; a command that rejects shows as an error of the updater. What the shell sets in
+the server's environment: `QM_MIGRATIONS_DIR`, `QM_DIST_DIR`, `QM_STDIN_CONTROL=1`, `QM_CSP_CONNECT` (`docs/app.md` "The sidecar").
+
+**The frameless window.** Only with `shell.available`: in the singleuser variant the slim bar is the title bar (drag region, the chip,
+the window buttons; the logo's row of the side bar is a drag region too); in the online variant the top bar is (drag region; double
+click maximizes, the shell's doing) with the three window buttons (`WindowButtons.vue`: minimize, maximize or restore, close; 36 px
+slots, close hovers in the error colour) at its right end; where the app bar is not shown (the start tile, the server not reachable)
+`TitleBar.vue` gives a bar with the buttons alone; `WindowEdges.vue` puts eight invisible 6 px strips along the edges (none while
+maximized). The top bar's window buttons sit absolutely at the top right (the bar keeps 128 px of right padding), so a wrapped bar keeps
+them in its first row; up to a window width of 1400 px the wordmark, the tab padding and the gaps give way so the bar stays one row at
+1280 px. The settings window has `TitleBar.vue` with its title and the close button, no edges.
+
+**The app footer and the update dialog.** With `login: 'none'` the footer starts with the app version (mono, 22 px high). Where the shell
+offers updates it is a button opening the dialog and a mark (the download arrow in the accent colour; its room is kept when empty) follows
+it while a version was found (`available`, `downloading`, `installing`); in a browser the version is plain text. The dialog
+(`UpdateDialog.vue`, "App Update"; also opened by the bold notice's button and the App group's "App Update" button in the settings,
+which exists only with the shell; from the settings window the main window opens it, "The two windows") shows the channel select in the head (disabled while busy), the current and available version as
+chips, the notes in a box of fixed height (kept when empty) and one status line of fixed height ("Checking …", "Downloading …" with the
+percent and a progress bar, "Installing …", or the error text in the error colour). Buttons (`updateButtons` in `shellLogic.ts`):
+Close always first on the left; then "Check Update" in idle, current, checking and error (disabled while checking) or "Install" in
+available, downloading and installing (disabled while downloading and installing); the two share one button's room
+(`ConfirmButton.reserve`). Closes by its button or Escape only. Tests: `test/webapp-shell.test.ts`.
+
+Tests: `test/webapp-local.test.ts` (start tile states including the timeout rule, navigation per capability, the settings
+decisions, time formatting, both languages having the same texts).
+
 ### Layout and building blocks
 
 - List views share one layout: Ressourcen and Blueprints have the scope switch above (`ScopeBar.vue`: big
-  buttons personal, each org, optionally "All"; always shown, also without any org; `scopeName` for heads),
+  buttons personal, each org, optionally "All"; always shown, also without any org, but not without the `orgs` capability; `scopeName` for heads),
   then ONE panel: head "<View> · <scope>" with the add button, the add area (`.add-area`), filters, table
   (Raffinerie the same without a scope switch). Never a panel holding only a head (its border doubles the
   panel's).
@@ -410,8 +665,8 @@ blocks".
 - Dialog buttons always sit in the footer (`ConfirmDialog`); a `ConfirmButton` with `form` submits a form in
   the body (Enter works). Pickers: `webapp/src/components/Picker.vue` (lists every match, the list scrolls);
   `Dropdown.vue` is BindSight's with prefixed variant classes (`dd-chip`, …: ui.css has global
-  `.chip`/`.outline`/`.small`). Toasts top right below the top bar (`TopBar.vue` measures its height into
-  `layout.ts` `topbarHeight`, `Toasts.vue` sets `top` from it; a CSS variable failed after a full reload).
+  `.chip`/`.outline`/`.small`). Toasts top right below the top bar (`TopBar.vue`, in the singleuser variant `SlimBar.vue` and the settings
+  window's title bar measure their height into `layout.ts` `topbarHeight`, `Toasts.vue` sets `top` from it; a CSS variable failed after a full reload).
   Error codes mapped in `i18n.ts`; amounts validated with the server's own `parseAmount`.
 - Icons on tabs, buttons and panel heads like BindSight (extra icons in the shared
   `adminapp/src/components/Icon.vue`); no counters in panel heads (only next to filters).
@@ -442,10 +697,10 @@ blocks".
 | Vector | Measure |
 |---|---|
 | CSRF | Session cookie SameSite=Lax; own same-origin check on every non-GET; writes accept `application/json` only (a JSON body cross-origin needs a CORS preflight, never answered); no state change on GET. Same-site is not enough: admin (`:8443`) and user app are the same site. |
-| XSS | Vue escapes; no `v-html` except `Icon.vue` (constants; enforced by `test/spa-sources.test.ts`). Untrusted texts: external `global.ini` files, Discord names. Strict CSP from the app. |
+| XSS | Vue escapes; no `v-html` except `Icon.vue` (constants; enforced by `test/spa-sources.test.ts`). Untrusted texts: external `global.ini` files, Discord names. Strict CSP from the app (`connect-src` is `'self'` and the WebSocket; `WebappConfig.extraConnectSrc` adds sources, unset online; the singleuser entry fills it from `QM_CSP_CONNECT`, which the desktop shell sets to the one origin its IPC needs, `http://ipc.localhost` on Windows: `docs/app.md`). |
 | Clickjacking | `frame-ancestors 'none'`, `X-Frame-Options: DENY`. |
 | Access control / IDOR | `Actor` only from the session + roster; a `guildId` from the request only with an active member row there; reads through functions that take the `Actor`, never "load by ID"; writes through the stock service only. DB tests cover other users' stock, other orgs, inactive members. |
-| Missing auth | Auth middleware on everything except `/auth/*` and static files; a test asserts 401 for every route without a session. |
+| Missing auth | Auth middleware on everything except `/auth/*`, `GET /api/capabilities` (no user data: what the server offers) and static files; a test asserts 401 for every other route without a session. |
 | Injection | Parameterized `sql` templates, Zod for every body/query/param, 16 KB body limit, amounts via `parseAmount`. |
 | Session theft | HttpOnly, Secure, HSTS (Caddy), hashed tokens, no Discord tokens stored, `Referrer-Policy: no-referrer`, `no-store` on API responses (the catalog, game data only: `private, no-cache`). |
 | Abuse | Rate limits in memory (one process): `/auth/*` per IP, `/api/*` per session. |

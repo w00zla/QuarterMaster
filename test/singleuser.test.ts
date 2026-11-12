@@ -1,0 +1,471 @@
+// Smoke test of the singleuser entry point as a real child process on a temp data folder and a port outside the
+// product range. Needs no Postgres. Every wait has a hard limit; the child is killed in `finally`.
+import assert from 'node:assert/strict';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describe, it } from 'node:test';
+import { runImport } from '../src/catalog/import/apply.ts';
+import { sha256, stableStringify } from '../src/catalog/import/plan.ts';
+import { buildRelease, gzipStable } from '../src/datapack/build.ts';
+import { connectPglite } from '../src/db/pglite.ts';
+import { dbDir } from '../src/singleuser/paths.ts';
+import { COMPANION_API, COMPANION_API_MIN, type Capabilities, type DataUpdateState, type LocalSettingsState, type MeResponse, type StockListResponse, type UexState } from '../src/webapp/api-types.ts';
+import { LOCAL_USER_ID } from '../src/webapp/identity-local.ts';
+import { U, fixtureSnapshot } from './fixtures.ts';
+
+const ROOT = new URL('../', import.meta.url);
+const MAIN = fileURLToPath(new URL('src/singleuser/main.ts', ROOT));
+// Never the real pairing file in the user profile: every child gets one in a temp folder (and no game folder of the environment)
+const PAIRING_ROOT = mkdtempSync(join(tmpdir(), 'qm-singleuser-pairing-'));
+process.on('exit', () => rmSync(PAIRING_ROOT, { recursive: true, force: true }));
+const PACKAGE_VERSION = (JSON.parse(readFileSync(new URL('package.json', ROOT), 'utf8')) as { version: string }).version;
+const JSON_TYPE = { 'content-type': 'application/json' };
+
+const freePort = () => new Promise<number>((resolve, reject) => {
+  const probe = createServer();
+  probe.once('error', reject);
+  probe.listen(0, '127.0.0.1', () => {
+    const { port } = probe.address() as { port: number };
+    probe.close(() => resolve(port));
+  });
+});
+
+type Child = { proc: ChildProcess; out: () => string; exited: Promise<number | null> };
+function start(script: string, env: Record<string, string>): Child {
+  const proc = spawn(process.execPath, [script], { env: { ...process.env, DATABASE_URL: '', QM_GAME_DIR: '', QM_PAIRING_FILE: join(PAIRING_ROOT, 'default', 'pairing.json'), QM_UEX_KEY: '', QM_STDIN_CONTROL: '1', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  let text = '';
+  proc.stdout!.on('data', (d: Buffer) => (text += d));
+  proc.stderr!.on('data', (d: Buffer) => (text += d));
+  const exited = new Promise<number | null>((resolve) => proc.once('exit', (code) => resolve(code)));
+  return { proc, out: () => text, exited };
+}
+const within = <T>(ms: number, what: string, p: Promise<T>) => new Promise<T>((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`timeout after ${ms} ms: ${what}`)), ms);
+  p.then((v) => { clearTimeout(timer); resolve(v); }, (e: unknown) => { clearTimeout(timer); reject(e as Error); });
+});
+const until = async (ms: number, what: string, done: () => boolean) => {
+  const end = Date.now() + ms;
+  while (!done()) {
+    if (Date.now() > end) throw new Error(`timeout after ${ms} ms: ${what}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+};
+/** A request with a Host header of our choice (fetch cannot set it). */
+const withHost = (port: number, host: string) => new Promise<number>((resolve, reject) => {
+  const req = request({ host: '127.0.0.1', port, path: '/api/capabilities', headers: { host }, timeout: 5000 }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+  req.on('error', reject);
+  req.end();
+});
+
+describe('singleuser: the process', { timeout: 120_000 }, () => {
+  it('starts, serves the fixed user, takes a write, refuses a second start, ends on request', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'qm-singleuser-'));
+    const port = await freePort();
+    // QM_AUTO_UPDATE=0: no feed is asked (this test must not touch the network)
+    // fetch is blocked in the process, and no UEX key is set: nothing may be requested
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_THUMBS_DIR: join(dir, 'no-thumbs'), QM_AUTO_UPDATE: '0', NODE_OPTIONS: `--import ${pathToFileURL(fileURLToPath(new URL('block-fetch.mjs', import.meta.url))).href}` };
+    const base = `http://127.0.0.1:${port}`;
+    let child: Child | undefined;
+    try {
+      // The catalog the write refers to: imported before the server owns the folder
+      const seed = connectPglite(dbDir(dir));
+      try {
+        await seed.migrate(fileURLToPath(new URL('drizzle', ROOT)));
+        const snap = fixtureSnapshot();
+        await runImport(seed.db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
+      } finally {
+        await seed.close();
+      }
+
+      child = start(MAIN, env);
+      const c = child;
+      await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+      assert.match(c.out(), new RegExp(`listening on ${base}`));
+      for (const step of ['open database', 'migrations', 'checkpoint', 'listen']) assert.match(c.out(), new RegExp(`${step}: \\d+ ms`));
+
+      const json = async <T>(path: string, init: RequestInit = {}) => {
+        const res = await fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(10_000) });
+        return { status: res.status, body: (await res.json()) as T };
+      };
+      assert.deepEqual(await json<Capabilities>('/api/capabilities'), { status: 200, body: { login: 'none', orgs: false, uex: false, game: { label: null, build: 1000 }, companionApi: { min: COMPANION_API_MIN, max: COMPANION_API } } });
+      // The data update is off: nothing installed, nothing asked
+      assert.deepEqual(await json<DataUpdateState>('/api/local/data'), { status: 200, body: { phase: 'idle', installed: null, progress: null, last: null } });
+      // No key: the UEX pull is off, nothing was requested, and the trade part stays hidden
+      assert.deepEqual(await json<UexState>('/api/local/uex'), { status: 200, body: { phase: 'off', lastPull: null, nextPull: null, last: null } });
+      assert.deepEqual(await json('/api/local/uex/pull', { method: 'POST', headers: JSON_TYPE, body: '{}' }), { status: 409, body: { error: 'noKey' } });
+      assert.match(c.out(), /uex: off [(]no key[)]/);
+      assert.doesNotMatch(c.out(), /BLOCKED FETCH|uex pull/);
+      const me = await json<MeResponse>('/api/me');
+      assert.equal(me.status, 200);
+      assert.deepEqual([me.body.name, me.body.avatarUrl], [null, null]);
+      assert.equal(me.body.userId, LOCAL_USER_ID);
+      const add = await json('/api/stock/add', { method: 'POST', headers: JSON_TYPE, body: JSON.stringify({ subjectUuid: U.metal, locationUuid: U.station, quality: 640, amount: '3' }) });
+      assert.deepEqual(add, { status: 200, body: { ok: true } });
+      const stock = await json<StockListResponse>('/api/stock?scope=personal');
+      assert.equal(stock.body.batches.filter((b) => b.quality === 640 && b.quantity === '3').length, 1);
+
+      // The Host guard in the real process
+      assert.equal(await withHost(port, `localhost:${port}`), 200);
+      assert.equal(await withHost(port, `evil.example:${port}`), 421);
+
+      // A second start on the same port fails clearly, without touching the database
+      const second = start(MAIN, env);
+      try {
+        assert.equal(await within(30_000, 'second start exits', second.exited), 1);
+        assert.match(second.out(), /Start failed: Port \d+ \(QM_PORT\) is already in use/);
+      } finally {
+        second.proc.kill();
+      }
+      assert.equal((await json<Capabilities>('/api/capabilities')).status, 200);
+
+      // Stop: the shutdown handler, then the process is gone within seconds
+      const stopped = Date.now();
+      c.proc.stdin!.write('stop\n');
+      assert.equal(await within(8_000, 'the process ends', c.exited), 0);
+      assert.ok(Date.now() - stopped < 8_000);
+      assert.match(c.out(), /stopped/);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('reads the game folder and its language pack at start, pairs with the companion, and unpairs on a clean stop', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'qm-singleuser-game-'));
+    const dir = join(root, 'data');
+    const game = join(root, 'LIVE');
+    const pairing = join(root, 'pairing', 'pairing.json');
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    // A fake game folder with a German pack; the real one is never touched
+    mkdirSync(join(game, 'data', 'Localization', 'german_(germany)'), { recursive: true });
+    writeFileSync(join(game, 'Data.p4k'), '');
+    writeFileSync(join(game, 'build_manifest.id'), JSON.stringify({ Data: { Branch: 'sc-alpha-4.10.2', RequestedP4ChangeNum: '12913470' } }));
+    writeFileSync(join(game, 'user.cfg'), 'g_language = german_(germany)\n');
+    writeFileSync(join(game, 'data', 'Localization', 'german_(germany)', 'global.ini'), 'ui_a=Hallo\nui_b=Welt\nui_c=Drei\n');
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_AUTO_UPDATE: '0', QM_GAME_DIR: game, QM_PAIRING_FILE: pairing };
+    let child: Child | undefined;
+    try {
+      child = start(MAIN, env);
+      const c = child;
+      await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+      assert.match(c.out(), /game folder: .*: ok, game 4\.10\.2\.12913470 \(\d+ ms\)/);
+      assert.match(c.out(), /language pack: german_\(germany\), 3 texts \(\d+ ms\)/);
+
+      const state = (await (await fetch(`${base}/api/local/settings`, { signal: AbortSignal.timeout(10_000) })).json()) as LocalSettingsState;
+      assert.deepEqual(state, {
+        gameDir: game, autoUpdate: false, uexKeySet: false, uexIntervalMinutes: 15, appVersion: PACKAGE_VERSION,
+        overridden: { gameDir: true, autoUpdate: true, uexKey: false, uexIntervalMinutes: false },
+        gameFolder: { state: 'ok', gameVersion: '4.10.2.12913470' },
+        languagePack: { state: 'loaded', language: 'german_(germany)', file: 'data/Localization/german_(germany)/global.ini', texts: 3, active: true, pending: false },
+      });
+      assert.deepEqual(JSON.parse(readFileSync(pairing, 'utf8')), { format: 1, origin: base, gameDir: game });
+      assert.equal(existsSync(join(dir, 'settings.json')), false); // overrides are never written
+
+      c.proc.stdin!.write('stop\n');
+      assert.equal(await within(8_000, 'the process ends', c.exited), 0);
+      assert.equal(existsSync(pairing), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('syncs the language pack before listening: a real route answers with a pack text, the next start finds it unchanged', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'qm-singleuser-pack-'));
+    const dir = join(root, 'data');
+    const game = join(root, 'LIVE');
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    mkdirSync(join(game, 'data', 'Localization', 'german_(germany)'), { recursive: true });
+    writeFileSync(join(game, 'Data.p4k'), '');
+    writeFileSync(join(game, 'build_manifest.id'), JSON.stringify({ Data: { Branch: 'sc-alpha-4.10.2', RequestedP4ChangeNum: '12913470' } }));
+    writeFileSync(join(game, 'user.cfg'), 'g_language = german_(germany)\n');
+    writeFileSync(join(game, 'data', 'Localization', 'german_(germany)', 'global.ini'), 'items_commodities_testmetal=Testmetall\n');
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_AUTO_UPDATE: '0', QM_GAME_DIR: game, QM_PAIRING_FILE: join(root, 'pairing.json') };
+    mkdirSync(dir, { recursive: true });
+    const seed = connectPglite(dbDir(dir));
+    try {
+      await seed.migrate(fileURLToPath(new URL('drizzle', ROOT)));
+      const snap = fixtureSnapshot();
+      delete snap.localization.de; // the data pack holds English game texts only
+      await runImport(seed.db, snap, sha256(stableStringify(snap)), { dryRun: false, force: false, allowDowngrade: false, maxRetireRatio: 0.1, maxChangeRatio: 0.5 });
+    } finally {
+      await seed.close();
+    }
+    const run = async (expected: RegExp) => {
+      const c = start(MAIN, env);
+      try {
+        await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+        assert.match(c.out(), expected);
+        // The sync's line comes before the server listens
+        assert.ok(c.out().indexOf('language pack sync:') < c.out().indexOf('listening on '));
+        for (const lang of ['de', 'en']) {
+          const res = await fetch(`${base}/api/catalog?lang=${lang}`, { signal: AbortSignal.timeout(20_000) });
+          const catalog = (await res.json()) as { materials: Array<{ uuid: string; name: string }> };
+          assert.equal(catalog.materials.find((m) => m.uuid === U.metal)!.name, 'Testmetall', lang);
+        }
+      } finally {
+        c.proc.stdin!.write('stop\n');
+        await within(8_000, 'the process ends', c.exited);
+        c.proc.kill();
+      }
+    };
+    try {
+      await run(/language pack sync: written, 1 texts \(1 added, 0 changed, 0 removed\) \(\d+ ms\)/);
+      await run(/language pack sync: unchanged, 1 texts \(\d+ ms\)/);
+    } finally {
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('updates itself from a feed folder: first install at start, then a chain on request; serves the catalog and a picture', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'qm-singleuser-feed-'));
+    const dir = join(root, 'data');
+    const feed = join(root, 'feed');
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const env = { QM_DATA_DIR: dir, QM_PORT: String(port), QM_DATA_FEED: feed };
+    let child: Child | undefined;
+    try {
+      // Two releases of the fixtures' catalog; release 2 adds one picture
+      const uuid = (i: number) => `20000000-0000-0000-0000-${i.toString(16).padStart(12, '0')}`;
+      const snapshot = fixtureSnapshot();
+      snapshot.game.label = '1.0.1000';
+      const snapshotFile = join(root, 'snapshot.json.gz');
+      writeFileSync(snapshotFile, gzipStable(Buffer.from(JSON.stringify(snapshot))));
+      const thumbs = (items: number[]) => {
+        const out = join(root, `thumbs-${items.length}`);
+        const index: Record<string, string> = {};
+        for (const i of items) {
+          index[uuid(i)] = 'aaaaaaaa';
+          for (const size of ['s', 'm', 'l']) {
+            mkdirSync(join(out, size), { recursive: true });
+            writeFileSync(join(out, size, `${uuid(i)}.aaaaaaaa.avif`), `fake ${size} ${i}`);
+          }
+        }
+        writeFileSync(join(out, 'thumbs.json'), JSON.stringify(index));
+        return out;
+      };
+      buildRelease({ snapshotFile, thumbsDir: thumbs([1]), n: 1, outDir: join(feed, 'data-1.0.1000-1') });
+      buildRelease({ snapshotFile, thumbsDir: thumbs([1, 2]), n: 2, previousDir: join(feed, 'data-1.0.1000-1'), outDir: join(feed, 'data-1.0.1000-2') });
+      const channel = (n: number) => writeFileSync(join(feed, 'channels.json'), JSON.stringify({ data: { stable: `data-1.0.1000-${n}` } }));
+      channel(1);
+
+      child = start(MAIN, env);
+      const c = child;
+      await until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+      const state = async () => (await (await fetch(`${base}/api/local/data`, { signal: AbortSignal.timeout(10_000) })).json()) as DataUpdateState;
+      // Polls the state endpoint (it answers while an install holds the database)
+      const installed = async (tag: string) => {
+        const end = Date.now() + 60_000;
+        for (;;) {
+          const s = await state();
+          if (s.installed?.tag === tag && s.phase === 'idle') return s;
+          if (Date.now() > end) throw new Error(`timeout: installed ${tag}, state ${JSON.stringify(s)}, output: ${c.out()}`);
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      };
+      await installed('data-1.0.1000-1');
+      assert.match(c.out(), /data update: plan full \(nothingInstalled\)/);
+
+      const catalog = (await (await fetch(`${base}/api/catalog`, { signal: AbortSignal.timeout(10_000) })).json()) as { materials: unknown[] };
+      assert.ok(catalog.materials.length > 0);
+      assert.equal((await fetch(`${base}/thumbs/s/${uuid(1)}.aaaaaaaa.avif`, { signal: AbortSignal.timeout(10_000) })).status, 200);
+      assert.equal((await fetch(`${base}/thumbs/s/${uuid(2)}.aaaaaaaa.avif`, { signal: AbortSignal.timeout(10_000) })).status, 404);
+
+      // The feed moves on; the check is asked for (JSON only, like every write) and answers at once
+      channel(2);
+      const res = await fetch(`${base}/api/local/data/check`, { method: 'POST', headers: JSON_TYPE, body: '{}', signal: AbortSignal.timeout(10_000) });
+      assert.equal(res.status, 200);
+      assert.ok(['checking', 'downloading', 'installing', 'idle'].includes(((await res.json()) as DataUpdateState).phase));
+      await installed('data-1.0.1000-2');
+      assert.match(c.out(), /data update: plan chain/);
+      // The server re-reads thumbs.json at most every 10 s (src/thumbs-index.ts): the new picture shows up within that
+      const end = Date.now() + 25_000;
+      let status = 0;
+      while (status !== 200 && Date.now() < end) {
+        status = (await fetch(`${base}/thumbs/s/${uuid(2)}.aaaaaaaa.avif`, { signal: AbortSignal.timeout(10_000) })).status;
+        if (status !== 200) await new Promise((r) => setTimeout(r, 500));
+      }
+      assert.equal(status, 200);
+
+      c.proc.stdin!.write('stop\n');
+      assert.equal(await within(8_000, 'the process ends', c.exited), 0);
+      assert.equal(existsSync(join(dir, 'downloads')), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+});
+
+describe('singleuser: start protocol, stdin control and the lock', { timeout: 120_000 }, () => {
+  const lines = (out: string) => out.split(/\r?\n/).filter((l) => l.startsWith('QM_'));
+  const setup = () => mkdtempSync(join(tmpdir(), 'qm-singleuser-lock-'));
+  const envFor = (dir: string, port: number) => ({ QM_DATA_DIR: dir, QM_PORT: String(port), QM_AUTO_UPDATE: '0' });
+  const listening = (c: Child) => until(60_000, `"listening" line, output: ${c.out()}`, () => /listening on /.test(c.out()) || c.proc.exitCode !== null);
+  const stop = async (c: Child) => {
+    c.proc.stdin!.write('stop\n');
+    assert.equal(await within(10_000, 'the process ends', c.exited), 0, c.out());
+  };
+
+  it('prints the steps in order, then ready; a closed stdin stops the server like "stop"', async () => {
+    const dir = setup();
+    const port = await freePort();
+    let child: Child | undefined;
+    try {
+      child = start(MAIN, envFor(dir, port));
+      const c = child;
+      await listening(c);
+      assert.deepEqual(lines(c.out()), ['QM_STEP database', 'QM_STEP migrations', 'QM_STEP languagePack', 'QM_STEP listen', `QM_READY http://127.0.0.1:${port}`]);
+      assert.equal(existsSync(join(dir, 'server.lock')), true);
+      assert.deepEqual(JSON.parse(readFileSync(join(dir, 'server.lock'), 'utf8')).port, port);
+      // The shell is gone: stdin ends, the server shuts down cleanly and lets go of the folder
+      c.proc.stdin!.end();
+      assert.equal(await within(10_000, 'the process ends', c.exited), 0, c.out());
+      assert.match(c.out(), /stdin closed: shutting down/);
+      assert.equal(existsSync(join(dir, 'server.lock')), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('ignores stdin unless the shell asked for the control', async () => {
+    const dir = setup();
+    const port = await freePort();
+    let child: Child | undefined;
+    try {
+      child = start(MAIN, { ...envFor(dir, port), QM_STDIN_CONTROL: '' });
+      const c = child;
+      await listening(c);
+      c.proc.stdin!.write('stop\n');
+      c.proc.stdin!.end();
+      await new Promise((r) => setTimeout(r, 1000));
+      assert.equal(c.proc.exitCode, null);
+      assert.equal((await fetch(`http://127.0.0.1:${port}/api/capabilities`, { signal: AbortSignal.timeout(10_000) })).status, 200);
+      c.proc.kill();
+      await within(10_000, 'the process ends', c.exited);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('refuses a second process on the same data folder with QM_FATAL locked, and the first is not disturbed', async () => {
+    const dir = setup();
+    const [port, other] = [await freePort(), await freePort()];
+    let child: Child | undefined;
+    try {
+      child = start(MAIN, envFor(dir, port));
+      const c = child;
+      await listening(c);
+      const second = start(MAIN, envFor(dir, other));
+      try {
+        assert.equal(await within(30_000, 'second start exits', second.exited), 1);
+        assert.deepEqual(lines(second.out()), ['QM_FATAL locked']);
+        assert.match(second.out(), /Start failed: Quartermaster is already running on this data folder \(process \d+, port \d+\)/);
+      } finally {
+        second.proc.kill();
+      }
+      // The refused start left the first one's lock alone
+      assert.equal(JSON.parse(readFileSync(join(dir, 'server.lock'), 'utf8')).pid, c.proc.pid);
+      assert.equal((await fetch(`http://127.0.0.1:${port}/api/capabilities`, { signal: AbortSignal.timeout(10_000) })).status, 200);
+      await stop(c);
+      // Clean stop: the lock is gone, the folder is free for the next start
+      assert.equal(existsSync(join(dir, 'server.lock')), false);
+      const third = start(MAIN, envFor(dir, other));
+      try {
+        await listening(third);
+        assert.match(third.out(), /QM_READY /);
+        await stop(third);
+      } finally {
+        third.proc.kill();
+      }
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('takes over a stale lock (its process is gone), and reports a taken port as QM_FATAL portsBusy', async () => {
+    const dir = setup();
+    const port = await freePort();
+    let child: Child | undefined;
+    try {
+      // A pid that existed a moment ago
+      const gone = spawn(process.execPath, ['-e', '']);
+      await new Promise((r) => gone.once('exit', r));
+      writeFileSync(join(dir, 'server.lock'), JSON.stringify({ pid: gone.pid, port, startedAt: Date.now() }));
+      child = start(MAIN, envFor(dir, port));
+      const c = child;
+      await listening(c);
+      assert.match(c.out(), /QM_READY /);
+      assert.equal(JSON.parse(readFileSync(join(dir, 'server.lock'), 'utf8')).pid, c.proc.pid);
+
+      // The port is taken (by the first process): the folder is not touched, the code says so
+      const busy = start(MAIN, envFor(setup(), port));
+      try {
+        assert.equal(await within(30_000, 'busy start exits', busy.exited), 1);
+        assert.deepEqual(lines(busy.out()), ['QM_FATAL portsBusy']);
+      } finally {
+        busy.proc.kill();
+      }
+      await stop(c);
+      assert.equal(existsSync(join(dir, 'server.lock')), false);
+    } finally {
+      child?.proc.kill();
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('reports a database that cannot be opened as QM_FATAL database and lets go of the lock', async () => {
+    const dir = setup();
+    const port = await freePort();
+    try {
+      // A file where the database folder should be
+      writeFileSync(join(dir, 'db'), 'not a folder');
+      const c = start(MAIN, envFor(dir, port));
+      try {
+        assert.equal(await within(60_000, 'the start fails', c.exited), 1);
+        assert.deepEqual(lines(c.out()), ['QM_STEP database', 'QM_FATAL database']);
+        assert.equal(existsSync(join(dir, 'server.lock')), false);
+      } finally {
+        c.proc.kill();
+      }
+    } finally {
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('refuses a QM_CSP_CONNECT that is not a plain source before it touches anything', async () => {
+    const dir = setup();
+    try {
+      const c = start(MAIN, { ...envFor(dir, await freePort()), QM_CSP_CONNECT: "ipc: 'unsafe-inline'; script-src *" });
+      try {
+        assert.equal(await within(30_000, 'the start fails', c.exited), 1);
+        assert.deepEqual(lines(c.out()), ['QM_FATAL config']);
+        assert.match(c.out(), /QM_CSP_CONNECT/);
+      } finally {
+        c.proc.kill();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+});

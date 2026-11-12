@@ -15,8 +15,8 @@
 //! (sc-ohseearr's `Gate`, a 96×40 grey thumbnail: the game's scene changes a little all the time,
 //! checking every changed frame took ~5 % CPU); a few reads without the terminal or a minute without
 //! frames end the visit. The refinery reader finds the terminal by its texts in the player's language:
-//! the game's `global.ini` (`Locale`: the language pack, else the English table `global-english.ini` in
-//! the app's local data folder); without either the refinery is not read. The OCR and the readers are
+//! the game's `global.ini` (`Locale`: the language pack, else the English table the server delivered,
+//! kept in the app's cache: `server::locale_file`); without either the refinery is not read. The OCR and the readers are
 //! dropped as soon as the scan stops (the OCR's memory arena keeps the full reads' peak, the warehouse
 //! reader holds its layout detector); the next start loads them again.
 //!
@@ -71,10 +71,6 @@ const OCR_THREADS: usize = 3;
 const LEAVE_AFTER: u32 = 3;
 // A visit also ends without any frame for this long (the game not in front)
 const VISIT_GAP: Duration = Duration::from_secs(60);
-/// The English `global.ini` in the app's local data folder: the game's texts for players without a language
-/// pack (the game keeps its English texts in `Data.p4k`; sc-ohseearr's `scripts/extract-global-ini.*` extracts
-/// them)
-const ENGLISH_TABLE: &str = "global-english.ini";
 
 pub struct Frame {
     /// When it was taken (Unix ms)
@@ -571,12 +567,12 @@ struct Readers {
     refinery: RefineryReader,
 }
 
-/// The game's texts for the readers (`LocaleSource`: the language pack of the configured game folder, the English
-/// table in the app's local data folder), None without either. That the refinery cannot be read then is logged
+/// The game's texts for the readers (`LocaleSource`: the language pack of the game folder in use, the English
+/// table the server delivered, kept in the app's cache), None without either. That the refinery cannot be read then is logged
 /// once per change (`missing`).
 fn locale_of<'a>(source: &'a mut LocaleSource, app: &AppHandle, missing: &mut bool) -> Option<&'a Locale> {
-    let game_dir = PathBuf::from(&app.state::<Mutex<crate::AppData>>().lock().unwrap().config.game_dir);
-    let english = app.path().app_local_data_dir().ok().map(|d| d.join(ENGLISH_TABLE));
+    let game_dir = PathBuf::from(app.state::<Mutex<crate::AppData>>().lock().unwrap().game_dir());
+    let english = app.path().app_cache_dir().ok().map(|d| crate::server::locale_file(&d.join("api")));
     match source.get(&game_dir, english.as_deref()) {
         Ok(locale) => {
             if std::mem::replace(missing, false) {
@@ -586,7 +582,7 @@ fn locale_of<'a>(source: &'a mut LocaleSource, app: &AppHandle, missing: &mut bo
         }
         Err(e) => {
             if !std::mem::replace(missing, true) {
-                let english = english.map_or("(no local data folder)".to_string(), |p| p.display().to_string());
+                let english = english.map_or("(no cache folder)".to_string(), |p| p.display().to_string());
                 log::warn!("refinery not readable: {e} (language pack of {}, English table {english})", game_dir.display());
             }
             None

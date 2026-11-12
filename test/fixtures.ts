@@ -5,7 +5,12 @@ import { dirname, join } from 'node:path';
 import { parseGlobalIni } from '../src/catalog/extract/localization.ts';
 import { normalize } from '../src/catalog/extract/normalize.ts';
 import { RecordStore } from '../src/catalog/extract/records.ts';
+import type { ContainerScan } from '../src/catalog/extract/socpak.ts';
 import type { Snapshot } from '../src/catalog/snapshot.ts';
+
+/** The star map amenity "Commodity Trading - Freight Elevator" and another one. */
+export const AMENITY = { freightElevator: 'a783bfb9-0f0a-491f-864b-945a49ef5da4', other: '10000000-0000-0000-0000-0000000000c0' };
+const amenity = (id: string) => ({ _RecordPath_: 'file://./x.json', _RecordName_: `StarMapAmenityTypeEntry.${id}`, _RecordId_: id });
 
 export const U = {
   rtdb: '10000000-0000-0000-0000-000000000001',
@@ -149,7 +154,7 @@ export const RECORDS: Record<string, unknown> = {
     categories: [{ _RecordId_: U.category, _RecordName_: 'BlueprintCategoryRecord.TestCat', _Type_: 'BlueprintCategoryRecord' }],
   }),
   'crafting/globalparams/craftingglobalparams.json': rec('CraftingGlobalParams.Main', U.globalParams, {
-    _Type_: 'CraftingGlobalParams',
+    _Type_: 'CraftingGlobalParams', defaultCompositionQuality: 500,
     defaultBlueprintSelection: { _Type_: 'DefaultBlueprintSelection_Whitelist', blueprintRecords: [ref('crafting/blueprints/crafting/bp_craft_test.json')] },
   }),
   'crafting/blueprintrewards/pool.json': rec('BlueprintPoolRecord.Pool', U.pool, {
@@ -174,11 +179,11 @@ export const RECORDS: Record<string, unknown> = {
     Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: {
       Type: 'Cooler', SubType: 'UNDEFINED', Size: 2, Grade: 3, Manufacturer: ref('scitemmanufacturer/scitemmanufacturer.test.json'),
       Localization: { Name: '@item_NameTEST_Output', Description: '@item_DescTEST_Output' },
-    } }],
+    } }, { _Type_: 'SHealthComponentParams', Health: 110 }],
   }),
   'entities/scitem/carryables/test_gem.json': rec('EntityClassDefinition.TEST_Gem', U.gem, {
     _Type_: 'EntityClassDefinition',
-    Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Type: 'Misc', SubType: 'Harvestable', Localization: { Name: '@items_commodities_testgem' } } }],
+    Components: [{ _Type_: 'SAttachableComponentParams', AttachDef: { Type: 'Misc', SubType: 'Harvestable', Localization: { Name: '@items_commodities_testgem' }, inventoryOccupancyVolume: { _Type_: 'SMicroCargoUnit', microSCU: 1000 } } }],
   }),
   'starmap/starmapobjecttypes.json': rec('StarMapObjectTypes.StarMapObjectTypes', U.starmapTypes, {
     _Type_: 'StarMapObjectTypes',
@@ -192,11 +197,12 @@ export const RECORDS: Record<string, unknown> = {
   'starmap/pu/system/test/teststar.json': starMapObject('TestStar', U.star, { type: starMapType(U.typeStar), navIcon: 'Star' }),
   'starmap/pu/station/test_station.json': starMapObject('Test_Station', U.station, {
     description: '@Test_Station_Desc', parent: ref('starmap/pu/system/test/teststar.json'), type: starMapType(U.typeStation),
-    navIcon: 'Station', respawnLocationType: 'Hospital',
+    navIcon: 'Station', respawnLocationType: 'Hospital', amenities: [null, amenity(AMENITY.other)],
   }),
   // Dangling parent and an unknown object type
   'starmap/pu/station/test_orphan.json': starMapObject('Test_Orphan', U.orphan, {
     name: '@LOC_UNINITIALIZED', parent: ref('starmap/pu/system/gone.json'), type: starMapType('10000000-0000-0000-0000-0000000000ff'), hideInStarmap: true,
+    amenities: [amenity(AMENITY.other), amenity(AMENITY.freightElevator)],
   }),
   // Not a StarMapObject: raw only
   'starmap/smdefaultmissionmarker.json': rec('MissionMarker.Default', U.marker, { _Type_: 'StarMapMissionMarker' }),
@@ -349,7 +355,12 @@ export const FPS = {
  * nameless records, clothing (the stackables and clothing are shop items, see SHOP_RECORDS). Kept apart from RECORDS: only the tests that need FPS gear add them. */
 export const FPS_RECORDS: Record<string, unknown> = {
   'entities/scitem/weapons/fps_weapons/test_rifle.json': gearItem('test_rifle', FPS.rifle,
-    { Type: 'WeaponPersonal', SubType: 'Medium', Size: 3, Localization: { Name: '@item_Nametest_rifle' } }),
+    { Type: 'WeaponPersonal', SubType: 'Medium', Size: 3, Localization: { Name: '@item_Nametest_rifle' } },
+    // A looping sequence: no rate on the fire mode itself, its first entry's pace is 1.2 seconds per shot
+    [{ _Type_: 'SCItemWeaponComponentParams', fireActions: [
+      { _Type_: 'SWeaponActionSequenceParams', sequenceEntries: [{ _Type_: 'SWeaponSequenceEntryParams', delay: 1.2, unit: 'Seconds' }] },
+      { _Type_: 'SWeaponActionFireSingleParams', fireRate: 300 },
+    ] }]),
   'entities/scitem/characters/human/armor/test_helmet.json': gearItem('test_helmet', FPS.helmet,
     { Type: 'Char_Armor_Helmet', SubType: 'Light', Localization: { Name: '@item_Nametest_helmet' } },
     [{ _Type_: 'SCItemSuitArmorParams', damageResistance: 'file://./../../../../../libs/foundry/records/damage/lightarmor.json' }]),
@@ -408,6 +419,16 @@ export const INI_EN ='\uFEFFitems_commodities_testmetal=Test Metal\r\nitems_comm
 export const INI_DE = '\uFEFFitems_commodities_testmetal=Testmetall\r\n'
   + 'item_NameTEST_Output=! GERMAN_(GERMANY) TRANSLATION NOT FOUND FOR LOCID: item_NameTEST_Output !\r\n';
 
+// The test provider is used by an object container at the station and by one placed nowhere; the refinery sits at the
+// station (and in one container placed nowhere)
+export const FIXTURE_CONTAINERS: ContainerScan = {
+  places: new Map([[U.provider, new Set([U.station])]]),
+  unplaced: [{ container: 'objectcontainers/pu/system/test/lost.socpak', providers: [U.provider] }],
+  refineryEntities: ['10000000-0000-0000-0000-0000000000d0'],
+  refineryPlaces: new Set([U.station]),
+  refineryUnplaced: ['objectcontainers/pu/loc/test/lost_refinery.socpak'],
+};
+
 /** Writes the synthetic records to a temp dir and returns their store root. */
 export function writeRecords(records: Record<string, unknown> = RECORDS): string {
   const root = mkdtempSync(join(tmpdir(), 'sc-qm-records-'));
@@ -419,16 +440,12 @@ export function writeRecords(records: Record<string, unknown> = RECORDS): string
   return root;
 }
 
-export function fixtureSnapshot(records: Record<string, unknown> = RECORDS): Snapshot {
+export function fixtureSnapshot(records: Record<string, unknown> = RECORDS, containers: ContainerScan = FIXTURE_CONTAINERS): Snapshot {
   return normalize({
     store: new RecordStore(writeRecords(records)),
     localizations: new Map([['en', parseGlobalIni(INI_EN)], ['de', parseGlobalIni(INI_DE)]]),
     game: { channel: 'LIVE', build: 1000, branch: 'test', version: '1.0', label: null, manifest: {} },
     extractor: { version: 'test', starbreaker: 'test' },
-    // The test provider is used by an object container at the station and by one placed nowhere
-    containers: {
-      places: new Map([[U.provider, new Set([U.station])]]),
-      unplaced: [{ container: 'objectcontainers/pu/system/test/lost.socpak', providers: [U.provider] }],
-    },
+    containers,
   });
 }

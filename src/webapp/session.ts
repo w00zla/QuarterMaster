@@ -18,6 +18,8 @@ export interface Session {
   username: string;
   globalName: string | null;
   avatar: string | null;
+  /** No Discord profile (the singleuser variant's local user): `/api/me` answers no name and no avatar. */
+  noProfile?: true;
 }
 
 /** Creates a session (and the app_user row if missing) and returns the cookie token (shown nowhere else). */

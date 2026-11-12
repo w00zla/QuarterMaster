@@ -121,6 +121,7 @@ export async function runImport(db: Db, snapshot: Snapshot, snapshotSha256: stri
           extractedAt: new Date(snapshot.extractedAt),
           forced: options.force,
           anomalies: snapshot.anomalies,
+          defaultCompositionQuality: snapshot.crafting.defaultCompositionQuality,
         }).returning({ id: c.importRun.id });
         const importId = run!.id;
         result!.importId = importId;

@@ -7,6 +7,7 @@ import { connect } from '../db/client.ts';
 import { createApp } from './app.ts';
 import { loadConfig, type ProcessConfig } from './config.ts';
 import { discordLogin } from './discord.ts';
+import { discordIdentity } from './identity-discord.ts';
 import { RealtimeHub, listenForChanges } from './realtime.ts';
 import { deleteExpiredSessions } from './session.ts';
 
@@ -21,12 +22,14 @@ const { origin } = config;
 
 const { db, close, client } = connect(process.env.DATABASE_URL);
 const login = discordLogin({ clientId: config.clientId, clientSecret: config.clientSecret, redirectUri: `${origin}/auth/callback` });
-const app = createApp(db, login, {
+// The online variant: Discord login, sessions and API tokens; orgs and UEX trading
+const identity = discordIdentity(db, login);
+const app = createApp(db, identity, {
   origin,
   trustProxy: config.trustProxy,
   distDir: fileURLToPath(new URL('../../webapp/dist', import.meta.url)),
-  companionDir: config.companionDir,
   thumbsDir: config.thumbsDir,
+  capabilities: { login: 'discord', orgs: true, uex: true },
 });
 
 const cleanup = () => deleteExpiredSessions(db).catch((err: unknown) => console.error('Session cleanup failed', err));
@@ -34,7 +37,7 @@ const cleanupTimer = setInterval(cleanup, 3600_000);
 await cleanup();
 
 const log = (message: string, err?: unknown) => (err === undefined ? console.log(message) : console.error(message, err));
-const realtime = new RealtimeHub(db, { origin, trustProxy: config.trustProxy }, log);
+const realtime = new RealtimeHub(db, identity, { origin, trustProxy: config.trustProxy }, log);
 await listenForChanges(client, realtime, log);
 
 const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {

@@ -1,5 +1,6 @@
-// Where a component's unmodified stat values sit in its DataCore record (`catalog.raw_record`),
-// per crafted property: the game's tooltip shows these absolute values ("Coolant Rating: 60.00"), the
+// Where a component's unmodified stat values sit in its DataCore record, per crafted property (the
+// extractor reads them there into the snapshot's `items[].baseStats`, `catalog.item.base_stats`): the
+// game's tooltip shows these absolute values ("Coolant Rating: 60.00"), the
 // stock stores a crafted component's gain over them in percent or steps (`component-stats.ts`). The
 // API consumers that read the tooltip need the base to tell the gain. Checked 2026-10-18 against the
 // user's inventory screenshots (HeatSafe 22 / 110, Blizzard 60 / 1800, Atlas 259.05 / 200, CoverAll
@@ -8,8 +9,10 @@
 // heads): their base stays null and such components are to be registered without stats only when
 // the tooltip shows none. Properties the tooltip shows as a change in percent (`tooltipForm`) need none.
 
+import { pathQueryFirst } from './jsonpath.ts';
+
 interface BasePath {
-  // A Postgres jsonpath into the record (lax mode: the first match counts)
+  // A Postgres jsonpath into the record (lax mode: the first match counts; evaluated by `jsonpath.ts`)
   path: string;
   // A jsonpath to a link ("file://…/libs/foundry/records/…json") in the item's record: `path` is then
   // read in the linked record
@@ -79,6 +82,29 @@ export function baseValue(key: string, raw: unknown, rank = 0): number | null {
   if (!spec || !Number.isFinite(n) || (spec.reciprocal && n === 0)) return null;
   // Rounded: 1 - 0.7 is 0.30000000000000004
   return Math.round(((spec.offset ?? 0) + (spec.reciprocal ? spec.scale / n : n * spec.scale)) * 1e9) / 1e9;
+}
+
+/**
+ * A record's base values (crafted property key -> the tooltip's value), for every property the record holds a
+ * number for: per property the first place (by rank) that does. `linked`: the record at a path
+ * ("libs/foundry/records/damage/mediumarmor.json", lower case), if there is one.
+ */
+export function baseStats(record: unknown, linked: (path: string) => unknown): Record<string, number> {
+  const stats: Record<string, number> = {};
+  for (const [key, rank, place] of basePaths()) {
+    if (key in stats) continue;
+    let source = record;
+    if (place.link) {
+      // "file://./../…/libs/foundry/records/damage/mediumarmor.json": the record path from "libs/" on
+      const link = pathQueryFirst(record, place.link);
+      const path = typeof link === 'string' ? /libs\/foundry\/records\/[\s\S]*$/.exec(link)?.[0].toLowerCase() : undefined;
+      source = path ? linked(path) : undefined;
+      if (source === undefined || source === null) continue;
+    }
+    const value = baseValue(key, pathQueryFirst(source, place.path), rank);
+    if (value !== null) stats[key] = value;
+  }
+  return stats;
 }
 
 /** How the tooltip shows a stat, from its crafted property's display transformation: its absolute value

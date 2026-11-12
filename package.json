@@ -9,6 +9,7 @@
   "scripts": {
     "typecheck": "tsc",
     "test": "node --env-file-if-exists=.env --test --test-concurrency=1 \"test/**/*.test.ts\"",
+    "test:pglite": "node --env-file-if-exists=.env --env-file=test/pglite.env --test --test-concurrency=1 --test-timeout=120000 \"test/**/*.test.ts\"",
     "db:up": "scripts/dev-db.sh up",
     "db:down": "scripts/dev-db.sh down",
     "db:psql": "scripts/dev-db.sh psql",
@@ -18,6 +19,7 @@
     "catalog:import": "node --env-file-if-exists=.env src/catalog/import/cli.ts",
     "loc:import": "node --env-file-if-exists=.env src/catalog/import/loc-cli.ts",
     "packshot:targets": "node --env-file-if-exists=.env src/catalog/thumb-targets-cli.ts",
+    "data:pack": "node src/datapack/cli.ts",
     "thumbs:build": "cargo run --release --quiet --manifest-path tools/thumbs/Cargo.toml --",
     "adminapp": "node --env-file-if-exists=.env src/adminapp/main.ts",
     "adminapp:dev": "pnpm --filter sc-quartermaster-adminapp dev",
@@ -27,6 +29,14 @@
     "webapp:watch": "node --watch --env-file-if-exists=.env src/webapp/main.ts",
     "webapp:dev": "pnpm --filter sc-quartermaster-webapp dev",
     "webapp:build": "pnpm --filter sc-quartermaster-webapp build",
+    "singleuser": "node --env-file-if-exists=.env src/singleuser/main.ts",
+    "singleuser:import": "node --env-file-if-exists=.env src/singleuser/import.ts",
+    "app:bundle": "node src/singleuser/app-bundle.ts",
+    "app:fetch-node": "node app/scripts/fetch-node.mjs",
+    "app:build": "node app/scripts/build.mjs",
+    "app:start": "node app/scripts/build.mjs --dev",
+    "app:fast": "node app/scripts/build.mjs --fast",
+    "app:smoke": "node app/scripts/smoke.mjs",
     "bot": "node --env-file-if-exists=.env src/bot/main.ts",
     "bot:register": "node --env-file-if-exists=.env src/bot/register.ts",
     "ext": "node --env-file-if-exists=.env src/ext/main.ts",
@@ -36,6 +46,7 @@
     "companion:directml": "pnpm --filter sc-quartermaster-companion directml"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.15",
     "@hono/node-server": "^2.1.3",
     "discord.js": "^14.27.0",
     "drizzle-orm": "^0.45.3",
@@ -50,6 +61,7 @@
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "drizzle-kit": "^0.31.11",
+    "esbuild": "0.28.2",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@12.16.1"

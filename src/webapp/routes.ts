@@ -30,7 +30,6 @@ import { registerMiningRoutes } from './mining.ts';
 import { registerFeatureRoutes } from './features.ts';
 import { minableUuids } from './mining-query.ts';
 import { unlockableBlueprints } from './unlock-query.ts';
-import { refineryMatch } from '../ext/refineries.ts';
 import type {
   BlueprintInfo, BlueprintListResponse, BlueprintOwner, CatalogResponse, CompanionCatalogResponse, CraftingUse, HistoryResponse, Lang, MaterialInfo, OkResponse,
   OrgBlueprintsResponse,
@@ -201,7 +200,42 @@ function listResponse(found: PickableBatch[], viewer: string, viewerOrgs: Set<st
   return { batches, totals: Object.fromEntries([...sums].map(([k, v]) => [k, formatMicros(v)])) };
 }
 
-export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap<string, string> = () => new Map()) {
+/** The org routes: an org's active members and their blueprints. Mounted only where orgs exist. */
+function registerOrgRoutes(api: Hono<Env>, db: Db) {
+  api.get('/orgs/:guildId/members', async (c) => {
+    const guildId = c.req.param('guildId');
+    if (!SNOWFLAKE.test(guildId)) throw new HttpError(400, 'invalid');
+    await membership(db, c.get('session').userId, guildId);
+    const members = await db.execute<OrgMember & Record<string, unknown>>(sql`
+      SELECT m.user_id AS "userId", m.display_name AS "displayName", u.rsi_handle AS "rsiHandle"
+      FROM app.member m JOIN app.app_user u ON u.user_id = m.user_id
+      WHERE m.guild_id = ${guildId} AND m.active ORDER BY lower(m.display_name)`);
+    return c.json([...members] satisfies OrgMember[]);
+  });
+
+  api.get('/orgs/:guildId/blueprints', async (c) => {
+    const guildId = c.req.param('guildId');
+    if (!SNOWFLAKE.test(guildId)) throw new HttpError(400, 'invalid');
+    await membership(db, c.get('session').userId, guildId);
+    // The registry is visible to the org: active members only
+    const found = await db.execute<{ uuid: string; owners: BlueprintOwner[] }>(sql`
+      SELECT b.blueprint_uuid AS uuid,
+        json_agg(json_build_object('userId', m.user_id, 'displayName', m.display_name, 'rsiHandle', u.rsi_handle)
+          ORDER BY lower(m.display_name)) AS owners
+      FROM app.user_blueprint b
+      JOIN app.member m ON m.user_id = b.user_id AND m.guild_id = ${guildId} AND m.active
+      JOIN app.app_user u ON u.user_id = b.user_id
+      GROUP BY b.blueprint_uuid`);
+    return c.json({ entries: found.map((r) => ({ uuid: r.uuid, owners: r.owners })) } satisfies OrgBlueprintsResponse);
+  });
+}
+
+/**
+ * `orgs`: whether the org routes (/orgs/…) are mounted. Without them an org is still nothing a request can reach:
+ * every other route that takes a guild id checks the caller's membership there (membership, the stock service's
+ * checkHolder), and a server without orgs has no memberships.
+ */
+export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap<string, string>, options: { orgs: boolean }) {
   // --- catalog ------------------------------------------------------------------------------
   // The same for everyone until the next import or UEX change, ~3 MB per language: the ETag (a hash of the
   // body) answers an unchanged catalog with 304; the browser and the companion keep it and revalidate.
@@ -216,7 +250,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
     const [bpTypes, types, bpStats] = [await blueprintTypes(db, lang), await itemTypes(db, lang), await blueprintStatNames(db, lang)];
     const unlockable = await unlockableBlueprints(db);
     const minable = await minableUuids(db);
-    const refineries = await refineryMatch(db);
+    const refineries = await stock.refineryLocations(db);
     const thumb = thumbs();
     return c.json({
       materials: [...materials.values()].map((m) => ({
@@ -226,8 +260,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
-        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
-        yields: Object.fromEntries(refineries?.yields.get(l.uuid) ?? []),
+        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: !refineries || refineries.has(l.uuid),
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
       blueprints: blueprints.entries.map((e) => ({
@@ -263,7 +296,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
   api.get('/companion/catalog', async (c) => {
     const lang = langOf(c);
     const [materials, locations, blueprints, types] = [await materialCatalog(db, lang), await locationCatalog(db, lang), await blueprintCatalog(db, lang), await itemTypes(db, lang)];
-    const refineries = await refineryMatch(db);
+    const refineries = await stock.refineryLocations(db);
     const thumb = thumbs();
     return c.json({
       materials: [...materials.values()].map((m) => ({
@@ -272,7 +305,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
       }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       locations: [...locations.values()].map((l) => ({
-        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: refineries?.matched.has(l.uuid) ?? true,
+        uuid: l.uuid, key: l.key, label: l.label, short: l.short, nameKey: l.nameKey, refinery: !refineries || refineries.has(l.uuid),
       }))
         .sort((a, b) => a.label.localeCompare(b.label)),
       blueprints: blueprints.entries.map((e) => ({
@@ -398,32 +431,7 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
   });
 
   // --- orgs -----------------------------------------------------------------------------------
-  api.get('/orgs/:guildId/members', async (c) => {
-    const guildId = c.req.param('guildId');
-    if (!SNOWFLAKE.test(guildId)) throw new HttpError(400, 'invalid');
-    await membership(db, c.get('session').userId, guildId);
-    const members = await db.execute<OrgMember & Record<string, unknown>>(sql`
-      SELECT m.user_id AS "userId", m.display_name AS "displayName", u.rsi_handle AS "rsiHandle"
-      FROM app.member m JOIN app.app_user u ON u.user_id = m.user_id
-      WHERE m.guild_id = ${guildId} AND m.active ORDER BY lower(m.display_name)`);
-    return c.json([...members] satisfies OrgMember[]);
-  });
-
-  api.get('/orgs/:guildId/blueprints', async (c) => {
-    const guildId = c.req.param('guildId');
-    if (!SNOWFLAKE.test(guildId)) throw new HttpError(400, 'invalid');
-    await membership(db, c.get('session').userId, guildId);
-    // The registry is visible to the org: active members only
-    const found = await db.execute<{ uuid: string; owners: BlueprintOwner[] }>(sql`
-      SELECT b.blueprint_uuid AS uuid,
-        json_agg(json_build_object('userId', m.user_id, 'displayName', m.display_name, 'rsiHandle', u.rsi_handle)
-          ORDER BY lower(m.display_name)) AS owners
-      FROM app.user_blueprint b
-      JOIN app.member m ON m.user_id = b.user_id AND m.guild_id = ${guildId} AND m.active
-      JOIN app.app_user u ON u.user_id = b.user_id
-      GROUP BY b.blueprint_uuid`);
-    return c.json({ entries: found.map((r) => ({ uuid: r.uuid, owners: r.owners })) } satisfies OrgBlueprintsResponse);
-  });
+  if (options.orgs) registerOrgRoutes(api, db);
 
   // --- summary --------------------------------------------------------------------------------
   // --- history ----------------------------------------------------------------------------------

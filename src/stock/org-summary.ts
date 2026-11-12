@@ -3,7 +3,7 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { importCache } from '../db/import-cache.ts';
-import { REWARD_POOL_PATHS, rows } from '../db/query.ts';
+import { rows } from '../db/query.ts';
 import type { StockMetrics } from '../webapp/api-types.ts';
 import { formatAmount } from './amount.ts';
 import { componentItemSql } from './service.ts';
@@ -21,8 +21,8 @@ export interface OrgMetrics extends StockMetrics {
 // "no source" count is the rest); language-independent, cached under one key
 const obtainable = importCache(async (db: Db) =>
   (await db.execute<{ n: number }>(sql`
-    SELECT count(*)::int AS n FROM catalog.blueprint b JOIN catalog.raw_record r ON r.uuid = b.uuid
-    WHERE b.retired_at IS NULL AND NOT b.is_default AND r.path IN ${REWARD_POOL_PATHS}`))[0]?.n ?? 0);
+    SELECT count(*)::int AS n FROM catalog.blueprint b
+    WHERE b.retired_at IS NULL AND NOT b.is_default AND b.in_reward_pool`))[0]?.n ?? 0);
 export const obtainableBlueprints = (db: Db) => obtainable(db, '');
 
 /** Stock figures in the shape of the web app's tiles (exact decimal text). */

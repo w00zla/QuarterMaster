@@ -41,7 +41,7 @@ const numeric = (n: number | null): string | null => (n === null ? null : String
 export function toEntitySets(s: Snapshot): EntitySets {
   return {
     manufacturer: s.manufacturers.map((m) => ({ ...m, contentHash: hashOf(m) })),
-    item: s.items.map((i) => ({ ...i, contentHash: hashOf(i) })),
+    item: s.items.map(({ shop, ...i }) => ({ ...i, isShop: shop, contentHash: hashOf({ ...i, shop }) })),
     resource: s.resources.map((r) => ({
       ...r,
       densityGPerCc: numeric(r.densityGPerCc),
@@ -56,7 +56,9 @@ export function toEntitySets(s: Snapshot): EntitySets {
       const { tiers: _tiers, ...row } = b;
       return { ...row, contentHash: hashOf(b) };
     }),
-    location: s.locations.map((l) => ({ ...l, contentHash: hashOf(l) })),
+    location: s.locations.map(({ freightElevator, refinery, ...l }) => ({
+      ...l, hasFreightElevator: freightElevator, hasRefinery: refinery, contentHash: hashOf({ ...l, freightElevator, refinery }),
+    })),
     rawRecord: s.rawRecords.map((r) => ({ ...r, contentHash: hashOf(r) })),
   };
 }

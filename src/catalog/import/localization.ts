@@ -11,6 +11,10 @@ export const GAME_PRIORITY = 0;
 export const APP_SOURCE = 'app';
 const APP_PRIORITY = 1000;
 export const DEFAULT_EXTERNAL_PRIORITY = 100;
+// The singleuser variant's language pack (the player's own global.ini), synced at every start (src/singleuser/language-pack.ts):
+// reserved like `game` and `app`, above the game's texts and below the app's
+export const PACK_SOURCE = 'language-pack';
+export const PACK_PRIORITY = 500;
 
 export type SourceRow = typeof c.localizationSource.$inferSelect;
 

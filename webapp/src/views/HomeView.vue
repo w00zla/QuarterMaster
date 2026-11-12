@@ -4,6 +4,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { StockMetrics, StockValue, SummaryResponse } from "../../../src/webapp/api-types";
 import { api } from "../api";
+import { orgsOn, uexOn } from "../capabilities";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import StatTile from "../components/StatTile.vue";
 import { hm } from "../format";
@@ -99,10 +100,10 @@ onUnmounted(() => {
         <StatTile v-for="tile in stockTiles(summary?.personal)" :key="tile.label" :label="tile.label" :value="tile.value" :unit="tile.unit" :icon="tile.icon">{{ tile.sub }}</StatTile>
         <StatTile icon="drop" :label="t('sum.refining')" :value="number(refining?.jobs)">{{ refiningSub }}</StatTile>
         <StatTile icon="blueprint" :label="t('sum.blueprints')" v-bind="blueprintsOf(summary?.personal.blueprints)" />
-        <StatTile icon="overview" :label="t('sum.value')" :value="valueOf(summary?.personal.value)">aUEC</StatTile>
+        <StatTile v-if="uexOn" icon="overview" :label="t('sum.value')" :value="valueOf(summary?.personal.value)">aUEC</StatTile>
       </div>
     </section>
-    <section class="panel">
+    <section v-if="orgsOn" class="panel">
       <div class="head">
         <Icon name="users" :size="16" />
         <span class="head-title">{{ t("home.orgs") }}</span>

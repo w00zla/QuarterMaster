@@ -3,14 +3,13 @@
 import { readFileSync, statSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { sql } from 'drizzle-orm';
-import { connect } from '../../db/client.ts';
+import { connectUrl } from '../../db/connect-url.ts';
 import { runImport, summarize } from './apply.ts';
 import { loadSnapshot } from './load.ts';
 import { ENTITY_NAMES } from './plan.ts';
 
-const HELP = `Usage: pnpm catalog:import <snapshot.json[.gz]> --label <version> [options]
+const HELP = `Usage: pnpm catalog:import <snapshot.json[.gz]> [options]
 
-  --label <text>            Required: the game version, e.g. 4.10.2 (snapshots carry none)
   --dry-run                 Run the full import in a transaction and roll it back
   --force                   Override mass-retire/mass-change safeguards, re-import an identical snapshot
   --allow-downgrade         Allow a snapshot older than the last import
@@ -28,16 +27,13 @@ async function main(): Promise<number> {
       'dry-run': { type: 'boolean', default: false },
       'force': { type: 'boolean', default: false },
       'allow-downgrade': { type: 'boolean', default: false },
-      'label': { type: 'string' },
       'max-retire-ratio': { type: 'string', default: '0.1' },
       'max-change-ratio': { type: 'string', default: '0.5' },
       'json': { type: 'boolean', default: false },
       'help': { type: 'boolean', short: 'h', default: false },
     },
   });
-  const label = args.label?.trim();
-  if (args.help || positionals.length !== 1 || !label) {
-    if (!args.help && positionals.length === 1) console.error('--label is required (the game version, e.g. 4.10.2)');
+  if (args.help || positionals.length !== 1) {
     console.log(HELP);
     return args.help ? 0 : 1;
   }
@@ -60,18 +56,21 @@ async function main(): Promise<number> {
   const file = positionals[0]!;
   const { snapshot, sha256: hash, timings: loadTimings } = loadSnapshot(readFileSync(file));
   Object.assign(timings, loadTimings);
-  snapshot.game.label = label;
 
   const g = snapshot.game;
   log(`Snapshot: ${g.channel} build ${g.build}${g.label ? ` "${g.label}"` : ''} (${g.branch}) extracted ${snapshot.extractedAt}`);
   log(`          ${file} (${(statSync(file).size / 1024 / 1024).toFixed(1)} MB, sha256 ${hash.slice(0, 12)}…, ${snapshot.anomalies.length} extractor anomalies)`);
 
   // --- import ---
-  const { db, close } = connect(process.env.DATABASE_URL);
+  const { db, close, maintain } = connectUrl(process.env.DATABASE_URL);
   try {
     const result = await runImport(db, snapshot, hash, options);
     let catalogBytes: number | null = null;
     if (result.status === 'imported') {
+      // PGlite neither checkpoints nor vacuums by itself; on Postgres this does nothing
+      const maintainStart = performance.now();
+      await maintain();
+      timings.maintain = performance.now() - maintainStart;
       const [row] = await db.execute<{ bytes: string }>(sql`
         SELECT coalesce(sum(pg_total_relation_size(c.oid)), 0)::text AS bytes
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

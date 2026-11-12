@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "The settings window (the web app at /settings?window=settings): the pickers, links, closing, sizing itself once, the main window to the front, and what the app update button and the title bar's drag region need. No window functions beyond these (it can be neither minimized, maximized nor resized) and no open_settings",
+  "local": false,
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "windows": ["settings"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "allow-pick-folder",
+    "allow-pick-file",
+    "allow-open-external",
+    "allow-window-close",
+    "allow-window-is-maximized",
+    "allow-settings-window-fit",
+    "allow-window-focus-main",
+    "allow-update-state"
+  ]
+}

@@ -25,6 +25,26 @@
 
 The bot and the web app run as one hosted service; how it is deployed is described in [docs/deploy.md](docs/deploy.md).
 
+## Downloads
+
+Two desktop apps come from the [GitHub releases](https://github.com/w00zla/quartermaster/releases) of this repository:
+**Quartermaster** (the app: the whole thing on your PC for one player, no server, no Discord; [docs/app.md](docs/app.md))
+and the **Quartermaster Companion** (reads the game and feeds the hosted web app or the local app; see below).
+
+Pick the newest release whose tag starts with `app-v` (Quartermaster) or `companion-v` (Companion); a version with a
+`-beta.1`-style ending is a test channel, a plain one is stable (`data-…` releases are the game data, which the app fetches itself). On Windows download the `…-setup.exe` of that release
+(`Quartermaster_<version>_x64-setup.exe`, `Quartermaster-Companion_<version>_x64-setup.exe`), on Linux the `…AppImage`
+(`Quartermaster_<version>_amd64.AppImage`, `Quartermaster-Companion_<version>_amd64.AppImage`). The other files of a
+release (`.sig`, `latest.json`) are for the updater.
+
+**Updates are automatic by default.** Both apps and the game data (the app's catalog and item pictures) update
+themselves; nothing needs installing by hand after the first install. To do that they ask GitHub, without a login and
+without sending anything about you: `channels.json` from `raw.githubusercontent.com/w00zla/quartermaster/channels`, then
+the files of the release it names from `github.com/w00zla/quartermaster/releases`. An app update is checked against
+the maintainer's signature before it is installed. To switch it off: in the app's settings, "Automatic updates"
+("Automatische Updates"; it covers the app's own update and the game data's check at start); the companion has its own
+switch in its settings. A companion from before it could update itself needs one manual install from the releases above.
+
 ## Companion
 
 <p align="center"><img src="assets/companion-banner.jpg" alt="Quartermaster Companion" width="800"></p>
@@ -38,15 +58,14 @@ refinery entries:
   with OCR from the game window. Each read becomes a proposal you confirm in the app.
 - **Overlay**: what the scan sees, drawn click-through over the game.
 
-It needs Windows 10/11 for the scans and the overlay (Linux builds read `Game.log` only), an API token from the web
-app's Companion dialog, and for the refinery scan a language pack or the game's English texts as `global-english.ini`
-in the app's data folder. How it works: [docs/companion.md](docs/companion.md).
+It needs Windows 10/11 for the scans and the overlay (Linux builds read `Game.log` only) and an API token from the web
+app's Companion dialog. How it works: [docs/companion.md](docs/companion.md).
 
 ## Build
 
 Requirements: Node 26+, pnpm, PostgreSQL 18 (bot and web app); Rust and the [Tauri 2
 prerequisites](https://tauri.app/start/prerequisites/) (companion). The companion's OCR comes from
-[sc-ohseearr](https://github.com/w00zla/sc-ohseearr): clone it next to this repository.
+[sc-ohseearr](https://github.com/w00zla/sc-ohseearr): the build fetches it by its release tag.
 
 ```sh
 pnpm install
@@ -69,7 +88,7 @@ where; the details are in [docs/](docs).
 ## Credits
 
 - [StarBreaker](https://github.com/diogotr7/StarBreaker) by diogotr7, used (through our fork) to read the game data.
-- [UEX](https://uexcorp.space) for prices and refinery data.
+- [UEX](https://uexcorp.space) for prices.
 
 ## Game data and fan content
 

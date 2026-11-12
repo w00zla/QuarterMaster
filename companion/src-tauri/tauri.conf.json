@@ -12,18 +12,23 @@
     "windows": [
       {
         "title": "Quartermaster Companion",
-        "width": 640,
+        "width": 696,
         "height": 800,
-        "minWidth": 640,
+        "minWidth": 696,
         "minHeight": 780,
         "decorations": false,
         "visible": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://cdn.discordapp.com; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'",
       "devCsp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBBMDg1OTQxNEZENzQzMDcKUldRSFE5ZFBRVmtJQ2xqaUp5TkVOb2tjdmJ1MENQWmJZcU12TjlqakJDVEUvS0dlSER0c2dSNG8K"
     }
   },
   "bundle": {

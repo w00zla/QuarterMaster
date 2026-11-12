@@ -2,7 +2,7 @@
 // Catalog rows are never deleted: entries missing from a newer snapshot get `retired_at`.
 import { sql } from 'drizzle-orm';
 import {
-  boolean, check, foreignKey, index, integer, jsonb, numeric, pgSchema, primaryKey, serial, text, timestamp, uuid,
+  boolean, check, doublePrecision, foreignKey, index, integer, jsonb, numeric, pgSchema, primaryKey, serial, text, timestamp, uuid,
 } from 'drizzle-orm/pg-core';
 
 export const catalog = pgSchema('catalog');
@@ -24,6 +24,8 @@ export const importRun = catalog.table('import', {
   forced: boolean('forced').notNull().default(false),
   summary: jsonb('summary'),
   anomalies: jsonb('anomalies'),
+  // CraftingGlobalParams.defaultCompositionQuality of the snapshot; null: the game data had none (or imported before the column)
+  defaultCompositionQuality: integer('default_composition_quality'),
 });
 
 /** Columns shared by every catalog entity. */
@@ -83,6 +85,12 @@ export const item = catalog.table('item', {
   manufacturerUuid: uuid('manufacturer_uuid').references(() => manufacturer.uuid),
   nameKey: text('name_key'),
   descriptionKey: text('description_key'),
+  // Sold in shops but no gear (components.ts SHOP_TYPES); the import stores these without a raw record
+  isShop: boolean('is_shop').notNull().default(false),
+  // Harvestables: SCU one piece takes in an inventory
+  scuPerPiece: doublePrecision('scu_per_piece'),
+  // Crafted property key -> the unmodified base value
+  baseStats: jsonb('base_stats').notNull().default(sql`'{}'::jsonb`),
   ...lifecycle(),
   // The "plain part" check of gear (componentItemSql) looks up items by type and name
 }, (t) => [index().on(t.className), index().on(t.type, t.nameKey)]);
@@ -116,6 +124,8 @@ export const blueprint = catalog.table('blueprint', {
   categoryUuid: uuid('category_uuid').references(() => blueprintCategory.uuid),
   outputItemUuid: uuid('output_item_uuid').references(() => item.uuid),
   isDefault: boolean('is_default').notNull(),
+  // Some blueprint reward pool hands it out
+  inRewardPool: boolean('in_reward_pool').notNull().default(false),
   ...lifecycle(),
 }, (t) => [index().on(t.key), index().on(t.outputItemUuid)]);
 
@@ -209,6 +219,9 @@ export const location = catalog.table('location', {
   navIcon: text('nav_icon'),
   hideInStarmap: boolean('hide_in_starmap').notNull(),
   respawnLocationType: text('respawn_location_type'),
+  // The amenity "Commodity Trading - Freight Elevator" is listed
+  hasFreightElevator: boolean('has_freight_elevator').notNull().default(false),
+  hasRefinery: boolean('has_refinery').notNull().default(false),
   ...lifecycle(),
 }, (t) => [index().on(t.parentUuid), index().on(t.navIcon)]);
 
