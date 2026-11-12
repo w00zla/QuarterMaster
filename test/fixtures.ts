@@ -294,7 +294,12 @@ export const RECORDS: Record<string, unknown> = {
     _Type_: 'HarvestablePreset', entityClass: ref('entities/mineable/mineablerock_fps_test_gem.json'),
   }),
   'entities/mineable/mineablerock_common_test.json': rec('EntityClassDefinition.MineableRock_Common_Test', '10000000-0000-0000-0000-000000000027', {
-    _Type_: 'EntityClassDefinition', Components: [{ _Type_: 'MineableParams', composition: ref('mining/rockcompositionpresets/commonshipmineables_test.json') }],
+    _Type_: 'EntityClassDefinition', Components: [
+      { _Type_: 'MineableParams', composition: ref('mining/rockcompositionpresets/commonshipmineables_test.json') },
+      { _Type_: 'SSCSignatureSystemParams', radarProperties: { _Type_: 'SSCRadarContactProperites', baseSignatureParams: {
+        _Type_: 'SSCSignatureSystemBaseSignatureParams', signatures: [0, 0, 0, 0, 4285, 0, 0, 0],
+      } } },
+    ],
   }),
   'entities/mineable/mineablerock_rare_test.json': rec('EntityClassDefinition.MineableRock_Rare_Test', '10000000-0000-0000-0000-000000000028', {
     _Type_: 'EntityClassDefinition', Components: [{ _Type_: 'MineableParams', composition: ref('mining/rockcompositionpresets/rareshipmineables_test.json') }],

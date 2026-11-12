@@ -260,6 +260,13 @@
       "when": 1794340556709,
       "tag": "0036_drop_refining_methods",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794487808801,
+      "tag": "0037_mineable_rock",
+      "breakpoints": true
     }
   ]
 }

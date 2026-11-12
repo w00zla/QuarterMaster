@@ -242,6 +242,15 @@ describe('normalize', () => {
         quality: { min: 400, max: 400, values: [{ value: 400, chance: 1 }] },
       },
     ]);
+    // The rock kinds: the resource of the composition's first part, the rarity (ship rocks), the radar signature
+    // (only the common rock has one)
+    const rock = (key: string, uuid: string, method: string, resourceUuid: string, rarity: string | null, radarSignature: number | null) =>
+      ({ uuid, key, method, resourceUuid, rarity, radarSignature });
+    assert.deepEqual(s.mineableRocks, [
+      rock('MineableRock_Common_Test', '10000000-0000-0000-0000-000000000027', 'ship', U.ore, 'common', 4285),
+      rock('MineableRock_FPS_Test_Gem', '10000000-0000-0000-0000-000000000029', 'fps', U.metal, null, null),
+      rock('MineableRock_Rare_Test', '10000000-0000-0000-0000-000000000028', 'ship', U.ore, 'rare', null),
+    ]);
     assert.equal(anomaly('unresolved_ref').filter((a) => a.record === 'MineableComposition.RareShipMineables_Test').length, 1);
     // The provider no container places, the container placed nowhere
     assert.deepEqual(anomaly('unplaced_provider').map((a) => a.record), ['HarvestableProviderPreset.HPP_Unused']);

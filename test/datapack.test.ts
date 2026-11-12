@@ -166,7 +166,7 @@ describe('data pack', () => {
       assert.deepEqual(r.thumbs, { total: 9, added: 9 });
       m1 = parseManifest(JSON.parse(readFileSync(join(rel1, 'manifest.json'), 'utf8')));
       assert.equal(m1.previous, null);
-      assert.equal(m1.schemaVersion, 7);
+      assert.equal(m1.schemaVersion, 8);
       assert.equal(m1.game.build, 1000);
       assert.equal(m1.files.thumbs.count, 9);
       for (const f of [m1.files.full, m1.files.catalog, m1.files.thumbs]) {
@@ -314,13 +314,13 @@ describe('data pack', () => {
     });
 
     it('a pack with another catalog schema is appTooOld, nothing touched', async () => {
-      const manifest = { ...JSON.parse(readFileSync(join(rel1, 'manifest.json'), 'utf8')), schemaVersion: 8 };
+      const manifest = { ...JSON.parse(readFileSync(join(rel1, 'manifest.json'), 'utf8')), schemaVersion: 9 };
       const data = scratch('data-old');
       const r = await installPack({
         connection: conn, dataDir: data, thumbsDir: join(data, 'thumbs'),
         source: { kind: 'parts', manifest, catalog: join(rel1, 'catalog.json.gz'), thumbsUpdates: [join(rel1, 'thumbs-update.zip')] },
       });
-      assert.deepEqual(r, { status: 'appTooOld', tag: m1.tag, packSchemaVersion: 8, appSchemaVersion: 7 });
+      assert.deepEqual(r, { status: 'appTooOld', tag: m1.tag, packSchemaVersion: 9, appSchemaVersion: 8 });
       assert.equal(existsSync(join(data, 'thumbs')), false);
       assert.equal(installedPack(data), null);
     });

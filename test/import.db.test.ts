@@ -82,6 +82,13 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
       ['ship', '1', '0.875', null, 400, [{ value: 400, chance: 1 }]],
       ['ship', '0.49', '0.75', null, 400, [{ value: 400, chance: 1 }]],
     ]);
+    const rocks = await db.execute<{ key: string; method: string; rarity: string | null; signature: string | null }>(sql`
+      SELECT key, method, rarity, radar_signature::text AS signature FROM catalog.mineable_rock ORDER BY key`);
+    assert.deepEqual(rocks.map((r) => [r.key, r.method, r.rarity, r.signature]), [
+      ['MineableRock_Common_Test', 'ship', 'common', '4285'],
+      ['MineableRock_FPS_Test_Gem', 'fps', null, null],
+      ['MineableRock_Rare_Test', 'ship', 'rare', null],
+    ]);
   });
 
   it('skips an identical snapshot', async () => {
@@ -98,6 +105,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     next.locations = next.locations.filter((l) => l.uuid !== U.orphan);
     next.blueprintSources = next.blueprintSources.filter((s) => s.kind === 'mission');
     next.mineables = next.mineables.filter((m) => m.method === 'ship');
+    next.mineableRocks = next.mineableRocks.filter((r) => r.method === 'ship');
     // Small sets: retiring 1 of 2 blueprints must not trip the ratio safeguard (absolute minimum)
     const r = await runImport(db, next, hashOf(next), OPTIONS);
     assert.equal(r.status, 'imported');
@@ -109,6 +117,7 @@ describe('catalog import (database)', { skip: url ? false : 'TEST_DATABASE_URL n
     // Sources and mining data are replaced as a whole
     assert.equal(await count('blueprint_source'), 1);
     assert.equal(await count('mineable'), 2);
+    assert.equal(await count('mineable_rock'), 2);
 
     const again = fixtureSnapshot();
     again.game.build = 1002;

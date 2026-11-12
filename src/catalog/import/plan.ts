@@ -107,7 +107,7 @@ export function blueprintSourceRows(s: Snapshot) {
   });
 }
 
-/** Mining providers and what they yield, as table rows. */
+/** Mining providers, what they yield and the rock kinds, as table rows. */
 export function miningRows(s: Snapshot) {
   return {
     providers: s.miningProviders,
@@ -115,6 +115,7 @@ export function miningRows(s: Snapshot) {
       ...m, qualityScale: String(m.qualityScale), share: String(m.share), minPercent: String(m.minPercent), maxPercent: String(m.maxPercent),
       qualityMin: quality?.min ?? null, qualityMax: quality?.max ?? null, qualityValues: quality?.values ?? [],
     })),
+    rocks: s.mineableRocks.map((r) => ({ ...r, radarSignature: numeric(r.radarSignature) })),
   };
 }
 
@@ -177,6 +178,12 @@ export function checkIntegrity(s: Snapshot): string[] {
     ref(providers.has(m.providerUuid), `mineable ${m.resourceUuid}: unknown mining provider ${m.providerUuid}`);
     ref(resources.has(m.resourceUuid), `mineable: unknown resource ${m.resourceUuid}`);
     ref(!m.itemUuid || items.has(m.itemUuid), `mineable ${m.resourceUuid}: unknown item ${m.itemUuid}`);
+  }
+  const rocks = new Set<string>();
+  for (const r of s.mineableRocks) {
+    if (rocks.has(r.uuid)) errors.push(`duplicate mineable rock uuid ${r.uuid}`);
+    rocks.add(r.uuid);
+    ref(resources.has(r.resourceUuid), `mineable rock ${r.key}: unknown resource ${r.resourceUuid}`);
   }
   for (const [name, n] of [
     ['blueprints', s.blueprints.length], ['resources', s.resources.length], ['items', s.items.length], ['locations', s.locations.length],
