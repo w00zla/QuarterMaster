@@ -1,6 +1,6 @@
 {
   "app": {
-    "stable": null,
+    "stable": "app-v1.0.0",
     "channels": []
   },
   "companion": {
