@@ -150,14 +150,14 @@ sudo systemctl enable --now quartermaster-backup.timer
 
 > **⚠️ Existing production setup: add `UEX_TOKEN`, `QM_WEB_PASSWORD` (`openssl rand -hex 32`), `DISCORD_CLIENT_SECRET` and `WEBAPP_ORIGIN` (§ 2) to the VM's `.env`, the OAuth2 redirect (§ 3), the web app's Caddy block (§ 5) and rename `WEB_USER`/`WEB_PASSWORD` to `ADMINAPP_USER`/`ADMINAPP_PASSWORD` (`sed -i -E 's/^WEB_(USER|PASSWORD|HOST|PORT)=/ADMINAPP_\1=/' .env`) BEFORE the next `scripts/deploy.sh`.** Without it every `docker compose` call fails on the `:?` check in `compose.yaml` (also `logs`, `run … register.ts`). `deploy.sh` then aborts at its first `docker compose` call, before backup, build and migration: the running containers and the DB stay unchanged (with `push-deploy.sh` the checkout is already updated). Set the variable and run `deploy.sh` again. The `db` container is recreated once because its environment changed (a short DB restart).
 
-From your machine, on `main` with everything committed:
+From your machine, on the branch to deploy (normally `main`) with everything committed:
 
 ```sh
 scripts/push-deploy.sh <user>@<vm>
 ssh <user>@<vm> 'cd /opt/sc-quartermaster && docker compose run --rm bot node src/bot/register.ts'   # only when commands changed
 ```
 
-`push-deploy.sh` refuses changed or untracked files (only commits are pushed: a never added file, e.g. a new migration, would silently be missing on the VM) and any branch but `main`. Then it pushes `main` into the VM's checkout and runs `scripts/deploy.sh` there with live output (`DEPLOY_PATH` for another checkout path).
+`push-deploy.sh` refuses changed or untracked files (only commits are pushed: a never added file, e.g. a new migration, would silently be missing on the VM) and a detached HEAD. Then it pushes the checked-out branch's HEAD as `main` into the VM's checkout (forced: the VM's `main` is always what is deployed, and after a branch the squash merge on `main` is no fast-forward of it; a branch other than `main` is named in the output) and runs `scripts/deploy.sh` there with live output (`DEPLOY_PATH` for another checkout path). A branch's migrations stay in the production DB: deploy only migrations that will land on `main` unchanged.
 
 - The push is refused when the VM's checkout has local changes: never edit files there (`.env` and `backups/` are ignored and never touched).
 - A dropped SSH connection kills `deploy.sh`. Run it again (on the VM or with `push-deploy.sh`, the push is then a no-op): a migration rolls back as a whole, bot/admin/ext/webapp stay stopped until then.
