@@ -124,20 +124,20 @@ jobs:
         if: matrix.name == 'linux'
         shell: bash
         run: |
-          mkdir -p assets
-          cp "app/src-tauri/target/release/bundle/appimage/Quartermaster_${VERSION}_amd64.AppImage" "app/src-tauri/target/release/bundle/appimage/Quartermaster_${VERSION}_amd64.AppImage.sig" assets/
-          ls -la assets
+          mkdir -p release-assets
+          cp "app/src-tauri/target/release/bundle/appimage/Quartermaster_${VERSION}_amd64.AppImage" "app/src-tauri/target/release/bundle/appimage/Quartermaster_${VERSION}_amd64.AppImage.sig" release-assets/
+          ls -la release-assets
       - name: Collect (Windows)
         if: matrix.name == 'windows'
         shell: bash
         run: |
-          mkdir -p assets
-          cp "app/src-tauri/target/release/bundle/nsis/Quartermaster_${VERSION}_x64-setup.exe" "app/src-tauri/target/release/bundle/nsis/Quartermaster_${VERSION}_x64-setup.exe.sig" assets/
-          ls -la assets
+          mkdir -p release-assets
+          cp "app/src-tauri/target/release/bundle/nsis/Quartermaster_${VERSION}_x64-setup.exe" "app/src-tauri/target/release/bundle/nsis/Quartermaster_${VERSION}_x64-setup.exe.sig" release-assets/
+          ls -la release-assets
       - uses: actions/upload-artifact@v7
         with:
           name: quartermaster-app-${{ matrix.name }}-${{ needs.test.outputs.version }}
-          path: assets/
+          path: release-assets/
           retention-days: 14
           if-no-files-found: error
 
@@ -155,16 +155,16 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: quartermaster-app-*
-          path: assets
+          path: release-assets
           merge-multiple: true
       - name: Draft release
         run: |
-          node scripts/latest-json.mjs "$TAG" assets > assets/latest.json
-          cat assets/latest.json
+          node scripts/latest-json.mjs "$TAG" release-assets > release-assets/latest.json
+          cat release-assets/latest.json
           case $VERSION in
           *-*) pre=--prerelease ;;
           *) pre= ;;
           esac
           # shellcheck disable=SC2086  # $pre is one flag or nothing
-          gh release create "$TAG" --draft $pre --latest=false --title "Quartermaster $VERSION" --notes "" assets/*
+          gh release create "$TAG" --draft $pre --latest=false --title "Quartermaster $VERSION" --notes "" release-assets/*
           echo "Draft release $TAG created — publish it on GitHub."
