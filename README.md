@@ -22,8 +22,8 @@ straight from the game, so there is little to type.
 
 | | Windows | Linux |
 | --- | --- | --- |
-| **Quartermaster** | **[Installer](https://github.com/w00zla/quartermaster/releases/download/app-v1.0.0/Quartermaster_1.0.0_x64-setup.exe)** | **[AppImage](https://github.com/w00zla/quartermaster/releases/download/app-v1.0.0/Quartermaster_1.0.0_amd64.AppImage)** |
-| **Quartermaster Companion** | **[Installer](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_x64-setup.exe)** | **[AppImage](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_amd64.AppImage)** |
+| **Quartermaster (singleuser)** | **[Installer](https://github.com/w00zla/quartermaster/releases/download/app-v1.0.0/Quartermaster_1.0.0_x64-setup.exe)** | **[AppImage](https://github.com/w00zla/quartermaster/releases/download/app-v1.0.0/Quartermaster_1.0.0_amd64.AppImage)** |
+| **Quartermaster Companion** | **[Installer](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_x64-setup.exe)** · [Standalone](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_x64-standalone.zip) | **[AppImage](https://github.com/w00zla/quartermaster/releases/download/companion-v2.1.0/Quartermaster-Companion_2.1.0_amd64.AppImage)** |
 
 </div>
 
@@ -31,14 +31,15 @@ All versions, test channels included: [releases](https://github.com/w00zla/quart
 
 # Two ways to use it
 
-- **The Quartermaster app**, on your PC, for one player: no server, no Discord, no account. It brings the game data
-  (catalog and item pictures) with it and keeps it current by itself. More: [docs/app.md](docs/app.md).
-- **The hosted service**, for orgs: a Discord bot and a web app on one server. One Discord server is one org; each
-  player's stock is their own and is shared into orgs batch by batch. The bot has slash commands, an org board that
-  updates itself and a logs channel, in German and English; the web app shows the same data in the browser, signed in
-  with Discord. How it is run: [docs/deploy.md](docs/deploy.md).
+- **Quartermaster (singleuser)**, the app on your PC, for one player: no server, no Discord, no account. It brings the
+  game data (catalog and item pictures) with it and keeps it current by itself. More: [docs/app.md](docs/app.md).
+- **Quartermaster (hosted)**, the service for orgs: a Discord bot and a web app on one server. One Discord server is
+  one org; each player's stock is their own and is shared into orgs batch by batch. The bot has slash commands, an org
+  board that updates itself and a logs channel, in German and English; the web app shows the same data in the
+  browser, signed in with Discord. How it is run: [docs/deploy.md](docs/deploy.md).
 
-The Companion works with either: it talks to the app on the same PC, or to the hosted web app with an API token.
+The Companion works with either: it talks to the app on the same PC, or to the web app of Quartermaster (hosted) with
+an API token.
 
 # Features
 
@@ -58,8 +59,9 @@ The Companion (`companion/`) reads what the game shows and turns it into stock, 
   from the game window. Each read is a proposal you confirm.
 - **Overlay:** what a scan sees, drawn over the game without catching your clicks.
 
-Scans and the overlay need Windows 10 or 11; on Linux the Companion reads `Game.log` only. How it works:
-[docs/companion.md](docs/companion.md).
+Scans and the overlay need Windows 10 or 11; on Linux the Companion reads `Game.log` only. On Windows it also comes
+as a standalone zip without installer: unpack it anywhere and start `quartermaster-companion.exe`; it tells you about
+a new version but does not update itself. How it works: [docs/companion.md](docs/companion.md).
 
 # Updates
 
@@ -74,7 +76,7 @@ manual install from the downloads above.
 
 # Building
 
-Requirements: Node 26+ and pnpm; PostgreSQL 18 for the hosted service; Rust and the
+Requirements: Node 26+ and pnpm; PostgreSQL 18 for Quartermaster (hosted); Rust and the
 [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for the two desktop apps. The Companion's OCR comes
 from [sc-ohseearr](https://github.com/w00zla/sc-ohseearr), fetched by its release tag.
 
@@ -82,8 +84,8 @@ from [sc-ohseearr](https://github.com/w00zla/sc-ohseearr), fetched by its releas
 pnpm install
 pnpm typecheck && pnpm test   # backend checks (DB tests need TEST_DATABASE_URL)
 pnpm webapp:dev               # the web app on Vite (needs the backend: pnpm webapp)
-pnpm app:start                # the Quartermaster app in development
-pnpm app:build                # the Quartermaster app, release build for this OS
+pnpm app:start                # Quartermaster (singleuser) in development
+pnpm app:build                # Quartermaster (singleuser), release build for this OS
 pnpm companion:directml       # once on Windows: DirectML.dll for the GPU OCR
 pnpm companion:start          # the Companion in development
 pnpm companion:build          # the Companion, release build for this OS

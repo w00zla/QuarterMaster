@@ -166,5 +166,5 @@ jobs:
           *) pre= ;;
           esac
           # shellcheck disable=SC2086  # $pre is one flag or nothing
-          gh release create "$TAG" --draft $pre --latest=false --title "Quartermaster $VERSION" --notes "" release-assets/*
+          gh release create "$TAG" --draft $pre --latest=false --title "Quartermaster (singleuser) $VERSION" --notes "" release-assets/*
           echo "Draft release $TAG created — publish it on GitHub."

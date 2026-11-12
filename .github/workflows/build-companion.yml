@@ -142,6 +142,9 @@ jobs:
           ls -la "$dir"
           cp "$dir/Quartermaster Companion_${VERSION}_x64-setup.exe" "release-assets/Quartermaster-Companion_${VERSION}_x64-setup.exe"
           cp "$dir/Quartermaster Companion_${VERSION}_x64-setup.exe.sig" "release-assets/Quartermaster-Companion_${VERSION}_x64-setup.exe.sig"
+          # The standalone build: the bare, unstamped executable (it does not update itself, it only compares versions)
+          # with DirectML.dll next to it for the GPU OCR
+          7z a -tzip "release-assets/Quartermaster-Companion_${VERSION}_x64-standalone.zip" ./companion/src-tauri/target/release/quartermaster-companion.exe ./companion/src-tauri/resources/ocr/DirectML.dll
           ls -la release-assets
       - uses: actions/upload-artifact@v7
         with:

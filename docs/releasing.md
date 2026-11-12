@@ -83,7 +83,7 @@ channel entry's tag must carry its own id. Nobody edits the file by hand: `scrip
      companion: `pnpm companion:directml` (Windows) and `pnpm companion:build`. The release build keeps the updater's http switch off (below).
   3. *Draft release* for the tag (a tag with `-` is marked pre-release): the installers, their `.sig` files and `latest.json`
      (`scripts/latest-json.mjs`), which names the assets of exactly that release. Release assets: app `Quartermaster_<v>_x64-setup.exe`,
-     `Quartermaster_<v>_amd64.AppImage`; companion `Quartermaster-Companion_<v>_…` (the bundler's space becomes `-`). The draft is not
+     `Quartermaster_<v>_amd64.AppImage`; companion `Quartermaster-Companion_<v>_…` (the bundler's space becomes `-`), and for Windows also `Quartermaster-Companion_<v>_x64-standalone.zip` (the bare executable with `DirectML.dll`; it does not update itself). The draft is not
      `latest` (`--latest=false`): neither app uses GitHub's "latest release", only tags.
 - **`release.yml`**, when a release is **published** (a draft made public, by hand): by the tag's prefix it writes the tag into
   `channels.json` on the `channels` branch (`app`/`companion`: `stable` for a plain version, the channel entry for `-<channel>.<n>`,
@@ -171,6 +171,6 @@ the apps pick it up at their next data check. Keep `<out dir>` for the next pack
 ## Not built
 
 No Authenticode signing (installers and executables are unsigned; the updater's signature is a different thing), no macOS build, no
-`.deb`/`.rpm`/standalone zip (BindSight has them; here the AppImage and the NSIS setup are what the updaters install), no release notes
+`.deb`/`.rpm` and no app standalone zip (BindSight has them; here the AppImage and the NSIS setup are what the updaters install; the companion's standalone zip only compares versions), no release notes
 automation, no automatic removal of channels (`channels.yml` removes one on request), no generated download table in the README (it
 links to the releases page).
