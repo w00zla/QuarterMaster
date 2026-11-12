@@ -132,6 +132,10 @@ jobs:
           ls -la "$dir"
           cp "$dir/Quartermaster Companion_${VERSION}_amd64.AppImage" "release-assets/Quartermaster-Companion_${VERSION}_amd64.AppImage"
           cp "$dir/Quartermaster Companion_${VERSION}_amd64.AppImage.sig" "release-assets/Quartermaster-Companion_${VERSION}_amd64.AppImage.sig"
+          # The distribution packages: installed through them the companion only compares versions (it does not update itself)
+          ls -la companion/src-tauri/target/release/bundle/deb companion/src-tauri/target/release/bundle/rpm
+          cp "companion/src-tauri/target/release/bundle/deb/Quartermaster Companion_${VERSION}_amd64.deb" "release-assets/Quartermaster-Companion_${VERSION}_amd64.deb"
+          cp "companion/src-tauri/target/release/bundle/rpm/Quartermaster Companion-${VERSION}-1.x86_64.rpm" "release-assets/Quartermaster-Companion-${VERSION}-1.x86_64.rpm"
           ls -la release-assets
       - name: Collect (Windows)
         if: matrix.name == 'windows'

@@ -9,9 +9,11 @@
 #
 # `channels` is the feed branch: only CI writes it (this workflow and
 # channels.yml), as the GitHub Actions bot; it is created here, as an orphan
-# with the file as its only content, when it does not exist yet. `main` is not
-# touched (it takes pull requests only). A manual run with a tag redoes the
-# update for a release already published. docs/releasing.md.
+# with the file as its only content, when it does not exist yet. For an app or
+# companion tag the README's downloads block on `main` is then rewritten from
+# the stable tags and pushed with the deploy key (README_DEPLOY_KEY), the only
+# bypass of main's ruleset; nothing else here touches `main`. A manual run with
+# a tag redoes both for a release already published. docs/releasing.md.
 name: Release published
 
 on:
@@ -71,3 +73,39 @@ jobs:
           fi
           git commit -m "Point channels.json at ${TAG}"
           git push origin channels
+      # The README's downloads block on main follows the stable tags (app and companion releases only). main takes no
+      # direct pushes except through the deploy key, the one bypass of its ruleset (docs/releasing.md); without the
+      # secret the step is skipped and says so.
+      - name: README downloads block on main
+        if: startsWith(env.TAG, 'app-v') || startsWith(env.TAG, 'companion-v')
+        env:
+          README_DEPLOY_KEY: ${{ secrets.README_DEPLOY_KEY }}
+        run: |
+          if [ -z "$README_DEPLOY_KEY" ]; then
+            echo "::warning::README_DEPLOY_KEY is not set: the README's downloads block is not updated"
+            exit 0
+          fi
+          cp channels.json "$RUNNER_TEMP/channels.json"
+          key="$RUNNER_TEMP/readme_deploy_key"
+          printf '%s\n' "$README_DEPLOY_KEY" > "$key"
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone --depth=1 --branch main "git@github.com:${GITHUB_REPOSITORY}.git" "$RUNNER_TEMP/main"
+          cd "$RUNNER_TEMP/main"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # A pull request merged in between: rebase on it and push again (three tries)
+          for try in 1 2 3; do
+            node "$RUNNER_TEMP/qm-scripts/readme-downloads.mjs" "$RUNNER_TEMP/channels.json" README.md
+            git add README.md
+            if git diff --cached --quiet; then
+              echo "README's downloads block already up to date"
+              exit 0
+            fi
+            git commit -m "README: latest downloads for ${TAG}"
+            if git push origin HEAD:main; then exit 0; fi
+            git fetch --depth=1 origin main
+            git reset --hard FETCH_HEAD
+          done
+          echo "::error::could not push the README to main"
+          exit 1

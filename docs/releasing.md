@@ -8,9 +8,10 @@ branch of its own that only CI writes. The workflows are in `.github/workflows/`
 ## `main`: pull requests only
 
 A ruleset on `main` (below, "Once, before the first release") allows nothing but pull requests: squash merge as the only merge method, no
-deletion, no force push, the three jobs of `ci.yml` as required status checks, **no bypass for anyone**, the GitHub Actions bot included.
-So nothing in CI commits to `main`: the feed file is on the `channels` branch (below), the README is edited by hand, and a version bump is
-a pull request like any change.
+deletion, no force push, the three jobs of `ci.yml` as required status checks. **One bypass:** deploy keys, and the one deploy key
+(`README_DEPLOY_KEY`) is used by `release.yml` for one thing only, the README's downloads block (below). Nothing else in CI commits to
+`main`: the feed file is on the `channels` branch (below), the rest of the README is edited by pull request, and a version bump is a
+pull request like any change.
 
 ## What is released
 
@@ -83,13 +84,18 @@ channel entry's tag must carry its own id. Nobody edits the file by hand: `scrip
      companion: `pnpm companion:directml` (Windows) and `pnpm companion:build`. The release build keeps the updater's http switch off (below).
   3. *Draft release* for the tag (a tag with `-` is marked pre-release): the installers, their `.sig` files and `latest.json`
      (`scripts/latest-json.mjs`), which names the assets of exactly that release. Release assets: app `Quartermaster_<v>_x64-setup.exe`,
-     `Quartermaster_<v>_amd64.AppImage`; companion `Quartermaster-Companion_<v>_…` (the bundler's space becomes `-`), and for Windows also `Quartermaster-Companion_<v>_x64-standalone.zip` (the bare executable with `DirectML.dll`; it does not update itself). The draft is not
+     `Quartermaster_<v>_amd64.AppImage`; companion `Quartermaster-Companion_<v>_…` (the bundler's space becomes `-`), for Windows also `Quartermaster-Companion_<v>_x64-standalone.zip` (the bare executable with `DirectML.dll`), for Linux also
+     `Quartermaster-Companion_<v>_amd64.deb` and `Quartermaster-Companion-<v>-1.x86_64.rpm` (these three do not update themselves, they only
+     compare versions). The draft is not
      `latest` (`--latest=false`): neither app uses GitHub's "latest release", only tags.
 - **`release.yml`**, when a release is **published** (a draft made public, by hand): by the tag's prefix it writes the tag into
   `channels.json` on the `channels` branch (`app`/`companion`: `stable` for a plain version, the channel entry for `-<channel>.<n>`,
   created on the channel's first version; `data`: `stable`; a tag that is not newer than the listed one leaves the file alone) and commits
-  it there as `github-actions[bot]`; the branch is created when missing. It does not touch `main`. A manual run with a tag redoes this for
-  a release already published.
+  it there as `github-actions[bot]`; the branch is created when missing. For an app or companion tag it then rewrites the README's
+  downloads block on `main` (`scripts/readme-downloads.mjs`: everything between `<div id="release_dls">` and `</div>`, one row per app with
+  every file of its `stable` release; channel releases are not listed) and pushes it, only when it changed, over SSH with the deploy key
+  `README_DEPLOY_KEY` (a pull request merged in between: it rebases and tries again, three times); without the secret it warns and skips.
+  A manual run with a tag redoes both for a release already published.
 - **`channels.yml`**, started by hand only (`workflow_dispatch`), so that "only CI writes the feed" also holds for removals. Inputs:
   `product` (`app` | `companion`), `channel` (the channel id), `action` (`remove`). It removes that channel's entry from `channels.json` on
   the `channels` branch and commits. The release tool calls it: `gh workflow run channels.yml -f product=app -f channel=beta -f action=remove`.
@@ -147,6 +153,9 @@ the apps pick it up at their next data check. Keep `<out dir>` for the next pack
 
 - **Secrets** (repository settings, Actions): `TAURI_SIGNING_PRIVATE_KEY` (the minisign private key as one line, or its file's content),
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty if the key has none). It is the **production** pair, whose public key is in both `tauri.conf.json`. Two updater key pairs, each serving both apps: **production** (public key in both `tauri.conf.json`; private key and password only in the repository's Actions secrets and the maintainer's safe; a build keeps this public key only with `QM_UPDATER_KEY=prod`, which the build workflows set) and **development** (public key in `tauri.devkey.conf.json` of each app, added by `scripts/build.mjs` to every other build; private key in the maintainer's environment for local signed builds and the smoke test's feed). A local build therefore never accepts production updates as its own and can never pass as a release; an installed release accepts nothing signed with the development key. Losing the production private key means no installed app can ever be updated again.
+- **The README deploy key:** an SSH key pair (ed25519, no passphrase) made for this only: its public half is a deploy key of the
+  repository with write access ("README downloads (release.yml)"), its private half the Actions secret `README_DEPLOY_KEY`; no other
+  copy is kept (a lost or leaked key is replaced by a new pair).
 - **Visibility:** the apps read `raw.githubusercontent.com` and the release assets without a token, so the repository must be public.
 - **Actions permissions** (Settings, Actions, General): workflow permissions "Read and write permissions" (the workflows ask `contents: write`
   themselves, because `release.yml` and `channels.yml` push to `channels` and the build workflows create releases); "Allow GitHub Actions to
@@ -160,7 +169,8 @@ the apps pick it up at their next data check. Keep `<out dir>` for the next pack
   - Require a pull request before merging, **allowed merge methods: squash only** (required approvals 0: a one-person repository).
   - Require status checks to pass: `Node tests`, `App Rust tests`, `Companion Rust tests` (the job names of `ci.yml`; GitHub offers a name
     only after a run reported it).
-  - **Bypass list: empty**, not the repository admin and not the GitHub Actions bot: nothing in CI pushes to `main`.
+  - **Bypass list: "Deploy keys" only**, not the repository admin. A personal repository cannot list the GitHub Actions bot (GitHub
+    refuses it), so `release.yml` pushes the README with the deploy key above.
   - No ruleset on `channels` or `channel/*` that blocks `github-actions[bot]` or direct pushes: `channels` is written by CI only, and
     the channel branches take the release tool's commits.
 - **Order:** merge the pull request that brings `ci.yml`, `channels.yml` and the new `release.yml` to `main` first (while `main` can still
@@ -171,6 +181,5 @@ the apps pick it up at their next data check. Keep `<out dir>` for the next pack
 ## Not built
 
 No Authenticode signing (installers and executables are unsigned; the updater's signature is a different thing), no macOS build, no
-`.deb`/`.rpm` and no app standalone zip (BindSight has them; here the AppImage and the NSIS setup are what the updaters install; the companion's standalone zip only compares versions), no release notes
-automation, no automatic removal of channels (`channels.yml` removes one on request), no generated download table in the README (it
-links to the releases page).
+`.deb`/`.rpm` and no standalone zip of the app (the companion has them; the app has the AppImage and the NSIS setup, which its updater
+installs), no release notes automation, no automatic removal of channels (`channels.yml` removes one on request).
