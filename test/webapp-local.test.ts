@@ -92,9 +92,9 @@ describe('navigation per capability', () => {
   });
 
   it('derives what the views ask from the capabilities: the local app, one user and the side layout without a login, none of them online or while unknown', () => {
-    assert.deepEqual(traitsOf(single), { localApp: true, singleUser: true, sideLayout: true });
-    assert.deepEqual(traitsOf(online), { localApp: false, singleUser: false, sideLayout: false });
-    assert.deepEqual(traitsOf(null), { localApp: false, singleUser: false, sideLayout: false });
+    assert.deepEqual(traitsOf(single), { localApp: true, singleUser: true });
+    assert.deepEqual(traitsOf(online), { localApp: false, singleUser: false });
+    assert.deepEqual(traitsOf(null), { localApp: false, singleUser: false });
   });
 
   it('gives the side bar the top bar\'s groups and the history as a group of its own, quieter', () => {

@@ -27,6 +27,7 @@ import { registerTradeRoutes, stockValues } from './trade.ts';
 import { materialTrade } from '../ext/trade.ts';
 import { loadUnlocks, registerUnlockRoutes, unlockSummary } from './unlocks.ts';
 import { registerMiningRoutes } from './mining.ts';
+import { companionDownloadsSource, registerCompanionDownloadRoute } from './companion-downloads.ts';
 import { registerFeatureRoutes } from './features.ts';
 import { minableUuids, rockSignatures } from './mining-query.ts';
 import { unlockableBlueprints } from './unlock-query.ts';
@@ -577,4 +578,6 @@ export function registerRoutes(api: Hono<Env>, db: Db, thumbs: () => ReadonlyMap
   registerMiningRoutes(api, db, thumbs);
   registerTradeRoutes(api, db);
   registerFeatureRoutes(api, db, thumbs);
+  // The companion's download links (its dialog in the web app), from GitHub's feed
+  registerCompanionDownloadRoute(api, companionDownloadsSource(fetch));
 }

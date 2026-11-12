@@ -721,6 +721,23 @@ export interface ApiTokenCreated {
   token: string;
 }
 
+// --- the companion's downloads (GET /api/companion/downloads; companion-downloads.ts) ----------------
+// Its stable release (channels.json on GitHub) as direct links, the main file first per platform. version null: no stable
+// release known (none yet, or GitHub not reachable): no links, the releases page only.
+
+export interface CompanionDownload {
+  // The file's kind as the README's downloads block names it: Installer, Standalone, AppImage, deb, rpm
+  label: string;
+  url: string;
+}
+
+export interface CompanionDownloadsResponse {
+  releasesUrl: string;
+  version: string | null;
+  windows: CompanionDownload[];
+  linux: CompanionDownload[];
+}
+
 // --- companion API contract check (every companion request, any /api route but capabilities) ---------
 /** 426: the companion's contract number is missing or below the server's minimum. */
 export interface CompanionOutdated {

@@ -13,10 +13,9 @@ import UpdateNotice from "./components/UpdateNotice.vue";
 import WindowEdges from "./components/WindowEdges.vue";
 // Notices of actions from the bot and the companion app (listens to the realtime messages)
 import "./history";
-import TopBar from "./components/TopBar.vue";
 import LoginView from "./views/LoginView.vue";
 import SettingsView from "./views/SettingsView.vue";
-import { capabilities, loadCapabilities, localApp, sideLayout } from "./capabilities";
+import { capabilities, loadCapabilities, localApp } from "./capabilities";
 import { t } from "./i18n";
 import { topbarHeight } from "./layout";
 import { reloadAll, settings, startLocal, tile, updateNeeded } from "./local";
@@ -113,7 +112,7 @@ if (settingsWindow) {
     </main>
     <Toasts />
   </div>
-  <div v-else class="app" :class="{ framed: sideLayout }">
+  <div v-else class="app" :class="{ framed: status === 'in' }">
     <!-- The frameless desktop window: the app bar is its title bar; where that is not shown, a bar with the window buttons -->
     <TitleBar v-if="!capabilities || tile.visible || status !== 'in'" />
     <WindowEdges />
@@ -122,25 +121,16 @@ if (settingsWindow) {
     <StartTile v-else-if="tile.visible" :model="tile" :version="settings?.appVersion ?? null" />
     <template v-else>
       <template v-if="status === 'in'">
-        <!-- Singleuser: the header across the full width (logo, game version, settings, window buttons), below it the navigation
-             at the left edge beside the content, as in the companion; online: the top bar -->
-        <template v-if="sideLayout">
-          <SlimBar />
-          <div class="side-layout">
-            <SideNav />
-            <main class="main side-main">
-              <UpdateNotice v-if="updateNeeded" />
-              <RouterView />
-            </main>
-          </div>
-        </template>
-        <template v-else>
-          <TopBar />
-          <main class="main">
+        <!-- The header across the full width (logo, the variant's controls, the game version, window buttons), below it the
+             navigation at the left edge beside the content, as in the companion -->
+        <SlimBar />
+        <div class="side-layout">
+          <SideNav />
+          <main class="main side-main">
             <UpdateNotice v-if="updateNeeded" />
             <RouterView />
           </main>
-        </template>
+        </div>
       </template>
       <LoginView v-else-if="status === 'anon'" />
       <div v-else-if="status === 'error'" class="empty-line">{{ t("error.backend") }}</div>
@@ -164,8 +154,8 @@ if (settingsWindow) {
   padding: 16px;
 }
 
-/* Singleuser: the app is exactly as high as the window, and only the content scrolls (the scroll bar stays between the slim bar
-   and the footer); online the page scrolls as a whole */
+/* Logged in: the app is exactly as high as the window, and only the content scrolls (the scroll bar stays between the slim bar
+   and the footer); the login page scrolls as a whole */
 .app.framed {
   height: 100%;
   min-height: 0;

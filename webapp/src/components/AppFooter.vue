@@ -2,9 +2,10 @@
 // BindSight's footer: one line with the credits and, at the right, the fan site disclaimer towards CIG (a short line, the full
 // text on hover) with the Star Citizen logo from the official fankit (exact sizes from
 // local/Fankit_*/03_LOGOS/STARCITIZEN_WHITE.png), then after a divider the third-party source (UEX: logo from its site,
-// uex-logo-{20,40}.png Lanczos from its 960 px touch icon). The singleuser app (no login) ends the line exactly as BindSight
-// does, after another divider: the update mark while one was found, the app logo, the version (logo and version open the App
-// Update dialog where the desktop shell offers updates; plain in a browser) and the link to the GitHub page.
+// uex-logo-{20,40}.png Lanczos from its 960 px touch icon). The line ends as BindSight's does, after another divider: the app
+// logo and the link to the GitHub page; the singleuser app (no login) also shows the update mark while one was found and its
+// version after the logo (logo and version open the App Update dialog where the desktop shell offers updates; plain in a
+// browser). Online there is no app version to show: logo and GitHub only.
 import { computed } from "vue";
 import Icon from "../../../adminapp/src/components/Icon.vue";
 import { localApp } from "../capabilities";
@@ -35,19 +36,19 @@ const found = computed(() => !!shell.update && updateFound(shell.update));
         <img :src="uexLogo" :srcset="`${uexLogo} 1x, ${uexLogo2x} 2x`" alt="" /> UEX
       </a>
     </span>
-    <!-- Exactly BindSight's right end (its AppFooter.vue), after a divider: the update mark while one was found, the app logo, the
-         version and the GitHub page (the desktop shell opens the link in the system's browser, shell.ts). Logo and version open
-         the App Update dialog where the shell offers updates -->
-    <template v-if="version">
-      <div class="divider" />
-      <span class="meta">
-        <button v-if="found" class="mark" type="button" :title="t('update.mark')" @click="shell.openUpdate()"><Icon name="imports" :size="14" /></button>
-        <img class="logo" :class="{ plain: !shell.updateAvailable }" :src="logo" alt="" @click="shell.updateAvailable && shell.openUpdate()" />
+    <!-- BindSight's right end (its AppFooter.vue), after a divider: the update mark while one was found, the app logo, the
+         version (singleuser only) and the GitHub page (the desktop shell opens the link in the system's browser, shell.ts). Logo
+         and version open the App Update dialog where the shell offers updates -->
+    <div class="divider" />
+    <span class="meta">
+      <button v-if="found" class="mark" type="button" :title="t('update.mark')" @click="shell.openUpdate()"><Icon name="imports" :size="14" /></button>
+      <img class="logo" :class="{ plain: !shell.updateAvailable }" :src="logo" alt="" @click="shell.updateAvailable && shell.openUpdate()" />
+      <template v-if="version">
         <button v-if="shell.updateAvailable" class="version mono" type="button" :title="t('update.button')" @click="shell.openUpdate()">{{ version }}</button>
         <span v-else class="version plain mono">{{ version }}</span>
-        <a class="repo" :href="REPO_URL" target="_blank" rel="noopener noreferrer"><Icon name="github" :size="14" fill="currentColor" /> GitHub</a>
-      </span>
-    </template>
+      </template>
+      <a class="repo" :href="REPO_URL" target="_blank" rel="noopener noreferrer"><Icon name="github" :size="14" fill="currentColor" /> GitHub</a>
+    </span>
   </footer>
 </template>
 

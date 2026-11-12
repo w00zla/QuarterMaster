@@ -1,5 +1,5 @@
-// What the UI derives from a server's capabilities: the traits the views ask (`traitsOf`: local app, one user, side layout) and
-// which navigation the top bar, the side bar and the router offer (pure: tested in test/webapp-local.test.ts).
+// What the UI derives from a server's capabilities: the traits the views ask (`traitsOf`: local app, one user) and
+// which navigation the side bar, the slim bar and the router offer (pure: tested in test/webapp-local.test.ts).
 // (No imports of Vue files or i18n: the root type check and the tests load this file; `label` and `icon` are literal
 // strings that the top bar checks against the text keys and the icon map.)
 
@@ -22,7 +22,7 @@ export interface NavCaps {
 
 /**
  * What the views ask instead of the capabilities themselves: each property is named for what it means, so a view never
- * tests "no login" when it means something else. Today all three follow from `login: "none"` (the singleuser variant);
+ * tests "no login" when it means something else. Today both follow from `login: "none"` (the singleuser variant);
  * a variant that differs in one of them changes this function only.
  */
 export interface Traits {
@@ -30,14 +30,12 @@ export interface Traits {
   localApp: boolean;
   /** Exactly one user: nothing has to say who did something or through what (the history's "who" and "source"). */
   singleUser: boolean;
-  /** The header across the full width with the side bar below it, the app as high as the window; else the top bar. */
-  sideLayout: boolean;
 }
 
 /** Until the capabilities are known the online behaviour applies. */
 export function traitsOf(caps: NavCaps | null): Traits {
   const none = caps?.login === "none";
-  return { localApp: none, singleUser: none, sideLayout: none };
+  return { localApp: none, singleUser: none };
 }
 
 const HOME: NavItem ={ to: "/", label: "nav.home", icon: "overview" };
@@ -53,7 +51,7 @@ const TOOLS: NavItem[] = [
   { to: "/mining", label: "nav.mining", icon: "pickaxe" },
 ];
 
-/** The three tab bars: the overview, the data views, the tools (the buy/sell tab only where UEX data is offered). */
+/** The three nav groups: the overview, the data views, the tools (the buy/sell tab only where UEX data is offered). */
 export function navGroups(caps: NavCaps | null): NavItem[][] {
   return [[HOME], DATA, caps?.uex === false ? TOOLS : [...TOOLS, TRADE]];
 }
@@ -61,7 +59,7 @@ export function navGroups(caps: NavCaps | null): NavItem[][] {
 const HISTORY: NavItem = { to: "/history", label: "nav.history", icon: "history", secondary: true };
 
 /**
- * The side bar's groups (singleuser): the top bar's three, then the history on its own, quieter. Without UEX data the buy/sell
+ * The side bar's groups: the three nav groups, then the history on its own, quieter. Without UEX data the buy/sell
  * entry stays in its place, disabled (the side bar greys it out and says why).
  */
 export function sideGroups(caps: NavCaps | null): NavItem[][] {
@@ -69,7 +67,7 @@ export function sideGroups(caps: NavCaps | null): NavItem[][] {
   return [home, data, caps?.uex === false ? [...tools, { ...TRADE, disabled: true }] : tools, [HISTORY]];
 }
 
-// --- the side bar's width (singleuser) ---
+// --- the side bar's width ---
 
 export type SideMode = "wide" | "narrow";
 
@@ -82,7 +80,7 @@ export const parseSideMode = (stored: string | null): SideMode => (stored === "n
 /** The mode in effect for a window width. */
 export const sideModeFor = (choice: SideMode, windowWidth: number): SideMode => (windowWidth < SIDE_NARROW_BELOW ? "narrow" : choice);
 
-/** The controls at the right end of the bar. `history` is in both variants. */
+/** The controls at the right end of the slim bar. `history` is in both variants (the side bar's last entry). */
 export function userControls(caps: NavCaps | null) {
   const none = caps?.login === "none";
   return {
