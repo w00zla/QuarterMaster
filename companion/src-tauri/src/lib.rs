@@ -258,12 +258,20 @@ fn set_config(app: AppHandle, state: State, mut config: Config) -> Result<Config
     #[cfg(windows)]
     overlay::set_hotkeys(&app, &config.hotkey_overlay, &config.hotkey_mode, &config.hotkey_scan_mode)?;
     config::save(&app, &config)?;
-    {
+    let other_server = {
         let mut data = state.lock().unwrap();
+        let other_server = config::other_server(&data.config, &config);
         if config.connection != config::LOCAL {
             data.paired = None;
         }
         data.config = config.clone();
+        other_server
+    };
+    // Another server (the connection, or online its address): never switched while running, the app starts anew with
+    // the saved config (the settings' button says so)
+    if other_server {
+        log::info!("config: another server ({}), restarting", config.connection);
+        app.restart();
     }
     let _ = app.emit(CONFIG_CHANGED, ());
     Ok(config)

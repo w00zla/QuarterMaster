@@ -84,7 +84,10 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
 ## Server and config
 
 - **Two connections** (config `connection`, the settings' "Verbindung" / "Connection"; `connection.ts` holds the
-  decisions, `lib.rs` `target` resolves the server per call):
+  decisions, `lib.rs` `target` resolves the server per call). **The app never switches servers while it runs**
+  (catalog, stock and jobs would stay the old server's): saving another connection, or online another server address,
+  restarts the app (`config.rs` `other_server` in `set_config`, `app.restart()`; the frontend's `otherServer` is the
+  same rule for the save button's label). The Access Key and everything else apply while running:
   - **Online** (`online`, the default; files without the entry are online): the server origin defaults to
     `https://quartermaster.w00z.net` (missing or empty = that); the settings' "Serveradresse" / "Server address" sets another one
     (written to the config file only then; plain http only for localhost, anything unusable refuses the save) and every call
@@ -269,7 +272,9 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   plugin). Created hidden; the page loads config and pairing itself (own webview), then reports its content height
   and Rust `fit_settings_window` sets the inner height, centers and shows it (so the Windows-only overlay group
   needs no hard-coded height). After a save Rust emits `config-changed`: the main window re-reads the config, re-checks
-  the connection and reloads the log state (`App.vue`); the settings window shows the "Saved" toast. Escape or
+  the connection and reloads the log state (`App.vue`); the settings window shows the "Saved" toast. A save that
+  changes the server (see "Two connections") restarts the app instead: the save button then reads "Speichern und neu
+  starten" / "Save and restart" (both labels lie in one grid cell, so the button keeps the longer one's width). Escape or
   "Schließen" closes it. Content: "Verbindung" ("Connection": "Online" or "Lokale App" / "Local app", a
   dropdown of fixed width), Access Key (disabled for the local app, which needs none; it stays in place), language,
   game folder (in the local mode the paired app's folder, shown disabled, when it has one; the own setting is kept), the "Bildschirm-Scan" group

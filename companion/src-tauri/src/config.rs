@@ -95,6 +95,14 @@ fn default_connection() -> String {
     ONLINE.into()
 }
 
+/// Whether `new` talks to another server than `old`: another connection, or online another server address. The app
+/// never switches servers while it runs (catalog, stock and jobs would stay the old server's): saving such a config
+/// restarts it (`set_config`; the frontend's `otherServer` in `connection.ts` is the same rule, for the button's label).
+pub fn other_server(old: &Config, new: &Config) -> bool {
+    let local = new.connection == LOCAL;
+    (old.connection == LOCAL) != local || (!local && old.server.trim() != new.server.trim())
+}
+
 pub const OVERLAY_POSITIONS: [&str; 6] = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
 
 pub const OVERLAY_DISPLAYS: [&str; 2] = ["thumbs", "compact"];
@@ -257,6 +265,22 @@ mod tests {
         assert_eq!(local.game_dir_with(Some("F:/Games/LIVE")), "F:/Games/LIVE");
         // Not set in the app (or the app not seen yet): the companion's own setting
         assert_eq!(local.game_dir_with(None), "D:/SC/LIVE");
+    }
+
+    #[test]
+    fn another_connection_or_online_address_is_another_server() {
+        let online = Config { token: "qmt_x".into(), ..Config::default() };
+        let local = Config { connection: LOCAL.into(), ..online.clone() };
+        assert!(other_server(&online, &local));
+        assert!(other_server(&local, &online));
+        assert!(other_server(&online, &Config { server: "https://qm.test".into(), ..online.clone() }));
+        // Everything else applies while running: the key, the game folder, the language
+        assert!(!other_server(&online, &Config { token: "qmt_y".into(), game_dir: "E:/SC/LIVE".into(), language: "de".into(), ..online.clone() }));
+        assert!(!other_server(&local, &Config { game_dir: "E:/SC/LIVE".into(), ..local.clone() }));
+        // The local app needs no address: the stored one does not count there
+        assert!(!other_server(&local, &Config { server: "https://qm.test".into(), ..local.clone() }));
+        // A config file written by hand: an unknown connection is online, blanks around the address do not count
+        assert!(!other_server(&Config { connection: "elsewhere".into(), server: format!(" {DEFAULT_SERVER} "), ..online.clone() }, &online));
     }
 
     #[test]

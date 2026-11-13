@@ -44,7 +44,10 @@ use sc_ohseearr_warehouse::WarehouseReader;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub use sc_ohseearr_capture_win::{Gate, Pixels, PULL_TIMEOUT_MS};
+pub use sc_ohseearr_capture_win::{Gate, Pixels};
+// The capture's (`capture.rs`, a Windows-only module): nothing uses it elsewhere
+#[cfg(windows)]
+pub use sc_ohseearr_capture_win::PULL_TIMEOUT_MS;
 
 use crate::components::ComponentRead;
 use crate::inventory::Grid;
@@ -149,6 +152,8 @@ struct SignatureEvent {
 /// Where the signature scan last saw a signature (the signature overlay sits next to it): the number's box in
 /// frame pixels, the frame's size and when. Set by the worker on every read with a value, cleared when the
 /// signature scan ends; the overlay hides once it is older than `overlay::SIGNATURE_STALE`.
+// Read by the overlay (`overlay.rs`, a Windows-only module); elsewhere the worker only sets it
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub struct SignatureSpot {
     pub at: Instant,
@@ -515,6 +520,8 @@ impl Default for GameFront {
     }
 }
 
+// Emitted by the capture (Windows only)
+#[cfg(windows)]
 pub const GAME_FRONT: &str = "game-front";
 
 /// The worker's pull on the screens read every frame (warehouse, character inventory): when the capture
@@ -529,6 +536,8 @@ pub struct FastCapture(pub Arc<AtomicU64>);
 /// screen).
 #[derive(Default, Clone)]
 pub struct SignatureCapture(pub Arc<AtomicBool>);
+// Emitted by the capture (Windows only)
+#[cfg(windows)]
 pub const GAME_SEEN: &str = "game-seen";
 
 /// Whether the OCR can run on the GPU (sc-ohseearr's engine, DirectML): the redistributable DirectML.dll next
