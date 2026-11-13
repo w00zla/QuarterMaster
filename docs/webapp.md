@@ -356,7 +356,9 @@ blocks".
   within; same filters as Ressourcen. `RefineryStartForm`: station, duration (all three fields empty = "duration
   open") and rows of resource, quality and expected yield (no method, no estimates). `RefineryDoneDialog`
   stores the whole job, each row's amount starting from its expected yield.
-- **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold with the crafted item's thumbnail before them (the type column the type's icon and name, `TypeLabel`); an org
+- **Blueprints**: no "All", the admin's `DataTable` with category/type/size/member filters, names bold with the crafted item's thumbnail before them (the type column the type's icon and name, `TypeLabel`); your own
+  list always holds every default blueprint that is not retired (from the catalog, not stored), with a quiet
+  `users` icon after the name (tooltip "Standard-Bauplan: Den hat jeder") and its remove button disabled; an org
   shows every blueprint its active members registered with who has it (the remove button there disabled). A click on a row puts it into the
   crafting check (`addToCrafting`) and opens the tab. The last column (fixed, both scopes) holds the
   "Freischaltung" button (`ChipButton`, disabled without an unlock; its click never reaches the row): it opens

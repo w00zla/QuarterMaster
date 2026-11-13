@@ -94,8 +94,15 @@ const category = ref("");
 const size = ref("");
 const member = ref("");
 
+// Default blueprints (not retired): everyone has them, so they are always in your own list and never removable
+const defaults = computed(() => (catalog.value?.blueprints ?? []).filter((b) => b.isDefault && !b.retired).map((b) => b.uuid));
+const isDefault = (r: Row) => !!r.bp?.isDefault;
+
 const allRows = computed<Row[]>(() => {
-  if (!org.value) return (mine.value ?? []).map((uuid) => ({ uuid, bp: blueprints.value.get(uuid), owners: [] }));
+  if (!org.value) {
+    const uuids = [...new Set([...defaults.value, ...(mine.value ?? [])])];
+    return uuids.map((uuid) => ({ uuid, bp: blueprints.value.get(uuid), owners: [] }));
+  }
   return (orgEntries.value ?? []).map((e) => ({ uuid: e.uuid, bp: blueprints.value.get(e.uuid), owners: e.owners }));
 });
 
@@ -314,6 +321,7 @@ onUnmounted(() => {
           <!-- The crafted item's thumbnail before the name (the type's icon without one), as in the stock lists -->
           <InfoTip kind="blueprint" :uuid="row.uuid"><Thumb v-if="!thumbView" v-bind="blueprintThumb(row.uuid)" size="s" :px="20" :icon="bpIcon(row)" :icon-size="15" class="name-icon" /><span class="bp-name">{{ row.bp?.name ?? t("bp.unknown") }}</span>
             <span v-if="row.bp?.retired" class="tag err">{{ t("bp.retired") }}</span></InfoTip>
+          <span v-if="!org && isDefault(row)" class="default-mark" :title="t('bp.defaultHint')"><Icon name="users" :size="12" /></span>
         </template>
         <template #cell-type="{ row }"><span class="type-text" :title="row.bp?.type ?? undefined">{{ row.bp?.typeLabel ?? "" }}</span></template>
         <template #cell-size="{ row }">{{ row.bp?.size ?? "—" }}</template>
@@ -323,7 +331,7 @@ onUnmounted(() => {
           <span class="owners user-cell" :title="row.owners.map(memberLabel).join(', ')">{{ row.owners.map(memberLabel).join(", ") }}</span>
         </template>
         <template #cell-actions="{ row }">
-          <button type="button" class="icon-btn remove" :title="t('bp.remove')" :disabled="busy || !!org" @click.stop="pending = row.uuid">
+          <button type="button" class="icon-btn remove" :title="t('bp.remove')" :disabled="busy || !!org || isDefault(row)" @click.stop="pending = row.uuid">
             <Icon name="trash" :size="14" />
           </button>
         </template>
@@ -383,6 +391,14 @@ onUnmounted(() => {
 
 .name-icon {
   margin-right: 6px;
+}
+
+/* A default blueprint: a quiet icon after the name, the tooltip says what it means */
+.default-mark {
+  display: inline-flex;
+  margin-left: 6px;
+  color: var(--text-3);
+  opacity: 0.7;
 }
 
 .type-text {
