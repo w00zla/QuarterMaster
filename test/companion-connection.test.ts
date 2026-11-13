@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { COMPANION_API, COMPANION_API_MIN } from '../src/webapp/api-types.ts';
 import {
-  connectionOf, gameDirOf, isConnectionCode, missingSetting, outdatedKeys, outdatedOf, refusalOf,
+  connectionOf, gameDirOf, isConnectionCode, missingSetting, otherServer, outdatedKeys, outdatedOf, refusalOf,
 } from '../companion/src/connection.ts';
 
 describe('companion connection', () => {
@@ -32,6 +32,20 @@ describe('companion connection', () => {
     assert.equal(gameDirOf({ connection: 'local', gameDir: 'D:/SC/LIVE' }, paired), 'F:/Games/LIVE');
     assert.equal(gameDirOf({ connection: 'local', gameDir: 'D:/SC/LIVE' }, { ...paired, gameDir: null }), 'D:/SC/LIVE');
     assert.equal(gameDirOf({ connection: 'local', gameDir: 'D:/SC/LIVE' }, null), 'D:/SC/LIVE');
+  });
+
+  it('another connection or another online address is another server (the save restarts the app)', () => {
+    const online = { connection: 'online', server: 'https://qm.example.com' };
+    const local = { connection: 'local', server: 'https://qm.example.com' };
+    assert.equal(otherServer(online, local), true);
+    assert.equal(otherServer(local, online), true);
+    assert.equal(otherServer(online, { ...online, server: 'https://other.example.com' }), true);
+    assert.equal(otherServer(online, { ...online }), false);
+    assert.equal(otherServer(online, { ...online, server: ' https://qm.example.com ' }), false);
+    // The local app needs no address: the stored one does not count there
+    assert.equal(otherServer(local, { ...local, server: 'https://other.example.com' }), false);
+    // Older config files have no connection entry: online
+    assert.equal(otherServer({ server: 'https://qm.example.com' }, online), false);
   });
 });
 

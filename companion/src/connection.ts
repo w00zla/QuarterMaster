@@ -18,6 +18,15 @@ export function missingSetting(config: { connection?: string; server: string; to
   return config.token ? null : "noToken";
 }
 
+/** Whether saving `next` makes the companion talk to another server than `saved`: another connection, or online
+ * another server address (both as stored: trimmed, the production server written out). The app never switches
+ * servers while it runs: such a save restarts it (Rust `set_config` with `config::other_server`, the same rule). */
+export function otherServer(saved: { connection?: string; server: string } | null, next: { connection?: string; server: string }): boolean {
+  const to = connectionOf(next);
+  if (connectionOf(saved) !== to) return true;
+  return to === "online" && next.server.trim() !== (saved?.server ?? "").trim();
+}
+
 /** The local app as its pairing file last said (Rust `paired`). */
 export interface Paired {
   origin: string;

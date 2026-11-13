@@ -26,7 +26,7 @@ import Tooltip from "../../adminapp/src/components/Tooltip.vue";
 import { fitSettingsWindow, getPaired, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition, type SignaturePosition } from "./backend";
 import type { OverlayDisplay } from "./overlayLayout";
 import { t } from "./i18n";
-import { connectionOf } from "./connection";
+import { connectionOf, otherServer } from "./connection";
 import { applyConfig, config, loadConfig, paired, refreshConnection } from "./state";
 import { errorText, toast, toastError } from "./toasts";
 import HotkeyInput from "./components/HotkeyInput.vue";
@@ -173,6 +173,10 @@ const changed = computed(() => connection.value !== connectionOf(config.value)
   || signaturePosition.value !== (config.value?.signaturePosition ?? "below")
   || scanOverlayInSignature.value !== (config.value?.scanOverlayInSignature ?? true));
 
+// Another connection or online address: the app never switches servers while running, the save restarts it (Rust
+// `set_config`), and the button says so. An emptied address is the production server, as the Rust side stores it.
+const restarts = computed(() => otherServer(config.value, { connection: connection.value, server: server.value.trim() || DEFAULT_SERVER }));
+
 async function save() {
   if (!changed.value || busy.value) return;
   busy.value = true;
@@ -197,8 +201,8 @@ async function save() {
       updateChannel: config.value?.updateChannel ?? "",
       gpu: gpu.value,
     }));
-    // This webview's own connection state (the paired app's folder shown above); the main window re-checks
-    // on "config-changed" (App.vue)
+    // Not reached when the save restarts the app (`restarts`). This webview's own connection state (the paired app's
+    // folder shown above); the main window re-checks on "config-changed" (App.vue)
     await refreshConnection();
     // As saved (an emptied server field holds the production server again)
     server.value = config.value?.server ?? "";
@@ -358,8 +362,10 @@ async function pickFolder() {
       </Tooltip>
       <span class="spacer" />
       <button type="button" class="btn outline" @click="close">{{ t("common.close") }}</button>
-      <button type="submit" form="settings" class="btn primary" :disabled="!changed || busy">
-        <Icon name="check" :size="14" /> {{ t("common.save") }}
+      <!-- Both labels lie in one cell: the button keeps the longer one's width whichever shows -->
+      <button type="submit" form="settings" class="btn primary save" :disabled="!changed || busy">
+        <span :class="{ off: restarts }" :aria-hidden="restarts"><Icon name="check" :size="14" /> {{ t("common.save") }}</span>
+        <span :class="{ off: !restarts }" :aria-hidden="!restarts"><Icon name="check" :size="14" /> {{ t("settings.saveRestart") }}</span>
       </button>
     </div>
   </div>
@@ -390,6 +396,23 @@ async function pickFolder() {
 .foot .btn:not(.small) {
   height: var(--h-control);
   font-size: 14px;
+}
+
+/* Save: its two labels (plain, and "… and restart" for another server) share one grid cell */
+.foot .btn.save {
+  display: grid;
+}
+
+.btn.save > span {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.btn.save > .off {
+  visibility: hidden;
 }
 
 .spacer {
