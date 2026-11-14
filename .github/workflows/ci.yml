@@ -26,6 +26,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   LINUX_DEPS: libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+  # The companion's on top (build-companion.yml has them in its LINUX_DEPS): the Linux screen capture
+  # (sc-ohseearr-capture-linux) builds against libpipewire's headers with bindgen
+  COMPANION_DEPS: libpipewire-0.3-dev libclang-dev
 
 jobs:
   node:
@@ -124,7 +127,7 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y $LINUX_DEPS
+          sudo apt-get install -y $LINUX_DEPS $COMPANION_DEPS
       - if: steps.scope.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@stable
       - if: steps.scope.outputs.run == 'true'

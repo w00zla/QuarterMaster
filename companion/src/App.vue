@@ -126,7 +126,7 @@ onMounted(async () => {
     <AppFooter class="app-foot" :version="info?.version ?? null" />
     <UpdateDialog v-if="updateOpen" />
     <Toasts />
-    <ClipTip />    <WindowEdges />
+    <ClipTip />    <WindowEdges grip />
   </div>
 </template>
 

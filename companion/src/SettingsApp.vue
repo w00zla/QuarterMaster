@@ -3,26 +3,28 @@
 // server unless changed; an emptied field is it again) and the API token (created in the web
 // app's Companion dialog and pasted here; both not needed for the local app: disabled then), game folder (in the
 // local mode the paired app's, shown disabled, when it has one), the UI
-// language, the switch "Automatic updates" (the channel is the update dialog's); the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
+// language, the switch "Automatic updates" (the channel is the update dialog's) with the button for the App Update dialog
+// below it (the main window's, as from its footer; opening it closes this window); the screen scan group: the automatic tab switch (overlay.ts), then the OCR on the GPU (off
 // by default) with its state as a tag and a dim note below (greyed out, off, when it cannot run there:
 // gpuStatus, event "ocr-gpu"); saving checks the connection and reloads the log state (the path may have changed).
 // Two columns keep the window low: the app and Star Citizen at the left, the scan and its overlay at the right. The overlay group
 // (Windows only): the transparency of both overlays (a slider); the scan overlay's position (six icon-only buttons on a drawn
 // monitor) and display (compact or thumbnails); the radar signature's overlay, its side next to the number (four icon-only buttons
 // around a drawn plate) and whether the scan overlay stays shown in the signature scan; the hotkeys (overlay on/off, overlay view,
-// scan mode), saved (on/off is the scan row's toggle and the hotkey). In the foot at the left, secondary for the user: the debug window (opening it closes this
-// window).
+// scan mode), saved (on/off is the scan row's toggle and the hotkey). In the foot at the left, secondary for the user: the debug
+// window (opening it closes this window).
 // The settings window (opened from the main window, Rust `open_settings_window`): fixed width, not resizable,
 // frameless with a title bar of its own (icon, "QM Companion Settings", close), like the desktop app's settings window. This page loads config and pairing itself (its own webview), sizes the window
 // to the content once filled (`fit_settings_window`, which also shows it), and after a save the main window
 // hears "config-changed" and re-reads the config, the connection and the log state.
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import Dropdown from "../../adminapp/src/components/Dropdown.vue";
 import Icon from "../../adminapp/src/components/Icon.vue";
 import Tooltip from "../../adminapp/src/components/Tooltip.vue";
+import { OPEN_UPDATE_EVENT } from "./appUpdate";
 import { fitSettingsWindow, getPaired, gpuStatus, openDebugWindow, setConfig, type GpuStatus, type OverlayPosition, type SignaturePosition } from "./backend";
 import type { OverlayDisplay } from "./overlayLayout";
 import { t } from "./i18n";
@@ -224,6 +226,16 @@ async function openDebug() {
   }
 }
 
+// The main window opens the dialog (it lives there); this window goes, so the dialog is not behind it
+async function openAppUpdate() {
+  try {
+    await emit(OPEN_UPDATE_EVENT);
+    close();
+  } catch (e) {
+    toastError(e);
+  }
+}
+
 async function pickFolder() {
   const picked = await open({ directory: true, defaultPath: gameDir.value || undefined });
   if (typeof picked === "string") gameDir.value = picked;
@@ -261,6 +273,12 @@ async function pickFolder() {
           <span class="label">{{ t("settings.autoUpdate") }}</span>
           <input v-model="autoUpdate" class="switch" type="checkbox" />
         </label>
+        <!-- The App Update dialog (the main window's, as from its footer), right under its switch -->
+        <div class="line end">
+          <button type="button" class="btn small outline" @click="openAppUpdate">
+            <Icon name="imports" :size="12" /> {{ t("update.button") }}
+          </button>
+        </div>
       </section>
       <section class="settings-group">
         <div class="settings-group-head"><Icon name="folder" :size="14" /><span class="settings-group-title">Star Citizen</span></div>
@@ -454,6 +472,11 @@ async function pickFolder() {
 /* A setting on the left, its control pushed to the right edge (as in BindSight) */
 .line.between {
   justify-content: space-between;
+}
+
+/* A control at the right edge alone, under the row above (the App Update button under its switch) */
+.line.end {
+  justify-content: flex-end;
 }
 
 /* The GPU acceleration: a plain row with its state tag, a dim note below; not possible here, the

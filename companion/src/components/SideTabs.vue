@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // The main window's tabs as a panel at the left edge, like the desktop app's side bar (webapp/src/components/SideNav.vue, copied:
-// that one is router based) but below the title bar and the scan row, down to the window's bottom. Two groups with a divider: the
-// scan modes (also the scan overlay's modes), then the look-up tabs; a new tab is one more entry in a group. Narrow (56 px): the
-// icon with the row count below it, the tab's name in a tooltip; wide (200 px): icon, name, the count at the right. A small button
+// that one is router based) but below the title bar and the scan row, down to the window's bottom. Three groups with dividers: the
+// terminal scan modes, the signature scan (all of them also the scan overlay's modes), then the look-up tabs; a new tab is one more
+// entry in a group. Narrow (56 px): the icon with the row count below it, the tab's name in a tooltip; wide (200 px): icon, name,
+// the count at the right. A small button
 // half over the panel's right edge toggles the two (always possible); the choice is remembered (default narrow). Wide raises the
 // window's minimum width by the difference and widens a narrower window to it, so the tables keep their width.
-// A tab being read shows its icon green (the scan row's "detected" colour): while the scan runs, the screens it reads (scan.ts
+// A tab being read shows a green dot at its icon (the scan row's "detected" colour; the overlay's rail likewise): while the scan runs, the screens it reads (scan.ts
 // scope: their filters on, the scan mode); the blueprints while their filter is on and Game.log is found.
 import { computed, onMounted, ref } from "vue";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
@@ -23,14 +24,14 @@ interface Entry {
   label: Key;
 }
 
-// The scan modes in the order the mode hotkey steps through them, then the look-up tabs
+// The scan modes in the order the mode hotkey steps through them (the signature scan on its own), then the look-up tabs
 const GROUPS: Entry[][] = [
   [
     { id: "comps", label: "comps.title" },
     { id: "stock", label: "stock.title" },
     { id: "refinery", label: "refinery.title" },
-    { id: "mining", label: "mining.title" },
   ],
+  [{ id: "mining", label: "mining.title" }],
   [{ id: "unlocks", label: "unlocks.title" }],
 ];
 
@@ -87,7 +88,10 @@ onMounted(fit);
         <div v-if="i > 0" class="sep" />
         <Tooltip v-for="x in group" :key="x.id" side="right" :text="narrow ? t(x.label) : null">
           <button type="button" class="item" :class="{ narrow, active: tab === x.id }" :aria-label="t(x.label)" @click="pickTab(x.id)">
-            <Icon :name="TAB_ICONS[x.id]" :size="20" :class="{ read: scanned[x.id] }" />
+            <span class="icon">
+              <Icon :name="TAB_ICONS[x.id]" :size="20" />
+              <span v-if="scanned[x.id]" class="dot" />
+            </span>
             <span v-if="!narrow" class="name">{{ t(x.label) }}</span>
             <span class="count">{{ tabCounts[x.id] }}</span>
           </button>
@@ -203,9 +207,27 @@ onMounted(fit);
   color: var(--accent-text);
 }
 
-/* This tab is being read: its icon green like the scan row's "detected" tag */
-.item .read {
-  color: var(--ok);
+/* The icon with the "being read" dot at its top right corner (outside the flow: the entry keeps its size) */
+.icon {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+
+/* This tab is being read: a green dot like the scan row's "detected" tag, ringed in the ground below it */
+.dot {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 1.5px var(--bg-surface);
+}
+
+.item.active .dot {
+  box-shadow: 0 0 0 1.5px var(--accent);
 }
 
 .name {

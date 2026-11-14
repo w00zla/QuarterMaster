@@ -14,6 +14,8 @@
 
 #[cfg(windows)]
 mod capture;
+#[cfg(target_os = "linux")]
+mod capture_linux;
 pub mod components;
 mod config;
 mod gamelog;
@@ -833,7 +835,7 @@ pub fn run() {
             app.manage(Mutex::new(AppData { config, paired: None, log_found: false, unlocks: Vec::new(), locations: Vec::new(), file: None, unlocks_on: true, reread: false }));
             app.manage(server::client());
             spawn_game_log_watch(app.handle().clone());
-            // The frame channel for the screen capture (Windows so far); QM_OCR_FRAMES feeds test images.
+            // The frame channel for the screen capture (Windows, Linux); QM_OCR_FRAMES feeds test images.
             // No scan session at start: the user starts one (the capture only runs during a session while
             // the game is in front)
             let detect = ocrwatch::Detect::new(std::sync::atomic::AtomicBool::new(false));
@@ -849,6 +851,8 @@ pub fn run() {
             let seen = ocrwatch::GameSeen::default();
             #[cfg(windows)]
             capture::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast, front.clone(), signature_capture.clone());
+            #[cfg(target_os = "linux")]
+            capture_linux::spawn(app.handle().clone(), frames.clone(), detect.clone(), seen.clone(), fast, front.clone(), signature_capture.clone());
             app.manage(Mutex::new(frames));
             app.manage(detect);
             app.manage(scan);

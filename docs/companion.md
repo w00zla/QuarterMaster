@@ -12,7 +12,8 @@ singleuser variant, `docs/singleuser.md`), found through its pairing file. It al
   screenshots and recordings, the sync untested in game);
 - shows what it detects in a scan overlay over the game.
 
-Linux and Windows; the screen capture and so every scan and the overlay are Windows only so far.
+Linux and Windows; the scan overlay and its hotkeys are Windows only so far. The Linux screen capture ("Screen capture
+(Linux)") is verified on KDE Plasma 6 (Wayland) only, the scan with it is untested in game.
 
 Commands, the log file and its lines: `CLAUDE.md` "Commands". The app lives in `companion/` (a pnpm workspace
 package); paths here without a prefix (`src/`, `src-tauri/`, `scripts/fetch-directml.mjs`) are relative to it, the
@@ -156,7 +157,8 @@ Product requirements ("Refinery" in the bot, `docs/requirements.md`):
   installed one (and the Linux AppImage) updates itself ("Updates and channels").
 - **The footer** (`AppFooter.vue`, the desktop app's with BindSight's right end): logo and version are buttons that open
   the App Update dialog; while the updater has a version waiting, an update mark (the download icon, accent colour)
-  sits before the logo. Its room is reserved (hidden, not absent), so nothing moves when it appears.
+  sits at the far right, after the GitHub link. Its room is reserved (hidden, not absent), so nothing moves when it
+  appears, and it keeps the link off the window's resize corner.
 
 ## Updates and channels
 
@@ -191,8 +193,9 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   "Nach Update suchen".
 - **The dialog** (`UpdateDialog.vue`, state in `appUpdate.ts`): "App Update", the desktop app's: channel in the head,
   current and available version, the notes in a box of fixed height, one status line with the progress, Close and Check
-  Update / Install in the foot (each button reserves the other's text). It opens from the footer, and from the update
-  panel's button, which shows "App Update" instead of "Releases auf GitHub" (same size) while the updater has a version
+  Update / Install in the foot (each button reserves the other's text). It opens from the footer, from the settings
+  window's "App Update" button (in its foot next to the debug button; event `open-update` to the main window, the
+  settings window closes), and from the update panel's button, which shows "App Update" instead of "Releases auf GitHub" (same size) while the updater has a version
   waiting and keeps opening the releases page otherwise.
 
 ## Release
@@ -200,8 +203,10 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
 - Bump the version in `src-tauri/Cargo.toml` (bundle names and the header use it), build per platform:
   Windows `pnpm companion:build` (`build:windows`) gives the setup (with `DirectML.dll` next to the exe, from
   `pnpm directml`) `target/release/bundle/nsis/Quartermaster Companion_<v>_x64-setup.exe` and
-  `target/release/quartermaster-companion.exe` (the standalone zip's, with `DirectML.dll`); Linux the AppImage, the `.deb` and the `.rpm`. The build needs network access for the OCR
-  crates (git, by tag) and nothing next to this repository. All of it runs through `scripts/build.mjs`; with
+  `target/release/quartermaster-companion.exe` (the standalone zip's, with `DirectML.dll`); Linux the AppImage, the `.deb` and the `.rpm` (the build needs libpipewire's headers and clang:
+  `libpipewire-0.3-dev`/`pipewire-devel`, `libclang-dev`/`clang`, for `sc-ohseearr-capture-linux`; in the workflows'
+  package lists). The build needs network access for the OCR crates (git, by tag) and nothing next to this
+  repository. All of it runs through `scripts/build.mjs`; with
   `TAURI_SIGNING_PRIVATE_KEY` set it also makes the updater's artifacts ("Updates and channels").
 - The server hosts no companion files: the downloads are the GitHub releases of this repository
   (https://github.com/w00zla/quartermaster/releases), which the web app's Companion dialog and the companion's update
@@ -216,7 +221,8 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
 - `App.vue`, `components/TopBar.vue`, `WindowEdges.vue`, `state.ts`: no native frame
   (`decorations: false`), the title bar after BindSight's (drag region, minimize/maximize/close; window
   permissions in `capabilities/default.json`, which lists the windows `main`, `settings`, `debug`, `overlay`),
-  invisible resize edges. The window stays narrow (696 px, also its minimum: the 640 px the tables had before plus the narrow side panel), 800 px high at start and
+  invisible resize edges (the main window shows a small grip in its bottom right corner, over the footer's end; gone
+  when maximized). The window stays narrow (696 px, also its minimum: the 640 px the tables had before plus the narrow side panel), 800 px high at start and
   780 px at least (dialogs sit 16 px below the top instead of 10vh, `App.vue`); main and debug window
   open where they were closed (`tauri-plugin-window-state`: place incl. monitor, size, maximized; the
   overlay is excluded, it places itself), created hidden and shown once placed.
@@ -245,7 +251,8 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   only.
 - The tabs sit in a **side panel** at the left edge (`components/SideTabs.vue`, copied from the web app's `SideNav.vue`
   in look and behaviour; below the title bar and the scan row, down to the window's bottom; only the main area beside it
-  scrolls). Two groups with a divider: the four scan modes (also the overlay's modes), then the look-up tabs (Blueprints);
+  scrolls). Three groups with dividers: the three terminal scan modes, Mining (the signature scan; all four are also the
+  overlay's modes), then the look-up tabs (Blueprints);
   a new tab is one more entry in `GROUPS`. Entries: icon, and each tab's table row count (`tabCounts` in `overlay.ts`;
   tabular, in a fixed room: it never changes an entry's size); the last tab kept in localStorage `qm.companion.tab`; it never
   switches by itself: the scan row's tag names the screen. **Narrow** (56 px, the default): the icon with the count below it
@@ -255,8 +262,8 @@ The model is the desktop app's (`docs/app.md` "Updates and channels"), for the p
   from the frontend, capability `main-window.json`; the minimum height is the constant `MIN_HEIGHT`, as in `tauri.conf.json`)
   and widens a narrower window to it, keeping position and height; this also runs at start, after the window-state plugin
   restored the stored size. Collapsing lowers the minimum to 696 px and does not shrink the window. A tab being read shows
-  its icon in green (the scan row's "detected" colour; 2026-11-10; no animation; the overlay's rail likewise, and it greys
-  the others): while the scan runs the screens it reads (their filters, the scan mode), the blueprints while their filter
+  a green dot at its icon's top right (the scan row's "detected" colour; 2026-11-14, before a green icon, too loud; no
+  animation; the overlay's rail likewise, and it greys the others): while the scan runs the screens it reads (their filters, the scan mode), the blueprints while their filter
   is on and Game.log is found.
   The outdated state shows no panel. The tabs with the panels
   Gear and Resources (both `InventoryPanel.vue`, prop `part`: `comps`, `stock`), Refinery (`RefineryPanel.vue`), Bergbau
@@ -569,8 +576,10 @@ tooltip and the page number go through the OCR only while the cursor is on a lit
   one tag for all its crates; no checkout next to this repo is needed to build): `sc-ohseearr-core` (ONNX Runtime, prebuilt and linked statically), the model packages
   `paddle-det-tiny` (PP-OCRv6 tiny's detector), `sc-rec-latin` (our recognizer: tiny's cut to Latin and fine-tuned on
   the game's font) and `sc-warehouse-layout`, compiled in (the Windows release is a bare exe), `sc-ohseearr-sc` (the
-  reader interface, the game's texts), the readers `-warehouse`, `-gear-inventory`, `-refinery`, `-mining-hud` and
-  `sc-ohseearr-capture-win`. How they work, what was tried, the measurements and the model history: its README, the
+  reader interface, the game's texts), the readers `-warehouse`, `-gear-inventory`, `-refinery`, `-mining-hud`,
+  `sc-ohseearr-capture` (the frames' `Pixels`, the change gate `Gate`, the cursor's rest `Rest`) and the capture per
+  platform, `sc-ohseearr-capture-win` (Windows) and `sc-ohseearr-capture-linux` (Linux).
+  How they work, what was tried, the measurements and the model history: its README, the
   reader READMEs, the model cards (`models/*/MODEL.md`), `training/README.md` and `docs/adr/` (0006/0007/0010 the
   readers). Changes to the engine, models or readers belong there.
 - `ocr.rs` only loads the `Ocr` (`ocr::load(threads, gpu)`: ONNX Runtime's intra-op threads, 3 in the scan
@@ -698,7 +707,8 @@ signature overlay), `mining.ts`, `signatures.ts`, `MiningPanel.vue`, `SignatureA
 ## Screen capture (Windows)
 
 `capture.rs`, the loop on sc-ohseearr's `sc-ohseearr-capture-win` (`WindowCapture`: the window, in front or not,
-`is_running`, `grab_window` with the skips counted into the next frame's info; `Rest`; how it captures, DXGI Desktop
+`is_running`, `grab_window` with the skips counted into the next frame's info, `cursor_pos`; `Rest` from
+`sc-ohseearr-capture`; how it captures, DXGI Desktop
 Duplication of the game's monitor cut to the window's client area with the cursor's position, and its limits (HDR,
 rotated monitors untested): that crate's README). `capture.rs` keeps the interval, the worker's pull, the events and
 its own `CaptureInfo` with `dropped`/`gated`/`waitMs`; `foreground_game`/`client_rect` for the overlay wrap the crate.
@@ -716,6 +726,32 @@ its own `CaptureInfo` with `dropped`/`gated`/`waitMs`; `foreground_game`/`client
   (the next try a full interval later); skips and grabs over 150 ms are logged (debug) and go with the read
   (`capture` in the debug view's events and recordings); any error drops the duplication, reopened next time.
 
+## Screen capture (Linux)
+
+`capture_linux.rs`, the loop on sc-ohseearr's `sc-ohseearr-capture-linux` (`WindowCapture`: `is_running`, `open` through
+the ScreenCast portal, `grab`, `grab_rested`, `close`; how it captures, a PipeWire stream of the window's own content at
+5 images a second with the cursor's position, the portal's dialog and the limits: that crate's README). Same frames,
+events and flags as on Windows.
+
+- The window: a Wayland compositor shows no window to another process unasked, so the user picks it in the portal's
+  dialog. The portal is asked only after the user started the scan and only while `StarCitizen.exe` runs (with its
+  window gone the dialog would come anyway). `open` blocks while the dialog is open; the scan row shows "Spiel nicht
+  im Fokus" meanwhile.
+- The restore token stays in memory for this run (not in the config): starting the scan again or a restart of the game
+  brings the window back without the dialog; after the companion's restart the user picks it once more.
+- The dialog cancelled (or the portal failed): the scan switches itself off (`scan-changed`), no new try until the user
+  starts it again (the dialog would come back every second).
+- `game-seen`: the stream runs or the executable runs. `game-front`: the stream runs. The image is the window's own
+  content, nothing lies over it: the companion in front does not disturb the read, "Spiel nicht im Fokus" means only
+  that no stream runs.
+- One frame per second (two in the signature scan). Pulled by the worker (warehouse, character inventory): once a read
+  is done, the next image whose cursor did not move since the image before (`grab_rested`, at least one image interval,
+  200 ms; the cursor comes only with an image, no polling as on Windows), `restMs` from it.
+- `CaptureInfo` on Linux: `grabMs`, `skippedTimeout`, `skippedPointer`; no `skippedOutside`.
+- The stream ended (the game closed, the session revoked): closed; opened again with the token while the game runs, the
+  scan off without one. The scan stopped: the stream and the portal's session end (the desktop's sharing indicator
+  goes).
+
 ## Scan overlay (Windows)
 
 `overlay.rs`; main window side `overlay.ts`; page `overlay.html` + `OverlayApp.vue`. Built 2026-10-18, used in
@@ -725,7 +761,7 @@ game since.
   compact fixed-size read-only tile (300×150 logical px, 340×210 in the display "Thumbnails": wider by the rows' S thumbnails; both narrower since 2026-10-30 without the kind badges, lower since 2026-10-31, one row higher since 2026-11-10 for the fifth mode), see-through as the settings say; layout "C" of the concept
   https://claude.ai/artifact/1CK7QBiMpLcj7n4efMeybn with the rail on the right, 2026-10-20): a narrow rail
   on the right with the five modes top down, each its icon above its count, exactly as wide as "999"
-  (`3ch`, tabular digits; the shown one highlighted; the icons of the modes being read green like the main window's
+  (`3ch`, tabular digits; the shown one highlighted; the modes being read with a green dot like the main window's
   tabs, one the scan leaves out greyed, since 2026-11-10: its filters
   all off, or the other scan mode (the terminals while the signature scan runs, Bergbau while it does not); a
   warning instead of the count when the log is missing); next to it a 22 px line (a line below it) with the picked location after its icon in every
@@ -820,6 +856,6 @@ process competes with the game is not measured.
 - "[CS2] StrikeForce Missile" stays unknown (the catalog says "StrikeForce II Missile"); which tooltips show
   stats at all; Quantum Fuel Burn (a lower value is the improvement, the bounds run 0…+20 %).
 - The readers on sc-ohseearr (2026-11-06) are verified in game (2026-11-08) except the refinery.
-- Not built: the Linux screen capture (xdg portal), CI, tray/autostart; the API
+- Not built: the scan overlay and its hotkeys on Linux, tray/autostart; the API
   token is a full-user token (not scoped). Shelved: a native GUI instead of Tauri (Slint with its software
   renderer), only if WebView2 turns out too heavy.

@@ -12,7 +12,8 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use sc_ohseearr_capture_win::{Captured, Found, Grab, Rest, Window, WindowCapture, PULL_POLL, REST};
+use sc_ohseearr_capture::{Rest, PULL_POLL, REST};
+use sc_ohseearr_capture_win::{cursor_pos, Captured, Found, Grab, Window, WindowCapture};
 use tauri::{AppHandle, Emitter};
 use windows::Win32::Foundation::{HWND, RECT};
 
@@ -45,7 +46,9 @@ pub fn spawn(app: AppHandle, tx: Sender<Frame>, detect: Detect, seen: GameSeen, 
                 let waiting = Instant::now();
                 while waiting.elapsed() < INTERVAL {
                     std::thread::sleep(PULL_POLL);
-                    rest.update();
+                    if let Some(p) = cursor_pos() {
+                        rest.observe(p, Instant::now());
+                    }
                     let ready = now_ms() >= fast.0.load(Ordering::Relaxed);
                     if ready && rest.rested() >= REST {
                         grab_now = true;
