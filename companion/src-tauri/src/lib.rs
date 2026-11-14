@@ -512,7 +512,7 @@ async fn open_settings_window(app: AppHandle) -> Result<(), String> {
 }
 
 /// Sizes the settings window to its content (`height`, logical px; the page measures it once it is filled), centers
-/// it and shows it.
+/// it over the main window and shows it.
 #[tauri::command]
 fn fit_settings_window(app: AppHandle, height: f64) -> Result<(), String> {
     let window = app.get_webview_window(SETTINGS_WINDOW).ok_or("no settings window")?;
@@ -521,10 +521,30 @@ fn fit_settings_window(app: AppHandle, height: f64) -> Result<(), String> {
     let first = !window.is_visible().unwrap_or(false);
     window.set_size(tauri::LogicalSize::new(SETTINGS_WIDTH, height)).map_err(|e| e.to_string())?;
     if first {
-        window.center().map_err(|e| e.to_string())?;
+        // Over the main window, on its monitor (`center` takes the monitor the new window is on: the primary one)
+        match app.get_webview_window("main") {
+            Some(main) => center_over(&window, &main),
+            None => window.center(),
+        }
+        .map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Places `window` centered over `main`, kept inside the work area of `main`'s monitor (physical pixels).
+fn center_over(window: &tauri::WebviewWindow, main: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let (pos, size, own) = (main.outer_position()?, main.outer_size()?, window.outer_size()?);
+    let (w, h) = (own.width as i32, own.height as i32);
+    let mut x = pos.x + (size.width as i32 - w) / 2;
+    let mut y = pos.y + (size.height as i32 - h) / 2;
+    if let Some(monitor) = main.current_monitor()? {
+        let area = monitor.work_area();
+        let (ax, ay) = (area.position.x, area.position.y);
+        x = x.clamp(ax, (ax + area.size.width as i32 - w).max(ax));
+        y = y.clamp(ay, (ay + area.size.height as i32 - h).max(ay));
+    }
+    window.set_position(tauri::PhysicalPosition::new(x, y))
 }
 
 /// Opens the debug window (debug.html), or brings it to the front; closing it turns the debug flag

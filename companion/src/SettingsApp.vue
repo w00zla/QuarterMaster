@@ -118,15 +118,34 @@ onMounted(async () => {
   }
 });
 let observer: ResizeObserver | null = null;
+// The content's height last fitted, the height last asked of the Rust side, the corrections made for it
 let fitted = 0;
+let asked = 0;
+let corrections = 0;
 function fit() {
   if (!root.value) return;
   const height = Math.ceil(root.value.getBoundingClientRect().height);
   if (!height || height === fitted) return;
   fitted = height;
+  corrections = 0;
+  ask(height);
+}
+function ask(height: number) {
+  asked = height;
   fitSettingsWindow(height).catch(toastError);
 }
+// The window may come out higher or lower than asked (Windows: tao adds an undecorated window's hidden frame to the
+// height, which the hidden window reports too large; an empty area stayed below the foot): what the page got is
+// measured and the difference asked away, a few times at most (no endless back and forth); a pixel is rounding
+function onResize() {
+  const off = window.innerHeight - fitted;
+  if (!fitted || Math.abs(off) <= 1 || corrections >= 3) return;
+  corrections++;
+  ask(asked - off);
+}
+window.addEventListener("resize", onResize);
 onUnmounted(() => {
+  window.removeEventListener("resize", onResize);
   observer?.disconnect();
   unlisten?.();
   window.removeEventListener("keydown", onKey);
