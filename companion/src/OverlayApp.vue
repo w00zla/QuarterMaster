@@ -2,7 +2,7 @@
 // The scan overlay's page (Rust: overlay.rs; the main window's side: overlay.ts): a compact fixed-size
 // tile on a transparent window, read-only (the window ignores the mouse): on the right a narrow rail
 // with the five modes, each its icon above its count (as wide as "999"; the shown one highlighted; one the scan
-// leaves out (its filters off, the other scan mode) greyed, the others' icons green (being read); a
+// leaves out (its filters off, the other scan mode) greyed, the others with a green dot (being read); a
 // warning instead of the count when the log is missing); next to it the
 // location line (clipped at its end), then the newest rows, 20 px each, as many as fit (more than that:
 // the last one fades out). The display "thumbs" (settings) shows the newest item as a taller top row (its
@@ -67,6 +67,7 @@ onMounted(async () => {
     <div class="rail">
       <span v-for="(x, i) in view.tabs" :key="i" class="mode" :class="{ active: x.active, off: x.off, warn: x.warn }">
         <Icon :name="x.icon" :size="10" />
+        <span v-if="!x.off && !x.warn" class="dot" />
         <Icon v-if="x.warn" name="warning" :size="10" />
         <span v-else>{{ x.count }}</span>
       </span>
@@ -175,6 +176,7 @@ body,
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
+  position: relative;
 }
 
 .mode.active {
@@ -182,9 +184,16 @@ body,
   background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-/* Being read (not left out, nothing missing): its icon green like the main window's tabs */
-.mode:not(.off):not(.warn) > svg:first-child {
-  color: var(--ok);
+/* Being read (not left out, nothing missing): a green dot at the cell's top right like the main window's tabs (outside the
+   flow: the cell keeps its size) */
+.mode > .dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ok);
 }
 
 /* Left out by the scan (its filters off, the other scan mode): greyed, shown or not */

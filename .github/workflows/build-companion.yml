@@ -23,7 +23,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  LINUX_DEPS: libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+  # libpipewire-0.3-dev and libclang-dev: the Linux screen capture (sc-ohseearr-capture-linux) builds against
+  # libpipewire's headers with bindgen
+  LINUX_DEPS: libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libpipewire-0.3-dev libclang-dev
 
 jobs:
   test:

@@ -1,5 +1,5 @@
 //! Feeds frames to the OCR off the main thread. Platform independent: frames come through a channel
-//! from a source — the screen capture (`capture.rs`, Windows so far) or, for tests, a folder of images
+//! from a source — the screen capture (`capture.rs` on Windows, `capture_linux.rs` on Linux) or, for tests, a folder of images
 //! (`QM_OCR_FRAMES=<dir>`: every image put there is read once, its modification time as the frame time).
 //!
 //! Reading is **one scan** the user switches on and off (off at every start), with a `Scope`: which of
@@ -44,10 +44,10 @@ use sc_ohseearr_warehouse::WarehouseReader;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub use sc_ohseearr_capture_win::{Gate, Pixels};
-// The capture's (`capture.rs`, a Windows-only module): nothing uses it elsewhere
-#[cfg(windows)]
-pub use sc_ohseearr_capture_win::PULL_TIMEOUT_MS;
+pub use sc_ohseearr_capture::{Gate, Pixels};
+// The capture's (`capture.rs` on Windows, `capture_linux.rs` on Linux): nothing uses it elsewhere
+#[cfg(any(windows, target_os = "linux"))]
+pub use sc_ohseearr_capture::PULL_TIMEOUT_MS;
 
 use crate::components::ComponentRead;
 use crate::inventory::Grid;
@@ -516,12 +516,12 @@ pub struct GameFront(pub Arc<AtomicBool>);
 
 impl Default for GameFront {
     fn default() -> Self {
-        Self(Arc::new(AtomicBool::new(!cfg!(windows))))
+        Self(Arc::new(AtomicBool::new(!cfg!(any(windows, target_os = "linux")))))
     }
 }
 
-// Emitted by the capture (Windows only)
-#[cfg(windows)]
+// Emitted by the capture (Windows, Linux)
+#[cfg(any(windows, target_os = "linux"))]
 pub const GAME_FRONT: &str = "game-front";
 
 /// The worker's pull on the screens read every frame (warehouse, character inventory): when the capture
@@ -536,8 +536,8 @@ pub struct FastCapture(pub Arc<AtomicU64>);
 /// screen).
 #[derive(Default, Clone)]
 pub struct SignatureCapture(pub Arc<AtomicBool>);
-// Emitted by the capture (Windows only)
-#[cfg(windows)]
+// Emitted by the capture (Windows, Linux)
+#[cfg(any(windows, target_os = "linux"))]
 pub const GAME_SEEN: &str = "game-seen";
 
 /// Whether the OCR can run on the GPU (sc-ohseearr's engine, DirectML): the redistributable DirectML.dll next

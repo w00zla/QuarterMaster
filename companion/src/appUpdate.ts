@@ -1,6 +1,7 @@
 // The app update's state for the main window (the Rust side: update.rs; the commands and the event are the desktop app's
 // shell contract, webapp/src/shellLogic.ts). `update` is null until the Rust side answered; the update dialog
-// (components/UpdateDialog.vue) opens from the footer and from the update panel.
+// (components/UpdateDialog.vue) opens from the footer, from the update panel and from the settings window (its button
+// sends `OPEN_UPDATE_EVENT`: the dialog lives in the main window).
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ref } from "vue";
@@ -8,6 +9,7 @@ import { COMMANDS, UPDATE_EVENT, failedUpdate, parseUpdateState, type UpdateStat
 
 export const update = ref<UpdateState | null>(null);
 export const updateOpen = ref(false);
+export const OPEN_UPDATE_EVENT = "open-update";
 
 const read = async () => parseUpdateState(await invoke(COMMANDS.updateState));
 
@@ -17,6 +19,7 @@ export async function watchUpdate(): Promise<void> {
     const next = parseUpdateState(e.payload);
     if (next) update.value = next;
   });
+  await listen(OPEN_UPDATE_EVENT, openUpdate);
   update.value = await read();
 }
 
