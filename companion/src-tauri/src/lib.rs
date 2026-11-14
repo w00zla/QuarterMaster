@@ -809,13 +809,14 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(
             // Stdout for `tauri dev`, plus a rotating file in the app log dir;
-            // dependencies only when they warn
+            // dependencies only when they warn, but the screen capture's debug lines (slow grabs, skipped frames)
             tauri_plugin_log::Builder::new()
                 .clear_targets()
                 .target(Target::new(TargetKind::Stdout))
                 .target(Target::new(TargetKind::LogDir { file_name: Some("companion".into()) }))
                 .level(log::LevelFilter::Warn)
                 .level_for("companion_lib", log::LevelFilter::Debug)
+                .level_for("sc_ohseearr_capture_win", log::LevelFilter::Debug)
                 .max_file_size(2_000_000)
                 .rotation_strategy(RotationStrategy::KeepSome(3))
                 .timezone_strategy(TimezoneStrategy::UseLocal)
